@@ -1,0 +1,814 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01FBAE8B97CDAF7E35274C9F /* OpenCodeBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2827C65D681FB1F9FB24B7 /* OpenCodeBootstrap.swift */; };
+		03DCDDFD8CE860FAEAD89DB3 /* ThinkingRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04820AC7A37C8876C322AE1F /* ThinkingRow.swift */; };
+		124239D44BD77B91DA2B2DE4 /* TodoInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22332A66515C9C38EB202DC /* TodoInspectorView.swift */; };
+		194B504F19D51A6F809D456E /* OpenCodeEventManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18EFEF6227AAFB3590882300 /* OpenCodeEventManager.swift */; };
+		19A2A0CA6D3A6AEEC0C28353 /* AppViewModel+Sessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4B91D6745A8E634A21646B8 /* AppViewModel+Sessions.swift */; };
+		23886D92B15F6BE27FAB627B /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E24421CE08AEAB38EEC236 /* AppViewModel.swift */; };
+		28CF3363B05EEFDA379C92F7 /* SessionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 751BF1A887341EC96213F975 /* SessionRow.swift */; };
+		2B9C3C0F09640F040B6B163B /* AgentToolbarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638D31E01C9E7027BBEF7770 /* AgentToolbarMenu.swift */; };
+		2F75E03D122089D50A3902F2 /* AppViewModel+Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFC0BC6B94598163839BEB51 /* AppViewModel+Connection.swift */; };
+		35F4201348FB82F0689166EB /* ReasoningBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67ED70E3B988B800EF2527FE /* ReasoningBlock.swift */; };
+		3781AB208B728108C5F33335 /* OpenCodeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C2E4443213AED890D5731AD /* OpenCodeModels.swift */; };
+		388CC9DEF534E908A47C44FA /* ChatGlassStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B166D24C208B9DEA796C69 /* ChatGlassStyle.swift */; };
+		3A0C44A7775E9BA404BDE571 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6CC62904B083C34CEC115F8 /* ChatView.swift */; };
+		3F2E2C7C3B066B638A401330 /* AppViewModel+Composer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02AF34C3AE03864E566C59DA /* AppViewModel+Composer.swift */; };
+		41BA3669E71731459F41F8EA /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48723322E87F93E488181C34 /* RootView.swift */; };
+		44E47174D62F7BE1F70907D2 /* PermissionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 462C06C5CAA57A2203DCAA3E /* PermissionCard.swift */; };
+		54AAFC95EF7AE9B34132372B /* ActivityDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01963F5690646B83264E6322 /* ActivityDetailView.swift */; };
+		5558D03B9138B87D7BC715BC /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC5EB9EFFE91C43D15E42DB /* MessageBubble.swift */; };
+		58A74000A88032AF9BC5A383 /* ProjectsPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD078B7015EA38C5705FD47 /* ProjectsPreviews.swift */; };
+		5E3E12C52A9909CBAD5E0348 /* AppViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0EEA870477FC0FB20F10BA0 /* AppViewModel+Events.swift */; };
+		5E41FF637E24C105822409C8 /* RootPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BE7E13EEA52B67A4D5D7E93 /* RootPreviews.swift */; };
+		6940BD04FEC0B5B4BC35B2C0 /* TodoCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8075AA645B1FFF1574EF2A95 /* TodoCard.swift */; };
+		699BFD5CB9DF5A02D1A2AC24 /* MarkdownMessageText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E6A66E01CBC3ABAD5DB637E /* MarkdownMessageText.swift */; };
+		6B846E22927BA463D441809F /* ProjectRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 976E7B6C266BBE6C7E32DCC6 /* ProjectRow.swift */; };
+		6CD4DEE3C0B5286E0D723483 /* OpenCodeStateReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FE226896BC39EE597FAFCD0 /* OpenCodeStateReducer.swift */; };
+		6E5ACD06E69539059E6D105C /* MessageComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 336AA13CA174A57F5F0EB8E8 /* MessageComposer.swift */; };
+		73089DEC5B77318173F081E5 /* ChatDebugProbeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC61FC8D9D3F923A6C41F1AC /* ChatDebugProbeSheet.swift */; };
+		769325F7D95B036B9C98C0F9 /* SessionAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50694E000CB966DF38DDE41C /* SessionAvatar.swift */; };
+		7B13E182462CA311B2F1AC45 /* OpenCodeAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F548AE214A483AB9207C376D /* OpenCodeAPIClient.swift */; };
+		8429493ED301FB3223F1EDE5 /* AppViewModel+Previews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED5404BF2A53DB64EC9BB8AC /* AppViewModel+Previews.swift */; };
+		8705629CBF404A33F9F18000 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E879D651F7196549575BBF97 /* Assets.xcassets */; };
+		8971BD08662EE0D909BBD944 /* TodoStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = D501151F9A7C46AFEB896438 /* TodoStrip.swift */; };
+		95A42DA19A9D8F38D73C64AA /* ActivityRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D173E5CA44E0FAA00024A7DC /* ActivityRow.swift */; };
+		A3404A867579F6DB6B42D6C8 /* OpenCodeIOSClientUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E35EBE15CA41A449B323317 /* OpenCodeIOSClientUITests.swift */; };
+		A3DAF2FA3EE5B87FCE3169C6 /* PermissionActionStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2AE7558998B1F31DA9AC3E /* PermissionActionStack.swift */; };
+		B1F560662D50742B915DC90E /* SessionsPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CADEBD7A68A16A7E0ED46EE2 /* SessionsPreviews.swift */; };
+		BA04F4DD96A0C39C2511402F /* OpenCodeStreamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41F2AB7FE622C4FDB3040763 /* OpenCodeStreamingTests.swift */; };
+		BA5ED6B3A311F0D083977D8B /* ProjectListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22123DE9C0CFED1D040013EC /* ProjectListView.swift */; };
+		BA9B9359B4B57BC1433A627A /* CreateProjectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A646955CA36C75DE45C03244 /* CreateProjectSheet.swift */; };
+		BF46C26DEF4B2706BAF1E6D1 /* SessionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5495928F452F10791C0614E4 /* SessionListView.swift */; };
+		BF9C50581431223AA4C85299 /* ChatPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9403CD63018375C683CB8CB9 /* ChatPreviews.swift */; };
+		D1BA395F41B7CFC8873FC4BD /* QuestionPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48FD1B20B55BEAF67EAEF737 /* QuestionPanel.swift */; };
+		D40AC2C3320139BA6929FD47 /* CreateSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C69B9DDEC02FCCFE6713CD /* CreateSessionSheet.swift */; };
+		D4E1BDD6DC2915C9B06F45AC /* OpenCodeAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCA8E8783A279403F85973BA /* OpenCodeAPIClientTests.swift */; };
+		D8058C11FF31CB8CFF4F54FB /* ConnectionPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCCD275C8D3DA6880342860D /* ConnectionPreviews.swift */; };
+		E1711616244122E08AA8F0FD /* AppViewModel+Projects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24200A73829BD02C29A419F2 /* AppViewModel+Projects.swift */; };
+		E3A29EED4F5FDD9060214C37 /* OpenCodeIOSClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25B65397CDDC5C142888B93 /* OpenCodeIOSClientApp.swift */; };
+		EC1510E633AC425471C1A0EE /* ModelToolbarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9330DFD0E36A44A30ADA81F4 /* ModelToolbarMenu.swift */; };
+		EEBF02CA590484C8DC12C0A8 /* DetailTextBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02C2EE024F2F7A8144C58C48 /* DetailTextBlock.swift */; };
+		EF7A2854EBAFD83C8D9A04F0 /* OpenCodeServerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DD58E8A5CEDA4251579066 /* OpenCodeServerConfig.swift */; };
+		F54ACA23469582F845E77EFA /* ConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FBF691A45B28DA836E7479A /* ConnectionView.swift */; };
+		FF4576F82738AC2C79CBC9AE /* OpenCodeEventStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = D206D56795411A6D0DE62123 /* OpenCodeEventStream.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		691EB45878D7D41870D8F59D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BCB68F5606A3BF937FA9E8D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FE46DB5F396A39389531C069;
+			remoteInfo = OpenCodeIOSClient;
+		};
+		FAA69E2358405520430F0B8B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BCB68F5606A3BF937FA9E8D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FE46DB5F396A39389531C069;
+			remoteInfo = OpenCodeIOSClient;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		01963F5690646B83264E6322 /* ActivityDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityDetailView.swift; sourceTree = "<group>"; };
+		02AF34C3AE03864E566C59DA /* AppViewModel+Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Composer.swift"; sourceTree = "<group>"; };
+		02C2EE024F2F7A8144C58C48 /* DetailTextBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailTextBlock.swift; sourceTree = "<group>"; };
+		04820AC7A37C8876C322AE1F /* ThinkingRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingRow.swift; sourceTree = "<group>"; };
+		0BE7E13EEA52B67A4D5D7E93 /* RootPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootPreviews.swift; sourceTree = "<group>"; };
+		18EFEF6227AAFB3590882300 /* OpenCodeEventManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeEventManager.swift; sourceTree = "<group>"; };
+		1E2AE7558998B1F31DA9AC3E /* PermissionActionStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionActionStack.swift; sourceTree = "<group>"; };
+		1E35EBE15CA41A449B323317 /* OpenCodeIOSClientUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeIOSClientUITests.swift; sourceTree = "<group>"; };
+		22123DE9C0CFED1D040013EC /* ProjectListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectListView.swift; sourceTree = "<group>"; };
+		24200A73829BD02C29A419F2 /* AppViewModel+Projects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Projects.swift"; sourceTree = "<group>"; };
+		2FBF691A45B28DA836E7479A /* ConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionView.swift; sourceTree = "<group>"; };
+		336AA13CA174A57F5F0EB8E8 /* MessageComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageComposer.swift; sourceTree = "<group>"; };
+		39ECDADD906549AE5867861D /* OpenCodeIOSClientTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = OpenCodeIOSClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3C2E4443213AED890D5731AD /* OpenCodeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeModels.swift; sourceTree = "<group>"; };
+		41F2AB7FE622C4FDB3040763 /* OpenCodeStreamingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeStreamingTests.swift; sourceTree = "<group>"; };
+		462C06C5CAA57A2203DCAA3E /* PermissionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionCard.swift; sourceTree = "<group>"; };
+		47DD58E8A5CEDA4251579066 /* OpenCodeServerConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeServerConfig.swift; sourceTree = "<group>"; };
+		48723322E87F93E488181C34 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		48FD1B20B55BEAF67EAEF737 /* QuestionPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionPanel.swift; sourceTree = "<group>"; };
+		50694E000CB966DF38DDE41C /* SessionAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAvatar.swift; sourceTree = "<group>"; };
+		5495928F452F10791C0614E4 /* SessionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListView.swift; sourceTree = "<group>"; };
+		638D31E01C9E7027BBEF7770 /* AgentToolbarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentToolbarMenu.swift; sourceTree = "<group>"; };
+		67ED70E3B988B800EF2527FE /* ReasoningBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReasoningBlock.swift; sourceTree = "<group>"; };
+		69E5854030C50B37EBC3CD1C /* OpenCodeIOSClient.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenCodeIOSClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		751BF1A887341EC96213F975 /* SessionRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRow.swift; sourceTree = "<group>"; };
+		7BC5EB9EFFE91C43D15E42DB /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
+		7E6A66E01CBC3ABAD5DB637E /* MarkdownMessageText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownMessageText.swift; sourceTree = "<group>"; };
+		8075AA645B1FFF1574EF2A95 /* TodoCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoCard.swift; sourceTree = "<group>"; };
+		81E24421CE08AEAB38EEC236 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
+		8FE226896BC39EE597FAFCD0 /* OpenCodeStateReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeStateReducer.swift; sourceTree = "<group>"; };
+		9330DFD0E36A44A30ADA81F4 /* ModelToolbarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelToolbarMenu.swift; sourceTree = "<group>"; };
+		9403CD63018375C683CB8CB9 /* ChatPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPreviews.swift; sourceTree = "<group>"; };
+		976E7B6C266BBE6C7E32DCC6 /* ProjectRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectRow.swift; sourceTree = "<group>"; };
+		9E2827C65D681FB1F9FB24B7 /* OpenCodeBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeBootstrap.swift; sourceTree = "<group>"; };
+		A0EEA870477FC0FB20F10BA0 /* AppViewModel+Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Events.swift"; sourceTree = "<group>"; };
+		A646955CA36C75DE45C03244 /* CreateProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateProjectSheet.swift; sourceTree = "<group>"; };
+		BCCD275C8D3DA6880342860D /* ConnectionPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPreviews.swift; sourceTree = "<group>"; };
+		C435A7F0986CD073C2DC3B28 /* OpenCodeIOSClientUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = OpenCodeIOSClientUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CADEBD7A68A16A7E0ED46EE2 /* SessionsPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsPreviews.swift; sourceTree = "<group>"; };
+		CFC0BC6B94598163839BEB51 /* AppViewModel+Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Connection.swift"; sourceTree = "<group>"; };
+		CFD078B7015EA38C5705FD47 /* ProjectsPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsPreviews.swift; sourceTree = "<group>"; };
+		D173E5CA44E0FAA00024A7DC /* ActivityRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityRow.swift; sourceTree = "<group>"; };
+		D206D56795411A6D0DE62123 /* OpenCodeEventStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeEventStream.swift; sourceTree = "<group>"; };
+		D22332A66515C9C38EB202DC /* TodoInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoInspectorView.swift; sourceTree = "<group>"; };
+		D501151F9A7C46AFEB896438 /* TodoStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoStrip.swift; sourceTree = "<group>"; };
+		D6B5CDE60ADDC75A7E9FA410 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		D7C69B9DDEC02FCCFE6713CD /* CreateSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateSessionSheet.swift; sourceTree = "<group>"; };
+		E25B65397CDDC5C142888B93 /* OpenCodeIOSClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeIOSClientApp.swift; sourceTree = "<group>"; };
+		E3B166D24C208B9DEA796C69 /* ChatGlassStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGlassStyle.swift; sourceTree = "<group>"; };
+		E879D651F7196549575BBF97 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		EC61FC8D9D3F923A6C41F1AC /* ChatDebugProbeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDebugProbeSheet.swift; sourceTree = "<group>"; };
+		ED5404BF2A53DB64EC9BB8AC /* AppViewModel+Previews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Previews.swift"; sourceTree = "<group>"; };
+		F4B91D6745A8E634A21646B8 /* AppViewModel+Sessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Sessions.swift"; sourceTree = "<group>"; };
+		F548AE214A483AB9207C376D /* OpenCodeAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAPIClient.swift; sourceTree = "<group>"; };
+		F6CC62904B083C34CEC115F8 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		FCA8E8783A279403F85973BA /* OpenCodeAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAPIClientTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		01D1B0365C559A91D1DDC692 /* API */ = {
+			isa = PBXGroup;
+			children = (
+				F548AE214A483AB9207C376D /* OpenCodeAPIClient.swift */,
+				9E2827C65D681FB1F9FB24B7 /* OpenCodeBootstrap.swift */,
+				18EFEF6227AAFB3590882300 /* OpenCodeEventManager.swift */,
+				D206D56795411A6D0DE62123 /* OpenCodeEventStream.swift */,
+			);
+			path = API;
+			sourceTree = "<group>";
+		};
+		3282EDEEEF58EC6680AAB777 = {
+			isa = PBXGroup;
+			children = (
+				F8539406755F818008E2AD01 /* OpenCodeIOSClient */,
+				44B4C8780309C135EFECC7BE /* OpenCodeIOSClientTests */,
+				A24B672C25EB9D7D1DDA6BB2 /* OpenCodeIOSClientUITests */,
+				644A8E4165D10CE00FDE1C71 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		44AB58CA416DBC23E450E000 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				F59EBE86429DF69E52B99FE2 /* Chat */,
+				C69DB1C18514869EC2EF1947 /* Connection */,
+				A18ACA2F0A3662595BCD7EFF /* Projects */,
+				A7628843C9752C663CCACD5B /* Root */,
+				C712389F3879E84DA153F287 /* Sessions */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		44B4C8780309C135EFECC7BE /* OpenCodeIOSClientTests */ = {
+			isa = PBXGroup;
+			children = (
+				FCA8E8783A279403F85973BA /* OpenCodeAPIClientTests.swift */,
+				41F2AB7FE622C4FDB3040763 /* OpenCodeStreamingTests.swift */,
+			);
+			path = OpenCodeIOSClientTests;
+			sourceTree = "<group>";
+		};
+		644A8E4165D10CE00FDE1C71 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				69E5854030C50B37EBC3CD1C /* OpenCodeIOSClient.app */,
+				39ECDADD906549AE5867861D /* OpenCodeIOSClientTests.xctest */,
+				C435A7F0986CD073C2DC3B28 /* OpenCodeIOSClientUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7B1E061214416A92129B411D /* AppViewModel */ = {
+			isa = PBXGroup;
+			children = (
+				81E24421CE08AEAB38EEC236 /* AppViewModel.swift */,
+				02AF34C3AE03864E566C59DA /* AppViewModel+Composer.swift */,
+				CFC0BC6B94598163839BEB51 /* AppViewModel+Connection.swift */,
+				A0EEA870477FC0FB20F10BA0 /* AppViewModel+Events.swift */,
+				ED5404BF2A53DB64EC9BB8AC /* AppViewModel+Previews.swift */,
+				24200A73829BD02C29A419F2 /* AppViewModel+Projects.swift */,
+				F4B91D6745A8E634A21646B8 /* AppViewModel+Sessions.swift */,
+			);
+			path = AppViewModel;
+			sourceTree = "<group>";
+		};
+		A18ACA2F0A3662595BCD7EFF /* Projects */ = {
+			isa = PBXGroup;
+			children = (
+				A646955CA36C75DE45C03244 /* CreateProjectSheet.swift */,
+				22123DE9C0CFED1D040013EC /* ProjectListView.swift */,
+				976E7B6C266BBE6C7E32DCC6 /* ProjectRow.swift */,
+				CFD078B7015EA38C5705FD47 /* ProjectsPreviews.swift */,
+			);
+			path = Projects;
+			sourceTree = "<group>";
+		};
+		A24B672C25EB9D7D1DDA6BB2 /* OpenCodeIOSClientUITests */ = {
+			isa = PBXGroup;
+			children = (
+				1E35EBE15CA41A449B323317 /* OpenCodeIOSClientUITests.swift */,
+			);
+			path = OpenCodeIOSClientUITests;
+			sourceTree = "<group>";
+		};
+		A7628843C9752C663CCACD5B /* Root */ = {
+			isa = PBXGroup;
+			children = (
+				0BE7E13EEA52B67A4D5D7E93 /* RootPreviews.swift */,
+				48723322E87F93E488181C34 /* RootView.swift */,
+			);
+			path = Root;
+			sourceTree = "<group>";
+		};
+		B3D9507B6CFA61DCAD621769 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				3C2E4443213AED890D5731AD /* OpenCodeModels.swift */,
+				47DD58E8A5CEDA4251579066 /* OpenCodeServerConfig.swift */,
+				8FE226896BC39EE597FAFCD0 /* OpenCodeStateReducer.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		C69DB1C18514869EC2EF1947 /* Connection */ = {
+			isa = PBXGroup;
+			children = (
+				BCCD275C8D3DA6880342860D /* ConnectionPreviews.swift */,
+				2FBF691A45B28DA836E7479A /* ConnectionView.swift */,
+			);
+			path = Connection;
+			sourceTree = "<group>";
+		};
+		C712389F3879E84DA153F287 /* Sessions */ = {
+			isa = PBXGroup;
+			children = (
+				D7C69B9DDEC02FCCFE6713CD /* CreateSessionSheet.swift */,
+				50694E000CB966DF38DDE41C /* SessionAvatar.swift */,
+				5495928F452F10791C0614E4 /* SessionListView.swift */,
+				751BF1A887341EC96213F975 /* SessionRow.swift */,
+				CADEBD7A68A16A7E0ED46EE2 /* SessionsPreviews.swift */,
+			);
+			path = Sessions;
+			sourceTree = "<group>";
+		};
+		CDBF48749AB90D3D0AC0C2C6 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				7B1E061214416A92129B411D /* AppViewModel */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		F59EBE86429DF69E52B99FE2 /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				01963F5690646B83264E6322 /* ActivityDetailView.swift */,
+				D173E5CA44E0FAA00024A7DC /* ActivityRow.swift */,
+				638D31E01C9E7027BBEF7770 /* AgentToolbarMenu.swift */,
+				EC61FC8D9D3F923A6C41F1AC /* ChatDebugProbeSheet.swift */,
+				E3B166D24C208B9DEA796C69 /* ChatGlassStyle.swift */,
+				9403CD63018375C683CB8CB9 /* ChatPreviews.swift */,
+				F6CC62904B083C34CEC115F8 /* ChatView.swift */,
+				02C2EE024F2F7A8144C58C48 /* DetailTextBlock.swift */,
+				7E6A66E01CBC3ABAD5DB637E /* MarkdownMessageText.swift */,
+				7BC5EB9EFFE91C43D15E42DB /* MessageBubble.swift */,
+				336AA13CA174A57F5F0EB8E8 /* MessageComposer.swift */,
+				9330DFD0E36A44A30ADA81F4 /* ModelToolbarMenu.swift */,
+				1E2AE7558998B1F31DA9AC3E /* PermissionActionStack.swift */,
+				462C06C5CAA57A2203DCAA3E /* PermissionCard.swift */,
+				48FD1B20B55BEAF67EAEF737 /* QuestionPanel.swift */,
+				67ED70E3B988B800EF2527FE /* ReasoningBlock.swift */,
+				04820AC7A37C8876C322AE1F /* ThinkingRow.swift */,
+				8075AA645B1FFF1574EF2A95 /* TodoCard.swift */,
+				D22332A66515C9C38EB202DC /* TodoInspectorView.swift */,
+				D501151F9A7C46AFEB896438 /* TodoStrip.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
+		F8539406755F818008E2AD01 /* OpenCodeIOSClient */ = {
+			isa = PBXGroup;
+			children = (
+				E879D651F7196549575BBF97 /* Assets.xcassets */,
+				D6B5CDE60ADDC75A7E9FA410 /* Info.plist */,
+				E25B65397CDDC5C142888B93 /* OpenCodeIOSClientApp.swift */,
+				01D1B0365C559A91D1DDC692 /* API */,
+				B3D9507B6CFA61DCAD621769 /* Models */,
+				CDBF48749AB90D3D0AC0C2C6 /* ViewModels */,
+				44AB58CA416DBC23E450E000 /* Views */,
+			);
+			path = OpenCodeIOSClient;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		03ABFB08B570A48C3F9A2AA3 /* OpenCodeIOSClientTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 45E88A5A3F2E1ED378C97E74 /* Build configuration list for PBXNativeTarget "OpenCodeIOSClientTests" */;
+			buildPhases = (
+				C8CA9185CB0E8422118DEB0F /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EED8D33C3EA325F2FC05F63F /* PBXTargetDependency */,
+			);
+			name = OpenCodeIOSClientTests;
+			packageProductDependencies = (
+			);
+			productName = OpenCodeIOSClientTests;
+			productReference = 39ECDADD906549AE5867861D /* OpenCodeIOSClientTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		323A6934DF3EC04D7353FAEF /* OpenCodeIOSClientUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3DC2AB24C357B89CED195643 /* Build configuration list for PBXNativeTarget "OpenCodeIOSClientUITests" */;
+			buildPhases = (
+				C76951FA2264759D8D7D9072 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0AC35FFEAEE7D2C39BAC6CAD /* PBXTargetDependency */,
+			);
+			name = OpenCodeIOSClientUITests;
+			packageProductDependencies = (
+			);
+			productName = OpenCodeIOSClientUITests;
+			productReference = C435A7F0986CD073C2DC3B28 /* OpenCodeIOSClientUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		FE46DB5F396A39389531C069 /* OpenCodeIOSClient */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E8928DCAD841114ED82CBE43 /* Build configuration list for PBXNativeTarget "OpenCodeIOSClient" */;
+			buildPhases = (
+				FF0B02FD0C3ED1D586FAE6FB /* Sources */,
+				B6B7731CA168C3FE565F519C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenCodeIOSClient;
+			packageProductDependencies = (
+			);
+			productName = OpenCodeIOSClient;
+			productReference = 69E5854030C50B37EBC3CD1C /* OpenCodeIOSClient.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BCB68F5606A3BF937FA9E8D1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					03ABFB08B570A48C3F9A2AA3 = {
+						DevelopmentTeam = 845JU3PD5V;
+						ProvisioningStyle = Automatic;
+					};
+					323A6934DF3EC04D7353FAEF = {
+						DevelopmentTeam = 845JU3PD5V;
+						ProvisioningStyle = Automatic;
+						TestTargetID = FE46DB5F396A39389531C069;
+					};
+					FE46DB5F396A39389531C069 = {
+						DevelopmentTeam = 845JU3PD5V;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = F0E9C188E4A0F4023582D9F1 /* Build configuration list for PBXProject "OpenCodeIOSClient" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 3282EDEEEF58EC6680AAB777;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 644A8E4165D10CE00FDE1C71 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FE46DB5F396A39389531C069 /* OpenCodeIOSClient */,
+				03ABFB08B570A48C3F9A2AA3 /* OpenCodeIOSClientTests */,
+				323A6934DF3EC04D7353FAEF /* OpenCodeIOSClientUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B6B7731CA168C3FE565F519C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8705629CBF404A33F9F18000 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C76951FA2264759D8D7D9072 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A3404A867579F6DB6B42D6C8 /* OpenCodeIOSClientUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C8CA9185CB0E8422118DEB0F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D4E1BDD6DC2915C9B06F45AC /* OpenCodeAPIClientTests.swift in Sources */,
+				BA04F4DD96A0C39C2511402F /* OpenCodeStreamingTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FF0B02FD0C3ED1D586FAE6FB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				54AAFC95EF7AE9B34132372B /* ActivityDetailView.swift in Sources */,
+				95A42DA19A9D8F38D73C64AA /* ActivityRow.swift in Sources */,
+				2B9C3C0F09640F040B6B163B /* AgentToolbarMenu.swift in Sources */,
+				3F2E2C7C3B066B638A401330 /* AppViewModel+Composer.swift in Sources */,
+				2F75E03D122089D50A3902F2 /* AppViewModel+Connection.swift in Sources */,
+				5E3E12C52A9909CBAD5E0348 /* AppViewModel+Events.swift in Sources */,
+				8429493ED301FB3223F1EDE5 /* AppViewModel+Previews.swift in Sources */,
+				E1711616244122E08AA8F0FD /* AppViewModel+Projects.swift in Sources */,
+				19A2A0CA6D3A6AEEC0C28353 /* AppViewModel+Sessions.swift in Sources */,
+				23886D92B15F6BE27FAB627B /* AppViewModel.swift in Sources */,
+				73089DEC5B77318173F081E5 /* ChatDebugProbeSheet.swift in Sources */,
+				388CC9DEF534E908A47C44FA /* ChatGlassStyle.swift in Sources */,
+				BF9C50581431223AA4C85299 /* ChatPreviews.swift in Sources */,
+				3A0C44A7775E9BA404BDE571 /* ChatView.swift in Sources */,
+				D8058C11FF31CB8CFF4F54FB /* ConnectionPreviews.swift in Sources */,
+				F54ACA23469582F845E77EFA /* ConnectionView.swift in Sources */,
+				BA9B9359B4B57BC1433A627A /* CreateProjectSheet.swift in Sources */,
+				D40AC2C3320139BA6929FD47 /* CreateSessionSheet.swift in Sources */,
+				EEBF02CA590484C8DC12C0A8 /* DetailTextBlock.swift in Sources */,
+				699BFD5CB9DF5A02D1A2AC24 /* MarkdownMessageText.swift in Sources */,
+				5558D03B9138B87D7BC715BC /* MessageBubble.swift in Sources */,
+				6E5ACD06E69539059E6D105C /* MessageComposer.swift in Sources */,
+				EC1510E633AC425471C1A0EE /* ModelToolbarMenu.swift in Sources */,
+				7B13E182462CA311B2F1AC45 /* OpenCodeAPIClient.swift in Sources */,
+				01FBAE8B97CDAF7E35274C9F /* OpenCodeBootstrap.swift in Sources */,
+				194B504F19D51A6F809D456E /* OpenCodeEventManager.swift in Sources */,
+				FF4576F82738AC2C79CBC9AE /* OpenCodeEventStream.swift in Sources */,
+				E3A29EED4F5FDD9060214C37 /* OpenCodeIOSClientApp.swift in Sources */,
+				3781AB208B728108C5F33335 /* OpenCodeModels.swift in Sources */,
+				EF7A2854EBAFD83C8D9A04F0 /* OpenCodeServerConfig.swift in Sources */,
+				6CD4DEE3C0B5286E0D723483 /* OpenCodeStateReducer.swift in Sources */,
+				A3DAF2FA3EE5B87FCE3169C6 /* PermissionActionStack.swift in Sources */,
+				44E47174D62F7BE1F70907D2 /* PermissionCard.swift in Sources */,
+				BA5ED6B3A311F0D083977D8B /* ProjectListView.swift in Sources */,
+				6B846E22927BA463D441809F /* ProjectRow.swift in Sources */,
+				58A74000A88032AF9BC5A383 /* ProjectsPreviews.swift in Sources */,
+				D1BA395F41B7CFC8873FC4BD /* QuestionPanel.swift in Sources */,
+				35F4201348FB82F0689166EB /* ReasoningBlock.swift in Sources */,
+				5E41FF637E24C105822409C8 /* RootPreviews.swift in Sources */,
+				41BA3669E71731459F41F8EA /* RootView.swift in Sources */,
+				769325F7D95B036B9C98C0F9 /* SessionAvatar.swift in Sources */,
+				BF46C26DEF4B2706BAF1E6D1 /* SessionListView.swift in Sources */,
+				28CF3363B05EEFDA379C92F7 /* SessionRow.swift in Sources */,
+				B1F560662D50742B915DC90E /* SessionsPreviews.swift in Sources */,
+				03DCDDFD8CE860FAEAD89DB3 /* ThinkingRow.swift in Sources */,
+				6940BD04FEC0B5B4BC35B2C0 /* TodoCard.swift in Sources */,
+				124239D44BD77B91DA2B2DE4 /* TodoInspectorView.swift in Sources */,
+				8971BD08662EE0D909BBD944 /* TodoStrip.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0AC35FFEAEE7D2C39BAC6CAD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FE46DB5F396A39389531C069 /* OpenCodeIOSClient */;
+			targetProxy = FAA69E2358405520430F0B8B /* PBXContainerItemProxy */;
+		};
+		EED8D33C3EA325F2FC05F63F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FE46DB5F396A39389531C069 /* OpenCodeIOSClient */;
+			targetProxy = 691EB45878D7D41870D8F59D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2E581C6DA0FE2C4959BE5615 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ntoporcov.opencode-client.tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenCodeIOSClient.app/OpenCodeIOSClient";
+			};
+			name = Release;
+		};
+		37A38C3C67B13A34407EB08A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 845JU3PD5V;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		37B20BB1A98ED0C0FD08E35D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 845JU3PD5V;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		6AEB18EE97BAC8A7F4EAB27D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OpenCodeIOSClient/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OpenCode;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ntoporcov.opencode-client";
+				PRODUCT_NAME = OpenCodeIOSClient;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B90B4C9C97016BC70E1E5AF1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OpenCodeIOSClient/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OpenCode;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ntoporcov.opencode-client";
+				PRODUCT_NAME = OpenCodeIOSClient;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C93032DB083B98279E43133F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ntoporcov.opencode-client.uitests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = OpenCodeIOSClient;
+			};
+			name = Debug;
+		};
+		CD0074863F9B49599EBE4F30 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ntoporcov.opencode-client.tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenCodeIOSClient.app/OpenCodeIOSClient";
+			};
+			name = Debug;
+		};
+		F3059729406E127440E12557 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ntoporcov.opencode-client.uitests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = OpenCodeIOSClient;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3DC2AB24C357B89CED195643 /* Build configuration list for PBXNativeTarget "OpenCodeIOSClientUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C93032DB083B98279E43133F /* Debug */,
+				F3059729406E127440E12557 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		45E88A5A3F2E1ED378C97E74 /* Build configuration list for PBXNativeTarget "OpenCodeIOSClientTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD0074863F9B49599EBE4F30 /* Debug */,
+				2E581C6DA0FE2C4959BE5615 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E8928DCAD841114ED82CBE43 /* Build configuration list for PBXNativeTarget "OpenCodeIOSClient" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6AEB18EE97BAC8A7F4EAB27D /* Debug */,
+				B90B4C9C97016BC70E1E5AF1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F0E9C188E4A0F4023582D9F1 /* Build configuration list for PBXProject "OpenCodeIOSClient" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				37B20BB1A98ED0C0FD08E35D /* Debug */,
+				37A38C3C67B13A34407EB08A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = BCB68F5606A3BF937FA9E8D1 /* Project object */;
+}
