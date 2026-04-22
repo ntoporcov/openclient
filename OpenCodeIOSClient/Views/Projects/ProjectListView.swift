@@ -39,6 +39,16 @@ struct ProjectListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    viewModel.presentConfigurationsSheet()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Configurations")
+                .accessibilityIdentifier("projects.configurations")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
                     viewModel.presentCreateProjectSheet()
                 } label: {
                     Image(systemName: "plus")
@@ -49,6 +59,9 @@ struct ProjectListView: View {
         }
         .sheet(isPresented: $viewModel.isShowingCreateProjectSheet) {
             CreateProjectSheet(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.isShowingConfigurationsSheet) {
+            ConfigurationsSheet(viewModel: viewModel)
         }
         .animation(opencodeSelectionAnimation, value: viewModel.selectedDirectory)
         .animation(opencodeSelectionAnimation, value: projectIDs)

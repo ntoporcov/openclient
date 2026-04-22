@@ -61,6 +61,7 @@ extension AppViewModel {
                 directoryState.todos = []
             }
             try await loadMessages(for: session)
+            seedComposerSelectionsForNewSession(session)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

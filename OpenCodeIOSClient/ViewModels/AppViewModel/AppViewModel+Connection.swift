@@ -13,6 +13,7 @@ extension AppViewModel {
             persistConfig()
             hasSavedServer = true
             showSavedServerPrompt = false
+            loadNewSessionDefaults()
             projects = bootstrap.projects
             selectedDirectory = directorySelection(for: bootstrap.currentProject)
             reconcileCurrentProjectSelection(serverProject: bootstrap.currentProject)
@@ -44,6 +45,7 @@ extension AppViewModel {
         selectedAgentNamesBySessionID = [:]
         selectedModelsBySessionID = [:]
         selectedVariantsBySessionID = [:]
+        newSessionDefaults = NewSessionDefaults()
         errorMessage = nil
         showSavedServerPrompt = hasSavedServer
     }

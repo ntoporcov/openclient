@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 extension AppViewModel {
     var selectableAgents: [OpenCodeAgent] {
@@ -9,6 +10,115 @@ extension AppViewModel {
 
     var sortedProviders: [OpenCodeProvider] {
         availableProviders.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    var currentServerDefaultsKey: String? {
+        NewSessionDefaultsStore.normalizedBaseURL(config.baseURL)
+    }
+
+    var validModelReferences: Set<OpenCodeModelReference> {
+        Set(availableProviders.flatMap { provider in
+            provider.models.values.map { OpenCodeModelReference(providerID: provider.id, modelID: $0.id) }
+        })
+    }
+
+    func presentConfigurationsSheet() {
+        sanitizeNewSessionDefaults()
+        withAnimation(opencodeSelectionAnimation) {
+            isShowingConfigurationsSheet = true
+        }
+    }
+
+    func loadNewSessionDefaults() {
+        let preferences = NewSessionDefaultsStore.load()
+        guard let key = currentServerDefaultsKey else {
+            newSessionDefaults = NewSessionDefaults()
+            return
+        }
+
+        newSessionDefaults = preferences.defaultsByBaseURL[key] ?? NewSessionDefaults()
+        sanitizeNewSessionDefaults()
+    }
+
+    func saveNewSessionDefaults() {
+        guard let key = currentServerDefaultsKey else { return }
+
+        sanitizeNewSessionDefaults()
+        var preferences = NewSessionDefaultsStore.load()
+        preferences.defaultsByBaseURL[key] = newSessionDefaults
+        NewSessionDefaultsStore.save(preferences)
+    }
+
+    func setNewSessionDefaultAgent(_ name: String?) {
+        newSessionDefaults.agentName = name
+        saveNewSessionDefaults()
+    }
+
+    func setNewSessionDefaultModel(_ reference: OpenCodeModelReference?) {
+        newSessionDefaults.providerID = reference?.providerID
+        newSessionDefaults.modelID = reference?.modelID
+
+        if let variant = newSessionDefaults.reasoningVariant,
+           !reasoningVariants(for: configurationEffectiveModelReference).contains(variant) {
+            newSessionDefaults.reasoningVariant = nil
+        }
+
+        saveNewSessionDefaults()
+    }
+
+    func setNewSessionDefaultReasoning(_ variant: String?) {
+        newSessionDefaults.reasoningVariant = variant
+        saveNewSessionDefaults()
+    }
+
+    func newSessionDefaultModelReference() -> OpenCodeModelReference? {
+        guard let providerID = newSessionDefaults.providerID,
+              let modelID = newSessionDefaults.modelID else {
+            return nil
+        }
+
+        let reference = OpenCodeModelReference(providerID: providerID, modelID: modelID)
+        return validModelReferences.contains(reference) ? reference : nil
+    }
+
+    func model(for reference: OpenCodeModelReference?) -> OpenCodeModel? {
+        guard let reference else { return nil }
+        return availableProviders.first(where: { $0.id == reference.providerID })?.models[reference.modelID]
+    }
+
+    var configurationEffectiveModelReference: OpenCodeModelReference? {
+        newSessionDefaultModelReference() ?? defaultModelReference()
+    }
+
+    var configurationReasoningVariants: [String] {
+        reasoningVariants(for: configurationEffectiveModelReference)
+    }
+
+    var configurationModelTitle: String {
+        guard let reference = newSessionDefaultModelReference(),
+              let model = model(for: reference) else {
+            return "System Default"
+        }
+
+        return model.name
+    }
+
+    var configurationAgentTitle: String {
+        guard let name = newSessionDefaults.agentName,
+              selectableAgents.contains(where: { $0.name == name }) else {
+            return "System Default"
+        }
+
+        return name.capitalized
+    }
+
+    var configurationReasoningTitle: String {
+        guard let variant = newSessionDefaults.reasoningVariant,
+              configurationReasoningVariants.contains(variant) else {
+            return "System Default"
+        }
+
+        return formattedVariantTitle(variant)
     }
 
     func agentToolbarTitle(for session: OpenCodeSession) -> String {
@@ -29,18 +139,14 @@ extension AppViewModel {
 
     func selectedModel(for session: OpenCodeSession) -> OpenCodeModel? {
         guard let reference = selectedModelsBySessionID[session.id] else { return nil }
-        return availableProviders.first(where: { $0.id == reference.providerID })?.models[reference.modelID]
+        return model(for: reference)
     }
 
     func effectiveAgentName(for session: OpenCodeSession) -> String? {
         selectedAgentName(for: session) ?? selectableAgents.first?.name
     }
 
-    func effectiveModelReference(for session: OpenCodeSession) -> OpenCodeModelReference? {
-        if let selected = selectedModelReference(for: session) {
-            return selected
-        }
-
+    func defaultModelReference() -> OpenCodeModelReference? {
         for provider in sortedProviders {
             guard let defaultModelID = defaultModelsByProviderID[provider.id],
                   provider.models[defaultModelID] != nil else { continue }
@@ -54,13 +160,26 @@ extension AppViewModel {
         return OpenCodeModelReference(providerID: provider.id, modelID: model.id)
     }
 
+    func effectiveModelReference(for session: OpenCodeSession) -> OpenCodeModelReference? {
+        if let selected = selectedModelReference(for: session) {
+            return selected
+        }
+
+        return defaultModelReference()
+    }
+
     func effectiveModel(for session: OpenCodeSession) -> OpenCodeModel? {
         guard let reference = effectiveModelReference(for: session) else { return nil }
-        return availableProviders.first(where: { $0.id == reference.providerID })?.models[reference.modelID]
+        return model(for: reference)
     }
 
     func reasoningVariants(for session: OpenCodeSession) -> [String] {
         guard let model = effectiveModel(for: session), model.capabilities.reasoning else { return [] }
+        return (model.variants ?? [:]).keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    func reasoningVariants(for reference: OpenCodeModelReference?) -> [String] {
+        guard let model = model(for: reference), model.capabilities.reasoning else { return [] }
         return (model.variants ?? [:]).keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
@@ -117,11 +236,33 @@ extension AppViewModel {
             availableAgents = try await agents
             availableProviders = try await providers
             defaultModelsByProviderID = try await defaults
+            loadNewSessionDefaults()
             sanitizeComposerSelections()
         } catch {
             availableAgents = []
             availableProviders = []
             defaultModelsByProviderID = [:]
+            loadNewSessionDefaults()
+        }
+    }
+
+    func sanitizeNewSessionDefaults() {
+        if let name = newSessionDefaults.agentName,
+           !selectableAgents.contains(where: { $0.name == name }) {
+            newSessionDefaults.agentName = nil
+        }
+
+        if let reference = newSessionDefaultModelReference() {
+            newSessionDefaults.providerID = reference.providerID
+            newSessionDefaults.modelID = reference.modelID
+        } else {
+            newSessionDefaults.providerID = nil
+            newSessionDefaults.modelID = nil
+        }
+
+        if let variant = newSessionDefaults.reasoningVariant,
+           !configurationReasoningVariants.contains(variant) {
+            newSessionDefaults.reasoningVariant = nil
         }
     }
 
@@ -129,14 +270,32 @@ extension AppViewModel {
         let validAgentNames = Set(selectableAgents.map(\.name))
         selectedAgentNamesBySessionID = selectedAgentNamesBySessionID.filter { validAgentNames.contains($0.value) }
 
-        let validModels = Set(availableProviders.flatMap { provider in
-            provider.models.values.map { OpenCodeModelReference(providerID: provider.id, modelID: $0.id) }
-        })
-        selectedModelsBySessionID = selectedModelsBySessionID.filter { validModels.contains($0.value) }
+        selectedModelsBySessionID = selectedModelsBySessionID.filter { validModelReferences.contains($0.value) }
 
         selectedVariantsBySessionID = selectedVariantsBySessionID.filter { sessionID, variant in
             guard let session = sessions.first(where: { $0.id == sessionID }) else { return false }
             return reasoningVariants(for: session).contains(variant)
+        }
+
+        sanitizeNewSessionDefaults()
+    }
+
+    func seedComposerSelectionsForNewSession(_ session: OpenCodeSession) {
+        if selectedAgentNamesBySessionID[session.id] == nil,
+           let defaultAgentName = newSessionDefaults.agentName,
+           selectableAgents.contains(where: { $0.name == defaultAgentName }) {
+            selectedAgentNamesBySessionID[session.id] = defaultAgentName
+        }
+
+        if selectedModelsBySessionID[session.id] == nil,
+           let defaultModel = newSessionDefaultModelReference() {
+            selectedModelsBySessionID[session.id] = defaultModel
+        }
+
+        if selectedVariantsBySessionID[session.id] == nil,
+           let defaultVariant = newSessionDefaults.reasoningVariant,
+           reasoningVariants(for: session).contains(defaultVariant) {
+            selectedVariantsBySessionID[session.id] = defaultVariant
         }
     }
 
@@ -145,20 +304,22 @@ extension AppViewModel {
             ($0.info.role ?? "").lowercased() == "user"
         }
 
-        if let agent = lastUserMessage?.info.agent,
+        guard let lastUserMessage else {
+            seedComposerSelectionsForNewSession(session)
+            return
+        }
+
+        if let agent = lastUserMessage.info.agent,
            selectableAgents.contains(where: { $0.name == agent }) {
             selectedAgentNamesBySessionID[session.id] = agent
         } else {
             selectedAgentNamesBySessionID[session.id] = nil
         }
 
-        if let model = lastUserMessage?.info.model {
+        if let model = lastUserMessage.info.model {
             let reference = OpenCodeModelReference(providerID: model.providerID, modelID: model.modelID)
-            let validModels = Set(availableProviders.flatMap { provider in
-                provider.models.values.map { OpenCodeModelReference(providerID: provider.id, modelID: $0.id) }
-            })
 
-            if validModels.contains(reference) {
+            if validModelReferences.contains(reference) {
                 selectedModelsBySessionID[session.id] = reference
             } else {
                 selectedModelsBySessionID[session.id] = nil

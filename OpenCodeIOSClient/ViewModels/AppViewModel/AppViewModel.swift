@@ -7,6 +7,7 @@ let opencodeSelectionAnimation = Animation.snappy(duration: 0.28, extraBounce: 0
 final class AppViewModel: ObservableObject {
     enum StorageKey {
         static let lastServerConfig = "lastServerConfig"
+        static let newSessionDefaults = "newSessionDefaults"
     }
 
     @Published var config = OpenCodeServerConfig()
@@ -33,6 +34,7 @@ final class AppViewModel: ObservableObject {
     @Published var hasSavedServer = false
     @Published var showSavedServerPrompt = false
     @Published var isShowingCreateSessionSheet = false
+    @Published var isShowingConfigurationsSheet = false
     @Published var debugLastEventSummary = ""
     @Published var debugProbeLog: [String] = []
     @Published var isShowingDebugProbe = false
@@ -44,6 +46,7 @@ final class AppViewModel: ObservableObject {
     @Published var selectedAgentNamesBySessionID: [String: String] = [:]
     @Published var selectedModelsBySessionID: [String: OpenCodeModelReference] = [:]
     @Published var selectedVariantsBySessionID: [String: String] = [:]
+    @Published var newSessionDefaults = NewSessionDefaults()
 
     let eventManager = OpenCodeEventManager()
     var eventStreamRestartTask: Task<Void, Never>?
