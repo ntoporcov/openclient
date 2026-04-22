@@ -355,6 +355,23 @@ struct OpenCodeVCSFileDiff: Codable, Hashable, Identifiable, Sendable {
     var id: String { file }
 }
 
+struct OpenCodeVCSSummary: Hashable, Sendable {
+    let fileCount: Int
+    let additions: Int
+    let deletions: Int
+}
+
+struct OpenCodeVCSIntensityFile: Hashable, Identifiable, Sendable {
+    let path: String
+    let status: String
+    let additions: Int
+    let deletions: Int
+    let relativePath: String
+    let score: Int
+
+    var id: String { path }
+}
+
 struct OpenCodeTodo: Codable, Hashable, Identifiable, Sendable {
     let content: String
     let status: String

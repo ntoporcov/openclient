@@ -2,6 +2,27 @@ import Foundation
 import SwiftUI
 
 extension AppViewModel {
+    var vcsSummary: OpenCodeVCSSummary {
+        OpenCodeVCSSummary(
+            fileCount: vcsFileStatuses.count,
+            additions: vcsFileStatuses.reduce(0) { $0 + $1.added },
+            deletions: vcsFileStatuses.reduce(0) { $0 + $1.removed }
+        )
+    }
+
+    var vcsIntensityFiles: [OpenCodeVCSIntensityFile] {
+        vcsFileStatuses.map { status in
+            OpenCodeVCSIntensityFile(
+                path: status.path,
+                status: status.status,
+                additions: status.added,
+                deletions: status.removed,
+                relativePath: relativeGitPath(status.path),
+                score: status.added + status.removed
+            )
+        }
+    }
+
     var availableVCSDiffModes: [OpenCodeVCSDiffMode] {
         guard hasGitProject else { return [] }
 
