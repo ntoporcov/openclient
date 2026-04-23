@@ -5,37 +5,31 @@ import SwiftUI
 import FoundationModels
 #endif
 
-enum AppleIntelligenceTool: String, CaseIterable, Identifiable {
+enum AppleIntelligenceIntent: String, CaseIterable, Sendable {
+    case chat
+    case initialize
     case listDirectory = "list_directory"
     case readFile = "read_file"
     case searchFiles = "search_files"
     case writeFile = "write_file"
+    case clarify
 
-    var id: String { rawValue }
-
-    var title: String {
+    var label: String {
         switch self {
+        case .chat:
+            return "chat"
+        case .initialize:
+            return "init"
         case .listDirectory:
-            return "List Directory"
+            return "list_directory"
         case .readFile:
-            return "Read File"
+            return "read_file"
         case .searchFiles:
-            return "Search Files"
+            return "search_files"
         case .writeFile:
-            return "Write File"
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .listDirectory:
-            return "Browse files and folders"
-        case .readFile:
-            return "Read a text file"
-        case .searchFiles:
-            return "Search text across files"
-        case .writeFile:
-            return "Write a text file"
+            return "write_file"
+        case .clarify:
+            return "clarify"
         }
     }
 }
@@ -57,7 +51,11 @@ extension AppViewModel {
     var defaultAppleIntelligenceSystemInstructions: String {
         """
         You are OpenCode running as an on-device Apple Intelligence demo inside a native iOS client.
-        Help the user work inside the selected workspace.
+        Answer the user's actual latest message directly.
+        Do not restart the conversation with a greeting unless the user is greeting you first.
+        Do not ignore the user's question.
+        If the user asks a general knowledge or conversational question, answer it normally.
+        Only shift into workspace help when the request is actually about the selected workspace.
         Never invent file contents.
         Paths are always relative to the selected workspace root unless you say otherwise.
         Keep answers practical and concise.
@@ -807,12 +805,36 @@ extension AppViewModel {
         errorMessage = nil
         appleIntelligenceResponseTask?.cancel()
 
-        let prompt = appleIntelligencePrompt(
-            currentText: trimmed,
-            attachments: attachments,
-            priorMessages: priorMessages,
-            workspace: workspace
-        )
+#if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            let model = SystemLanguageModel.default
+            if !model.isAvailable {
+                updateAppleIntelligenceAssistantMessage(
+                    messageID: assistantMessageID,
+                    partID: assistantPartID,
+                    sessionID: session.id,
+                    text: appleIntelligenceAvailabilitySummary ?? "Apple Intelligence is unavailable."
+                )
+                directoryState.sessionStatuses[session.id] = "idle"
+                isLoading = false
+                persistAppleIntelligenceMessages()
+                return
+            }
+
+            if !model.supportsLocale(Locale.current) {
+                updateAppleIntelligenceAssistantMessage(
+                    messageID: assistantMessageID,
+                    partID: assistantPartID,
+                    sessionID: session.id,
+                    text: "Apple Intelligence does not support the current device language or locale for this demo yet."
+                )
+                directoryState.sessionStatuses[session.id] = "idle"
+                isLoading = false
+                persistAppleIntelligenceMessages()
+                return
+            }
+        }
+#endif
 
         appleIntelligenceResponseTask = Task { [weak self] in
             guard let self else { return }
@@ -829,9 +851,23 @@ extension AppViewModel {
                 }
 
                 let initialContext = self.appleIntelligenceInitialContext(for: rootURL)
+                let intent = try await self.inferAppleIntelligenceIntent(
+                    currentText: trimmed,
+                    attachments: attachments,
+                    priorMessages: priorMessages,
+                    workspace: workspace
+                )
+                let prompt = self.appleIntelligenceExecutionPrompt(
+                    intent: intent,
+                    currentText: trimmed,
+                    attachments: attachments,
+                    priorMessages: priorMessages,
+                    workspace: workspace,
+                    initialContext: initialContext
+                )
 #if canImport(FoundationModels)
                 if #available(iOS 26.0, macOS 26.0, *) {
-                    for try await snapshot in try self.makeAppleIntelligenceResponseStream(prompt: prompt, initialContext: initialContext, rootURL: rootURL) {
+                    for try await snapshot in try self.makeAppleIntelligenceResponseStream(intent: intent, prompt: prompt, rootURL: rootURL) {
                         try Task.checkCancellation()
                         await MainActor.run {
                             self.updateAppleIntelligenceAssistantMessage(
@@ -906,11 +942,166 @@ extension AppViewModel {
         )
     }
 
-    func appleIntelligencePrompt(
+    func inferAppleIntelligenceIntent(
         currentText: String,
         attachments: [OpenCodeComposerAttachment],
         priorMessages: [OpenCodeMessageEnvelope],
         workspace: AppleIntelligenceWorkspaceRecord
+    ) async throws -> AppleIntelligenceIntent {
+        if let heuristicIntent = appleIntelligenceHeuristicIntent(currentText: currentText, attachments: attachments) {
+            return heuristicIntent
+        }
+
+        if currentText == "/init" || currentText.hasPrefix("/init ") {
+            return .initialize
+        }
+
+        let history = priorMessages
+            .suffix(6)
+            .compactMap { message -> String? in
+                let role = (message.info.role ?? "assistant").lowercased()
+                let text = message.parts.compactMap(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                return "\(role): \(text)"
+            }
+            .joined(separator: "\n\n")
+        let attachmentSummary = appleIntelligenceAttachmentSummary(attachments)
+        let classifierPrompt = """
+        Classify the user's latest request into exactly one label.
+
+        Valid labels:
+        - chat
+        - init
+        - list_directory
+        - read_file
+        - search_files
+        - write_file
+        - clarify
+
+        Rules:
+        - chat: normal conversation, greetings, questions that do not require workspace inspection
+        - init: explicit /init command
+        - list_directory: asking to list, browse, or explore files/folders
+        - read_file: asking about a specific file or asking to open/read a file
+        - search_files: asking to find something by topic, symbol, or text across files
+        - write_file: asking to create, edit, update, or modify files
+        - clarify: workspace task is ambiguous and needs a follow-up question
+
+        Return only the label and nothing else.
+
+        Workspace: \(workspace.lastKnownPath)
+
+        Recent conversation:
+        \(history.isEmpty ? "None." : history)
+
+        Latest user message:
+        \(currentText.isEmpty ? "[No text; inspect attachments only.]" : currentText)
+
+        \(attachmentSummary)
+        """
+
+#if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            let model = SystemLanguageModel.default
+            let session = LanguageModelSession(model: model) {
+                """
+                You classify user intent for an on-device coding assistant.
+                Return one exact label from the allowed set and no extra words.
+                """
+            }
+            let response = try await session.respond(to: classifierPrompt)
+            let label = response.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            switch label {
+            case AppleIntelligenceIntent.chat.label:
+                return .chat
+            case AppleIntelligenceIntent.initialize.label:
+                return .initialize
+            case AppleIntelligenceIntent.listDirectory.label:
+                return .listDirectory
+            case AppleIntelligenceIntent.readFile.label:
+                return .readFile
+            case AppleIntelligenceIntent.searchFiles.label:
+                return .searchFiles
+            case AppleIntelligenceIntent.writeFile.label:
+                return .writeFile
+            default:
+                return .chat
+            }
+        }
+#endif
+        return .chat
+    }
+
+    func appleIntelligenceHeuristicIntent(currentText: String, attachments: [OpenCodeComposerAttachment]) -> AppleIntelligenceIntent? {
+        let trimmed = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.lowercased()
+        let simplified = normalized
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "’", with: "")
+            .replacingOccurrences(of: "?", with: "")
+            .replacingOccurrences(of: "!", with: "")
+            .replacingOccurrences(of: ".", with: "")
+            .replacingOccurrences(of: ",", with: "")
+
+        if !attachments.isEmpty, trimmed.isEmpty {
+            return .clarify
+        }
+
+        guard !simplified.isEmpty else {
+            return .chat
+        }
+
+        let chatPhrases = [
+            "hi", "hey", "hello", "yo", "hiya", "good morning", "good afternoon", "good evening",
+            "whats up", "what is up", "hows it going", "how is it going", "how are you", "sup", "wyd",
+            "who are you", "what are you", "thanks", "thank you", "cool", "nice", "ok", "okay",
+            "what", "huh", "uhh", "uhmmm", "bro", "man"
+        ]
+        if chatPhrases.contains(where: { simplified == $0 || simplified.hasPrefix($0 + " ") || simplified.hasSuffix(" " + $0) }) {
+            return .chat
+        }
+
+        let capabilityQuestions = [
+            "can you read files", "can you read file", "can you browse files", "can you inspect files",
+            "can you search files", "what can you do", "what can you read"
+        ]
+        if capabilityQuestions.contains(where: { simplified == $0 || simplified.contains($0) }) {
+            return .chat
+        }
+
+        let directoryKeywords = [
+            "list files", "show files", "browse files", "browse folder", "list directory", "what files",
+            "whats in this folder", "show me the folder", "your directory", "this directory", "the directory"
+        ]
+        if directoryKeywords.contains(where: { simplified.contains($0) }) {
+            return .listDirectory
+        }
+
+        let searchKeywords = ["find ", "search for", "grep", "where is", "look for", "search the codebase", "search the project"]
+        if searchKeywords.contains(where: { simplified.contains($0) }) {
+            return .searchFiles
+        }
+
+        let writeKeywords = ["edit ", "change ", "update ", "modify ", "write ", "create ", "add ", "replace ", "fix "]
+        if writeKeywords.contains(where: { simplified.contains($0) }) {
+            return .writeFile
+        }
+
+        let readKeywords = ["open ", "read ", "show me ", "explain this file", "whats in ", "what is in "]
+        if readKeywords.contains(where: { simplified.contains($0) }) {
+            return .readFile
+        }
+
+        return nil
+    }
+
+    func appleIntelligenceExecutionPrompt(
+        intent: AppleIntelligenceIntent,
+        currentText: String,
+        attachments: [OpenCodeComposerAttachment],
+        priorMessages: [OpenCodeMessageEnvelope],
+        workspace: AppleIntelligenceWorkspaceRecord,
+        initialContext: String
     ) -> String {
         let history = priorMessages
             .suffix(8)
@@ -923,11 +1114,10 @@ extension AppViewModel {
             .joined(separator: "\n\n")
 
         let attachmentSummary = appleIntelligenceAttachmentSummary(attachments)
-        let isInitCommand = currentText == "/init" || currentText.hasPrefix("/init ")
         let instructionBlock = appleIntelligenceUserInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         let additionalInstructionsSection = instructionBlock.isEmpty ? "" : "\nAdditional instructions:\n\(instructionBlock)\n"
 
-        if isInitCommand {
+        if intent == .initialize {
             return """
             The user selected the workspace at \(workspace.lastKnownPath).
 
@@ -942,12 +1132,59 @@ extension AppViewModel {
             3. How someone should explore or run it next if that is discoverable
             4. A few useful follow-up things they can ask you to do
 
+            \(initialContext)
+
             \(attachmentSummary)
             """
         }
 
+        if intent == .chat {
+            return """
+            The user is having a normal conversation.
+            Respond to the user's latest message directly.
+            Do not greet again unless the latest message is itself a greeting.
+            If the latest message is a follow-up question, answer the follow-up instead of restarting.
+            Do not mention workspace files or tools.
+
+            Recent conversation:
+            \(history.isEmpty ? "None." : history)
+
+            User message:
+            \(currentText.isEmpty ? "[No text; inspect the supplied attachments.]" : currentText)
+            \(additionalInstructionsSection)
+
+            \(attachmentSummary)
+            """
+        }
+
+        let intentGuidance: String = switch intent {
+        case .chat:
+            "Respond conversationally without using tools."
+        case .listDirectory:
+            "The user wants to browse files or folders. Use directory listing tools only if needed."
+        case .readFile:
+            "The user wants details about a specific file. Prefer reading that file directly."
+        case .searchFiles:
+            "The user wants to find information across the workspace. Search before answering."
+        case .writeFile:
+            "The user wants to modify workspace files. Inspect only what is needed, then make the requested change."
+        case .clarify:
+            "The request is ambiguous. Ask one concise clarification question and do not use tools."
+        case .initialize:
+            ""
+        }
+
         return """
         The user selected the workspace at \(workspace.lastKnownPath).
+
+        Intent:
+        \(intent.label)
+
+        Guidance:
+        \(intentGuidance)
+
+        Workspace context:
+        \(initialContext)
 
         Recent conversation:
         \(history.isEmpty ? "None." : history)
@@ -1044,36 +1281,46 @@ extension AppViewModel {
     }
 
     @available(iOS 26.0, macOS 26.0, *)
-    func makeAppleIntelligenceResponseStream(prompt: String, initialContext: String, rootURL: URL) throws -> LanguageModelSession.ResponseStream<String> {
+    func makeAppleIntelligenceResponseStream(intent: AppleIntelligenceIntent, prompt: String, rootURL: URL) throws -> LanguageModelSession.ResponseStream<String> {
 #if canImport(FoundationModels)
-        guard SystemLanguageModel.default.isAvailable else {
+        let model = SystemLanguageModel.default
+        guard model.isAvailable else {
             throw NSError(domain: "AppleIntelligence", code: 1, userInfo: [NSLocalizedDescriptionKey: appleIntelligenceAvailabilitySummary ?? "Apple Intelligence is unavailable."])
+        }
+        guard model.supportsLocale(Locale.current) else {
+            throw NSError(
+                domain: "AppleIntelligence",
+                code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "Apple Intelligence does not support the current device language/locale for this model."]
+            )
         }
 
         let toolbox = AppleIntelligenceWorkspaceToolbox(rootURL: rootURL)
-        let enabledTools = Set(appleIntelligenceEnabledToolIDs)
         var tools: [any Tool] = []
-        if enabledTools.contains(AppleIntelligenceTool.listDirectory.id) {
+        switch intent {
+        case .chat, .clarify:
+            break
+        case .initialize:
             tools.append(AppleIntelligenceListDirectoryTool(toolbox: toolbox))
-        }
-        if enabledTools.contains(AppleIntelligenceTool.readFile.id) {
             tools.append(AppleIntelligenceReadFileTool(toolbox: toolbox))
-        }
-        if enabledTools.contains(AppleIntelligenceTool.searchFiles.id) {
             tools.append(AppleIntelligenceSearchFilesTool(toolbox: toolbox))
-        }
-        if enabledTools.contains(AppleIntelligenceTool.writeFile.id) {
+        case .listDirectory:
+            tools.append(AppleIntelligenceListDirectoryTool(toolbox: toolbox))
+        case .readFile:
+            tools.append(AppleIntelligenceReadFileTool(toolbox: toolbox))
+        case .searchFiles:
+            tools.append(AppleIntelligenceSearchFilesTool(toolbox: toolbox))
+        case .writeFile:
+            tools.append(AppleIntelligenceReadFileTool(toolbox: toolbox))
             tools.append(AppleIntelligenceWriteFileTool(toolbox: toolbox))
         }
-        let session = LanguageModelSession(model: .default, tools: tools) {
+        let session = LanguageModelSession(model: model, tools: tools) {
             let instructionBlock = self.appleIntelligenceSystemInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
             if instructionBlock.isEmpty {
-                initialContext
+                "You are OpenCode running as an on-device Apple Intelligence demo inside a native iOS client."
             } else {
                 """
                 \(instructionBlock)
-
-                \(initialContext)
                 """
             }
         }
@@ -1120,16 +1367,39 @@ private struct AppleIntelligenceWorkspaceToolbox: Sendable {
     }
 
     func readFile(path: String) throws -> String {
+        let excerptLimit = 4000
         let target = try resolvedURL(for: path, allowDirectory: true)
+        guard FileManager.default.fileExists(atPath: target.path(percentEncoded: false)) else {
+            return missingFileFallback(path: path)
+        }
         let values = try target.resourceValues(forKeys: [.isDirectoryKey])
         if values.isDirectory == true {
             return directoryReadFallback(path: path, target: target)
         }
-        let data = try Data(contentsOf: target)
+        let data: Data
+        do {
+            data = try Data(contentsOf: target)
+        } catch {
+            return missingFileFallback(path: path)
+        }
         guard let text = String(data: data, encoding: .utf8) else {
             return "File \(normalizedPath(path)) is not UTF-8 text."
         }
-        return String(text.prefix(16000))
+
+        if target.pathExtension.lowercased() == "json",
+           let summary = jsonSummary(text: text, path: path, excerptLimit: excerptLimit) {
+            return summary
+        }
+
+        if text.count <= excerptLimit {
+            return text
+        }
+
+        return """
+        File \(normalizedPath(path)) is large, so this content is truncated to the first \(excerptLimit) characters.
+
+        \(String(text.prefix(excerptLimit)))
+        """
     }
 
     func searchFiles(query: String) throws -> String {
@@ -1266,6 +1536,67 @@ private struct AppleIntelligenceWorkspaceToolbox: Sendable {
             .joined(separator: "\n")
 
         return "\(normalizedPath(path)) is a directory, not a file. Top entries:\n\(preview)"
+    }
+
+    private func missingFileFallback(path: String) -> String {
+        let cleaned = normalizedPath(path)
+        let rootEntries = (try? FileManager.default.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+        let preview = rootEntries
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+            .prefix(20)
+            .map { url in
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                return isDirectory ? "- \(relativePath(for: url))/" : "- \(relativePath(for: url))"
+            }
+            .joined(separator: "\n")
+
+        if preview.isEmpty {
+            return "\(cleaned) was not found in the selected workspace. The workspace currently appears empty."
+        }
+
+        return "\(cleaned) was not found in the selected workspace. Top-level entries are:\n\(preview)"
+    }
+
+    private func jsonSummary(text: String, path: String, excerptLimit: Int) -> String? {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) else {
+            return nil
+        }
+
+        let cleaned = normalizedPath(path)
+        if let dictionary = json as? [String: Any] {
+            let keys = dictionary.keys.sorted()
+            let previewKeys = keys.prefix(20).joined(separator: ", ")
+            if text.count <= excerptLimit {
+                return """
+                JSON file \(cleaned) with top-level keys: \(previewKeys)
+
+                \(text)
+                """
+            }
+
+            let excerpt = String(text.prefix(excerptLimit))
+            return """
+            JSON file \(cleaned) is large.
+            Top-level keys: \(previewKeys)
+            Total top-level key count: \(keys.count)
+            Content below is truncated to the first \(excerptLimit) characters.
+
+            \(excerpt)
+            """
+        }
+
+        if let array = json as? [Any] {
+            let excerpt = String(text.prefix(min(text.count, excerptLimit)))
+            return """
+            JSON file \(cleaned) contains a top-level array with \(array.count) items.
+            Content below is truncated to the first \(min(text.count, excerptLimit)) characters.
+
+            \(excerpt)
+            """
+        }
+
+        return nil
     }
 }
 

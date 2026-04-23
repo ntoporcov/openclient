@@ -48,31 +48,11 @@ struct ConnectionView: View {
                     }
                 }
                 .listRowSeparator(.hidden)
+#if !os(macOS)
                 .listRowSpacing(0.0)
+#endif
                 .padding(.horizontal,1)
                 .padding(.vertical,0)
-            }
-
-            Section("Apple Intelligence") {
-                Button {
-                    viewModel.presentAppleIntelligenceFolderPicker()
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Try with Apple Intelligence")
-                            .font(.headline)
-                        Text("Don't have OpenCode? You can try some of our functionality with on-device Apple Intelligence")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .disabled(!viewModel.canTryAppleIntelligence)
-
-                if let summary = viewModel.appleIntelligenceAvailabilitySummary, !viewModel.canTryAppleIntelligence {
-                    Text(summary)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
             }
 
             Section("Server") {
@@ -107,23 +87,25 @@ struct ConnectionView: View {
                 }
             }
 
-            if !viewModel.appleIntelligenceDebugPickedPath.isEmpty ||
-                !viewModel.appleIntelligenceDebugActivePath.isEmpty ||
-                !viewModel.appleIntelligenceDebugResolvedPath.isEmpty ||
-                !viewModel.appleIntelligenceDebugToolRootPath.isEmpty {
-                Section("Apple Intelligence Debug") {
-                    if !viewModel.appleIntelligenceDebugPickedPath.isEmpty {
-                        LabeledContent("Picked", value: viewModel.appleIntelligenceDebugPickedPath)
+            Section("Apple Intelligence") {
+                Button {
+                    viewModel.presentAppleIntelligenceFolderPicker()
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Try with Apple Intelligence")
+                            .font(.headline)
+                        Text("Don't have OpenCode? You can try some of our functionality with on-device Apple Intelligence")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    if !viewModel.appleIntelligenceDebugActivePath.isEmpty {
-                        LabeledContent("Active", value: viewModel.appleIntelligenceDebugActivePath)
-                    }
-                    if !viewModel.appleIntelligenceDebugResolvedPath.isEmpty {
-                        LabeledContent("Resolved", value: viewModel.appleIntelligenceDebugResolvedPath)
-                    }
-                    if !viewModel.appleIntelligenceDebugToolRootPath.isEmpty {
-                        LabeledContent("Tool Root", value: viewModel.appleIntelligenceDebugToolRootPath)
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(!viewModel.canTryAppleIntelligence)
+
+                if let summary = viewModel.appleIntelligenceAvailabilitySummary, !viewModel.canTryAppleIntelligence {
+                    Text(summary)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -225,7 +207,7 @@ private struct RecentServerCard: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                .fill(OpenCodePlatformColor.secondaryGroupedBackground)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)

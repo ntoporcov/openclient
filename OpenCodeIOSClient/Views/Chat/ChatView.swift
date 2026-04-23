@@ -296,7 +296,6 @@ struct ChatView: View {
                 AppleIntelligenceInstructionsSheet(
                     userInstructions: $viewModel.appleIntelligenceUserInstructions,
                     systemInstructions: $viewModel.appleIntelligenceSystemInstructions,
-                    enabledToolIDs: $viewModel.appleIntelligenceEnabledToolIDs,
                     selectedTab: $selectedInstructionTab,
                     defaultUserInstructions: viewModel.defaultAppleIntelligenceUserInstructions,
                     defaultSystemInstructions: viewModel.defaultAppleIntelligenceSystemInstructions,
@@ -697,7 +696,6 @@ struct ChatView: View {
 private struct AppleIntelligenceInstructionsSheet: View {
     @Binding var userInstructions: String
     @Binding var systemInstructions: String
-    @Binding var enabledToolIDs: Set<String>
     @Binding var selectedTab: AppleIntelligenceInstructionTab
 
     let defaultUserInstructions: String
@@ -719,17 +717,10 @@ private struct AppleIntelligenceInstructionsSheet: View {
                     .font(.system(.body, design: .monospaced))
             }
 
-            Section("Tools For Next Turn") {
-                ForEach(AppleIntelligenceTool.allCases) { tool in
-                    Toggle(isOn: binding(for: tool)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(tool.title)
-                            Text(tool.summary)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+            Section {
+                Text("These prompts apply to the second execution round after intent inference.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -766,19 +757,6 @@ private struct AppleIntelligenceInstructionsSheet: View {
         case .system:
             return $systemInstructions
         }
-    }
-
-    private func binding(for tool: AppleIntelligenceTool) -> Binding<Bool> {
-        Binding(
-            get: { enabledToolIDs.contains(tool.id) },
-            set: { isEnabled in
-                if isEnabled {
-                    enabledToolIDs.insert(tool.id)
-                } else {
-                    enabledToolIDs.remove(tool.id)
-                }
-            }
-        )
     }
 }
 

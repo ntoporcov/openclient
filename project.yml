@@ -4,6 +4,9 @@ options:
   deploymentTarget:
     iOS: 17.0
     macOS: 14.0
+  fileTypes:
+    icon:
+      file: true
 settings:
   base:
     SWIFT_VERSION: 6.0
@@ -19,6 +22,9 @@ targets:
       - path: OpenCodeIOSClient
         excludes:
           - OpenCodeMacApp.swift
+      - path: AppIcon.icon
+        buildPhase: resources
+        group: OpenCodeIOSClient
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ntoporcov.opencode-client
@@ -58,6 +64,10 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         SWIFT_EMIT_LOC_STRINGS: YES
+    scheme:
+      gatherCoverageData: false
+      testTargets:
+        - OpenCodeMacClientTests
   OpenCodeIOSClientTests:
     type: bundle.unit-test
     platform: iOS
@@ -84,4 +94,17 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.ntoporcov.opencode-client.uitests
+        CODE_SIGN_STYLE: Automatic
+  OpenCodeMacClientTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: OpenCodeMacClientTests
+    dependencies:
+      - target: OpenCodeMacClient
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.ntoporcov.opencode-client.macos.tests
         CODE_SIGN_STYLE: Automatic

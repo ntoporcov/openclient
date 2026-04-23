@@ -15,9 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FE46DB5F396A39389531C069"
-               BuildableName = "OpenCodeIOSClient.app"
-               BlueprintName = "OpenCodeIOSClient"
+               BlueprintIdentifier = "BB490846463F18E8EE36413F"
+               BuildableName = "OpenCodeMacClient.app"
+               BlueprintName = "OpenCodeMacClient"
                ReferencedContainer = "container:OpenCodeIOSClient.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,9 +32,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "FE46DB5F396A39389531C069"
-            BuildableName = "OpenCodeIOSClient.app"
-            BlueprintName = "OpenCodeIOSClient"
+            BlueprintIdentifier = "BB490846463F18E8EE36413F"
+            BuildableName = "OpenCodeMacClient.app"
+            BlueprintName = "OpenCodeMacClient"
             ReferencedContainer = "container:OpenCodeIOSClient.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -44,20 +44,9 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "03ABFB08B570A48C3F9A2AA3"
-               BuildableName = "OpenCodeIOSClientTests.xctest"
-               BlueprintName = "OpenCodeIOSClientTests"
-               ReferencedContainer = "container:OpenCodeIOSClient.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "323A6934DF3EC04D7353FAEF"
-               BuildableName = "OpenCodeIOSClientUITests.xctest"
-               BlueprintName = "OpenCodeIOSClientUITests"
+               BlueprintIdentifier = "FB00EC303AAA20A8C2BAEED2"
+               BuildableName = "OpenCodeMacClientTests.xctest"
+               BlueprintName = "OpenCodeMacClientTests"
                ReferencedContainer = "container:OpenCodeIOSClient.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -79,9 +68,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "FE46DB5F396A39389531C069"
-            BuildableName = "OpenCodeIOSClient.app"
-            BlueprintName = "OpenCodeIOSClient"
+            BlueprintIdentifier = "BB490846463F18E8EE36413F"
+            BuildableName = "OpenCodeMacClient.app"
+            BlueprintName = "OpenCodeMacClient"
             ReferencedContainer = "container:OpenCodeIOSClient.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -98,9 +87,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "FE46DB5F396A39389531C069"
-            BuildableName = "OpenCodeIOSClient.app"
-            BlueprintName = "OpenCodeIOSClient"
+            BlueprintIdentifier = "BB490846463F18E8EE36413F"
+            BuildableName = "OpenCodeMacClient.app"
+            BlueprintName = "OpenCodeMacClient"
             ReferencedContainer = "container:OpenCodeIOSClient.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

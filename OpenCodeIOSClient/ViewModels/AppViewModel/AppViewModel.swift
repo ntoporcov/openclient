@@ -61,7 +61,6 @@ final class AppViewModel: ObservableObject {
     @Published var isShowingAppleIntelligenceInstructionsSheet = false
     @Published var appleIntelligenceUserInstructions = ""
     @Published var appleIntelligenceSystemInstructions = ""
-    @Published var appleIntelligenceEnabledToolIDs: Set<String> = []
     @Published var isLoading = false
     @Published var recentServerConfigs: [OpenCodeServerConfig] = []
     @Published var hasSavedServer = false
@@ -110,7 +109,6 @@ final class AppViewModel: ObservableObject {
         let recentConfigs = loadRecentServerConfigs()
         appleIntelligenceUserInstructions = defaultAppleIntelligenceUserInstructions
         appleIntelligenceSystemInstructions = defaultAppleIntelligenceSystemInstructions
-        appleIntelligenceEnabledToolIDs = Set(AppleIntelligenceTool.allCases.map(\.id))
         if let savedConfig = recentConfigs.first {
             recentServerConfigs = recentConfigs
             config = savedConfig
