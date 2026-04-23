@@ -3,6 +3,22 @@ import SwiftUI
 import UIKit
 #endif
 
+fileprivate enum AppleIntelligenceInstructionTab: String, CaseIterable, Identifiable {
+    case user
+    case system
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .user:
+            return "User Prompt"
+        case .system:
+            return "System Prompt"
+        }
+    }
+}
+
 struct ChatView: View {
     @ObservedObject var viewModel: AppViewModel
     let sessionID: String
@@ -20,6 +36,7 @@ struct ChatView: View {
     @State private var composerAccessoryExpansion: ComposerAccessoryExpansion = .collapsed
     @State private var selectedAttachmentPreview: OpenCodeComposerAttachment?
     @State private var isComposerMenuOpen = false
+    @State private var copiedTranscript = false
     @State private var outgoingBubbleText: String?
     @State private var outgoingBubbleProgress: CGFloat = 0
     @State private var outgoingBubbleCleanupTask: Task<Void, Never>?
@@ -33,6 +50,12 @@ struct ChatView: View {
     @State private var shouldAdjustForKeyboard = false
     @State private var hasCompletedInitialHydrationSnap = false
     @State private var keyboardAnimationDuration: Double = 0.25
+    @State private var composerOverlayHeight: CGFloat = 0
+    @State private var shouldFollowComposerAffordanceChange = false
+    @State private var affordanceScrollTask: Task<Void, Never>?
+    @State private var needsInitialComposerHeightSnap = true
+
+    @State private var selectedInstructionTab: AppleIntelligenceInstructionTab = .user
 
     private let messageWindowSize = 10
     private var todoIDs: String {
@@ -77,7 +100,7 @@ struct ChatView: View {
     }
 
     private var effectiveBottomPadding: CGFloat {
-        messageBottomPadding + (shouldAdjustForKeyboard ? keyboardHeight : 0)
+        max(messageBottomPadding, composerOverlayHeight + 12) + (shouldAdjustForKeyboard ? keyboardHeight : 0)
     }
 
     var body: some View {
@@ -149,6 +172,7 @@ struct ChatView: View {
                     .onAppear {
                         listViewportHeight = geometry.size.height
                         needsInitialBottomSnap = true
+                        needsInitialComposerHeightSnap = true
                         hasCompletedInitialHydrationSnap = false
                         if !hasLoadedInitialWindow {
                             visibleMessageCount = min(viewModel.messages.count, messageWindowSize)
@@ -179,6 +203,23 @@ struct ChatView: View {
                     }
                     .onChange(of: immediateScrollToken) { _, _ in
                         scheduleScrollToBottom(with: proxy)
+                    }
+                    .onChange(of: composerOverlayHeight) { oldHeight, newHeight in
+                        guard newHeight > 0, abs(newHeight - oldHeight) > 1 else { return }
+                        if needsInitialComposerHeightSnap, !viewModel.messages.isEmpty {
+                            needsInitialComposerHeightSnap = false
+                            scheduleScrollToBottom(with: proxy, delayMS: 60)
+                            return
+                        }
+                        guard shouldFollowComposerAffordanceChange || isNearBottom else { return }
+                        shouldFollowComposerAffordanceChange = false
+                        affordanceScrollTask?.cancel()
+                        affordanceScrollTask = Task { @MainActor in
+                            scheduleScrollToBottom(with: proxy, delayMS: 20)
+                            try? await Task.sleep(for: .milliseconds(140))
+                            guard !Task.isCancelled else { return }
+                            scheduleScrollToBottom(with: proxy, delayMS: 0)
+                        }
                     }
                     .onChange(of: viewModel.messages.count) { oldCount, count in
                         if !hasLoadedInitialWindow {
@@ -250,6 +291,21 @@ struct ChatView: View {
                 AttachmentPreviewSheet(attachment: attachment)
             }
         }
+        .sheet(isPresented: $viewModel.isShowingAppleIntelligenceInstructionsSheet) {
+            NavigationStack {
+                AppleIntelligenceInstructionsSheet(
+                    userInstructions: $viewModel.appleIntelligenceUserInstructions,
+                    systemInstructions: $viewModel.appleIntelligenceSystemInstructions,
+                    enabledToolIDs: $viewModel.appleIntelligenceEnabledToolIDs,
+                    selectedTab: $selectedInstructionTab,
+                    defaultUserInstructions: viewModel.defaultAppleIntelligenceUserInstructions,
+                    defaultSystemInstructions: viewModel.defaultAppleIntelligenceSystemInstructions,
+                    onDone: {
+                        viewModel.isShowingAppleIntelligenceInstructionsSheet = false
+                    }
+                )
+            }
+        }
         .overlay {
             if composerAccessoryExpansion.isExpanded || isComposerMenuOpen {
                 GeometryReader { geometry in
@@ -293,9 +349,13 @@ struct ChatView: View {
             }
         }
         .onChange(of: accessoryPresenceSignature) { _, _ in
+            shouldFollowComposerAffordanceChange = isNearBottom
             if viewModel.draftAttachments.isEmpty || viewModel.todos.allSatisfy(\.isComplete) {
                 composerAccessoryExpansion = .collapsed
             }
+        }
+        .onChange(of: viewModel.messages.count) { _, _ in
+            copiedTranscript = false
         }
     }
 
@@ -381,9 +441,22 @@ struct ChatView: View {
     }
 
     private var composerOverlay: some View {
-        composerStack
+        measuredComposerStack
             .padding(.bottom, keyboardHeight)
             .background(Color.clear)
+    }
+
+    private var measuredComposerStack: some View {
+        composerStack
+            .background {
+                GeometryReader { geometry in
+                    Color.clear
+                        .preference(key: ComposerOverlayHeightPreferenceKey.self, value: geometry.size.height)
+                }
+            }
+            .onPreferenceChange(ComposerOverlayHeightPreferenceKey.self) { height in
+                composerOverlayHeight = height
+            }
     }
 
     private func scheduleScrollToBottom(with proxy: ScrollViewProxy, delayMS: Int = 10) {
@@ -557,7 +630,32 @@ struct ChatView: View {
 
     @ToolbarContentBuilder
     private var chatToolbar: some ToolbarContent {
-        if !viewModel.isUsingAppleIntelligence {
+        if viewModel.isUsingAppleIntelligence {
+            ToolbarItem(placement: .opencodeLeading) {
+                Button("Home") {
+                    viewModel.leaveAppleIntelligenceSession()
+                }
+            }
+
+            ToolbarItem(placement: .opencodeTrailing) {
+                Button {
+                    OpenCodeClipboard.copy(appleIntelligenceTranscript())
+                    copiedTranscript = true
+                } label: {
+                    Image(systemName: copiedTranscript ? "checkmark.doc" : "doc.on.doc")
+                }
+                .accessibilityLabel(copiedTranscript ? "Copied Transcript" : "Copy Transcript")
+            }
+
+            ToolbarItem(placement: .opencodeTrailing) {
+                Button {
+                    viewModel.isShowingAppleIntelligenceInstructionsSheet = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .accessibilityLabel("Model Instructions")
+            }
+        } else {
             ToolbarItem(placement: .opencodeTrailing) {
                 AgentToolbarMenu(viewModel: viewModel, session: liveSession, glassNamespace: toolbarGlassNamespace)
             }
@@ -573,6 +671,115 @@ struct ChatView: View {
             }
         }
     }
+
+    private func appleIntelligenceTranscript() -> String {
+        viewModel.messages.map { message in
+            let role = (message.info.role ?? "assistant").lowercased()
+            let text = message.parts
+                .compactMap(\.text)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+
+            if !text.isEmpty {
+                return "\(role):\n\(text)"
+            }
+
+            let partSummary = message.parts.map { part in
+                let filename = part.filename ?? part.type
+                return "[\(filename)]"
+            }.joined(separator: " ")
+            return "\(role):\n\(partSummary)"
+        }.joined(separator: "\n\n")
+    }
+}
+
+private struct AppleIntelligenceInstructionsSheet: View {
+    @Binding var userInstructions: String
+    @Binding var systemInstructions: String
+    @Binding var enabledToolIDs: Set<String>
+    @Binding var selectedTab: AppleIntelligenceInstructionTab
+
+    let defaultUserInstructions: String
+    let defaultSystemInstructions: String
+    let onDone: () -> Void
+
+    var body: some View {
+        Form {
+            Picker("Prompt", selection: $selectedTab) {
+                ForEach(AppleIntelligenceInstructionTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Section(selectedTab.title) {
+                TextEditor(text: activeBinding)
+                    .frame(minHeight: 280)
+                    .font(.system(.body, design: .monospaced))
+            }
+
+            Section("Tools For Next Turn") {
+                ForEach(AppleIntelligenceTool.allCases) { tool in
+                    Toggle(isOn: binding(for: tool)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tool.title)
+                            Text(tool.summary)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Section {
+                Button("Clear Current Tab", role: .destructive) {
+                    activeBinding.wrappedValue = ""
+                }
+
+                Button("Reset Current Tab") {
+                    switch selectedTab {
+                    case .user:
+                        userInstructions = defaultUserInstructions
+                    case .system:
+                        systemInstructions = defaultSystemInstructions
+                    }
+                }
+            }
+        }
+        .navigationTitle("Model Instructions")
+        .opencodeInlineNavigationTitle()
+        .toolbar {
+            ToolbarItem(placement: .opencodeLeading) {
+                Button("Done") {
+                    onDone()
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private var activeBinding: Binding<String> {
+        switch selectedTab {
+        case .user:
+            return $userInstructions
+        case .system:
+            return $systemInstructions
+        }
+    }
+
+    private func binding(for tool: AppleIntelligenceTool) -> Binding<Bool> {
+        Binding(
+            get: { enabledToolIDs.contains(tool.id) },
+            set: { isEnabled in
+                if isEnabled {
+                    enabledToolIDs.insert(tool.id)
+                } else {
+                    enabledToolIDs.remove(tool.id)
+                }
+            }
+        )
+    }
 }
 
 private struct ChatBottomAnchorFramePreferenceKey: PreferenceKey {
@@ -583,6 +790,14 @@ private struct ChatBottomAnchorFramePreferenceKey: PreferenceKey {
         if next != .zero {
             value = next
         }
+    }
+}
+
+private struct ComposerOverlayHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

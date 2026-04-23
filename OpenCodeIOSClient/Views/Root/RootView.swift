@@ -45,13 +45,6 @@ struct RootView: View {
                 NavigationStack {
                     ChatView(viewModel: viewModel, sessionID: session.id)
                         .id(session.id)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("Home") {
-                                    viewModel.leaveAppleIntelligenceSession()
-                                }
-                            }
-                        }
                 }
             } else {
                 NavigationStack {

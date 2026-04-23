@@ -5,7 +5,71 @@ import SwiftUI
 import FoundationModels
 #endif
 
+enum AppleIntelligenceTool: String, CaseIterable, Identifiable {
+    case listDirectory = "list_directory"
+    case readFile = "read_file"
+    case searchFiles = "search_files"
+    case writeFile = "write_file"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .listDirectory:
+            return "List Directory"
+        case .readFile:
+            return "Read File"
+        case .searchFiles:
+            return "Search Files"
+        case .writeFile:
+            return "Write File"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .listDirectory:
+            return "Browse files and folders"
+        case .readFile:
+            return "Read a text file"
+        case .searchFiles:
+            return "Search text across files"
+        case .writeFile:
+            return "Write a text file"
+        }
+    }
+}
+
 extension AppViewModel {
+    var defaultAppleIntelligenceUserInstructions: String {
+        """
+        Default to using no tools.
+        If the user is just greeting you, chatting casually, brainstorming, or asking a general question, respond normally without using any tools.
+        Only use file tools when the user explicitly asks about the workspace, files, code, project structure, or asks you to inspect, search, read, write, list, browse, summarize, or modify something in the picked folder.
+        Do not use tools just because a workspace exists.
+        Do not inspect the workspace proactively.
+        Do not call `list_directory` unless the user explicitly asks to list, browse, or explore files.
+        If the user mentions a specific file or topic and clearly wants workspace information, prefer `read_file` or `search_files` over listing the whole directory.
+        Answer from conversation context alone whenever possible.
+        """
+    }
+
+    var defaultAppleIntelligenceSystemInstructions: String {
+        """
+        You are OpenCode running as an on-device Apple Intelligence demo inside a native iOS client.
+        Help the user work inside the selected workspace.
+        Never invent file contents.
+        Paths are always relative to the selected workspace root unless you say otherwise.
+        Keep answers practical and concise.
+        Default to no tool usage.
+        Do not use any tools for greetings, small talk, general advice, or brainstorming.
+        Do not browse the workspace by default.
+        Only use tools after an explicit user request that requires workspace inspection or modification.
+        Only call `list_directory` when the user explicitly asks for a file listing or browsing step.
+        Prefer `read_file` for named files and `search_files` for topic lookups when the user explicitly wants workspace information.
+        """
+    }
+
     func reloadSessions() async throws {
         let bootstrap = try await OpenCodeBootstrap.bootstrapDirectory(client: client, directory: effectiveSelectedDirectory)
         withAnimation(opencodeSelectionAnimation) {
@@ -860,6 +924,8 @@ extension AppViewModel {
 
         let attachmentSummary = appleIntelligenceAttachmentSummary(attachments)
         let isInitCommand = currentText == "/init" || currentText.hasPrefix("/init ")
+        let instructionBlock = appleIntelligenceUserInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        let additionalInstructionsSection = instructionBlock.isEmpty ? "" : "\nAdditional instructions:\n\(instructionBlock)\n"
 
         if isInitCommand {
             return """
@@ -888,12 +954,7 @@ extension AppViewModel {
 
         User message:
         \(currentText.isEmpty ? "[No text; inspect the supplied attachments.]" : currentText)
-
-        If the user is just greeting you, chatting casually, or asking a general question that does not depend on workspace contents, respond normally without using any tools.
-        Answer directly when you can.
-        Only use file tools when they are actually needed to answer correctly.
-        Do not call `list_directory` unless the user explicitly asks to list, browse, or explore files, or you need the root contents for a workspace-specific task.
-        If the user mentions a specific file or topic, prefer `read_file` or `search_files` over listing the whole directory.
+        \(additionalInstructionsSection)
 
         \(attachmentSummary)
         """
@@ -990,26 +1051,31 @@ extension AppViewModel {
         }
 
         let toolbox = AppleIntelligenceWorkspaceToolbox(rootURL: rootURL)
-        let tools: [any Tool] = [
-            AppleIntelligenceListDirectoryTool(toolbox: toolbox),
-            AppleIntelligenceReadFileTool(toolbox: toolbox),
-            AppleIntelligenceSearchFilesTool(toolbox: toolbox),
-            AppleIntelligenceWriteFileTool(toolbox: toolbox),
-        ]
+        let enabledTools = Set(appleIntelligenceEnabledToolIDs)
+        var tools: [any Tool] = []
+        if enabledTools.contains(AppleIntelligenceTool.listDirectory.id) {
+            tools.append(AppleIntelligenceListDirectoryTool(toolbox: toolbox))
+        }
+        if enabledTools.contains(AppleIntelligenceTool.readFile.id) {
+            tools.append(AppleIntelligenceReadFileTool(toolbox: toolbox))
+        }
+        if enabledTools.contains(AppleIntelligenceTool.searchFiles.id) {
+            tools.append(AppleIntelligenceSearchFilesTool(toolbox: toolbox))
+        }
+        if enabledTools.contains(AppleIntelligenceTool.writeFile.id) {
+            tools.append(AppleIntelligenceWriteFileTool(toolbox: toolbox))
+        }
         let session = LanguageModelSession(model: .default, tools: tools) {
-            """
-            You are OpenCode running as an on-device Apple Intelligence demo inside a native iOS client.
-            Help the user work inside the selected workspace, using tools only when you need real file information.
-            Never invent file contents.
-            Paths are always relative to the selected workspace root unless you say otherwise.
-            Keep answers practical and concise.
-            Do not use any tools for greetings, small talk, or general advice that does not require workspace inspection.
-            Do not browse the workspace by default.
-            Only call `list_directory` when the user explicitly asks for a file listing or browsing step.
-            Prefer `read_file` for named files and `search_files` for topic lookups.
+            let instructionBlock = self.appleIntelligenceSystemInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+            if instructionBlock.isEmpty {
+                initialContext
+            } else {
+                """
+                \(instructionBlock)
 
-            \(initialContext)
-            """
+                \(initialContext)
+                """
+            }
         }
         return session.streamResponse(to: prompt)
 #else
