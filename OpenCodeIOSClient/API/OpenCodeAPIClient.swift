@@ -131,12 +131,26 @@ struct OpenCodeAPIClient {
         return response.default ?? [:]
     }
 
-    func listPermissions() async throws -> [OpenCodePermission] {
-        try await send(path: "/permission", method: "GET")
+    func listPermissions(directory: String? = nil, workspaceID: String? = nil) async throws -> [OpenCodePermission] {
+        var queryItems: [URLQueryItem] = []
+        if let directory, !directory.isEmpty {
+            queryItems.append(URLQueryItem(name: "directory", value: directory))
+        }
+        if let workspaceID, !workspaceID.isEmpty {
+            queryItems.append(URLQueryItem(name: "workspace", value: workspaceID))
+        }
+        return try await send(path: "/permission", method: "GET", queryItems: queryItems)
     }
 
-    func listQuestions() async throws -> [OpenCodeQuestionRequest] {
-        try await send(path: "/question", method: "GET")
+    func listQuestions(directory: String? = nil, workspaceID: String? = nil) async throws -> [OpenCodeQuestionRequest] {
+        var queryItems: [URLQueryItem] = []
+        if let directory, !directory.isEmpty {
+            queryItems.append(URLQueryItem(name: "directory", value: directory))
+        }
+        if let workspaceID, !workspaceID.isEmpty {
+            queryItems.append(URLQueryItem(name: "workspace", value: workspaceID))
+        }
+        return try await send(path: "/question", method: "GET", queryItems: queryItems)
     }
 
     func getNextControlRequest(directory: String?) async throws -> OpenCodeControlRequest {
@@ -156,16 +170,57 @@ struct OpenCodeAPIClient {
         try await sendNoContent(path: "/session/\(sessionID)/permissions/\(permissionID)", method: "POST", body: PermissionResponse(response: response, remember: remember))
     }
 
-    func replyToPermission(requestID: String, reply: String, message: String? = nil) async throws {
-        try await sendNoContent(path: "/permission/\(requestID)/reply", method: "POST", body: OpenCodePermissionReplyRequest(reply: reply, message: message))
+    func replyToPermission(requestID: String, reply: String, message: String? = nil, directory: String? = nil, workspaceID: String? = nil) async throws {
+        var queryItems: [URLQueryItem] = []
+        if let directory, !directory.isEmpty {
+            queryItems.append(URLQueryItem(name: "directory", value: directory))
+        }
+        if let workspaceID, !workspaceID.isEmpty {
+            queryItems.append(URLQueryItem(name: "workspace", value: workspaceID))
+        }
+
+        try await sendNoContent(
+            path: "/permission/\(requestID)/reply",
+            method: "POST",
+            queryItems: queryItems,
+            body: OpenCodePermissionReplyRequest(reply: reply, message: message),
+            directoryHeader: directory
+        )
     }
 
-    func replyToQuestion(requestID: String, answers: [[String]]) async throws {
-        try await sendNoContent(path: "/question/\(requestID)/reply", method: "POST", body: OpenCodeQuestionReplyRequest(answers: answers))
+    func replyToQuestion(requestID: String, answers: [[String]], directory: String? = nil, workspaceID: String? = nil) async throws {
+        var queryItems: [URLQueryItem] = []
+        if let directory, !directory.isEmpty {
+            queryItems.append(URLQueryItem(name: "directory", value: directory))
+        }
+        if let workspaceID, !workspaceID.isEmpty {
+            queryItems.append(URLQueryItem(name: "workspace", value: workspaceID))
+        }
+
+        try await sendNoContent(
+            path: "/question/\(requestID)/reply",
+            method: "POST",
+            queryItems: queryItems,
+            body: OpenCodeQuestionReplyRequest(answers: answers),
+            directoryHeader: directory
+        )
     }
 
-    func rejectQuestion(requestID: String) async throws {
-        try await sendNoContent(path: "/question/\(requestID)/reject", method: "POST")
+    func rejectQuestion(requestID: String, directory: String? = nil, workspaceID: String? = nil) async throws {
+        var queryItems: [URLQueryItem] = []
+        if let directory, !directory.isEmpty {
+            queryItems.append(URLQueryItem(name: "directory", value: directory))
+        }
+        if let workspaceID, !workspaceID.isEmpty {
+            queryItems.append(URLQueryItem(name: "workspace", value: workspaceID))
+        }
+
+        try await sendNoContent(
+            path: "/question/\(requestID)/reject",
+            method: "POST",
+            queryItems: queryItems,
+            directoryHeader: explicitDirectoryHeader(directory)
+        )
     }
 
     func sendMessage(

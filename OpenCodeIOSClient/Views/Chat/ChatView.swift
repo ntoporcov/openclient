@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct ChatView: View {
     @ObservedObject var viewModel: AppViewModel
@@ -10,13 +13,26 @@ struct ChatView: View {
     @State private var showingTodoInspector = false
     @State private var visibleMessageCount = 80
     @State private var hasLoadedInitialWindow = false
-    @State private var hasSnappedInitially = false
     @State private var questionAnswers: [String: Set<String>] = [:]
     @State private var questionCustomAnswers: [String: String] = [:]
     @State private var autoScrollTask: Task<Void, Never>?
+    @State private var shouldSnapOnNextMessage = false
     @State private var composerAccessoryExpansion: ComposerAccessoryExpansion = .collapsed
     @State private var selectedAttachmentPreview: OpenCodeComposerAttachment?
     @State private var isComposerMenuOpen = false
+    @State private var outgoingBubbleText: String?
+    @State private var outgoingBubbleProgress: CGFloat = 0
+    @State private var outgoingBubbleCleanupTask: Task<Void, Never>?
+    @State private var composerInputFrame: CGRect = .zero
+    @State private var outgoingBubbleStartFrame: CGRect = .zero
+    @State private var listViewportHeight: CGFloat = 0
+    @State private var bottomAnchorFrame: CGRect = .zero
+    @State private var immediateScrollToken = 0
+    @State private var needsInitialBottomSnap = true
+    @State private var keyboardHeight: CGFloat = 0
+    @State private var shouldAdjustForKeyboard = false
+    @State private var hasCompletedInitialHydrationSnap = false
+    @State private var keyboardAnimationDuration: Double = 0.25
 
     private let messageWindowSize = 10
     private var todoIDs: String {
@@ -31,36 +47,47 @@ struct ChatView: View {
         viewModel.selectedSessionQuestions.map { $0.id }.joined(separator: "|")
     }
 
-    private var bottomContentSignature: String {
-        [
-            displayedMessages.last?.id ?? "none",
-            String(lastMessageTextLength),
-            shouldShowThinking ? "thinking" : "idle",
-            composerMode
-        ].joined(separator: "|")
-    }
-
     private var liveSession: OpenCodeSession {
         if let selected = viewModel.selectedSession, selected.id == sessionID {
             return selected
         }
 
-        guard let session = viewModel.session(matching: sessionID) else {
-            fatalError("Missing session for ChatView: \(sessionID)")
-        }
-        return session
+        return viewModel.session(matching: sessionID) ?? OpenCodeSession(
+            id: sessionID,
+            title: "Session",
+            workspaceID: nil,
+            directory: nil,
+            projectID: nil,
+            parentID: nil
+        )
+    }
+
+    private var streamingFollowSignature: String {
+        [
+            displayedMessages.last?.id ?? "none",
+            String(displayedMessages.last?.parts.count ?? 0),
+            String(lastDisplayedMessageTextLength),
+            shouldShowThinking ? "thinking" : "idle"
+        ].joined(separator: "|")
+    }
+
+    private var isNearBottom: Bool {
+        guard listViewportHeight > 0, bottomAnchorFrame != .zero else { return true }
+        return abs(bottomAnchorFrame.minY - listViewportHeight) <= 140
+    }
+
+    private var effectiveBottomPadding: CGFloat {
+        messageBottomPadding + (shouldAdjustForKeyboard ? keyboardHeight : 0)
     }
 
     var body: some View {
         GeometryReader { geometry in
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 12) {
+            ZStack(alignment: .bottom) {
+                ScrollViewReader { proxy in
+                    List {
                         if hiddenMessageCount > 0 {
                             Button {
-                                withAnimation(opencodeSelectionAnimation) {
-                                    visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
-                                }
+                                visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
                             } label: {
                                 Text("View older messages (\(hiddenMessageCount))")
                                     .font(.subheadline.weight(.medium))
@@ -71,6 +98,9 @@ struct ChatView: View {
                             }
                             .buttonStyle(.plain)
                             .padding(.bottom, 4)
+                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 0, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                         }
 
                         ForEach(displayedMessages) { message in
@@ -82,56 +112,121 @@ struct ChatView: View {
                                 selectedActivityDetail = ActivityDetail(message: message, part: part)
                             }
                             .id(message.id)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                         }
 
                         if shouldShowThinking {
                             ThinkingRow()
+                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
                         }
 
                         Color.clear
-                            .frame(height: 1)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: max(1, effectiveBottomPadding))
+                            .background {
+                                GeometryReader { anchorGeometry in
+                                    Color.clear
+                                        .preference(key: ChatBottomAnchorFramePreferenceKey.self, value: anchorGeometry.frame(in: .named("chat-view-space")))
+                                }
+                            }
                             .id("chat-bottom-anchor")
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, messageBottomPadding)
-                }
-                .defaultScrollAnchor(.bottom)
-                .opencodeInteractiveKeyboardDismiss()
-                .background(OpenCodePlatformColor.groupedBackground)
-                .accessibilityIdentifier("chat.scroll")
-                .safeAreaInset(edge: .bottom) {
-                    composerStack
-                }
-                .onAppear {
-                    if !hasLoadedInitialWindow {
-                        visibleMessageCount = min(viewModel.messages.count, messageWindowSize)
-                        hasLoadedInitialWindow = true
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .opencodeInteractiveKeyboardDismiss()
+                    .background(OpenCodePlatformColor.groupedBackground)
+                    .accessibilityIdentifier("chat.scroll")
+                    .transaction { transaction in
+                        transaction.animation = nil
                     }
-                    scheduleScrollToBottom(with: proxy, animated: false)
-                }
-                .onChange(of: viewModel.messages.count) { _, count in
-                    if !hasLoadedInitialWindow {
-                        visibleMessageCount = min(count, messageWindowSize)
-                        return
+                    .onAppear {
+                        listViewportHeight = geometry.size.height
+                        needsInitialBottomSnap = true
+                        hasCompletedInitialHydrationSnap = false
+                        if !hasLoadedInitialWindow {
+                            visibleMessageCount = min(viewModel.messages.count, messageWindowSize)
+                            hasLoadedInitialWindow = true
+                        }
+                        scheduleScrollToBottom(with: proxy)
                     }
+                    .onChange(of: bottomAnchorFrame) { _, frame in
+                        guard needsInitialBottomSnap, frame != .zero else { return }
+                        needsInitialBottomSnap = false
+                        scheduleScrollToBottom(with: proxy, delayMS: 80)
+                    }
+                    .onChange(of: geometry.size.height) { _, height in
+                        listViewportHeight = height
+                    }
+                    .onChange(of: keyboardHeight) { oldHeight, newHeight in
+                        if newHeight <= 0 {
+                            shouldAdjustForKeyboard = false
+                            return
+                        }
 
-                    visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
-                }
-                .onChange(of: visibleMessageCount) { _, _ in
-                    if !hasSnappedInitially {
-                        scheduleScrollToBottom(with: proxy, animated: false)
-                        hasSnappedInitially = true
-                    }
-                }
-                .onChange(of: bottomContentSignature) { oldValue, newValue in
-                    guard hasLoadedInitialWindow else { return }
+                        if oldHeight <= 0 {
+                            shouldAdjustForKeyboard = isNearBottom
+                        }
 
-                    let shouldAnimate = hasSnappedInitially && bottomMessageID(from: oldValue) != bottomMessageID(from: newValue)
-                    scheduleScrollToBottom(with: proxy, animated: shouldAnimate)
+                        guard newHeight > oldHeight, shouldAdjustForKeyboard else { return }
+                        scheduleScrollToBottom(with: proxy, delayMS: 40, animated: true)
+                    }
+                    .onChange(of: immediateScrollToken) { _, _ in
+                        scheduleScrollToBottom(with: proxy)
+                    }
+                    .onChange(of: viewModel.messages.count) { oldCount, count in
+                        if !hasLoadedInitialWindow {
+                            visibleMessageCount = min(count, messageWindowSize)
+                            return
+                        }
+
+                        visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
+
+                        if count > 0, !hasCompletedInitialHydrationSnap {
+                            hasCompletedInitialHydrationSnap = true
+                            scheduleScrollToBottom(with: proxy, delayMS: 120)
+                        }
+
+                        if count > oldCount, outgoingBubbleText != nil {
+                            settleOutgoingBubbleAfterRowInsert()
+                        }
+
+                        guard count > oldCount else { return }
+
+                        if shouldSnapOnNextMessage || isNearBottom {
+                            shouldSnapOnNextMessage = false
+                            scheduleScrollToBottom(with: proxy)
+                        }
+                    }
+                    .onChange(of: streamingFollowSignature) { _, _ in
+                        guard hasLoadedInitialWindow, isNearBottom else { return }
+                        scheduleScrollToBottom(with: proxy)
+                    }
+                    .onPreferenceChange(ChatBottomAnchorFramePreferenceKey.self) { frame in
+                        bottomAnchorFrame = frame
+                    }
+#if canImport(UIKit)
+                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                        keyboardHeight = keyboardHeight(from: notification, containerFrame: geometry.frame(in: .global))
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                        keyboardHeight = 0
+                        shouldAdjustForKeyboard = false
+                    }
+#endif
                 }
+
+                composerOverlay
             }
         }
+        .coordinateSpace(name: "chat-view-space")
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .navigationTitle(liveSession.title ?? "Session")
         .opencodeInlineNavigationTitle()
         .toolbar { chatToolbar }
@@ -185,6 +280,18 @@ struct ChatView: View {
                 }
             }
         }
+        .overlay(alignment: .topLeading) {
+            GeometryReader { geometry in
+                if let outgoingBubbleText, outgoingBubbleStartFrame != .zero {
+                    let frame = interpolatedOutgoingBubbleFrame(in: geometry.size, text: outgoingBubbleText)
+
+                    OutgoingSendBubble(text: outgoingBubbleText, frame: frame)
+                        .position(x: frame.midX, y: frame.midY)
+                        .opacity(1 - outgoingBubbleProgress)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
         .onChange(of: accessoryPresenceSignature) { _, _ in
             if viewModel.draftAttachments.isEmpty || viewModel.todos.allSatisfy(\.isComplete) {
                 composerAccessoryExpansion = .collapsed
@@ -210,7 +317,6 @@ struct ChatView: View {
                     }
                 )
                 .padding(.horizontal, 16)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             if !viewModel.selectedSessionPermissions.isEmpty {
@@ -225,7 +331,6 @@ struct ChatView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if !viewModel.selectedSessionQuestions.isEmpty {
                 QuestionPanel(
                     requests: viewModel.selectedSessionQuestions,
@@ -240,7 +345,6 @@ struct ChatView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             } else {
                 let isBusy = viewModel.sessionStatuses[liveSession.id] == "busy"
                 MessageComposer(
@@ -249,59 +353,63 @@ struct ChatView: View {
                     commands: viewModel.commands,
                     attachmentCount: viewModel.draftAttachments.count,
                     isBusy: isBusy,
+                    onInputFrameChange: { frame in
+                        composerInputFrame = frame
+                    },
                     onSend: {
-                        Task { await viewModel.sendCurrentMessage() }
+                        startOutgoingBubbleAnimationAndSend()
                     },
                     onStop: {
                         Task { await viewModel.stopCurrentSession() }
                     },
                     onSelectCommand: { command in
+                        shouldSnapOnNextMessage = true
                         Task { await viewModel.sendCommand(command, sessionID: sessionID, userVisible: true) }
                     },
                     onAddAttachments: { attachments in
                         viewModel.addDraftAttachments(attachments)
                     }
                 )
-                .id(viewModel.composerResetToken)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .background(.clear)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(opencodeSelectionAnimation, value: todoIDs)
-        .animation(opencodeSelectionAnimation, value: permissionIDs)
-        .animation(opencodeSelectionAnimation, value: questionIDs)
+        .transaction { transaction in
+            transaction.animation = nil
+        }
     }
 
-    private func scheduleScrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
+    private var composerOverlay: some View {
+        composerStack
+            .padding(.bottom, keyboardHeight)
+            .background(Color.clear)
+    }
+
+    private func scheduleScrollToBottom(with proxy: ScrollViewProxy, delayMS: Int = 10) {
+        scheduleScrollToBottom(with: proxy, delayMS: delayMS, animated: false)
+    }
+
+    private func scheduleScrollToBottom(with proxy: ScrollViewProxy, delayMS: Int = 10, animated: Bool) {
         autoScrollTask?.cancel()
         autoScrollTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(delayMS))
             guard !Task.isCancelled else { return }
             scrollToBottom(with: proxy, animated: animated)
         }
     }
 
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
-        let action = {
-            proxy.scrollTo("chat-bottom-anchor", anchor: .bottom)
-        }
-
         if animated {
-            withAnimation(opencodeSelectionAnimation, action)
+            withAnimation(.easeOut(duration: keyboardAnimationDuration)) {
+                proxy.scrollTo("chat-bottom-anchor", anchor: .bottom)
+            }
         } else {
-            action()
+            proxy.scrollTo("chat-bottom-anchor", anchor: .bottom)
         }
     }
 
     private var messageBottomPadding: CGFloat { 96 }
-
-    private var lastMessageTextLength: Int {
-        displayedMessages.last?.parts.reduce(0) { partialResult, part in
-            partialResult + (part.text?.count ?? 0)
-        } ?? 0
-    }
 
     private var displayedMessages: ArraySlice<OpenCodeMessageEnvelope> {
         viewModel.messages.suffix(visibleMessageCount)
@@ -311,20 +419,10 @@ struct ChatView: View {
         max(0, viewModel.messages.count - displayedMessages.count)
     }
 
-    private var composerMode: String {
-        if !viewModel.selectedSessionPermissions.isEmpty {
-            return "permissions"
-        }
-
-        if !viewModel.selectedSessionQuestions.isEmpty {
-            return "questions"
-        }
-
-        if viewModel.todos.contains(where: { !$0.isComplete }) {
-            return "todos"
-        }
-
-        return "composer"
+    private var lastDisplayedMessageTextLength: Int {
+        displayedMessages.last?.parts.reduce(0) { partialResult, part in
+            partialResult + (part.text?.count ?? 0)
+        } ?? 0
     }
 
     private var accessoryPresenceSignature: String {
@@ -341,9 +439,96 @@ struct ChatView: View {
         }
     }
 
-    private func bottomMessageID(from signature: String) -> String {
-        signature.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+    private func startOutgoingBubbleAnimationAndSend() {
+        let draftText = viewModel.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasAttachments = !viewModel.draftAttachments.isEmpty
+
+        guard !draftText.isEmpty || hasAttachments else { return }
+
+        shouldSnapOnNextMessage = true
+        immediateScrollToken += 1
+
+        if !draftText.isEmpty && !hasAttachments {
+            outgoingBubbleText = draftText
+            outgoingBubbleProgress = 0
+            outgoingBubbleStartFrame = composerInputFrame == .zero
+                ? CGRect(x: 40, y: 600, width: 240, height: 48)
+                : composerInputFrame
+
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                outgoingBubbleProgress = 1
+            }
+
+            outgoingBubbleCleanupTask?.cancel()
+            outgoingBubbleCleanupTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                outgoingBubbleText = nil
+                outgoingBubbleProgress = 0
+                outgoingBubbleStartFrame = .zero
+            }
+
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(60))
+                await viewModel.sendCurrentMessage()
+            }
+            return
+        }
+
+        Task { await viewModel.sendCurrentMessage() }
     }
+
+    private func settleOutgoingBubbleAfterRowInsert() {
+        outgoingBubbleCleanupTask?.cancel()
+        outgoingBubbleCleanupTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard !Task.isCancelled else { return }
+            outgoingBubbleText = nil
+            outgoingBubbleProgress = 0
+            outgoingBubbleStartFrame = .zero
+        }
+    }
+
+    private func interpolatedOutgoingBubbleFrame(in containerSize: CGSize, text: String) -> CGRect {
+        let start = outgoingBubbleStartFrame
+        let end = estimatedOutgoingBubbleTargetFrame(in: containerSize, text: text)
+
+        return CGRect(
+            x: lerp(start.minX, end.minX, progress: outgoingBubbleProgress),
+            y: lerp(start.minY, end.minY, progress: outgoingBubbleProgress),
+            width: lerp(start.width, end.width, progress: outgoingBubbleProgress),
+            height: lerp(start.height, end.height, progress: outgoingBubbleProgress)
+        )
+    }
+
+    private func estimatedOutgoingBubbleTargetFrame(in containerSize: CGSize, text: String) -> CGRect {
+        let maxWidth = min(320, containerSize.width - 32)
+        let estimatedWidth = min(maxWidth, max(110, min(maxWidth, 34 + (CGFloat(text.count) * 7.0))))
+        let estimatedLines = max(1, min(4, ceil((CGFloat(text.count) * 7.0) / max(estimatedWidth - 28, 80))))
+        let estimatedHeight = 22 + (estimatedLines * 22)
+        let x = containerSize.width - 16 - estimatedWidth
+        let y = max(12, outgoingBubbleStartFrame.minY - 104)
+
+        return CGRect(x: x, y: y, width: estimatedWidth, height: estimatedHeight)
+    }
+
+    private func lerp(_ start: CGFloat, _ end: CGFloat, progress: CGFloat) -> CGFloat {
+        start + ((end - start) * progress)
+    }
+
+#if canImport(UIKit)
+    private func keyboardHeight(from notification: Notification, containerFrame: CGRect) -> CGFloat {
+        if let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double {
+            keyboardAnimationDuration = duration
+        }
+
+        guard let value = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
+            return 0
+        }
+
+        return max(0, containerFrame.maxY - value.minY)
+    }
+#endif
 
     private var shouldShowThinking: Bool {
         guard viewModel.sessionStatuses[liveSession.id] == "busy" else { return false }
@@ -372,18 +557,50 @@ struct ChatView: View {
 
     @ToolbarContentBuilder
     private var chatToolbar: some ToolbarContent {
-        ToolbarItem(placement: .opencodeTrailing) {
-            AgentToolbarMenu(viewModel: viewModel, session: liveSession, glassNamespace: toolbarGlassNamespace)
-        }
+        if !viewModel.isUsingAppleIntelligence {
+            ToolbarItem(placement: .opencodeTrailing) {
+                AgentToolbarMenu(viewModel: viewModel, session: liveSession, glassNamespace: toolbarGlassNamespace)
+            }
 
-        #if !os(macOS)
-        if #available(iOS 26.0, *) {
-            ToolbarSpacer(.flexible, placement: .topBarTrailing)
-        }
-        #endif
+            #if !os(macOS)
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.flexible, placement: .topBarTrailing)
+            }
+            #endif
 
-        ToolbarItem(placement: .opencodeTrailing) {
-            ModelToolbarMenu(viewModel: viewModel, session: liveSession, glassNamespace: toolbarGlassNamespace)
+            ToolbarItem(placement: .opencodeTrailing) {
+                ModelToolbarMenu(viewModel: viewModel, session: liveSession, glassNamespace: toolbarGlassNamespace)
+            }
         }
+    }
+}
+
+private struct ChatBottomAnchorFramePreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero {
+            value = next
+        }
+    }
+}
+
+private struct OutgoingSendBubble: View {
+    let text: String
+    let frame: CGRect
+
+    var body: some View {
+        Text(text)
+            .font(.body)
+            .foregroundStyle(.white)
+            .lineLimit(4)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.blue, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
     }
 }

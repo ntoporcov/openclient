@@ -184,7 +184,12 @@ extension AppViewModel {
         case .permissionChanged:
             appendDebugLog("permission changed")
             Task { [weak self] in
-                await self?.loadAllPermissions()
+                guard let self else { return }
+                if let session = self.selectedSession {
+                    await self.loadAllPermissions(for: session)
+                } else {
+                    await self.loadAllPermissions(directory: self.effectiveSelectedDirectory)
+                }
             }
         case .questionChanged:
             appendDebugLog("question changed")
@@ -221,7 +226,12 @@ extension AppViewModel {
 
         if payload.type == "question.asked" {
             Task { [weak self] in
-                await self?.loadAllQuestions()
+                guard let self else { return }
+                if let session = self.selectedSession {
+                    await self.loadAllQuestions(for: session)
+                } else {
+                    await self.loadAllQuestions(directory: self.effectiveSelectedDirectory)
+                }
             }
         }
     }

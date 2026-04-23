@@ -10,6 +10,7 @@ struct MessageComposer: View {
     let commands: [OpenCodeCommand]
     let attachmentCount: Int
     let isBusy: Bool
+    let onInputFrameChange: (CGRect) -> Void
     let onSend: () -> Void
     let onStop: () -> Void
     let onSelectCommand: (OpenCodeCommand) -> Void
@@ -108,6 +109,10 @@ struct MessageComposer: View {
                 isAccessoryMenuOpen = false
             }
         }
+        .onPreferenceChange(ComposerInputFramePreferenceKey.self) { frame in
+            guard frame != .zero else { return }
+            onInputFrameChange(frame)
+        }
 #if canImport(PhotosUI)
         .onChange(of: selectedPhotoItems) { _, _ in
             Task { await loadSelectedPhotoItems() }
@@ -187,6 +192,12 @@ struct MessageComposer: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 11)
                     .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear
+                                .preference(key: ComposerInputFramePreferenceKey.self, value: geometry.frame(in: .named("chat-view-space")))
+                        }
+                    }
                     .accessibilityIdentifier("chat.input")
                     .simultaneousGesture(TapGesture().onEnded {
                         if isAccessoryMenuOpen {
@@ -442,6 +453,17 @@ struct MessageComposer: View {
         return Double(controlByteCount) / Double(sample.count) <= 0.3
     }
 #endif
+}
+
+private struct ComposerInputFramePreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero {
+            value = next
+        }
+    }
 }
 
 private struct CommandPicker: View {

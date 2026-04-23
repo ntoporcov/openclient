@@ -44,8 +44,10 @@ struct QuestionPanel: View {
                                             }
                                             Spacer()
                                         }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 8)
+                                        .contentShape(Rectangle())
                                         .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                                     }
                                     .buttonStyle(.plain)
@@ -66,21 +68,33 @@ struct QuestionPanel: View {
                     }
 
                     VStack(spacing: 8) {
-                        Button("Send Answer") {
+                        Button {
                             onSubmit(request, buildAnswers(for: request))
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Send Answer")
+                                Spacer()
+                            }
+                            .padding(.vertical, 3)
                         }
+                        .controlSize(.large)
                         .opencodePrimaryGlassButton()
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .buttonBorderShape(.capsule)
 
-                        Button("Dismiss") {
+                        Button {
                             onDismiss(request)
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Dismiss")
+                                Spacer()
+                            }
+                            .padding(.vertical, 7)
                         }
-                        .opencodeGlassButton(clear: true)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(14)

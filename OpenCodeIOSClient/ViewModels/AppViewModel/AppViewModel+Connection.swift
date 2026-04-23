@@ -1,7 +1,46 @@
 import Foundation
 
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
+
 extension AppViewModel {
     private static let maxRecentServerCount = 4
+
+    var canTryAppleIntelligence: Bool {
+#if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            SystemLanguageModel.default.isAvailable
+        } else {
+            false
+        }
+#else
+        false
+#endif
+    }
+
+    var appleIntelligenceAvailabilitySummary: String? {
+#if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            switch SystemLanguageModel.default.availability {
+            case .available:
+                return nil
+            case let .unavailable(reason):
+                switch reason {
+                case .deviceNotEligible:
+                    return "Requires an Apple Intelligence-capable device."
+                case .appleIntelligenceNotEnabled:
+                    return "Turn on Apple Intelligence to try the on-device demo."
+                case .modelNotReady:
+                    return "Apple Intelligence is still preparing on this device."
+                @unknown default:
+                    return "Apple Intelligence is unavailable on this device right now."
+                }
+            }
+        }
+#endif
+        return "Requires a device that supports Apple Intelligence."
+    }
 
     func connect() async {
         isLoading = true
@@ -9,6 +48,7 @@ extension AppViewModel {
 
         do {
             let bootstrap = try await OpenCodeBootstrap.bootstrapGlobal(client: client)
+            backendMode = .server
             isConnected = bootstrap.health.healthy
             serverVersion = bootstrap.health.version
             errorMessage = nil
@@ -25,6 +65,7 @@ extension AppViewModel {
             await runUITestBootstrapIfNeeded()
         } catch {
             stopEventStream()
+            backendMode = .none
             isConnected = false
             directoryState = OpenCodeDirectoryState()
             errorMessage = error.localizedDescription
@@ -43,9 +84,14 @@ extension AppViewModel {
     }
 
     func disconnect() {
+        appleIntelligenceResponseTask?.cancel()
+        stopAccessingActiveAppleIntelligenceWorkspace()
+        currentAppleIntelligenceWorkspace = nil
         stopEventStream()
+        backendMode = .none
         isConnected = false
         serverVersion = ""
+        activeAppleIntelligenceWorkspaceID = nil
         projects = []
         currentProject = nil
         selectedDirectory = nil
@@ -61,6 +107,190 @@ extension AppViewModel {
         newSessionDefaults = NewSessionDefaults()
         errorMessage = nil
         showSavedServerPrompt = hasSavedServer
+    }
+
+    func leaveAppleIntelligenceSession() {
+        appleIntelligenceResponseTask?.cancel()
+        stopAccessingActiveAppleIntelligenceWorkspace()
+        currentAppleIntelligenceWorkspace = nil
+        backendMode = .none
+        activeAppleIntelligenceWorkspaceID = nil
+        currentProject = nil
+        selectedDirectory = nil
+        selectedProjectContentTab = .sessions
+        directoryState = OpenCodeDirectoryState()
+        draftMessage = ""
+        clearDraftAttachments()
+        errorMessage = nil
+    }
+
+    func presentAppleIntelligenceFolderPicker() {
+        errorMessage = nil
+        isShowingAppleIntelligenceFolderPicker = true
+    }
+
+    func openAppleIntelligenceWorkspace(_ workspace: AppleIntelligenceWorkspaceRecord) async {
+        do {
+            let resolvedURL = try resolveAppleIntelligenceWorkspaceURL(workspace)
+            guard (try resolvedURL.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true else {
+                throw NSError(domain: "AppleIntelligence", code: 5, userInfo: [NSLocalizedDescriptionKey: "The saved Apple Intelligence folder is no longer available. Please pick it again."])
+            }
+
+            await openAppleIntelligenceWorkspace(workspace, resolvedURL: resolvedURL)
+            return
+        } catch {
+            stopAccessingActiveAppleIntelligenceWorkspace()
+            removeAppleIntelligenceWorkspace(workspace)
+            errorMessage = error.localizedDescription
+            isShowingAppleIntelligenceFolderPicker = true
+            return
+        }
+    }
+
+    func createAppleIntelligenceWorkspace(from directoryURL: URL) async {
+        do {
+            appleIntelligenceDebugPickedPath = directoryURL.path(percentEncoded: false)
+            let importedURL = try materializeAppleIntelligenceWorkspace(from: directoryURL)
+            try setActiveAppleIntelligenceWorkspaceURL(importedURL)
+
+            let bookmarkData = try importedURL.bookmarkData(options: appleIntelligenceBookmarkCreationOptions, includingResourceValuesForKeys: nil, relativeTo: nil)
+            let resolvedPath = importedURL.path(percentEncoded: false)
+            let title = importedURL.lastPathComponent.isEmpty ? resolvedPath : importedURL.lastPathComponent
+            let workspace = AppleIntelligenceWorkspaceRecord(
+                id: "apple-workspace:\(UUID().uuidString)",
+                title: title,
+                bookmarkData: bookmarkData,
+                lastKnownPath: resolvedPath,
+                sessionID: "apple-session:\(UUID().uuidString)",
+                messages: [],
+                updatedAt: Date()
+            )
+            await openAppleIntelligenceWorkspace(workspace, resolvedURL: importedURL)
+        } catch {
+            stopAccessingActiveAppleIntelligenceWorkspace()
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func openAppleIntelligenceWorkspace(_ workspace: AppleIntelligenceWorkspaceRecord, resolvedURL: URL) async {
+        do {
+            try setActiveAppleIntelligenceWorkspaceURL(resolvedURL)
+        } catch {
+            stopAccessingActiveAppleIntelligenceWorkspace()
+            errorMessage = error.localizedDescription
+            return
+        }
+
+        appleIntelligenceResponseTask?.cancel()
+        stopEventStream()
+        backendMode = .appleIntelligence
+        isConnected = false
+        serverVersion = ""
+        activeAppleIntelligenceWorkspaceID = workspace.id
+        currentAppleIntelligenceWorkspace = AppleIntelligenceWorkspaceRecord(
+            id: workspace.id,
+            title: workspace.title,
+            bookmarkData: workspace.bookmarkData,
+            lastKnownPath: resolvedURL.path(percentEncoded: false),
+            sessionID: workspace.sessionID,
+            messages: workspace.messages,
+            updatedAt: workspace.updatedAt
+        )
+        projects = []
+        currentProject = workspace.project
+        selectedDirectory = resolvedURL.path(percentEncoded: false)
+        selectedProjectContentTab = .sessions
+        streamDirectory = resolvedURL.path(percentEncoded: false)
+        directoryState = OpenCodeDirectoryState(
+            sessions: [workspace.session],
+            selectedSession: workspace.session,
+            messages: workspace.messages,
+            commands: [],
+            sessionStatuses: [workspace.session.id: "idle"]
+        )
+        draftTitle = ""
+        draftMessage = ""
+        clearDraftAttachments()
+        errorMessage = nil
+    }
+
+    func setActiveAppleIntelligenceWorkspaceURL(_ url: URL) throws {
+        stopAccessingActiveAppleIntelligenceWorkspace()
+        let didAccess = url.startAccessingSecurityScopedResource()
+        let fileExists = FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
+        if !didAccess && !fileExists {
+            throw NSError(domain: "AppleIntelligence", code: 6, userInfo: [NSLocalizedDescriptionKey: "Unable to access the selected folder."])
+        }
+
+        activeAppleIntelligenceWorkspaceURL = url
+        isAccessingActiveAppleIntelligenceWorkspace = didAccess
+        appleIntelligenceDebugActivePath = url.path(percentEncoded: false)
+    }
+
+    func stopAccessingActiveAppleIntelligenceWorkspace() {
+        if isAccessingActiveAppleIntelligenceWorkspace {
+            activeAppleIntelligenceWorkspaceURL?.stopAccessingSecurityScopedResource()
+        }
+        activeAppleIntelligenceWorkspaceURL = nil
+        isAccessingActiveAppleIntelligenceWorkspace = false
+        appleIntelligenceDebugActivePath = ""
+        appleIntelligenceDebugResolvedPath = ""
+        appleIntelligenceDebugToolRootPath = ""
+    }
+
+    var appleIntelligenceBookmarkCreationOptions: URL.BookmarkCreationOptions {
+#if os(macOS)
+        return [.withSecurityScope]
+#else
+        return []
+#endif
+    }
+
+    var appleIntelligenceBookmarkResolutionOptions: URL.BookmarkResolutionOptions {
+#if os(macOS)
+        return [.withSecurityScope]
+#else
+        return []
+#endif
+    }
+
+    func materializeAppleIntelligenceWorkspace(from sourceURL: URL) throws -> URL {
+        let didAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let fileManager = FileManager.default
+        let appSupport = try fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let root = appSupport.appendingPathComponent("AppleIntelligenceWorkspaces", isDirectory: true)
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let folderName = sourceURL.lastPathComponent.isEmpty ? "Workspace" : sourceURL.lastPathComponent
+        let destination = root.appendingPathComponent("\(folderName)-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.copyItem(at: sourceURL, to: destination)
+        appleIntelligenceDebugResolvedPath = destination.path(percentEncoded: false)
+        return destination
+    }
+
+    func removeAppleIntelligenceWorkspace(_ workspace: AppleIntelligenceWorkspaceRecord) {
+        appleIntelligenceRecentWorkspaces.removeAll { $0.id == workspace.id }
+        persistAppleIntelligenceWorkspaces()
+
+        if activeAppleIntelligenceWorkspaceID == workspace.id {
+            leaveAppleIntelligenceSession()
+        }
+    }
+
+    func persistAppleIntelligenceMessages() {
+        guard var currentAppleIntelligenceWorkspace else { return }
+        currentAppleIntelligenceWorkspace.messages = directoryState.messages
+        currentAppleIntelligenceWorkspace.updatedAt = Date()
+        if let selectedDirectory, !selectedDirectory.isEmpty {
+            currentAppleIntelligenceWorkspace.lastKnownPath = selectedDirectory
+        }
+        self.currentAppleIntelligenceWorkspace = currentAppleIntelligenceWorkspace
     }
 
     func reconnectToSavedServer() async {
@@ -113,6 +343,20 @@ extension AppViewModel {
         }
 
         return []
+    }
+
+    func loadAppleIntelligenceWorkspaces() -> [AppleIntelligenceWorkspaceRecord] {
+        guard let data = UserDefaults.standard.data(forKey: StorageKey.appleIntelligenceWorkspaces),
+              let workspaces = try? JSONDecoder().decode([AppleIntelligenceWorkspaceRecord].self, from: data) else {
+            return []
+        }
+
+        return workspaces.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    func persistAppleIntelligenceWorkspaces() {
+        guard let data = try? JSONEncoder().encode(appleIntelligenceRecentWorkspaces) else { return }
+        UserDefaults.standard.set(data, forKey: StorageKey.appleIntelligenceWorkspaces)
     }
 
     func removeRecentServer(_ serverConfig: OpenCodeServerConfig) {

@@ -1,6 +1,10 @@
 import Foundation
 import SwiftUI
 
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
+
 extension AppViewModel {
     func reloadSessions() async throws {
         let bootstrap = try await OpenCodeBootstrap.bootstrapDirectory(client: client, directory: effectiveSelectedDirectory)
@@ -74,6 +78,14 @@ extension AppViewModel {
     }
 
     func selectSession(_ session: OpenCodeSession) async {
+        if isUsingAppleIntelligence {
+            withAnimation(opencodeSelectionAnimation) {
+                selectedProjectContentTab = .sessions
+                directoryState.selectedSession = session
+            }
+            return
+        }
+
         withAnimation(opencodeSelectionAnimation) {
             selectedProjectContentTab = .sessions
             directoryState.selectedSession = session
@@ -84,7 +96,9 @@ extension AppViewModel {
         do {
             async let messages: Void = loadMessages(for: session)
             async let statuses: Void = reloadSessionStatuses()
-            _ = try await (messages, statuses)
+            async let permissions: Void = loadAllPermissions(for: session)
+            async let questions: Void = loadAllQuestions(for: session)
+            _ = try await (messages, statuses, permissions, questions)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -92,6 +106,11 @@ extension AppViewModel {
     }
 
     func sendCurrentMessage() async {
+        if isUsingAppleIntelligence {
+            await sendCurrentAppleIntelligenceMessage()
+            return
+        }
+
         guard let selectedSessionID = selectedSession?.id else { return }
         let text = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = draftAttachments
@@ -173,6 +192,15 @@ extension AppViewModel {
     }
 
     func stopCurrentSession() async {
+        if isUsingAppleIntelligence {
+            appleIntelligenceResponseTask?.cancel()
+            if let selectedSession {
+                directoryState.sessionStatuses[selectedSession.id] = "idle"
+            }
+            persistAppleIntelligenceMessages()
+            return
+        }
+
         guard let selectedSession else { return }
         let requestDirectory = sendDirectory(for: selectedSession)
 
@@ -202,6 +230,12 @@ extension AppViewModel {
     }
 
     func sendMessage(_ text: String, attachments: [OpenCodeComposerAttachment] = [], sessionID: String, userVisible: Bool) async {
+        if isUsingAppleIntelligence {
+            guard let session = session(matching: sessionID) else { return }
+            await sendAppleIntelligenceMessage(text, attachments: attachments, in: session, userVisible: userVisible)
+            return
+        }
+
         guard let session = session(matching: sessionID) else { return }
         await sendMessage(text, attachments: attachments, in: session, userVisible: userVisible)
     }
@@ -233,9 +267,7 @@ extension AppViewModel {
             draftMessage = ""
             clearDraftAttachments()
             composerResetToken = UUID()
-            withAnimation(opencodeSelectionAnimation) {
-                directoryState.messages.append(localUserMessage)
-            }
+            directoryState.messages.append(localUserMessage)
         }
         appendDebugLog("send: \(trimmed)")
         appendDebugLog(
@@ -272,9 +304,7 @@ extension AppViewModel {
             errorMessage = nil
         } catch {
             if userVisible {
-                withAnimation(opencodeSelectionAnimation) {
-                    directoryState.messages.removeAll { $0.id == localUserMessage.id }
-                }
+                directoryState.messages.removeAll { $0.id == localUserMessage.id }
                 draftMessage = trimmed
                 addDraftAttachments(attachments)
             }
@@ -391,7 +421,7 @@ extension AppViewModel {
             let parts = message.parts.map { part in
                 let text = (part.text ?? "").replacingOccurrences(of: "\n", with: "\\n")
                 let snippet = String(text.prefix(40))
-                return "\(part.id):\(part.type ?? "nil"):\(snippet)"
+                return "\(part.id ?? "nil"):\(part.type):\(snippet)"
             }.joined(separator: "|")
             return "\(message.id):\(message.info.role ?? "nil")[\(parts)]"
         }.joined(separator: "; ")
@@ -446,9 +476,9 @@ extension AppViewModel {
         }
     }
 
-    func loadAllPermissions() async {
+    func loadAllPermissions(directory: String? = nil, workspaceID: String? = nil) async {
         do {
-            let permissions = try await client.listPermissions()
+            let permissions = try await client.listPermissions(directory: directory, workspaceID: workspaceID)
             withAnimation(opencodeSelectionAnimation) {
                 directoryState.permissions = permissions
             }
@@ -459,9 +489,13 @@ extension AppViewModel {
         }
     }
 
-    func loadAllQuestions() async {
+    func loadAllPermissions(for session: OpenCodeSession) async {
+        await loadAllPermissions(directory: sendDirectory(for: session), workspaceID: session.workspaceID)
+    }
+
+    func loadAllQuestions(directory: String? = nil, workspaceID: String? = nil) async {
         do {
-            let questions = try await client.listQuestions()
+            let questions = try await client.listQuestions(directory: directory, workspaceID: workspaceID)
             withAnimation(opencodeSelectionAnimation) {
                 directoryState.questions = questions
             }
@@ -470,6 +504,10 @@ extension AppViewModel {
                 directoryState.questions = []
             }
         }
+    }
+
+    func loadAllQuestions(for session: OpenCodeSession) async {
+        await loadAllQuestions(directory: sendDirectory(for: session), workspaceID: session.workspaceID)
     }
 
     var selectedSessionPermissions: [OpenCodePermission] {
@@ -498,7 +536,14 @@ extension AppViewModel {
                 reply = response
             }
 
-            try await client.replyToPermission(requestID: permission.id, reply: reply)
+            let session = session(matching: permission.sessionID)
+            let directory = session.flatMap(sendDirectory(for:))
+            try await client.replyToPermission(
+                requestID: permission.id,
+                reply: reply,
+                directory: directory,
+                workspaceID: session?.workspaceID
+            )
             withAnimation(opencodeSelectionAnimation) {
                 directoryState.permissions.removeAll { $0.id == permission.id }
             }
@@ -515,7 +560,14 @@ extension AppViewModel {
 
     func respondToQuestion(_ request: OpenCodeQuestionRequest, answers: [[String]]) async {
         do {
-            try await client.replyToQuestion(requestID: request.id, answers: answers)
+            let session = session(matching: request.sessionID)
+            let directory = session.flatMap(sendDirectory(for:))
+            try await client.replyToQuestion(
+                requestID: request.id,
+                answers: answers,
+                directory: directory,
+                workspaceID: session?.workspaceID
+            )
             withAnimation(opencodeSelectionAnimation) {
                 directoryState.questions.removeAll { $0.id == request.id }
             }
@@ -526,7 +578,13 @@ extension AppViewModel {
 
     func dismissQuestion(_ request: OpenCodeQuestionRequest) async {
         do {
-            try await client.rejectQuestion(requestID: request.id)
+            let session = session(matching: request.sessionID)
+            let directory = session.flatMap(sendDirectory(for:))
+            try await client.rejectQuestion(
+                requestID: request.id,
+                directory: directory,
+                workspaceID: session?.workspaceID
+            )
             withAnimation(opencodeSelectionAnimation) {
                 directoryState.questions.removeAll { $0.id == request.id }
             }
@@ -616,4 +674,601 @@ extension AppViewModel {
             }
         }
     }
+
+    func sendCurrentAppleIntelligenceMessage() async {
+        guard let selectedSession else { return }
+        let text = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachments = draftAttachments
+        guard !text.isEmpty || !attachments.isEmpty else { return }
+        await sendAppleIntelligenceMessage(text, attachments: attachments, in: selectedSession, userVisible: true)
+    }
+
+    func sendAppleIntelligenceMessage(_ text: String, attachments: [OpenCodeComposerAttachment] = [], in session: OpenCodeSession, userVisible: Bool) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return }
+        guard let workspace = activeAppleIntelligenceWorkspace else {
+            errorMessage = "No Apple Intelligence workspace is active."
+            return
+        }
+
+        let priorMessages = directoryState.messages
+        let userMessageID = OpenCodeIdentifier.message()
+        let userPartID = OpenCodeIdentifier.part()
+        let assistantMessageID = OpenCodeIdentifier.message()
+        let assistantPartID = OpenCodeIdentifier.part()
+
+        let localUserMessage = OpenCodeMessageEnvelope.local(
+            role: "user",
+            text: trimmed,
+            attachments: attachments,
+            messageID: userMessageID,
+            sessionID: session.id,
+            partID: userPartID,
+            agent: nil,
+            model: nil
+        )
+        let localAssistantMessage = OpenCodeMessageEnvelope(
+            info: OpenCodeMessage(id: assistantMessageID, role: "assistant", sessionID: session.id, time: nil, agent: "Apple Intelligence", model: nil),
+            parts: [
+                OpenCodePart(
+                    id: assistantPartID,
+                    messageID: assistantMessageID,
+                    sessionID: session.id,
+                    type: "text",
+                    mime: nil,
+                    filename: nil,
+                    url: nil,
+                    reason: nil,
+                    tool: nil,
+                    callID: nil,
+                    state: nil,
+                    text: ""
+                )
+            ]
+        )
+
+        if userVisible {
+            draftMessage = ""
+            clearDraftAttachments()
+            composerResetToken = UUID()
+            withAnimation(opencodeSelectionAnimation) {
+                directoryState.messages.append(localUserMessage)
+                directoryState.messages.append(localAssistantMessage)
+            }
+        }
+
+        persistAppleIntelligenceMessages()
+        directoryState.sessionStatuses[session.id] = "busy"
+        isLoading = true
+        errorMessage = nil
+        appleIntelligenceResponseTask?.cancel()
+
+        let prompt = appleIntelligencePrompt(
+            currentText: trimmed,
+            attachments: attachments,
+            priorMessages: priorMessages,
+            workspace: workspace
+        )
+
+        appleIntelligenceResponseTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let rootURL = try self.resolveAppleIntelligenceWorkspaceURL(workspace)
+                await MainActor.run {
+                    self.appleIntelligenceDebugToolRootPath = rootURL.path(percentEncoded: false)
+                }
+                let didAccess = rootURL.startAccessingSecurityScopedResource()
+                defer {
+                    if didAccess {
+                        rootURL.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                let initialContext = self.appleIntelligenceInitialContext(for: rootURL)
+#if canImport(FoundationModels)
+                if #available(iOS 26.0, macOS 26.0, *) {
+                    for try await snapshot in try self.makeAppleIntelligenceResponseStream(prompt: prompt, initialContext: initialContext, rootURL: rootURL) {
+                        try Task.checkCancellation()
+                        await MainActor.run {
+                            self.updateAppleIntelligenceAssistantMessage(
+                                messageID: assistantMessageID,
+                                partID: assistantPartID,
+                                sessionID: session.id,
+                                text: snapshot.content
+                            )
+                        }
+                    }
+                } else {
+                    throw NSError(domain: "AppleIntelligence", code: 2, userInfo: [NSLocalizedDescriptionKey: "Apple Intelligence is unavailable on this OS version."])
+                }
+#else
+                throw NSError(domain: "AppleIntelligence", code: 2, userInfo: [NSLocalizedDescriptionKey: "Apple Intelligence is unavailable on this build."])
+#endif
+
+                await MainActor.run {
+                    self.directoryState.sessionStatuses[session.id] = "idle"
+                    self.isLoading = false
+                    self.persistAppleIntelligenceMessages()
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.directoryState.sessionStatuses[session.id] = "idle"
+                    self.isLoading = false
+                    self.persistAppleIntelligenceMessages()
+                }
+            } catch {
+                await MainActor.run {
+                    self.directoryState.sessionStatuses[session.id] = "idle"
+                    self.isLoading = false
+                    self.updateAppleIntelligenceAssistantMessage(
+                        messageID: assistantMessageID,
+                        partID: assistantPartID,
+                        sessionID: session.id,
+                        text: "Apple Intelligence error: \(error.localizedDescription)"
+                    )
+                    self.persistAppleIntelligenceMessages()
+                    self.errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func updateAppleIntelligenceAssistantMessage(messageID: String, partID: String, sessionID: String, text: String) {
+        let part = OpenCodePart(
+            id: partID,
+            messageID: messageID,
+            sessionID: sessionID,
+            type: "text",
+            mime: nil,
+            filename: nil,
+            url: nil,
+            reason: nil,
+            tool: nil,
+            callID: nil,
+            state: nil,
+            text: text
+        )
+
+        if let index = directoryState.messages.firstIndex(where: { $0.id == messageID }) {
+            directoryState.messages[index] = directoryState.messages[index].upsertingPart(part)
+            return
+        }
+
+        directoryState.messages.append(
+            OpenCodeMessageEnvelope(
+                info: OpenCodeMessage(id: messageID, role: "assistant", sessionID: sessionID, time: nil, agent: "Apple Intelligence", model: nil),
+                parts: [part]
+            )
+        )
+    }
+
+    func appleIntelligencePrompt(
+        currentText: String,
+        attachments: [OpenCodeComposerAttachment],
+        priorMessages: [OpenCodeMessageEnvelope],
+        workspace: AppleIntelligenceWorkspaceRecord
+    ) -> String {
+        let history = priorMessages
+            .suffix(8)
+            .compactMap { message -> String? in
+                let role = (message.info.role ?? "assistant").lowercased()
+                let text = message.parts.compactMap(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                return "\(role): \(text)"
+            }
+            .joined(separator: "\n\n")
+
+        let attachmentSummary = appleIntelligenceAttachmentSummary(attachments)
+        let isInitCommand = currentText == "/init" || currentText.hasPrefix("/init ")
+
+        if isInitCommand {
+            return """
+            The user selected the workspace at \(workspace.lastKnownPath).
+
+            Recent conversation:
+            \(history.isEmpty ? "None." : history)
+
+            The user ran /init.
+            Use your tools to inspect the workspace and produce a practical project initialization summary.
+            Cover:
+            1. What this project appears to be
+            2. Important files or entry points
+            3. How someone should explore or run it next if that is discoverable
+            4. A few useful follow-up things they can ask you to do
+
+            \(attachmentSummary)
+            """
+        }
+
+        return """
+        The user selected the workspace at \(workspace.lastKnownPath).
+
+        Recent conversation:
+        \(history.isEmpty ? "None." : history)
+
+        User message:
+        \(currentText.isEmpty ? "[No text; inspect the supplied attachments.]" : currentText)
+
+        If the user is just greeting you, chatting casually, or asking a general question that does not depend on workspace contents, respond normally without using any tools.
+        Answer directly when you can.
+        Only use file tools when they are actually needed to answer correctly.
+        Do not call `list_directory` unless the user explicitly asks to list, browse, or explore files, or you need the root contents for a workspace-specific task.
+        If the user mentions a specific file or topic, prefer `read_file` or `search_files` over listing the whole directory.
+
+        \(attachmentSummary)
+        """
+    }
+
+    func appleIntelligenceAttachmentSummary(_ attachments: [OpenCodeComposerAttachment]) -> String {
+        guard !attachments.isEmpty else { return "Attachments: none." }
+
+        let summaries = attachments.map { attachment in
+            let name = attachment.filename
+            if attachment.mime.lowercased().hasPrefix("text/"),
+               let decoded = decodeAttachmentText(attachment) {
+                let excerpt = decoded.prefix(4000)
+                return "Attachment \(name) (text):\n\(excerpt)"
+            }
+
+            if attachment.isImage {
+                return "Attachment \(name): image included by the user."
+            }
+
+            return "Attachment \(name): non-text file with MIME type \(attachment.mime)."
+        }
+
+        return "Attachments:\n\n\(summaries.joined(separator: "\n\n"))"
+    }
+
+    func decodeAttachmentText(_ attachment: OpenCodeComposerAttachment) -> String? {
+        guard let commaIndex = attachment.dataURL.firstIndex(of: ",") else { return nil }
+        let base64 = String(attachment.dataURL[attachment.dataURL.index(after: commaIndex)...])
+        guard let data = Data(base64Encoded: base64),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func appleIntelligenceInitialContext(for rootURL: URL) -> String {
+        let entries = (try? FileManager.default.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+        let summary = entries
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+            .prefix(30)
+            .map { url in
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                return isDirectory ? "\(url.lastPathComponent)/" : url.lastPathComponent
+            }
+            .joined(separator: ", ")
+
+        return summary.isEmpty ? "The workspace root appears empty." : "Top-level workspace entries: \(summary)"
+    }
+
+    func resolveAppleIntelligenceWorkspaceURL(_ workspace: AppleIntelligenceWorkspaceRecord) throws -> URL {
+        if activeAppleIntelligenceWorkspaceID == workspace.id,
+           let activeAppleIntelligenceWorkspaceURL {
+            appleIntelligenceDebugResolvedPath = activeAppleIntelligenceWorkspaceURL.path(percentEncoded: false)
+            return activeAppleIntelligenceWorkspaceURL
+        }
+
+        var isStale = false
+        let url = try URL(
+            resolvingBookmarkData: workspace.bookmarkData,
+            options: appleIntelligenceBookmarkResolutionOptions,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+
+        if isStale,
+           let refreshed = try? url.bookmarkData(options: appleIntelligenceBookmarkCreationOptions, includingResourceValuesForKeys: nil, relativeTo: nil),
+           var currentAppleIntelligenceWorkspace,
+           currentAppleIntelligenceWorkspace.id == workspace.id {
+            currentAppleIntelligenceWorkspace.bookmarkData = refreshed
+            currentAppleIntelligenceWorkspace.lastKnownPath = url.path(percentEncoded: false)
+            self.currentAppleIntelligenceWorkspace = currentAppleIntelligenceWorkspace
+        }
+
+        let fileManager = FileManager.default
+        let resolvedPath = url.path(percentEncoded: false)
+        appleIntelligenceDebugResolvedPath = resolvedPath
+        guard fileManager.fileExists(atPath: resolvedPath) else {
+            throw NSError(
+                domain: "AppleIntelligence",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "The saved Apple Intelligence folder is no longer available. Please pick it again."]
+            )
+        }
+
+        return url
+    }
+
+    @available(iOS 26.0, macOS 26.0, *)
+    func makeAppleIntelligenceResponseStream(prompt: String, initialContext: String, rootURL: URL) throws -> LanguageModelSession.ResponseStream<String> {
+#if canImport(FoundationModels)
+        guard SystemLanguageModel.default.isAvailable else {
+            throw NSError(domain: "AppleIntelligence", code: 1, userInfo: [NSLocalizedDescriptionKey: appleIntelligenceAvailabilitySummary ?? "Apple Intelligence is unavailable."])
+        }
+
+        let toolbox = AppleIntelligenceWorkspaceToolbox(rootURL: rootURL)
+        let tools: [any Tool] = [
+            AppleIntelligenceListDirectoryTool(toolbox: toolbox),
+            AppleIntelligenceReadFileTool(toolbox: toolbox),
+            AppleIntelligenceSearchFilesTool(toolbox: toolbox),
+            AppleIntelligenceWriteFileTool(toolbox: toolbox),
+        ]
+        let session = LanguageModelSession(model: .default, tools: tools) {
+            """
+            You are OpenCode running as an on-device Apple Intelligence demo inside a native iOS client.
+            Help the user work inside the selected workspace, using tools only when you need real file information.
+            Never invent file contents.
+            Paths are always relative to the selected workspace root unless you say otherwise.
+            Keep answers practical and concise.
+            Do not use any tools for greetings, small talk, or general advice that does not require workspace inspection.
+            Do not browse the workspace by default.
+            Only call `list_directory` when the user explicitly asks for a file listing or browsing step.
+            Prefer `read_file` for named files and `search_files` for topic lookups.
+
+            \(initialContext)
+            """
+        }
+        return session.streamResponse(to: prompt)
+#else
+        throw NSError(domain: "AppleIntelligence", code: 2, userInfo: [NSLocalizedDescriptionKey: "Apple Intelligence is unavailable on this build."])
+#endif
+    }
 }
+
+#if canImport(FoundationModels)
+@available(iOS 26.0, macOS 26.0, *)
+private struct AppleIntelligenceWorkspaceToolbox: Sendable {
+    let rootURL: URL
+
+    private var rootPath: String {
+        rootURL.standardizedFileURL.path
+    }
+
+    private var allowedRootPaths: Set<String> {
+        canonicalPathVariants(for: rootURL)
+    }
+
+    func listDirectory(path: String) throws -> String {
+        let target = try resolvedURL(for: path, allowDirectory: true)
+        let values = try target.resourceValues(forKeys: [.isDirectoryKey])
+        guard values.isDirectory == true else {
+            return "\(normalizedPath(path)) is a file, not a directory."
+        }
+
+        let entries = try FileManager.default.contentsOfDirectory(at: target, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+        if entries.isEmpty {
+            return "Directory \(normalizedPath(path)) is empty."
+        }
+
+        return entries
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+            .prefix(80)
+            .map { url in
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                return isDirectory ? "- \(relativePath(for: url))/" : "- \(relativePath(for: url))"
+            }
+            .joined(separator: "\n")
+    }
+
+    func readFile(path: String) throws -> String {
+        let target = try resolvedURL(for: path, allowDirectory: true)
+        let values = try target.resourceValues(forKeys: [.isDirectoryKey])
+        if values.isDirectory == true {
+            return directoryReadFallback(path: path, target: target)
+        }
+        let data = try Data(contentsOf: target)
+        guard let text = String(data: data, encoding: .utf8) else {
+            return "File \(normalizedPath(path)) is not UTF-8 text."
+        }
+        return String(text.prefix(16000))
+    }
+
+    func searchFiles(query: String) throws -> String {
+        let enumerator = FileManager.default.enumerator(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+        var matches: [String] = []
+
+        while let url = enumerator?.nextObject() as? URL, matches.count < 40 {
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if isDirectory { continue }
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            if text.localizedCaseInsensitiveContains(query) {
+                matches.append(relativePath(for: url))
+            }
+        }
+
+        return matches.isEmpty ? "No text files contained \"\(query)\"." : matches.map { "- \($0)" }.joined(separator: "\n")
+    }
+
+    func writeFile(path: String, content: String) throws -> String {
+        let target = try resolvedURL(for: path, allowDirectory: false)
+        let parent = target.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        try content.write(to: target, atomically: true, encoding: .utf8)
+        return "Wrote \(content.count) characters to \(normalizedPath(path))."
+    }
+
+    private func resolvedURL(for path: String, allowDirectory: Bool) throws -> URL {
+        let rawPath = path
+        let cleaned = normalizedPath(path)
+        let target: URL
+
+        if cleaned.isEmpty || cleaned == "." {
+            target = rootURL
+        } else if let absoluteURL = absoluteWorkspaceURL(from: cleaned) {
+            target = absoluteURL
+        } else if cleaned == rootURL.lastPathComponent {
+            target = rootURL
+        } else if cleaned.hasPrefix(rootPath + "/") || cleaned == rootPath {
+            target = URL(fileURLWithPath: cleaned)
+        } else {
+            target = rootURL.appendingPathComponent(cleaned)
+        }
+
+        let standardized = target.standardizedFileURL
+        let standardizedVariants = canonicalPathVariants(for: standardized)
+        let isInsideWorkspace = standardizedVariants.contains { candidate in
+            allowedRootPaths.contains { root in
+                candidate == root || candidate.hasPrefix(root + "/")
+            }
+        }
+
+        guard isInsideWorkspace else {
+            let debugMessage = "That path escapes the selected workspace. raw=\(rawPath) cleaned=\(cleaned) resolved=\(standardized.path) root=\(rootPath)"
+            throw NSError(domain: "AppleIntelligence", code: 3, userInfo: [NSLocalizedDescriptionKey: debugMessage])
+        }
+
+        if allowDirectory { return standardized }
+
+        let values = try? standardized.resourceValues(forKeys: [.isDirectoryKey])
+        if values?.isDirectory == true {
+            throw NSError(domain: "AppleIntelligence", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected a file path, but received a directory."])
+        }
+        return standardized
+    }
+
+    private func normalizedPath(_ path: String) -> String {
+        let trimmed = cleanedModelPath(path)
+        if trimmed == "/" { return "" }
+        if trimmed.hasPrefix("file://") {
+            return URL(string: trimmed)?.path(percentEncoded: false) ?? trimmed
+        }
+        if trimmed.hasPrefix(rootPath + "/") || trimmed == rootPath {
+            return trimmed
+        }
+        return trimmed.hasPrefix("/") ? String(trimmed.dropFirst()) : trimmed
+    }
+
+    private func absoluteWorkspaceURL(from value: String) -> URL? {
+        if value.hasPrefix("file://"), let url = URL(string: value), url.isFileURL {
+            return url
+        }
+
+        if value.hasPrefix("/") {
+            return URL(fileURLWithPath: value)
+        }
+
+        return nil
+    }
+
+    private func cleanedModelPath(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "`\"'"))
+    }
+
+    private func canonicalPathVariants(for url: URL) -> Set<String> {
+        canonicalPathVariants(for: url.standardizedFileURL.path)
+            .union(canonicalPathVariants(for: url.resolvingSymlinksInPath().path))
+    }
+
+    private func canonicalPathVariants(for path: String) -> Set<String> {
+        guard !path.isEmpty else { return [] }
+        var variants: Set<String> = [path]
+
+        if path.hasPrefix("/private/") {
+            variants.insert(String(path.dropFirst("/private".count)))
+        } else if path.hasPrefix("/var/") {
+            variants.insert("/private" + path)
+        }
+
+        return variants
+    }
+
+    private func relativePath(for url: URL) -> String {
+        let fullPath = url.standardizedFileURL.path
+        guard fullPath.hasPrefix(rootPath) else { return url.lastPathComponent }
+        let suffix = fullPath.dropFirst(rootPath.count)
+        return suffix.hasPrefix("/") ? String(suffix.dropFirst()) : String(suffix)
+    }
+
+    private func directoryReadFallback(path: String, target: URL) -> String {
+        let entries = (try? FileManager.default.contentsOfDirectory(at: target, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+        if entries.isEmpty {
+            return "\(normalizedPath(path)) is a directory and it is empty. Use list_directory if you want to browse it."
+        }
+
+        let preview = entries
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+            .prefix(20)
+            .map { url in
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                return isDirectory ? "- \(relativePath(for: url))/" : "- \(relativePath(for: url))"
+            }
+            .joined(separator: "\n")
+
+        return "\(normalizedPath(path)) is a directory, not a file. Top entries:\n\(preview)"
+    }
+}
+
+@available(iOS 26.0, macOS 26.0, *)
+@Generable(description: "Arguments for listing a directory inside the selected workspace")
+private struct AppleIntelligenceListDirectoryArguments {
+    let path: String
+}
+
+@available(iOS 26.0, macOS 26.0, *)
+@Generable(description: "Arguments for reading a text file inside the selected workspace")
+private struct AppleIntelligenceReadFileArguments {
+    let path: String
+}
+
+@available(iOS 26.0, macOS 26.0, *)
+@Generable(description: "Arguments for searching text across files in the selected workspace")
+private struct AppleIntelligenceSearchFilesArguments {
+    let query: String
+}
+
+@available(iOS 26.0, macOS 26.0, *)
+@Generable(description: "Arguments for writing a text file inside the selected workspace")
+private struct AppleIntelligenceWriteFileArguments {
+    let path: String
+    let content: String
+}
+
+@available(iOS 26.0, macOS 26.0, *)
+private struct AppleIntelligenceListDirectoryTool: Tool {
+    let toolbox: AppleIntelligenceWorkspaceToolbox
+    let name = "list_directory"
+    let description = "List files and folders at a relative workspace path when the user explicitly asks to browse or list files."
+
+    func call(arguments: AppleIntelligenceListDirectoryArguments) async throws -> String {
+        try toolbox.listDirectory(path: arguments.path)
+    }
+}
+
+@available(iOS 26.0, macOS 26.0, *)
+private struct AppleIntelligenceReadFileTool: Tool {
+    let toolbox: AppleIntelligenceWorkspaceToolbox
+    let name = "read_file"
+    let description = "Read a UTF-8 text file at a relative workspace path. If the path is a directory, you will get a short directory summary instead of an error."
+
+    func call(arguments: AppleIntelligenceReadFileArguments) async throws -> String {
+        try toolbox.readFile(path: arguments.path)
+    }
+}
+
+@available(iOS 26.0, macOS 26.0, *)
+private struct AppleIntelligenceSearchFilesTool: Tool {
+    let toolbox: AppleIntelligenceWorkspaceToolbox
+    let name = "search_files"
+    let description = "Search UTF-8 text files in the selected workspace for a query string."
+
+    func call(arguments: AppleIntelligenceSearchFilesArguments) async throws -> String {
+        try toolbox.searchFiles(query: arguments.query)
+    }
+}
+
+@available(iOS 26.0, macOS 26.0, *)
+private struct AppleIntelligenceWriteFileTool: Tool {
+    let toolbox: AppleIntelligenceWorkspaceToolbox
+    let name = "write_file"
+    let description = "Write UTF-8 text content to a relative file path in the selected workspace."
+
+    func call(arguments: AppleIntelligenceWriteFileArguments) async throws -> String {
+        try toolbox.writeFile(path: arguments.path, content: arguments.content)
+    }
+}
+#endif

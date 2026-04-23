@@ -30,9 +30,13 @@ struct MessageBubble: View {
                 let index = entry.offset
                 let part = entry.element
                 partView(part, index: index)
+                    .transition(.identity)
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .transaction { transaction in
+            transaction.animation = nil
+        }
     }
 
     @ViewBuilder

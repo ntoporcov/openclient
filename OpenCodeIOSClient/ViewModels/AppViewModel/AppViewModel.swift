@@ -23,11 +23,16 @@ final class AppViewModel: ObservableObject {
         static let lastServerConfig = "lastServerConfig"
         static let recentServerConfigs = "recentServerConfigs"
         static let newSessionDefaults = "newSessionDefaults"
+        static let appleIntelligenceWorkspaces = "appleIntelligenceWorkspaces"
     }
 
     @Published var config = OpenCodeServerConfig()
+    @Published var backendMode: AppBackendMode = .none
     @Published var isConnected = false
     @Published var serverVersion = ""
+    @Published var appleIntelligenceRecentWorkspaces: [AppleIntelligenceWorkspaceRecord] = []
+    @Published var activeAppleIntelligenceWorkspaceID: String?
+    @Published var isShowingAppleIntelligenceFolderPicker = false
     @Published var projects: [OpenCodeProject] = []
     @Published var currentProject: OpenCodeProject?
     @Published var selectedDirectory: String?
@@ -47,6 +52,10 @@ final class AppViewModel: ObservableObject {
     @Published var draftAttachments: [OpenCodeComposerAttachment] = []
     @Published var composerResetToken = UUID()
     @Published var errorMessage: String?
+    @Published var appleIntelligenceDebugPickedPath = ""
+    @Published var appleIntelligenceDebugActivePath = ""
+    @Published var appleIntelligenceDebugResolvedPath = ""
+    @Published var appleIntelligenceDebugToolRootPath = ""
     @Published var isLoading = false
     @Published var recentServerConfigs: [OpenCodeServerConfig] = []
     @Published var hasSavedServer = false
@@ -70,6 +79,10 @@ final class AppViewModel: ObservableObject {
     var eventStreamRestartTask: Task<Void, Never>?
     var reloadTask: Task<Void, Never>?
     var liveRefreshTask: Task<Void, Never>?
+    var appleIntelligenceResponseTask: Task<Void, Never>?
+    var activeAppleIntelligenceWorkspaceURL: URL?
+    var currentAppleIntelligenceWorkspace: AppleIntelligenceWorkspaceRecord?
+    var isAccessingActiveAppleIntelligenceWorkspace = false
     var debugProbeStreamTasks: [Task<Void, Never>] = []
     var uiTestBootstrapTitle: String?
     var uiTestBootstrapPrompt: String?
@@ -99,6 +112,23 @@ final class AppViewModel: ObservableObject {
 
     var client: OpenCodeAPIClient {
         OpenCodeAPIClient(config: config)
+    }
+
+    var isUsingAppleIntelligence: Bool {
+        backendMode == .appleIntelligence
+    }
+
+    var hasActiveWorkspace: Bool {
+        isConnected || isUsingAppleIntelligence
+    }
+
+    var activeAppleIntelligenceWorkspace: AppleIntelligenceWorkspaceRecord? {
+        if let currentAppleIntelligenceWorkspace,
+           currentAppleIntelligenceWorkspace.id == activeAppleIntelligenceWorkspaceID {
+            return currentAppleIntelligenceWorkspace
+        }
+        guard let activeAppleIntelligenceWorkspaceID else { return nil }
+        return appleIntelligenceRecentWorkspaces.first { $0.id == activeAppleIntelligenceWorkspaceID }
     }
 
     var sessions: [OpenCodeSession] { directoryState.sessions }

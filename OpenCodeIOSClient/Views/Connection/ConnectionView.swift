@@ -1,11 +1,19 @@
 import SwiftUI
 
+#if canImport(UniformTypeIdentifiers)
+import UniformTypeIdentifiers
+#endif
+
+#if canImport(UIKit)
+import UIKit
+#endif
+
 struct ConnectionView: View {
     @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
         List {
-            if viewModel.showSavedServerPrompt, viewModel.recentServerConfigs.isEmpty == false {
+            if viewModel.showSavedServerPrompt {
                 Section("Recent") {
                     ForEach(viewModel.recentServerConfigs, id: \.recentServerID) { serverConfig in
                         ZStack(alignment: .topTrailing) {
@@ -45,6 +53,28 @@ struct ConnectionView: View {
                 .padding(.vertical,0)
             }
 
+            Section("Apple Intelligence") {
+                Button {
+                    viewModel.presentAppleIntelligenceFolderPicker()
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Try with Apple Intelligence")
+                            .font(.headline)
+                        Text("Don't have OpenCode? You can try some of our functionality with on-device Apple Intelligence")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(!viewModel.canTryAppleIntelligence)
+
+                if let summary = viewModel.appleIntelligenceAvailabilitySummary, !viewModel.canTryAppleIntelligence {
+                    Text(summary)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Server") {
                 TextField("Base URL", text: $viewModel.config.baseURL)
                     .opencodeDisableTextAutocapitalization()
@@ -76,11 +106,79 @@ struct ConnectionView: View {
                         .foregroundStyle(.red)
                 }
             }
+
+            if !viewModel.appleIntelligenceDebugPickedPath.isEmpty ||
+                !viewModel.appleIntelligenceDebugActivePath.isEmpty ||
+                !viewModel.appleIntelligenceDebugResolvedPath.isEmpty ||
+                !viewModel.appleIntelligenceDebugToolRootPath.isEmpty {
+                Section("Apple Intelligence Debug") {
+                    if !viewModel.appleIntelligenceDebugPickedPath.isEmpty {
+                        LabeledContent("Picked", value: viewModel.appleIntelligenceDebugPickedPath)
+                    }
+                    if !viewModel.appleIntelligenceDebugActivePath.isEmpty {
+                        LabeledContent("Active", value: viewModel.appleIntelligenceDebugActivePath)
+                    }
+                    if !viewModel.appleIntelligenceDebugResolvedPath.isEmpty {
+                        LabeledContent("Resolved", value: viewModel.appleIntelligenceDebugResolvedPath)
+                    }
+                    if !viewModel.appleIntelligenceDebugToolRootPath.isEmpty {
+                        LabeledContent("Tool Root", value: viewModel.appleIntelligenceDebugToolRootPath)
+                    }
+                }
+            }
         }
         .opencodeGroupedListStyle()
         .opencodeLargeNavigationTitle()
+        .sheet(isPresented: $viewModel.isShowingAppleIntelligenceFolderPicker) {
+#if canImport(UIKit) && canImport(UniformTypeIdentifiers)
+            AppleIntelligenceFolderPicker { url in
+                viewModel.isShowingAppleIntelligenceFolderPicker = false
+                guard let url else { return }
+                Task { await viewModel.createAppleIntelligenceWorkspace(from: url) }
+            }
+#else
+            Text("Folder picking is unavailable on this platform.")
+                .presentationDetents([.medium])
+#endif
+        }
     }
 }
+
+#if canImport(UIKit) && canImport(UniformTypeIdentifiers)
+private struct AppleIntelligenceFolderPicker: UIViewControllerRepresentable {
+    let onPick: (URL?) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.folder], asCopy: false)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL?) -> Void
+
+        init(onPick: @escaping (URL?) -> Void) {
+            self.onPick = onPick
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onPick(urls.first)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onPick(nil)
+        }
+    }
+}
+#endif
 
 private struct RecentServerCard: View {
     let serverConfig: OpenCodeServerConfig

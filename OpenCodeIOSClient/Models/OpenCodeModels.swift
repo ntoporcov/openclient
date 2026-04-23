@@ -406,6 +406,44 @@ struct OpenCodeDirectoryState: Equatable, Sendable {
     var vcsErrorMessage: String?
 }
 
+enum AppBackendMode: String, Codable, Sendable {
+    case none
+    case server
+    case appleIntelligence
+}
+
+struct AppleIntelligenceWorkspaceRecord: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    var title: String
+    var bookmarkData: Data
+    var lastKnownPath: String
+    var sessionID: String
+    var messages: [OpenCodeMessageEnvelope]
+    var updatedAt: Date
+
+    var session: OpenCodeSession {
+        OpenCodeSession(
+            id: sessionID,
+            title: title,
+            workspaceID: nil,
+            directory: lastKnownPath,
+            projectID: id,
+            parentID: nil
+        )
+    }
+
+    var project: OpenCodeProject {
+        OpenCodeProject(
+            id: id,
+            worktree: lastKnownPath,
+            vcs: nil,
+            name: title,
+            icon: nil,
+            time: nil
+        )
+    }
+}
+
 enum OpenCodeProjectFilesMode: String, CaseIterable, Hashable, Sendable {
     case changes
     case tree

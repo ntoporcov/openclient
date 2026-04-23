@@ -41,6 +41,18 @@ struct RootView: View {
                     }
                 }
                 .animation(opencodeSelectionAnimation, value: viewModel.selectedSession?.id)
+            } else if viewModel.isUsingAppleIntelligence, let session = viewModel.selectedSession {
+                NavigationStack {
+                    ChatView(viewModel: viewModel, sessionID: session.id)
+                        .id(session.id)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Home") {
+                                    viewModel.leaveAppleIntelligenceSession()
+                                }
+                            }
+                        }
+                }
             } else {
                 NavigationStack {
                     ConnectionView(viewModel: viewModel)
@@ -49,6 +61,6 @@ struct RootView: View {
                 }
             }
         }
-        .animation(opencodeSelectionAnimation, value: viewModel.isConnected)
+        .animation(opencodeSelectionAnimation, value: viewModel.hasActiveWorkspace)
     }
 }
