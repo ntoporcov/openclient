@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 
 struct SessionListView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Namespace private var sessionRowNamespace
     let onSessionChosen: () -> Void
 
     var body: some View {
@@ -114,6 +115,7 @@ struct SessionListView: View {
             showsPinnedBadge: showsPinnedBadge,
             style: style
         )
+        .matchedGeometryEffect(id: session.id, in: sessionRowNamespace)
         .contentShape(Rectangle())
         .onTapGesture {
             Task {
