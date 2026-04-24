@@ -84,9 +84,24 @@ struct ConnectionView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
         }
         .opencodeGroupedListStyle()
         .opencodeLargeNavigationTitle()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                NavigationLink {
+                    HelpView()
+                } label: {
+                    HelpFooterCard()
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
+                .padding(.bottom, 14)
+            }
+            .background(OpenCodePlatformColor.groupedBackground)
+        }
         .toolbar {
             if hasRecentServers {
                 ToolbarItem(placement: .opencodeTrailing) {
@@ -167,6 +182,92 @@ private struct ServerConnectionSections: View {
                     .foregroundStyle(.red)
             }
         }
+    }
+}
+
+private struct HelpNavigationRow: View {
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.purple.opacity(0.88), Color.blue.opacity(0.78)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 52, height: 52)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Help & Getting Started")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                Text("Learn what OpenCode is, how the app works, and how to connect securely.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct HelpFooterCard: View {
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.purple.opacity(0.88), Color.blue.opacity(0.78)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 52, height: 52)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Help & Getting Started")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                Text("Learn what OpenCode is, how the app works, and how to connect securely.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 16)
+
+            Image(systemName: "arrow.up.right.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(OpenCodePlatformColor.secondaryGroupedBackground)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
 
