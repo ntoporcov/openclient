@@ -19,6 +19,14 @@ fileprivate enum AppleIntelligenceInstructionTab: String, CaseIterable, Identifi
     }
 }
 
+private struct PendingOutgoingSend {
+    let text: String
+    let attachments: [OpenCodeComposerAttachment]
+    let shouldAnimateBubble: Bool
+    let messageID: String?
+    let partID: String?
+}
+
 struct ChatView: View {
     @ObservedObject var viewModel: AppViewModel
     let sessionID: String
@@ -33,15 +41,15 @@ struct ChatView: View {
     @State private var questionCustomAnswers: [String: String] = [:]
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var shouldSnapOnNextMessage = false
+    @State private var shouldDelayNextUserInsertScroll = false
     @State private var composerAccessoryExpansion: ComposerAccessoryExpansion = .collapsed
     @State private var selectedAttachmentPreview: OpenCodeComposerAttachment?
     @State private var isComposerMenuOpen = false
     @State private var copiedTranscript = false
-    @State private var outgoingBubbleText: String?
-    @State private var outgoingBubbleProgress: CGFloat = 0
-    @State private var outgoingBubbleCleanupTask: Task<Void, Never>?
-    @State private var composerInputFrame: CGRect = .zero
-    @State private var outgoingBubbleStartFrame: CGRect = .zero
+    @State private var pendingOutgoingSend: PendingOutgoingSend?
+    @State private var pendingOutgoingSendTask: Task<Void, Never>?
+    @State private var outgoingEntryResetTask: Task<Void, Never>?
+    @State private var animatingOutgoingMessageID: String?
     @State private var listViewportHeight: CGFloat = 0
     @State private var bottomAnchorFrame: CGRect = .zero
     @State private var immediateScrollToken = 0
@@ -75,6 +83,14 @@ struct ChatView: View {
         viewModel.questions(for: sessionID).map { $0.id }.joined(separator: "|")
     }
 
+    private var listAnimationSignature: String {
+        [
+            displayedMessages.map(\.id).joined(separator: "|"),
+            shouldShowThinking ? "thinking" : "idle",
+            thinkingInsertionMessageID ?? "none"
+        ].joined(separator: "#")
+    }
+
     private var liveSession: OpenCodeSession {
         if let selected = viewModel.selectedSession, selected.id == sessionID {
             return selected
@@ -88,6 +104,14 @@ struct ChatView: View {
             projectID: nil,
             parentID: nil
         )
+    }
+
+    private var isSessionBusy: Bool {
+        viewModel.sessionStatuses[liveSession.id] == "busy"
+    }
+
+    private var isComposerBusy: Bool {
+        isSessionBusy || pendingOutgoingSend != nil
     }
 
     private var streamingFollowSignature: String {
@@ -126,6 +150,10 @@ struct ChatView: View {
 
     private var effectiveBottomPadding: CGFloat {
         max(messageBottomPadding, composerOverlayHeight + 12) + (shouldAdjustForKeyboard ? keyboardHeight : 0)
+    }
+
+    private var shouldAnimateInitialChatReveal: Bool {
+        viewModel.messages.isEmpty
     }
 
     private var shouldShowChatLoadingOverlay: Bool {
@@ -168,30 +196,15 @@ struct ChatView: View {
                         }
 
                         ForEach(displayedMessages) { message in
-                            MessageBubble(
-                                message: message,
-                                detailedMessage: viewModel.toolMessageDetails[message.id],
-                                currentSessionID: sessionID,
-                                isStreamingMessage: isStreamingMessage(message),
-                                resolveTaskSessionID: { part, currentSessionID in
-                                    viewModel.resolveTaskSessionID(from: part, currentSessionID: currentSessionID)
-                                }
-                            ) { part in
-                                selectedActivityDetail = ActivityDetail(message: message, part: part)
-                            } onOpenTaskSession: { taskSessionID in
-                                Task { await viewModel.openSession(sessionID: taskSessionID) }
+                            if thinkingInsertionMessageID == message.id {
+                                thinkingRowListItem
                             }
-                            .id(message.id)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
+
+                            messageRow(for: message)
                         }
 
-                        if shouldShowThinking {
-                            ThinkingRow()
-                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
+                        if shouldShowThinking, thinkingInsertionMessageID == nil {
+                            thinkingRowListItem
                         }
 
                         Color.clear
@@ -209,6 +222,7 @@ struct ChatView: View {
                             .listRowBackground(Color.clear)
                     }
                     .listStyle(.plain)
+                    .animation(.snappy(duration: 0.28, extraBounce: 0.02), value: listAnimationSignature)
                     .scrollContentBackground(.hidden)
                     .opencodeInteractiveKeyboardDismiss()
                     .background(OpenCodePlatformColor.groupedBackground)
@@ -222,16 +236,13 @@ struct ChatView: View {
                     }
                     .animation(.easeOut(duration: 0.18), value: isChatContentVisible)
                     .animation(.easeOut(duration: 0.18), value: chatContentOffsetY)
-                    .transaction { transaction in
-                        transaction.animation = nil
-                    }
                     .onAppear {
                         listViewportHeight = geometry.size.height
                         needsInitialBottomSnap = true
                         needsInitialComposerHeightSnap = true
                         hasCompletedInitialHydrationSnap = false
-                        isChatContentVisible = false
-                        chatContentOffsetY = 14
+                        isChatContentVisible = !shouldAnimateInitialChatReveal
+                        chatContentOffsetY = shouldAnimateInitialChatReveal ? 14 : 0
                         shouldShowLoadingIndicator = false
                         if !hasLoadedInitialWindow {
                             visibleMessageCount = min(viewModel.messages.count, messageWindowSize)
@@ -295,15 +306,13 @@ struct ChatView: View {
                             scheduleChatContentReveal(delayMS: 180)
                         }
 
-                        if count > oldCount, outgoingBubbleText != nil {
-                            settleOutgoingBubbleAfterRowInsert()
-                        }
-
                         guard count > oldCount else { return }
 
                         if shouldSnapOnNextMessage || isNearBottom {
                             shouldSnapOnNextMessage = false
-                            scheduleScrollToBottom(with: proxy)
+                            let delay = shouldDelayNextUserInsertScroll ? 180 : 10
+                            shouldDelayNextUserInsertScroll = false
+                            scheduleScrollToBottom(with: proxy, delayMS: delay)
                         }
 
                         updateChatContentVisibility()
@@ -342,6 +351,8 @@ struct ChatView: View {
         .onDisappear {
             contentRevealTask?.cancel()
             loadingIndicatorTask?.cancel()
+            pendingOutgoingSendTask?.cancel()
+            outgoingEntryResetTask?.cancel()
             if viewModel.activeChatSessionID == sessionID {
                 viewModel.activeChatSessionID = nil
             }
@@ -411,18 +422,6 @@ struct ChatView: View {
                 }
             }
         }
-        .overlay(alignment: .topLeading) {
-            GeometryReader { geometry in
-                if let outgoingBubbleText, outgoingBubbleStartFrame != .zero {
-                    let frame = interpolatedOutgoingBubbleFrame(in: geometry.size, text: outgoingBubbleText)
-
-                    OutgoingSendBubble(text: outgoingBubbleText, frame: frame)
-                        .position(x: frame.midX, y: frame.midY)
-                        .opacity(1 - outgoingBubbleProgress)
-                        .allowsHitTesting(false)
-                }
-            }
-        }
         .onChange(of: accessoryPresenceSignature) { _, _ in
             shouldFollowComposerAffordanceChange = isNearBottom
             if viewModel.draftAttachments.isEmpty || viewModel.todos.allSatisfy(\.isComplete) {
@@ -484,7 +483,7 @@ struct ChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             } else {
-                let isBusy = viewModel.sessionStatuses[liveSession.id] == "busy"
+                let isBusy = isComposerBusy
                 if isChildSession {
                     childSessionComposerNotice
                         .padding(.horizontal, 16)
@@ -496,14 +495,12 @@ struct ChatView: View {
                         commands: viewModel.commands,
                         attachmentCount: viewModel.draftAttachments.count,
                         isBusy: isBusy,
-                        onInputFrameChange: { frame in
-                            composerInputFrame = frame
-                        },
+                        onInputFrameChange: { _ in },
                         onSend: {
                             startOutgoingBubbleAnimationAndSend()
                         },
                         onStop: {
-                            Task { await viewModel.stopCurrentSession() }
+                            stopComposerAction()
                         },
                         onSelectCommand: { command in
                             shouldSnapOnNextMessage = true
@@ -624,11 +621,44 @@ struct ChatView: View {
         }
     }
 
+    private var thinkingRowListItem: some View {
+        ThinkingRow()
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
+
+    private func messageRow(for message: OpenCodeMessageEnvelope) -> some View {
+        MessageBubble(
+            message: message,
+            detailedMessage: viewModel.toolMessageDetails[message.id],
+            currentSessionID: sessionID,
+            isStreamingMessage: isStreamingMessage(message),
+            animateEntryFromComposer: message.id == animatingOutgoingMessageID,
+            resolveTaskSessionID: { part, currentSessionID in
+                viewModel.resolveTaskSessionID(from: part, currentSessionID: currentSessionID)
+            }
+        ) { part in
+            selectedActivityDetail = ActivityDetail(message: message, part: part)
+        } onOpenTaskSession: { taskSessionID in
+            Task { await viewModel.openSession(sessionID: taskSessionID) }
+        }
+        .transition(.asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .opacity
+        ))
+        .id(message.id)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+    }
+
     private func updateChatContentVisibility() {
         if isLoadingSelectedSession {
             contentRevealTask?.cancel()
-            isChatContentVisible = false
-            chatContentOffsetY = 14
+            isChatContentVisible = !shouldAnimateInitialChatReveal
+            chatContentOffsetY = shouldAnimateInitialChatReveal ? 14 : 0
             scheduleLoadingIndicatorReveal()
             return
         }
@@ -645,8 +675,17 @@ struct ChatView: View {
         guard hasCompletedInitialHydrationSnap else {
             loadingIndicatorTask?.cancel()
             shouldShowLoadingIndicator = false
-            isChatContentVisible = false
-            chatContentOffsetY = 14
+            isChatContentVisible = !shouldAnimateInitialChatReveal
+            chatContentOffsetY = shouldAnimateInitialChatReveal ? 14 : 0
+            return
+        }
+
+        guard shouldAnimateInitialChatReveal else {
+            contentRevealTask?.cancel()
+            loadingIndicatorTask?.cancel()
+            shouldShowLoadingIndicator = false
+            isChatContentVisible = true
+            chatContentOffsetY = 0
             return
         }
 
@@ -682,81 +721,92 @@ struct ChatView: View {
 
     private func startOutgoingBubbleAnimationAndSend() {
         let draftText = viewModel.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasAttachments = !viewModel.draftAttachments.isEmpty
+        let draftAttachments = viewModel.draftAttachments
+        let hasAttachments = !draftAttachments.isEmpty
 
         guard !draftText.isEmpty || hasAttachments else { return }
 
         OpenCodeHaptics.impact(.strong)
 
         shouldSnapOnNextMessage = true
+        shouldDelayNextUserInsertScroll = true
         immediateScrollToken += 1
 
-        if !draftText.isEmpty && !hasAttachments {
-            outgoingBubbleText = draftText
-            outgoingBubbleProgress = 0
-            outgoingBubbleStartFrame = composerInputFrame == .zero
-                ? CGRect(x: 40, y: 600, width: 240, height: 48)
-                : composerInputFrame
+        let shouldAnimateBubble = !draftText.isEmpty && !hasAttachments
+        let preparedIDs = shouldAnimateBubble
+            ? viewModel.insertOptimisticUserMessage(draftText, attachments: draftAttachments, in: liveSession)
+            : nil
 
-            withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-                outgoingBubbleProgress = 1
-            }
+        let pendingSend = PendingOutgoingSend(
+            text: draftText,
+            attachments: draftAttachments,
+            shouldAnimateBubble: shouldAnimateBubble,
+            messageID: preparedIDs?.messageID,
+            partID: preparedIDs?.partID
+        )
 
-            outgoingBubbleCleanupTask?.cancel()
-            outgoingBubbleCleanupTask = Task { @MainActor in
-                try? await Task.sleep(for: .seconds(3))
+        pendingOutgoingSendTask?.cancel()
+        pendingOutgoingSend = pendingSend
+        viewModel.draftMessage = ""
+        viewModel.clearDraftAttachments()
+        viewModel.composerResetToken = UUID()
+
+        if shouldAnimateBubble {
+            animatingOutgoingMessageID = preparedIDs?.messageID
+            outgoingEntryResetTask?.cancel()
+            outgoingEntryResetTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(420))
                 guard !Task.isCancelled else { return }
-                outgoingBubbleText = nil
-                outgoingBubbleProgress = 0
-                outgoingBubbleStartFrame = .zero
+                animatingOutgoingMessageID = nil
             }
 
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(60))
-                await viewModel.sendCurrentMessage()
+            pendingOutgoingSendTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(260))
+                guard !Task.isCancelled else { return }
+
+                pendingOutgoingSend = nil
+                await viewModel.sendMessage(
+                    pendingSend.text,
+                    attachments: pendingSend.attachments,
+                    in: liveSession,
+                    userVisible: true,
+                    messageID: pendingSend.messageID,
+                    partID: pendingSend.partID,
+                    appendOptimisticMessage: false
+                )
             }
             return
         }
 
-        Task { await viewModel.sendCurrentMessage() }
-    }
-
-    private func settleOutgoingBubbleAfterRowInsert() {
-        outgoingBubbleCleanupTask?.cancel()
-        outgoingBubbleCleanupTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(220))
+        pendingOutgoingSendTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
-            outgoingBubbleText = nil
-            outgoingBubbleProgress = 0
-            outgoingBubbleStartFrame = .zero
+
+            viewModel.draftMessage = pendingSend.text
+            viewModel.addDraftAttachments(pendingSend.attachments)
+            pendingOutgoingSend = nil
+            await viewModel.sendCurrentMessage()
         }
     }
 
-    private func interpolatedOutgoingBubbleFrame(in containerSize: CGSize, text: String) -> CGRect {
-        let start = outgoingBubbleStartFrame
-        let end = estimatedOutgoingBubbleTargetFrame(in: containerSize, text: text)
+    private func stopComposerAction() {
+        if let pendingSend = pendingOutgoingSend {
+            pendingOutgoingSendTask?.cancel()
+            pendingOutgoingSendTask = nil
+            pendingOutgoingSend = nil
+            if pendingSend.shouldAnimateBubble {
+                if let messageID = pendingSend.messageID {
+                    viewModel.directoryState.messages.removeAll { $0.id == messageID }
+                }
+                outgoingEntryResetTask?.cancel()
+                animatingOutgoingMessageID = nil
+            }
+            viewModel.draftMessage = pendingSend.text
+            viewModel.addDraftAttachments(pendingSend.attachments)
+            return
+        }
 
-        return CGRect(
-            x: lerp(start.minX, end.minX, progress: outgoingBubbleProgress),
-            y: lerp(start.minY, end.minY, progress: outgoingBubbleProgress),
-            width: lerp(start.width, end.width, progress: outgoingBubbleProgress),
-            height: lerp(start.height, end.height, progress: outgoingBubbleProgress)
-        )
-    }
-
-    private func estimatedOutgoingBubbleTargetFrame(in containerSize: CGSize, text: String) -> CGRect {
-        let maxWidth = min(320, containerSize.width - 32)
-        let estimatedWidth = min(maxWidth, max(110, min(maxWidth, 34 + (CGFloat(text.count) * 7.0))))
-        let estimatedLines = max(1, min(4, ceil((CGFloat(text.count) * 7.0) / max(estimatedWidth - 28, 80))))
-        let estimatedHeight = 22 + (estimatedLines * 22)
-        let x = containerSize.width - 16 - estimatedWidth
-        let y = max(12, outgoingBubbleStartFrame.minY - 104)
-
-        return CGRect(x: x, y: y, width: estimatedWidth, height: estimatedHeight)
-    }
-
-    private func lerp(_ start: CGFloat, _ end: CGFloat, progress: CGFloat) -> CGFloat {
-        start + ((end - start) * progress)
+        Task { await viewModel.stopCurrentSession() }
     }
 
 #if canImport(UIKit)
@@ -774,7 +824,11 @@ struct ChatView: View {
 #endif
 
     private var shouldShowThinking: Bool {
-        guard viewModel.sessionStatuses[liveSession.id] == "busy" else { return false }
+        if pendingOutgoingSend != nil {
+            return true
+        }
+
+        guard isSessionBusy else { return false }
         guard let lastUserIndex = displayedMessages.lastIndex(where: { ($0.info.role ?? "").lowercased() == "user" }) else {
             return false
         }
@@ -793,9 +847,14 @@ struct ChatView: View {
     }
 
     private func isStreamingMessage(_ message: OpenCodeMessageEnvelope) -> Bool {
-        guard viewModel.sessionStatuses[liveSession.id] == "busy" else { return false }
+        guard isSessionBusy else { return false }
         guard (message.info.role ?? "").lowercased() == "assistant" else { return false }
         return displayedMessages.last?.id == message.id
+    }
+
+    private var thinkingInsertionMessageID: String? {
+        guard shouldShowThinking else { return nil }
+        return displayedMessages.last(where: { isStreamingMessage($0) })?.id
     }
 
     @ToolbarContentBuilder
@@ -1006,24 +1065,5 @@ private struct ComposerOverlayHeightPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
-    }
-}
-
-private struct OutgoingSendBubble: View {
-    let text: String
-    let frame: CGRect
-
-    var body: some View {
-        Text(text)
-            .font(.body)
-            .foregroundStyle(.white)
-            .lineLimit(4)
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.blue, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .frame(width: frame.width, height: frame.height, alignment: .topLeading)
-            .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
     }
 }

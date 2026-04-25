@@ -5,12 +5,17 @@ struct MessageBubble: View {
     let detailedMessage: OpenCodeMessageEnvelope?
     let currentSessionID: String?
     let isStreamingMessage: Bool
+    let animateEntryFromComposer: Bool
     let resolveTaskSessionID: (OpenCodePart, String) -> String?
     let onSelectPart: (OpenCodePart) -> Void
     let onOpenTaskSession: (String) -> Void
 
     @State private var expandedReasoningPartIDs: Set<String> = []
     @State private var expandedContextGroupIDs: Set<String> = []
+    @State private var entryOffset: CGSize = .zero
+    @State private var entryOpacity: Double = 1
+    @State private var entryScale: CGFloat = 1
+    @State private var hasRunEntryAnimation = false
 
     private var effectiveMessage: OpenCodeMessageEnvelope {
         detailedMessage ?? message
@@ -67,8 +72,36 @@ struct MessageBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-        .transaction { transaction in
-            transaction.animation = nil
+        .offset(entryOffset)
+        .opacity(entryOpacity)
+        .scaleEffect(entryScale, anchor: .bottomTrailing)
+        .onAppear {
+            runEntryAnimationIfNeeded()
+        }
+        .onChange(of: animateEntryFromComposer) { _, _ in
+            runEntryAnimationIfNeeded()
+        }
+    }
+
+    private func runEntryAnimationIfNeeded() {
+        guard animateEntryFromComposer, isUser, !hasRunEntryAnimation else { return }
+
+        hasRunEntryAnimation = true
+        var transaction = Transaction()
+        transaction.animation = nil
+
+        withTransaction(transaction) {
+            entryOffset = CGSize(width: -130, height: 88)
+            entryOpacity = 0.94
+            entryScale = 0.985
+        }
+
+        DispatchQueue.main.async {
+            withAnimation(.spring(response: 0.48, dampingFraction: 0.84)) {
+                entryOffset = .zero
+                entryOpacity = 1
+                entryScale = 1
+            }
         }
     }
 

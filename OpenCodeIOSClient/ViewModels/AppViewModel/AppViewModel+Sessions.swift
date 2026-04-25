@@ -36,11 +36,12 @@ enum AppleIntelligenceIntent: String, CaseIterable, Sendable {
 
 extension AppViewModel {
     func prepareSessionSelection(_ session: OpenCodeSession) {
+        let cachedMessages = cachedMessagesBySessionID[session.id] ?? []
         withAnimation(opencodeSelectionAnimation) {
             selectedProjectContentTab = .sessions
             directoryState.selectedSession = session
             directoryState.isLoadingSelectedSession = true
-            directoryState.messages = []
+            directoryState.messages = cachedMessages
             directoryState.todos = []
             directoryState.permissions = []
             directoryState.questions = []
@@ -317,13 +318,53 @@ extension AppViewModel {
         await sendMessage(text, attachments: attachments, in: session, userVisible: userVisible)
     }
 
-    func sendMessage(_ text: String, attachments: [OpenCodeComposerAttachment] = [], in selectedSession: OpenCodeSession, userVisible: Bool) async {
+    @discardableResult
+    func insertOptimisticUserMessage(
+        _ text: String,
+        attachments: [OpenCodeComposerAttachment] = [],
+        in selectedSession: OpenCodeSession,
+        messageID: String? = nil,
+        partID: String? = nil
+    ) -> (messageID: String, partID: String) {
+        let resolvedMessageID = messageID ?? OpenCodeIdentifier.message()
+        let resolvedPartID = partID ?? OpenCodeIdentifier.part()
+        let variant = selectedVariant(for: selectedSession)
+        let optimisticModel = effectiveModelReference(for: selectedSession).map {
+            OpenCodeMessageModelReference(providerID: $0.providerID, modelID: $0.modelID, variant: variant)
+        }
+
+        let localUserMessage = OpenCodeMessageEnvelope.local(
+            role: "user",
+            text: text,
+            attachments: attachments,
+            messageID: resolvedMessageID,
+            sessionID: selectedSession.id,
+            partID: resolvedPartID,
+            agent: effectiveAgentName(for: selectedSession),
+            model: optimisticModel
+        )
+
+        withAnimation(.snappy(duration: 0.28, extraBounce: 0.02)) {
+            directoryState.messages.append(localUserMessage)
+        }
+        return (resolvedMessageID, resolvedPartID)
+    }
+
+    func sendMessage(
+        _ text: String,
+        attachments: [OpenCodeComposerAttachment] = [],
+        in selectedSession: OpenCodeSession,
+        userVisible: Bool,
+        messageID: String? = nil,
+        partID: String? = nil,
+        appendOptimisticMessage: Bool = true
+    ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
         let requestDirectory = sendDirectory(for: selectedSession)
-        let messageID = OpenCodeIdentifier.message()
-        let partID = OpenCodeIdentifier.part()
+        let resolvedMessageID = messageID ?? OpenCodeIdentifier.message()
+        let resolvedPartID = partID ?? OpenCodeIdentifier.part()
         let modelReference = effectiveModelReference(for: selectedSession)
         let agentName = effectiveAgentName(for: selectedSession)
         let variant = selectedVariant(for: selectedSession)
@@ -335,12 +376,13 @@ extension AppViewModel {
             role: "user",
             text: trimmed,
             attachments: attachments,
-            messageID: messageID,
-            partID: partID,
+            messageID: resolvedMessageID,
+            sessionID: selectedSession.id,
+            partID: resolvedPartID,
             agent: agentName,
             model: optimisticModel
         )
-        if userVisible {
+        if userVisible, appendOptimisticMessage {
             draftMessage = ""
             clearDraftAttachments()
             composerResetToken = UUID()
@@ -348,7 +390,7 @@ extension AppViewModel {
         }
         appendDebugLog("send: \(trimmed)")
         appendDebugLog(
-            "send scope session=\(debugSessionLabel(selectedSession)) selectedDir=\(debugDirectoryLabel(effectiveSelectedDirectory)) currentProject=\(currentProject?.id ?? "nil") requestDir=\(debugDirectoryLabel(requestDirectory)) msgID=\(messageID) partID=\(partID)"
+            "send scope session=\(debugSessionLabel(selectedSession)) selectedDir=\(debugDirectoryLabel(effectiveSelectedDirectory)) currentProject=\(currentProject?.id ?? "nil") requestDir=\(debugDirectoryLabel(requestDirectory)) msgID=\(resolvedMessageID) partID=\(resolvedPartID)"
         )
 
         isLoading = true
@@ -364,13 +406,13 @@ extension AppViewModel {
                 text: trimmed,
                 attachments: attachments,
                 directory: requestDirectory,
-                messageID: nil,
-                partID: nil,
+                messageID: resolvedMessageID,
+                partID: resolvedPartID,
                 model: modelReference,
                 agent: agentName,
                 variant: variant
             )
-            appendDebugLog("prompt_async accepted session=\(debugSessionLabel(selectedSession)) msgID=\(messageID) partID=\(partID)")
+            appendDebugLog("prompt_async accepted session=\(debugSessionLabel(selectedSession)) msgID=\(resolvedMessageID) partID=\(resolvedPartID)")
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(500))
                 await self?.logServerMessageSnapshot(for: selectedSession, reason: "post-send 500ms")
@@ -414,10 +456,10 @@ extension AppViewModel {
     func loadMessages(for session: OpenCodeSession) async throws {
         let loadedMessages = try await client.listMessages(sessionID: session.id, directory: session.directory)
         refreshSessionPreview(for: session.id, messages: loadedMessages)
+        cachedMessagesBySessionID[session.id] = loadedMessages
         guard selectedSession?.id == session.id else { return }
         appendDebugLog(serverMessageSummary(loadedMessages, sessionID: session.id, reason: "loadMessages"))
         directoryState.messages = mergeMessagesPreservingStreamProgress(existing: directoryState.messages, loaded: loadedMessages)
-        reconcileOptimisticUserMessages()
         syncComposerSelections(for: session)
         prefetchToolMessageDetails(for: session, messages: directoryState.messages)
         refreshLiveActivityIfNeeded(for: session.id)
@@ -438,44 +480,6 @@ extension AppViewModel {
 
             return existingMessage.mergedWithCanonical(message)
         }
-    }
-
-    func reconcileOptimisticUserMessages() {
-        var canonicalUserTextCounts: [String: Int] = [:]
-
-        for message in directoryState.messages {
-            guard !isOptimisticLocalUserMessage(message), let text = normalizedUserText(for: message) else { continue }
-            canonicalUserTextCounts[text, default: 0] += 1
-        }
-
-        var remainingCanonicalUserTextCounts = canonicalUserTextCounts
-
-        directoryState.messages.removeAll { message in
-            guard isOptimisticLocalUserMessage(message),
-                  let text = normalizedUserText(for: message),
-                  let count = remainingCanonicalUserTextCounts[text],
-                  count > 0 else {
-                return false
-            }
-
-            remainingCanonicalUserTextCounts[text] = count - 1
-            return true
-        }
-    }
-
-    func isOptimisticLocalUserMessage(_ message: OpenCodeMessageEnvelope) -> Bool {
-        (message.info.role ?? "").lowercased() == "user" && message.info.sessionID == nil
-    }
-
-    func normalizedUserText(for message: OpenCodeMessageEnvelope) -> String? {
-        guard (message.info.role ?? "").lowercased() == "user" else { return nil }
-
-        let text = message.parts
-            .compactMap(\.text)
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return text.isEmpty ? nil : text
     }
 
     func fetchMessageDetails(sessionID: String, messageID: String) async throws -> OpenCodeMessageEnvelope {

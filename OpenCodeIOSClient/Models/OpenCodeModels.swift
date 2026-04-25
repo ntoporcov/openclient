@@ -27,7 +27,15 @@ enum OpenCodeIdentifier {
         counter += 1
 
         let value = UInt64(timestamp) << 12 | UInt64(counter & 0x0FFF)
-        let timeComponent = String(value, radix: 16, uppercase: false).leftPadded(to: 12, with: "0")
+        var timeBytes = [UInt8](repeating: 0, count: 6)
+        for index in 0 ..< 6 {
+            let shift = UInt64(40 - (8 * index))
+            timeBytes[index] = UInt8((value >> shift) & 0xFF)
+        }
+
+        let timeComponent = timeBytes
+            .map { String($0, radix: 16, uppercase: false).leftPadded(to: 2, with: "0") }
+            .joined()
         let randomComponent = String((0 ..< 14).map { _ in
             base62Characters.randomElement() ?? "0"
         })

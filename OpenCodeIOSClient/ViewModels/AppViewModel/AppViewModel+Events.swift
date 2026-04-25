@@ -158,7 +158,6 @@ extension AppViewModel {
 
         switch result {
         case let .message(reason):
-            reconcileOptimisticUserMessages()
             if let selectedSession {
                 refreshSessionPreview(for: selectedSession.id, messages: directoryState.messages)
             }
