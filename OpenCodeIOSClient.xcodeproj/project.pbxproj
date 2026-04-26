@@ -13,6 +13,7 @@
 		078C8308CA3570CF09E87A62 /* GitStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483F003FBB5C24B5B8B08C06 /* GitStatusView.swift */; };
 		0851D72BB12ACF8FA5909238 /* OpenCodeWidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05CC2F75F73B3A2F9FF5DD8E /* OpenCodeWidgetStore.swift */; };
 		0BC9ED1BEDCC1CD87C7C8CE7 /* NewSessionDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8994E8493B69E44F2907F0B /* NewSessionDefaults.swift */; };
+		0D41361BFD53F13EA58E6A54 /* ForkSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02FC24D66B635B01B4F29AE5 /* ForkSessionSheet.swift */; };
 		124239D44BD77B91DA2B2DE4 /* TodoInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22332A66515C9C38EB202DC /* TodoInspectorView.swift */; };
 		12C2018FDD2650ACC154D7F7 /* OpenCodeEventManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18EFEF6227AAFB3590882300 /* OpenCodeEventManager.swift */; };
 		152399F750FB324E47871DAA /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DF20ACB6AD0EFAC28A95D9 /* HelpView.swift */; };
@@ -142,6 +143,7 @@
 		CD21C8A2BEF609CEBC95ADFE /* OpenCodeChatActivityIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C971B49980524A841E5689 /* OpenCodeChatActivityIntents.swift */; };
 		CF29802BEBD5A466A64AC665 /* ProjectContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF3564009893D20694D105B /* ProjectContentView.swift */; };
 		D1BA395F41B7CFC8873FC4BD /* QuestionPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48FD1B20B55BEAF67EAEF737 /* QuestionPanel.swift */; };
+		D33B693CC86B157080327DE9 /* ForkSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02FC24D66B635B01B4F29AE5 /* ForkSessionSheet.swift */; };
 		D40AC2C3320139BA6929FD47 /* CreateSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C69B9DDEC02FCCFE6713CD /* CreateSessionSheet.swift */; };
 		D4E1BDD6DC2915C9B06F45AC /* OpenCodeAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCA8E8783A279403F85973BA /* OpenCodeAPIClientTests.swift */; };
 		D6AF347489033040BC60018F /* QuestionPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48FD1B20B55BEAF67EAEF737 /* QuestionPanel.swift */; };
@@ -229,6 +231,7 @@
 		0207739825466816326A8CE4 /* AppViewModel+Widgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Widgets.swift"; sourceTree = "<group>"; };
 		02AF34C3AE03864E566C59DA /* AppViewModel+Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Composer.swift"; sourceTree = "<group>"; };
 		02C2EE024F2F7A8144C58C48 /* DetailTextBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailTextBlock.swift; sourceTree = "<group>"; };
+		02FC24D66B635B01B4F29AE5 /* ForkSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForkSessionSheet.swift; sourceTree = "<group>"; };
 		04820AC7A37C8876C322AE1F /* ThinkingRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingRow.swift; sourceTree = "<group>"; };
 		05CC2F75F73B3A2F9FF5DD8E /* OpenCodeWidgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeWidgetStore.swift; sourceTree = "<group>"; };
 		0BE7E13EEA52B67A4D5D7E93 /* RootPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootPreviews.swift; sourceTree = "<group>"; };
@@ -541,6 +544,7 @@
 				9403CD63018375C683CB8CB9 /* ChatPreviews.swift */,
 				F6CC62904B083C34CEC115F8 /* ChatView.swift */,
 				02C2EE024F2F7A8144C58C48 /* DetailTextBlock.swift */,
+				02FC24D66B635B01B4F29AE5 /* ForkSessionSheet.swift */,
 				7E6A66E01CBC3ABAD5DB637E /* MarkdownMessageText.swift */,
 				7BC5EB9EFFE91C43D15E42DB /* MessageBubble.swift */,
 				336AA13CA174A57F5F0EB8E8 /* MessageComposer.swift */,
@@ -847,6 +851,7 @@
 				300D3F9E5CB278849683EB16 /* CreateProjectSheet.swift in Sources */,
 				8485CB413C5F3E79DE0A4433 /* CreateSessionSheet.swift in Sources */,
 				CCECDD9AD6E18B8AC53F0AA2 /* DetailTextBlock.swift in Sources */,
+				0D41361BFD53F13EA58E6A54 /* ForkSessionSheet.swift in Sources */,
 				5BAF666C9C6C3C67001D358E /* GitDiffView.swift in Sources */,
 				6531D79763A93152FD03DBA7 /* GitStatusView.swift in Sources */,
 				E659C43A30A60D37CCE988B6 /* HelpPreviews.swift in Sources */,
@@ -925,6 +930,7 @@
 				BA9B9359B4B57BC1433A627A /* CreateProjectSheet.swift in Sources */,
 				D40AC2C3320139BA6929FD47 /* CreateSessionSheet.swift in Sources */,
 				EEBF02CA590484C8DC12C0A8 /* DetailTextBlock.swift in Sources */,
+				D33B693CC86B157080327DE9 /* ForkSessionSheet.swift in Sources */,
 				8346513141588D894B30B6FB /* GitDiffView.swift in Sources */,
 				078C8308CA3570CF09E87A62 /* GitStatusView.swift in Sources */,
 				5D25F987D4D97867A679E65D /* HelpPreviews.swift in Sources */,
