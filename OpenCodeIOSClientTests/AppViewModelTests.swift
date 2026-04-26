@@ -229,4 +229,92 @@ final class AppViewModelTests: XCTestCase {
 
         XCTAssertGreaterThan(viewModel.lastStreamEventAt, .distantPast)
     }
+
+    func testLiveActivityTranscriptShowsLatestAssistantLineOnly() {
+        let viewModel = AppViewModel()
+        let session = OpenCodeSession(
+            id: "ses_live",
+            title: "Live",
+            workspaceID: nil,
+            directory: "/tmp/project",
+            projectID: "proj_test",
+            parentID: nil
+        )
+
+        viewModel.directoryState.selectedSession = session
+        viewModel.directoryState.sessionStatuses[session.id] = "busy"
+        viewModel.directoryState.messages = [
+            .local(role: "user", text: "Can you fix the build?", messageID: "msg_user", sessionID: session.id),
+            .local(role: "assistant", text: "I am checking the failing test now.", messageID: "msg_assistant", sessionID: session.id),
+        ]
+
+        let lines = viewModel.liveActivityTranscriptLines(for: session)
+
+        XCTAssertEqual(lines.map(\.role), ["assistant"])
+        XCTAssertEqual(lines.map(\.text), ["I am checking the failing test now."])
+        XCTAssertEqual(lines.last?.isStreaming, true)
+    }
+
+    func testLiveActivityTranscriptDoesNotSurfaceUserOnlyMessages() {
+        let viewModel = AppViewModel()
+        let session = OpenCodeSession(
+            id: "ses_live",
+            title: "Live",
+            workspaceID: nil,
+            directory: "/tmp/project",
+            projectID: "proj_test",
+            parentID: nil
+        )
+
+        viewModel.directoryState.selectedSession = session
+        viewModel.directoryState.sessionStatuses[session.id] = "busy"
+        viewModel.directoryState.messages = [
+            .local(role: "user", text: "Can you fix the build?", messageID: "msg_user", sessionID: session.id),
+        ]
+
+        XCTAssertTrue(viewModel.liveActivityTranscriptLines(for: session).isEmpty)
+    }
+
+    func testLiveActivityTranscriptIsBoundedForLongStreamingText() {
+        let viewModel = AppViewModel()
+        let session = OpenCodeSession(
+            id: "ses_live",
+            title: "Live",
+            workspaceID: nil,
+            directory: "/tmp/project",
+            projectID: "proj_test",
+            parentID: nil
+        )
+        let longText = String(repeating: "streaming ", count: 40)
+
+        viewModel.directoryState.selectedSession = session
+        viewModel.directoryState.sessionStatuses[session.id] = "busy"
+        viewModel.directoryState.messages = [
+            .local(role: "assistant", text: longText, messageID: "msg_assistant", sessionID: session.id),
+        ]
+
+        let lines = viewModel.liveActivityTranscriptLines(for: session)
+
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertLessThanOrEqual(lines[0].text.count, 180)
+        XCTAssertEqual(lines[0].isStreaming, true)
+    }
+
+    func testLiveActivityTranscriptUsesCachedMessagesForUnselectedActiveSession() {
+        let viewModel = AppViewModel()
+        let selected = OpenCodeSession(id: "ses_selected", title: "Selected", workspaceID: nil, directory: "/tmp/project", projectID: nil, parentID: nil)
+        let background = OpenCodeSession(id: "ses_background", title: "Background", workspaceID: nil, directory: "/tmp/project", projectID: nil, parentID: nil)
+
+        viewModel.directoryState.selectedSession = selected
+        viewModel.directoryState.sessionStatuses[background.id] = "busy"
+        viewModel.cachedMessagesBySessionID[background.id] = [
+            .local(role: "user", text: "Ship it", messageID: "msg_user", sessionID: background.id),
+            .local(role: "assistant", text: "Shipping now", messageID: "msg_assistant", sessionID: background.id),
+        ]
+
+        let lines = viewModel.liveActivityTranscriptLines(for: background)
+
+        XCTAssertEqual(lines.map(\.text), ["Shipping now"])
+        XCTAssertEqual(lines.last?.isStreaming, true)
+    }
 }

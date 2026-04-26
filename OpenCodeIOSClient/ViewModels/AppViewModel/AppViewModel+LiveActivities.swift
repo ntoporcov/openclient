@@ -6,6 +6,8 @@ import ActivityKit
 
 extension AppViewModel {
     private static let liveActivityGracePeriod: TimeInterval = 180
+    nonisolated private static let liveActivityStaleAfter: TimeInterval = 45
+    private static let liveActivityRefreshDelay: Duration = .milliseconds(350)
 
     func toggleLiveActivity(for session: OpenCodeSession) async {
         if activeLiveActivitySessionIDs.contains(session.id) {
@@ -27,7 +29,7 @@ extension AppViewModel {
 
             try await Task.detached(priority: .userInitiated) {
                 if let existing = Activity<OpenCodeChatActivityAttributes>.activities.first(where: { $0.attributes.sessionID == sessionID }) {
-                    await existing.update(ActivityContent(state: state, staleDate: nil))
+                    await existing.update(Self.liveActivityContent(state: state))
                     return
                 }
 
@@ -41,11 +43,12 @@ extension AppViewModel {
                         directory: sessionDirectory,
                         workspaceID: workspaceID
                     ),
-                    content: ActivityContent(state: state, staleDate: nil),
+                    content: Self.liveActivityContent(state: state),
                     pushType: nil
                 )
             }.value
             activeLiveActivitySessionIDs.insert(session.id)
+            lastLiveActivityStatesBySessionID[session.id] = state
             if userVisibleErrors {
                 errorMessage = nil
             }
@@ -96,6 +99,8 @@ extension AppViewModel {
 
     func stopLiveActivity(for sessionID: String, immediate: Bool = false) async {
         #if canImport(ActivityKit) && os(iOS)
+        liveActivityRefreshTasksBySessionID[sessionID]?.cancel()
+        liveActivityRefreshTasksBySessionID[sessionID] = nil
         let session = session(matching: sessionID) ?? sessions.first(where: { $0.id == sessionID }) ?? (selectedSession?.id == sessionID ? selectedSession : nil)
         let finalState = session.map { liveActivityState(for: $0) }
         let gracePeriod = immediate ? nil : Self.liveActivityGracePeriod
@@ -105,14 +110,34 @@ extension AppViewModel {
                 guard let gracePeriod else { return .immediate }
                 return .after(Date().addingTimeInterval(gracePeriod))
             }()
-            await activity.end(ActivityContent(state: finalState ?? activity.content.state, staleDate: nil), dismissalPolicy: dismissalPolicy)
+            await activity.end(Self.liveActivityContent(state: finalState ?? activity.content.state), dismissalPolicy: dismissalPolicy)
         }.value
         activeLiveActivitySessionIDs.remove(sessionID)
+        lastLiveActivityStatesBySessionID[sessionID] = nil
         #endif
     }
 
-    func refreshLiveActivityIfNeeded(for sessionID: String? = nil, endIfIdle: Bool = false) {
+    func refreshLiveActivityIfNeeded(for sessionID: String? = nil, endIfIdle: Bool = false, immediate: Bool = false) {
         #if canImport(ActivityKit) && os(iOS)
+        if let sessionID, !immediate, !endIfIdle {
+            guard activeLiveActivitySessionIDs.contains(sessionID) else { return }
+            liveActivityRefreshTasksBySessionID[sessionID]?.cancel()
+            liveActivityRefreshTasksBySessionID[sessionID] = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: Self.liveActivityRefreshDelay)
+                guard !Task.isCancelled else { return }
+                self?.refreshLiveActivityIfNeeded(for: sessionID, endIfIdle: endIfIdle, immediate: true)
+                self?.liveActivityRefreshTasksBySessionID[sessionID] = nil
+            }
+            return
+        }
+
+        if sessionID == nil, !immediate, !endIfIdle {
+            for activeSessionID in activeLiveActivitySessionIDs {
+                refreshLiveActivityIfNeeded(for: activeSessionID)
+            }
+            return
+        }
+
         Task { @MainActor [weak self] in
             guard let self else { return }
             let targetSessionIDs: [String]
@@ -133,18 +158,25 @@ extension AppViewModel {
                     await Task.detached(priority: .utility) {
                         guard let activity = Activity<OpenCodeChatActivityAttributes>.activities.first(where: { $0.attributes.sessionID == targetSessionID }) else { return }
                         await activity.end(
-                            ActivityContent(state: state, staleDate: nil),
+                            Self.liveActivityContent(state: state),
                             dismissalPolicy: .after(Date().addingTimeInterval(Self.liveActivityGracePeriod))
                         )
                     }.value
                     self.activeLiveActivitySessionIDs.remove(targetSessionID)
+                    self.lastLiveActivityStatesBySessionID[targetSessionID] = nil
+                    continue
+                }
+
+                if let previousState = self.lastLiveActivityStatesBySessionID[targetSessionID],
+                   Self.liveActivityStatesMatch(previousState, state) {
                     continue
                 }
 
                 await Task.detached(priority: .utility) {
                     guard let activity = Activity<OpenCodeChatActivityAttributes>.activities.first(where: { $0.attributes.sessionID == targetSessionID }) else { return }
-                    await activity.update(ActivityContent(state: state, staleDate: nil))
+                    await activity.update(Self.liveActivityContent(state: state))
                 }.value
+                self.lastLiveActivityStatesBySessionID[targetSessionID] = state
             }
         }
         #endif
@@ -206,13 +238,15 @@ extension AppViewModel {
     private func liveActivityState(for session: OpenCodeSession) -> OpenCodeChatActivityAttributes.ContentState {
         let pendingPermission = permissions(for: session.id).first
         let pendingQuestion = questions(for: session.id).first
-        let latestSnippet = liveActivityLatestSnippet(for: session)
+        let transcriptLines = liveActivityTranscriptLines(for: session)
+        let latestSnippet = liveActivityLatestSnippet(for: session, transcriptLines: transcriptLines)
         let status = liveActivityStatusText(for: session, hasPendingInteraction: pendingPermission != nil || pendingQuestion != nil)
 
         if let pendingPermission {
             return OpenCodeChatActivityAttributes.ContentState(
                 status: status,
                 latestSnippet: latestSnippet,
+                transcriptLines: transcriptLines,
                 updatedAt: .now,
                 pendingInteractionKind: "permission",
                 interactionID: pendingPermission.id,
@@ -234,6 +268,7 @@ extension AppViewModel {
             return OpenCodeChatActivityAttributes.ContentState(
                 status: status,
                 latestSnippet: latestSnippet,
+                transcriptLines: transcriptLines,
                 updatedAt: .now,
                 pendingInteractionKind: "question",
                 interactionID: pendingQuestion.id,
@@ -247,6 +282,7 @@ extension AppViewModel {
         return OpenCodeChatActivityAttributes.ContentState(
             status: status,
             latestSnippet: latestSnippet,
+            transcriptLines: transcriptLines,
             updatedAt: .now,
             pendingInteractionKind: nil,
             interactionID: nil,
@@ -277,7 +313,40 @@ extension AppViewModel {
         }
     }
 
-    private func liveActivityLatestSnippet(for session: OpenCodeSession) -> String {
+    func liveActivityTranscriptLines(for session: OpenCodeSession) -> [OpenCodeChatActivityLine] {
+        let sourceMessages: [OpenCodeMessageEnvelope]
+        if selectedSession?.id == session.id {
+            sourceMessages = messages
+        } else {
+            sourceMessages = cachedMessagesBySessionID[session.id] ?? []
+        }
+
+        guard let latestAssistant = sourceMessages
+            .last(where: { ($0.info.role ?? "").lowercased() == "assistant" }),
+            let text = liveActivityText(for: latestAssistant, limit: 180) else {
+            return []
+        }
+        let isSessionBusy = directoryState.sessionStatuses[session.id] == "busy"
+
+        return [
+            OpenCodeChatActivityLine(
+                id: latestAssistant.id,
+                role: "assistant",
+                text: text,
+                isStreaming: isSessionBusy
+            )
+        ]
+    }
+
+    private func liveActivityLatestSnippet(for session: OpenCodeSession, transcriptLines: [OpenCodeChatActivityLine]) -> String {
+        if let assistant = transcriptLines.last(where: { $0.role == "assistant" }) {
+            return assistant.text
+        }
+
+        if let latest = transcriptLines.last {
+            return latest.text
+        }
+
         if selectedSession?.id == session.id {
             if let assistant = latestMeaningfulSnippet(in: messages, role: "assistant") {
                 return assistant
@@ -299,6 +368,16 @@ extension AppViewModel {
         return sessionPreviews[session.id]?.text ?? "No messages yet"
     }
 
+    private func liveActivityText(for message: OpenCodeMessageEnvelope, limit: Int) -> String? {
+        let text = message.parts
+            .filter { $0.type == "text" }
+            .compactMap { $0.text?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+
+        return opencodePreviewText(text, limit: limit)
+    }
+
     private func latestMeaningfulSnippet(in messages: [OpenCodeMessageEnvelope], role: String) -> String? {
         messages
             .reversed()
@@ -312,6 +391,32 @@ extension AppViewModel {
             .pipe { opencodePreviewText($0, limit: 140) }
     }
 }
+
+#if canImport(ActivityKit) && os(iOS)
+private extension AppViewModel {
+    nonisolated static func liveActivityContent(state: OpenCodeChatActivityAttributes.ContentState) -> ActivityContent<OpenCodeChatActivityAttributes.ContentState> {
+        ActivityContent(
+            state: state,
+            staleDate: Date().addingTimeInterval(liveActivityStaleAfter)
+        )
+    }
+
+    nonisolated static func liveActivityStatesMatch(
+        _ lhs: OpenCodeChatActivityAttributes.ContentState,
+        _ rhs: OpenCodeChatActivityAttributes.ContentState
+    ) -> Bool {
+        lhs.status == rhs.status &&
+            lhs.latestSnippet == rhs.latestSnippet &&
+            lhs.transcriptLines == rhs.transcriptLines &&
+            lhs.pendingInteractionKind == rhs.pendingInteractionKind &&
+            lhs.interactionID == rhs.interactionID &&
+            lhs.interactionTitle == rhs.interactionTitle &&
+            lhs.interactionSummary == rhs.interactionSummary &&
+            lhs.questionOptionLabels == rhs.questionOptionLabels &&
+            lhs.canReplyToQuestionInline == rhs.canReplyToQuestionInline
+    }
+}
+#endif
 
 private extension String {
     func pipe<T>(_ transform: (String) -> T) -> T {

@@ -7,6 +7,7 @@ struct OpenCodeChatActivityAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var status: String
         var latestSnippet: String
+        var transcriptLines: [OpenCodeChatActivityLine]
         var updatedAt: Date
         var pendingInteractionKind: String?
         var interactionID: String?
@@ -23,6 +24,13 @@ struct OpenCodeChatActivityAttributes: ActivityAttributes {
     var serverUsername: String
     var directory: String?
     var workspaceID: String?
+}
+
+struct OpenCodeChatActivityLine: Codable, Hashable, Identifiable {
+    var id: String
+    var role: String
+    var text: String
+    var isStreaming: Bool
 }
 
 #endif

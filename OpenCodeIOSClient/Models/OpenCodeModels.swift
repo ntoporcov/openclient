@@ -256,6 +256,24 @@ struct OpenCodeMessageEnvelope: Codable, Identifiable, Hashable, Sendable {
 
         return existing.count > incoming.count && existing.hasPrefix(incoming)
     }
+
+    func debugJSONString() -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        guard let data = try? encoder.encode(self) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func copiedTextContent() -> String? {
+        let text = parts
+            .compactMap(\ .text)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+
+        return text.isEmpty ? nil : text
+    }
 }
 
 struct OpenCodeMessage: Codable, Hashable, Sendable {

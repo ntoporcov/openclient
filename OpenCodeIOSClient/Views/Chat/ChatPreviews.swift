@@ -156,13 +156,13 @@ private struct MessageComposerPreviewHost: View {
 }
 
 #Preview("User Message Bubble") {
-    MessageBubble(message: OpenCodePreviewData.userMessage, detailedMessage: nil, currentSessionID: OpenCodePreviewData.primarySession.id, isStreamingMessage: false, animateEntryFromComposer: false, resolveTaskSessionID: { _, _ in nil }, onSelectPart: { _ in }, onOpenTaskSession: { _ in }, onForkMessage: { _ in })
+    MessageBubble(message: OpenCodePreviewData.userMessage, detailedMessage: nil, currentSessionID: OpenCodePreviewData.primarySession.id, isStreamingMessage: false, animateEntryFromComposer: false, resolveTaskSessionID: { _, _ in nil }, onSelectPart: { _ in }, onOpenTaskSession: { _ in }, onForkMessage: { _ in }, onInspectDebugMessage: { _ in })
         .padding()
         .background(OpenCodePlatformColor.groupedBackground)
 }
 
 #Preview("Assistant Message Bubble") {
-    MessageBubble(message: OpenCodePreviewData.assistantMessage, detailedMessage: OpenCodePreviewData.assistantMessage, currentSessionID: OpenCodePreviewData.primarySession.id, isStreamingMessage: true, animateEntryFromComposer: false, resolveTaskSessionID: { _, _ in OpenCodePreviewData.secondarySession.id }, onSelectPart: { _ in }, onOpenTaskSession: { _ in }, onForkMessage: { _ in })
+    MessageBubble(message: OpenCodePreviewData.assistantMessage, detailedMessage: OpenCodePreviewData.assistantMessage, currentSessionID: OpenCodePreviewData.primarySession.id, isStreamingMessage: true, animateEntryFromComposer: false, resolveTaskSessionID: { _, _ in OpenCodePreviewData.secondarySession.id }, onSelectPart: { _ in }, onOpenTaskSession: { _ in }, onForkMessage: { _ in }, onInspectDebugMessage: { _ in })
         .padding()
         .background(OpenCodePlatformColor.groupedBackground)
 }

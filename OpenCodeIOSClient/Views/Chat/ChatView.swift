@@ -19,6 +19,19 @@ fileprivate enum AppleIntelligenceInstructionTab: String, CaseIterable, Identifi
     }
 }
 
+private struct MessageDebugPayload: Identifiable {
+    let id: String
+    let title: String
+    let json: String
+
+    init?(message: OpenCodeMessageEnvelope) {
+        guard let json = message.debugJSONString() else { return nil }
+        self.id = message.id
+        self.title = message.info.id
+        self.json = json
+    }
+}
+
 private struct PendingOutgoingSend {
     let text: String
     let attachments: [OpenCodeComposerAttachment]
@@ -33,6 +46,7 @@ struct ChatView: View {
 
     @Namespace private var toolbarGlassNamespace
     @State private var copiedDebugLog = false
+    @State private var selectedMessageDebugPayload: MessageDebugPayload?
     @State private var selectedActivityDetail: ActivityDetail?
     @State private var showingTodoInspector = false
     @State private var visibleMessageCount = 80
@@ -323,6 +337,11 @@ struct ChatView: View {
         .sheet(item: $selectedActivityDetail) { detail in
             NavigationStack {
                 ActivityDetailView(viewModel: viewModel, detail: detail)
+            }
+        }
+        .sheet(item: $selectedMessageDebugPayload) { payload in
+            NavigationStack {
+                MessageDebugSheet(payload: payload)
             }
         }
         .sheet(isPresented: $showingTodoInspector) {
@@ -642,6 +661,8 @@ struct ChatView: View {
             Task { await viewModel.openSession(sessionID: taskSessionID) }
         } onForkMessage: { forkMessage in
             Task { await viewModel.forkSelectedSession(from: forkMessage.id) }
+        } onInspectDebugMessage: { debugMessage in
+            selectedMessageDebugPayload = MessageDebugPayload(message: debugMessage)
         }
         .transition(.asymmetric(
             insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -942,6 +963,34 @@ struct ChatView: View {
             }.joined(separator: " ")
             return "\(role):\n\(partSummary)"
         }.joined(separator: "\n\n")
+    }
+}
+
+private struct MessageDebugSheet: View {
+    let payload: MessageDebugPayload
+
+    @State private var copiedJSON = false
+
+    var body: some View {
+        ScrollView {
+            Text(payload.json)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding()
+        .navigationTitle("Message JSON")
+        .opencodeInlineNavigationTitle()
+        .toolbar {
+            ToolbarItem(placement: .opencodeTrailing) {
+                Button(copiedJSON ? "Copied" : "Copy") {
+                    OpenCodeClipboard.copy(payload.json)
+                    copiedJSON = true
+                }
+            }
+        }
     }
 }
 

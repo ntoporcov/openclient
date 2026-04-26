@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -28,7 +29,7 @@ struct OpenCodeChatActivityWidget: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
-                    statusBadge(for: context.state.status)
+                    statusBadge(for: displayStatus(for: context))
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
@@ -56,7 +57,7 @@ struct OpenCodeChatActivityWidget: Widget {
                     workspaceID: context.attributes.workspaceID
                 )
             )
-            .keylineTint(statusColor(for: context.state.status))
+            .keylineTint(statusColor(for: displayStatus(for: context)))
         }
     }
 
@@ -76,13 +77,24 @@ struct OpenCodeChatActivityWidget: Widget {
 
     private func statusColor(for status: String) -> Color {
         switch status.lowercased() {
-        case "working":
+        case "action":
+            return .orange
+        case "working", "live":
             return .green
         case "ready":
             return .blue
+        case "paused":
+            return .gray
         default:
             return .white
         }
+    }
+
+    private func displayStatus(for context: ActivityViewContext<OpenCodeChatActivityAttributes>) -> String {
+        if context.state.pendingInteractionKind != nil {
+            return "Action"
+        }
+        return context.isStale ? "Paused" : context.state.status
     }
 }
 
@@ -108,7 +120,7 @@ private struct OpenCodeChatActivityView: View {
 
                     Spacer(minLength: 0)
 
-                    Text(context.state.status)
+                    Text(displayStatus)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(statusColor)
                         .padding(.horizontal, 8)
@@ -126,16 +138,25 @@ private struct OpenCodeChatActivityView: View {
     }
 
     private var statusColor: Color {
-        switch context.state.status.lowercased() {
+        switch displayStatus.lowercased() {
         case "action":
             return .orange
         case "live":
             return .green
         case "ready":
             return .blue
+        case "paused":
+            return .gray
         default:
             return .white
         }
+    }
+
+    private var displayStatus: String {
+        if context.state.pendingInteractionKind != nil {
+            return "Action"
+        }
+        return context.isStale ? "Paused" : context.state.status
     }
 
     @ViewBuilder
@@ -145,6 +166,16 @@ private struct OpenCodeChatActivityView: View {
         } else if context.state.pendingInteractionKind == "question" {
             OpenCodeChatActivityQuestionContent(context: context)
         } else {
+            OpenCodeChatActivityTranscriptContent(context: context)
+        }
+    }
+}
+
+private struct OpenCodeChatActivityTranscriptContent: View {
+    let context: ActivityViewContext<OpenCodeChatActivityAttributes>
+
+    var body: some View {
+        if context.state.transcriptLines.isEmpty {
             Text(context.state.latestSnippet)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.96))
@@ -152,6 +183,18 @@ private struct OpenCodeChatActivityView: View {
                 .lineLimit(5)
                 .padding(.horizontal, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(context.state.transcriptLines) { line in
+                    Text(line.text)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.96))
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -199,28 +242,18 @@ private struct OpenCodeChatActivityActions: View {
         if context.state.pendingInteractionKind == "permission",
            let requestID = context.state.interactionID {
             HStack(spacing: 8) {
-                actionLink(
+                permissionButton(
                     title: "Allow Once",
-                    destination: OpenCodeChatActivityDeepLink.permissionURL(
-                        sessionID: context.attributes.sessionID,
-                        requestID: requestID,
-                        reply: "allow",
-                        directory: context.attributes.directory,
-                        workspaceID: context.attributes.workspaceID
-                    ),
+                    requestID: requestID,
+                    reply: "once",
                     tint: .green
                 )
                 .frame(maxWidth: .infinity)
 
-                actionLink(
+                permissionButton(
                     title: "Deny",
-                    destination: OpenCodeChatActivityDeepLink.permissionURL(
-                        sessionID: context.attributes.sessionID,
-                        requestID: requestID,
-                        reply: "deny",
-                        directory: context.attributes.directory,
-                        workspaceID: context.attributes.workspaceID
-                    ),
+                    requestID: requestID,
+                    reply: "reject",
                     tint: .red
                 )
                 .frame(maxWidth: .infinity)
@@ -230,15 +263,10 @@ private struct OpenCodeChatActivityActions: View {
                   context.state.canReplyToQuestionInline {
             HStack(spacing: 8) {
                 ForEach(context.state.questionOptionLabels, id: \.self) { option in
-                    actionLink(
+                    questionButton(
                         title: option,
-                        destination: OpenCodeChatActivityDeepLink.questionURL(
-                            sessionID: context.attributes.sessionID,
-                            requestID: requestID,
-                            answer: option,
-                            directory: context.attributes.directory,
-                            workspaceID: context.attributes.workspaceID
-                        ),
+                        requestID: requestID,
+                        answer: option,
                         tint: .blue
                     )
                     .frame(maxWidth: .infinity)
@@ -273,6 +301,49 @@ private struct OpenCodeChatActivityActions: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private func permissionButton(title: String, requestID: String, reply: String, tint: Color) -> some View {
+        Button(intent: OpenCodeReplyPermissionIntent(
+            sessionID: context.attributes.sessionID,
+            requestID: requestID,
+            reply: reply,
+            credentialID: context.attributes.credentialID,
+            baseURL: context.attributes.serverBaseURL,
+            username: context.attributes.serverUsername,
+            directory: context.attributes.directory,
+            workspaceID: context.attributes.workspaceID
+        )) {
+            actionLabel(title: title, tint: tint)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func questionButton(title: String, requestID: String, answer: String, tint: Color) -> some View {
+        Button(intent: OpenCodeReplyQuestionIntent(
+            sessionID: context.attributes.sessionID,
+            requestID: requestID,
+            answer: answer,
+            credentialID: context.attributes.credentialID,
+            baseURL: context.attributes.serverBaseURL,
+            username: context.attributes.serverUsername,
+            directory: context.attributes.directory,
+            workspaceID: context.attributes.workspaceID
+        )) {
+            actionLabel(title: title, tint: tint)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func actionLabel(title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(tint, in: Capsule())
+            .foregroundStyle(.white)
     }
 
 }

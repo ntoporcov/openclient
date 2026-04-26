@@ -16,6 +16,7 @@ struct MessageBubble: View {
     let onSelectPart: (OpenCodePart) -> Void
     let onOpenTaskSession: (String) -> Void
     let onForkMessage: (OpenCodeMessageEnvelope) -> Void
+    let onInspectDebugMessage: (OpenCodeMessageEnvelope) -> Void
 
     @State private var expandedReasoningPartIDs: Set<String> = []
     @State private var expandedContextGroupIDs: Set<String> = []
@@ -121,6 +122,22 @@ struct MessageBubble: View {
             Label("Reasoning: \(reasoningLabel)", systemImage: "brain.head.profile")
         }
         .disabled(true)
+
+        Divider()
+
+        Button {
+            onInspectDebugMessage(effectiveMessage)
+        } label: {
+            Label("Debug JSON", systemImage: "curlybraces")
+        }
+
+        if let copiedText = effectiveMessage.copiedTextContent() {
+            Button {
+                OpenCodeClipboard.copy(copiedText)
+            } label: {
+                Label("Copy Message", systemImage: "doc.on.doc")
+            }
+        }
 
         if isUser {
             Divider()
@@ -280,6 +297,52 @@ struct MessageBubble: View {
         return text
     }
 
+    private func todoWriteTitle(for part: OpenCodePart, running: Bool) -> String {
+        if running {
+            return "Updating Todos"
+        }
+
+        let title = part.state?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let title, !title.isEmpty {
+            return title
+        }
+
+        return "Todo Update"
+    }
+
+    private func todoWriteSubtitle(for part: OpenCodePart) -> String? {
+        guard let todos = todoWriteTodos(for: part), !todos.isEmpty else {
+            return part.state?.status?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let completed = todos.filter { $0.isComplete }.count
+        let inProgress = todos.filter { $0.isInProgress }.count
+        let pending = todos.count - completed - inProgress
+
+        var segments: [String] = []
+        if completed > 0 {
+            segments.append("\(completed) completed")
+        }
+        if inProgress > 0 {
+            segments.append("\(inProgress) in progress")
+        }
+        if pending > 0 {
+            segments.append("\(pending) pending")
+        }
+
+        guard !segments.isEmpty else { return nil }
+        return segments.joined(separator: " · ")
+    }
+
+    private func todoWriteTodos(for part: OpenCodePart) -> [OpenCodeTodo]? {
+        guard let output = part.state?.output,
+              let data = output.data(using: .utf8) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode([OpenCodeTodo].self, from: data)
+    }
+
     private func textStyle(for part: OpenCodePart) -> MarkdownMessageText.Style {
         if !isUser, part.type == "reasoning" {
             return .reasoning
@@ -356,7 +419,15 @@ struct MessageBubble: View {
         case "", "step-start", "step-finish", "reasoning", "text":
             return nil
         case "todowrite":
-            return nil
+            return ActivityStyle(
+                title: todoWriteTitle(for: part, running: running),
+                subtitle: todoWriteSubtitle(for: part),
+                icon: "checklist",
+                tint: .blue,
+                isRunning: running,
+                showsDisclosure: true,
+                shimmerTitle: running
+            )
         case "bash":
             return ActivityStyle(
                 title: "Shell",
