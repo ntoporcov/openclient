@@ -63,6 +63,33 @@ extension AppViewModel {
         await startLiveActivity(for: session, userVisibleErrors: false)
     }
 
+    func scheduleLiveActivityPreviewRefreshIfNeeded(for sessionID: String?) {
+        guard let sessionID,
+              activeLiveActivitySessionIDs.contains(sessionID),
+              selectedSession?.id != sessionID,
+              let session = session(matching: sessionID) ?? sessions.first(where: { $0.id == sessionID }) else {
+            return
+        }
+
+        liveActivityPreviewRefreshTasksBySessionID[sessionID]?.cancel()
+        liveActivityPreviewRefreshTasksBySessionID[sessionID] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+
+            do {
+                let messages = try await self.client.listMessages(sessionID: session.id, directory: session.directory)
+                self.cachedMessagesBySessionID[session.id] = messages
+                self.refreshSessionPreview(for: session.id, messages: messages)
+                self.refreshLiveActivityIfNeeded(for: session.id)
+            } catch {
+                return
+            }
+
+            self.liveActivityPreviewRefreshTasksBySessionID[sessionID] = nil
+        }
+    }
+
     func stopLiveActivity(for session: OpenCodeSession, immediate: Bool = false) async {
         await stopLiveActivity(for: session.id, immediate: immediate)
     }
@@ -260,6 +287,15 @@ extension AppViewModel {
             }
         }
 
+        if let cachedMessages = cachedMessagesBySessionID[session.id] {
+            if let assistant = latestMeaningfulSnippet(in: cachedMessages, role: "assistant") {
+                return assistant
+            }
+            if let user = latestMeaningfulSnippet(in: cachedMessages, role: "user") {
+                return user
+            }
+        }
+
         return sessionPreviews[session.id]?.text ?? "No messages yet"
     }
 
@@ -273,17 +309,12 @@ extension AppViewModel {
             }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
-            .liveActivityLastLinePreview(limit: 140)
+            .pipe { opencodePreviewText($0, limit: 140) }
     }
 }
 
 private extension String {
-    func liveActivityLastLinePreview(limit: Int = 140) -> String? {
-        let lines = components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard let line = lines.last else { return nil }
-        return String(line.prefix(limit))
+    func pipe<T>(_ transform: (String) -> T) -> T {
+        transform(self)
     }
 }

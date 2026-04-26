@@ -568,25 +568,14 @@ extension AppViewModel {
                 part.text?.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             .joined(separator: "\n")
-            .lastLinePreview()
+        let previewText = opencodePreviewText(text, limit: 120)
 
         let date = dateFromMilliseconds(message.info.time?.completed ?? message.info.time?.created)
-        return SessionPreview(text: text ?? "No preview available", date: date)
+        return SessionPreview(text: previewText ?? "No preview available", date: date)
     }
 
     func dateFromMilliseconds(_ value: Double?) -> Date? {
         guard let value else { return nil }
         return Date(timeIntervalSince1970: value / 1000)
-    }
-}
-
-private extension String {
-    func lastLinePreview(limit: Int = 120) -> String? {
-        let lines = components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard let line = lines.last else { return nil }
-        return String(line.prefix(limit))
     }
 }

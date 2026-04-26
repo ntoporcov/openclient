@@ -145,6 +145,9 @@ extension AppViewModel {
 
         let payload = managed.envelope
         let selectedSession = directoryState.selectedSession
+        let eventSessionID = managedEventSessionID(for: managed)
+
+        updateCachedMessagesForLiveActivityIfNeeded(payload: payload, sessionID: eventSessionID, selectedSessionID: selectedSession?.id)
 
         var nextDirectoryState = directoryState
         let result = OpenCodeStateReducer.applyDirectoryEvent(
@@ -161,6 +164,7 @@ extension AppViewModel {
             if let selectedSession {
                 refreshSessionPreview(for: selectedSession.id, messages: directoryState.messages)
             }
+            scheduleLiveActivityPreviewRefreshIfNeeded(for: managedEventSessionID(for: managed))
             if let selectedSession,
                payload.type == "message.updated",
                payload.properties.info?.role == "user",
@@ -208,6 +212,11 @@ extension AppViewModel {
                 scheduleReload(for: selectedSession)
             }
         case let .ignored(reason):
+            if isLiveActivityMessageEvent(payload.type),
+               activeLiveActivitySessionIDs.contains(eventSessionID ?? "") {
+                appendDebugLog("live activity refresh on ignored \(payload.type) session=\(eventSessionID ?? "nil")")
+                scheduleLiveActivityPreviewRefreshIfNeeded(for: eventSessionID)
+            }
             appendDebugLog("drop \(payload.type): \(reason)")
         }
 
@@ -237,8 +246,50 @@ extension AppViewModel {
             }
         }
 
-        refreshLiveActivityIfNeeded(for: managedEventSessionID(for: managed))
+        refreshLiveActivityIfNeeded(for: eventSessionID)
         publishWidgetSnapshots()
+    }
+
+    private func isLiveActivityMessageEvent(_ type: String) -> Bool {
+        switch type {
+        case "message.updated", "message.part.updated", "message.part.delta", "message.removed", "message.part.removed":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func updateCachedMessagesForLiveActivityIfNeeded(payload: OpenCodeEventEnvelope, sessionID: String?, selectedSessionID: String?) {
+        guard let sessionID,
+              sessionID != selectedSessionID,
+              activeLiveActivitySessionIDs.contains(sessionID),
+              isLiveActivityMessageEvent(payload.type) else {
+            return
+        }
+
+        var cachedMessages = cachedMessagesBySessionID[sessionID] ?? []
+
+        switch payload.type {
+        case "message.updated", "message.part.updated", "message.part.delta":
+            let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: sessionID, messages: cachedMessages)
+            guard update.applied else { return }
+            cachedMessages = update.messages
+        case "message.removed":
+            guard let messageID = payload.properties.messageID else { return }
+            cachedMessages.removeAll { $0.info.id == messageID }
+        case "message.part.removed":
+            guard let messageID = payload.properties.messageID,
+                  let partID = payload.properties.partID,
+                  let index = cachedMessages.firstIndex(where: { $0.info.id == messageID }) else {
+                return
+            }
+            cachedMessages[index] = cachedMessages[index].removingPart(partID: partID)
+        default:
+            return
+        }
+
+        cachedMessagesBySessionID[sessionID] = cachedMessages
+        refreshSessionPreview(for: sessionID, messages: cachedMessages)
     }
 
     private func shouldApplyDirectoryEvent(from managed: OpenCodeManagedEvent) -> Bool {

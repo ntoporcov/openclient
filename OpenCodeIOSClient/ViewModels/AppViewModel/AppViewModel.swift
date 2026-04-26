@@ -114,6 +114,7 @@ final class AppViewModel: ObservableObject {
     var lastFallbackMessageCount = 0
     var lastFallbackAssistantLength = 0
     var nextStreamPartHapticAllowedAt = Date.distantPast
+    var liveActivityPreviewRefreshTasksBySessionID: [String: Task<Void, Never>] = [:]
 
     let debugProbePrompt = "Write four short paragraphs about why responsive streaming matters in mobile AI apps. Make each paragraph 2-3 sentences."
     let defaultSearchRoot = NSHomeDirectory()
