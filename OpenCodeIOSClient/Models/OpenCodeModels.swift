@@ -381,6 +381,12 @@ struct OpenCodeComposerAttachment: Identifiable, Hashable, Sendable {
     }
 }
 
+struct OpenCodeForkableMessage: Identifiable, Hashable, Sendable {
+    let id: String
+    let text: String
+    let created: Double?
+}
+
 struct OpenCodeProvidersResponse: Codable, Hashable, Sendable {
     let providers: [OpenCodeProvider]
     let `default`: [String: String]?
@@ -1513,6 +1519,10 @@ enum OpenCodeStreamReducer {
 
 struct CreateSessionRequest: Encodable {
     let title: String?
+}
+
+struct ForkSessionRequest: Encodable {
+    let messageID: String?
 }
 
 struct SendMessageRequest: Encodable {

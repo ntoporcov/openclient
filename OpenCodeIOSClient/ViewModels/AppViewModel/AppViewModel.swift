@@ -79,6 +79,7 @@ final class AppViewModel: ObservableObject {
     @Published var savedServerEditorMode: SavedServerEditorMode = .add
     @Published var isShowingCreateSessionSheet = false
     @Published var isShowingConfigurationsSheet = false
+    @Published var isShowingForkSessionSheet = false
     @Published var debugLastEventSummary = ""
     @Published var debugProbeLog: [String] = []
     @Published var isShowingDebugProbe = false
@@ -181,7 +182,13 @@ final class AppViewModel: ObservableObject {
     }
 
     var messages: [OpenCodeMessageEnvelope] { directoryState.messages }
-    var commands: [OpenCodeCommand] { directoryState.commands }
+    var commands: [OpenCodeCommand] {
+        var result = directoryState.commands
+        if selectedSession != nil, !forkableMessages.isEmpty, !result.contains(where: { $0.name == "fork" }) {
+            result.append(Self.forkClientCommand)
+        }
+        return result
+    }
     var sessionStatuses: [String: String] { directoryState.sessionStatuses }
     var todos: [OpenCodeTodo] { directoryState.todos }
     var permissions: [OpenCodePermission] { directoryState.permissions }
@@ -205,6 +212,17 @@ final class AppViewModel: ObservableObject {
         get { directoryState.selectedVCSFile }
         set { directoryState.selectedVCSFile = newValue }
     }
+
+    static let forkClientCommand = OpenCodeCommand(
+        name: "fork",
+        description: "Create a new session from a previous message",
+        agent: nil,
+        model: nil,
+        source: "client",
+        template: "",
+        subtask: false,
+        hints: []
+    )
     var hasGitProject: Bool { currentProject?.vcs == "git" && effectiveSelectedDirectory != nil }
     var currentVCSDiffs: [OpenCodeVCSFileDiff] { directoryState.vcsDiffsByMode[selectedVCSDiffMode] ?? [] }
     var selectedProjectFileContent: OpenCodeFileContent? {

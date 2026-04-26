@@ -5,6 +5,12 @@ import SwiftUI
 import FoundationModels
 #endif
 
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
 enum AppleIntelligenceIntent: String, CaseIterable, Sendable {
     case chat
     case initialize
@@ -194,7 +200,20 @@ extension AppViewModel {
         let attachments = draftAttachments
         guard !text.isEmpty || !attachments.isEmpty else { return }
 
+        if attachments.isEmpty, shouldOpenForkSheet(forSlashInput: text) {
+            draftMessage = ""
+            composerResetToken = UUID()
+            presentForkSessionSheet()
+            return
+        }
+
         if let (command, arguments) = slashCommandInput(from: text) {
+            if isForkClientCommand(command) {
+                draftMessage = ""
+                composerResetToken = UUID()
+                presentForkSessionSheet()
+                return
+            }
             await sendCommand(command, arguments: arguments, attachments: attachments, sessionID: selectedSessionID, userVisible: true)
             return
         }
@@ -453,6 +472,114 @@ extension AppViewModel {
 
         let arguments = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
         return (command, arguments)
+    }
+
+    var forkableMessages: [OpenCodeForkableMessage] {
+        let messages = directoryState.messages
+        var result: [OpenCodeForkableMessage] = []
+
+        for message in messages {
+            guard (message.info.role ?? "").lowercased() == "user" else { continue }
+            guard let text = forkPromptText(from: message).nilIfEmpty else { continue }
+
+            result.append(
+                OpenCodeForkableMessage(
+                    id: message.id,
+                    text: text.replacingOccurrences(of: "\n", with: " "),
+                    created: message.info.time?.created
+                )
+            )
+        }
+
+        return result.reversed()
+    }
+
+    func presentForkSessionSheet() {
+        guard selectedSession != nil, !forkableMessages.isEmpty else { return }
+        withAnimation(opencodeSelectionAnimation) {
+            isShowingForkSessionSheet = true
+        }
+    }
+
+    func isForkClientCommand(_ command: OpenCodeCommand) -> Bool {
+        command.source == "client" && command.name == "fork"
+    }
+
+    func shouldOpenForkSheet(forSlashInput text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "/fork"
+    }
+
+    func forkSelectedSession(from messageID: String) async {
+        guard let selectedSession else { return }
+        await forkSession(selectedSession, from: messageID)
+    }
+
+    func forkSession(_ selectedSession: OpenCodeSession, from messageID: String) async {
+        let requestDirectory = sendDirectory(for: selectedSession)
+        let sourceMessage = directoryState.messages.first { $0.id == messageID }
+        let restoredPrompt = sourceMessage.map(promptDraft(from:))
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            appendDebugLog("fork request session=\(debugSessionLabel(selectedSession)) message=\(messageID) directory=\(debugDirectoryLabel(requestDirectory))")
+            let forked = try await client.forkSession(
+                sessionID: selectedSession.id,
+                messageID: messageID,
+                directory: requestDirectory,
+                workspaceID: selectedSession.workspaceID
+            )
+            appendDebugLog("fork accepted session=\(debugSessionLabel(forked)) parent=\(selectedSession.id) message=\(messageID)")
+
+            withAnimation(opencodeSelectionAnimation) {
+                isShowingForkSessionSheet = false
+            }
+            upsertVisibleSession(forked)
+            try? await reloadSessions()
+            upsertVisibleSession(forked)
+            await selectSession(forked)
+
+            if let restoredPrompt {
+                draftMessage = restoredPrompt.text
+                draftAttachments = restoredPrompt.attachments
+                composerResetToken = UUID()
+            }
+
+            errorMessage = nil
+        } catch {
+            appendDebugLog("fork error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func forkPromptText(from message: OpenCodeMessageEnvelope) -> String {
+        message.parts
+            .filter { $0.type == "text" }
+            .compactMap { $0.text?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private func promptDraft(from message: OpenCodeMessageEnvelope) -> (text: String, attachments: [OpenCodeComposerAttachment]) {
+        let text = forkPromptText(from: message)
+        let attachments = message.parts.compactMap { part -> OpenCodeComposerAttachment? in
+            guard part.type == "file",
+                  let filename = part.filename,
+                  let mime = part.mime,
+                  let url = part.url else {
+                return nil
+            }
+
+            return OpenCodeComposerAttachment(
+                id: part.id ?? OpenCodeIdentifier.part(),
+                kind: mime.lowercased().hasPrefix("image/") ? .image : .file,
+                filename: filename,
+                mime: mime,
+                dataURL: url
+            )
+        }
+        return (text, attachments)
     }
 
     func loadMessages(for session: OpenCodeSession) async throws {

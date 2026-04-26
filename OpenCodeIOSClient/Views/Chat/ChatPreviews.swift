@@ -49,7 +49,7 @@ private struct MessageComposerPreviewHost: View {
     @State private var isAccessoryMenuOpen = false
 
     var body: some View {
-        MessageComposer(text: $text, isAccessoryMenuOpen: $isAccessoryMenuOpen, commands: OpenCodePreviewData.commands, attachmentCount: OpenCodePreviewData.composerAttachments.count, isBusy: false, onInputFrameChange: { _ in }, onSend: {}, onStop: {}, onSelectCommand: { _ in }, onAddAttachments: { _ in })
+        MessageComposer(text: $text, isAccessoryMenuOpen: $isAccessoryMenuOpen, commands: OpenCodePreviewData.commands, attachmentCount: OpenCodePreviewData.composerAttachments.count, isBusy: false, canFork: true, onInputFrameChange: { _ in }, onSend: {}, onStop: {}, onSelectCommand: { _ in }, onOpenFork: {}, onAddAttachments: { _ in })
             .padding()
             .background(OpenCodePlatformColor.groupedBackground)
     }
@@ -156,13 +156,13 @@ private struct MessageComposerPreviewHost: View {
 }
 
 #Preview("User Message Bubble") {
-    MessageBubble(message: OpenCodePreviewData.userMessage, detailedMessage: nil, currentSessionID: OpenCodePreviewData.primarySession.id, isStreamingMessage: false, animateEntryFromComposer: false, resolveTaskSessionID: { _, _ in nil }, onSelectPart: { _ in }, onOpenTaskSession: { _ in })
+    MessageBubble(message: OpenCodePreviewData.userMessage, detailedMessage: nil, currentSessionID: OpenCodePreviewData.primarySession.id, isStreamingMessage: false, animateEntryFromComposer: false, resolveTaskSessionID: { _, _ in nil }, onSelectPart: { _ in }, onOpenTaskSession: { _ in }, onForkMessage: { _ in })
         .padding()
         .background(OpenCodePlatformColor.groupedBackground)
 }
 
 #Preview("Assistant Message Bubble") {
-    MessageBubble(message: OpenCodePreviewData.assistantMessage, detailedMessage: OpenCodePreviewData.assistantMessage, currentSessionID: OpenCodePreviewData.primarySession.id, isStreamingMessage: true, animateEntryFromComposer: false, resolveTaskSessionID: { _, _ in OpenCodePreviewData.secondarySession.id }, onSelectPart: { _ in }, onOpenTaskSession: { _ in })
+    MessageBubble(message: OpenCodePreviewData.assistantMessage, detailedMessage: OpenCodePreviewData.assistantMessage, currentSessionID: OpenCodePreviewData.primarySession.id, isStreamingMessage: true, animateEntryFromComposer: false, resolveTaskSessionID: { _, _ in OpenCodePreviewData.secondarySession.id }, onSelectPart: { _ in }, onOpenTaskSession: { _ in }, onForkMessage: { _ in })
         .padding()
         .background(OpenCodePlatformColor.groupedBackground)
 }

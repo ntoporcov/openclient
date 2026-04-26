@@ -10,10 +10,12 @@ struct MessageComposer: View {
     let commands: [OpenCodeCommand]
     let attachmentCount: Int
     let isBusy: Bool
+    let canFork: Bool
     let onInputFrameChange: (CGRect) -> Void
     let onSend: () -> Void
     let onStop: () -> Void
     let onSelectCommand: (OpenCodeCommand) -> Void
+    let onOpenFork: () -> Void
     let onAddAttachments: ([OpenCodeComposerAttachment]) -> Void
 
     @State private var selectedCommandName: String?
@@ -297,6 +299,18 @@ struct MessageComposer: View {
                 tint: .blue,
                 isDisabled: !canInsertCommandShortcut,
                 action: insertSlashCommand
+            )
+
+            AccessoryMenuAction(
+                title: "Fork",
+                subtitle: "Start from a message",
+                systemImage: "arrow.triangle.branch",
+                tint: .purple,
+                isDisabled: isBusy || !canFork,
+                action: {
+                    isAccessoryMenuOpen = false
+                    onOpenFork()
+                }
             )
         }
         .padding(.horizontal, 12)

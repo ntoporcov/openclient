@@ -349,6 +349,12 @@ struct ChatView: View {
                 )
             }
         }
+        .sheet(isPresented: $viewModel.isShowingForkSessionSheet) {
+            NavigationStack {
+                ForkSessionSheet(viewModel: viewModel, sessionID: sessionID)
+            }
+            .presentationDetents([.medium, .large])
+        }
         .overlay {
             if composerAccessoryExpansion.isExpanded || isComposerMenuOpen {
                 GeometryReader { geometry in
@@ -452,6 +458,7 @@ struct ChatView: View {
                         commands: viewModel.commands,
                         attachmentCount: viewModel.draftAttachments.count,
                         isBusy: isBusy,
+                        canFork: !viewModel.forkableMessages.isEmpty,
                         onInputFrameChange: { _ in },
                         onSend: {
                             startOutgoingBubbleAnimationAndSend()
@@ -460,8 +467,16 @@ struct ChatView: View {
                             stopComposerAction()
                         },
                         onSelectCommand: { command in
+                            if viewModel.isForkClientCommand(command) {
+                                viewModel.draftMessage = ""
+                                viewModel.presentForkSessionSheet()
+                                return
+                            }
                             shouldSnapOnNextMessage = true
                             Task { await viewModel.sendCommand(command, sessionID: sessionID, userVisible: true) }
+                        },
+                        onOpenFork: {
+                            viewModel.presentForkSessionSheet()
                         },
                         onAddAttachments: { attachments in
                             viewModel.addDraftAttachments(attachments)
@@ -625,13 +640,15 @@ struct ChatView: View {
             selectedActivityDetail = ActivityDetail(message: message, part: part)
         } onOpenTaskSession: { taskSessionID in
             Task { await viewModel.openSession(sessionID: taskSessionID) }
+        } onForkMessage: { forkMessage in
+            Task { await viewModel.forkSelectedSession(from: forkMessage.id) }
         }
         .transition(.asymmetric(
             insertion: .move(edge: .bottom).combined(with: .opacity),
             removal: .opacity
         ))
         .id(message.id)
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
     }
@@ -707,6 +724,14 @@ struct ChatView: View {
         let hasAttachments = !draftAttachments.isEmpty
 
         guard !draftText.isEmpty || hasAttachments else { return }
+
+        if !hasAttachments,
+           (viewModel.shouldOpenForkSheet(forSlashInput: draftText) || viewModel.slashCommandInput(from: draftText).map({ viewModel.isForkClientCommand($0.command) }) == true) {
+            viewModel.draftMessage = ""
+            viewModel.composerResetToken = UUID()
+            viewModel.presentForkSessionSheet()
+            return
+        }
 
         OpenCodeHaptics.impact(.strong)
 

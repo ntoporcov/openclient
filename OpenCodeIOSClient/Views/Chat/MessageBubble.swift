@@ -1,5 +1,11 @@
 import SwiftUI
 
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
 struct MessageBubble: View {
     let message: OpenCodeMessageEnvelope
     let detailedMessage: OpenCodeMessageEnvelope?
@@ -9,6 +15,7 @@ struct MessageBubble: View {
     let resolveTaskSessionID: (OpenCodePart, String) -> String?
     let onSelectPart: (OpenCodePart) -> Void
     let onOpenTaskSession: (String) -> Void
+    let onForkMessage: (OpenCodeMessageEnvelope) -> Void
 
     @State private var expandedReasoningPartIDs: Set<String> = []
     @State private var expandedContextGroupIDs: Set<String> = []
@@ -59,16 +66,15 @@ struct MessageBubble: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(displayEntries, id: \.id) { entry in
-                switch entry {
-                case let .part(indexed):
-                    partView(indexed.part, index: indexed.index)
-                        .transition(.identity)
-                case let .context(group):
-                    contextGroupView(group)
-                        .transition(.identity)
-                }
+        HStack(alignment: .center, spacing: 0) {
+            if isUser {
+                Spacer(minLength: 44)
+            }
+
+            messageContent
+
+            if !isUser {
+                Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
@@ -81,6 +87,67 @@ struct MessageBubble: View {
         .onChange(of: animateEntryFromComposer) { _, _ in
             runEntryAnimationIfNeeded()
         }
+    }
+
+    private var messageContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(displayEntries, id: \.id) { entry in
+                switch entry {
+                case let .part(indexed):
+                    partView(indexed.part, index: indexed.index)
+                        .transition(.identity)
+                case let .context(group):
+                    contextGroupView(group)
+                        .transition(.identity)
+                }
+            }
+        }
+        .contextMenu { messageContextMenu }
+    }
+
+    @ViewBuilder
+    private var messageContextMenu: some View {
+        Button {} label: {
+            Label("Agent: \(agentLabel)", systemImage: "person.crop.circle")
+        }
+        .disabled(true)
+
+        Button {} label: {
+            Label("Model: \(modelLabel)", systemImage: "cpu")
+        }
+        .disabled(true)
+
+        Button {} label: {
+            Label("Reasoning: \(reasoningLabel)", systemImage: "brain.head.profile")
+        }
+        .disabled(true)
+
+        if isUser {
+            Divider()
+
+            Button {
+                onForkMessage(effectiveMessage)
+            } label: {
+                Label("Fork", systemImage: "arrow.triangle.branch")
+            }
+        }
+    }
+
+    private var agentLabel: String {
+        effectiveMessage.info.agent?.nilIfEmpty ?? "Default"
+    }
+
+    private var modelLabel: String {
+        guard let model = effectiveMessage.info.model else { return "Default" }
+        let base = "\(model.providerID)/\(model.modelID)"
+        guard let variant = model.variant?.nilIfEmpty else { return base }
+        return "\(base) (\(variant))"
+    }
+
+    private var reasoningLabel: String {
+        let reasoningParts = effectiveMessage.parts.filter { $0.type == "reasoning" && ($0.text?.nilIfEmpty != nil) }
+        guard !reasoningParts.isEmpty else { return "None" }
+        return reasoningParts.count == 1 ? "1 block" : "\(reasoningParts.count) blocks"
     }
 
     private func runEntryAnimationIfNeeded() {
@@ -204,7 +271,6 @@ struct MessageBubble: View {
                 bubbleColor.clipShape(bubbleShape)
             }
             .frame(maxWidth: 320, alignment: .trailing)
-            .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private func renderableText(for part: OpenCodePart) -> String? {

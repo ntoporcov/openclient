@@ -37,6 +37,23 @@ struct OpenCodeAPIClient: Sendable {
         return try await send(path: "/session", method: "POST", queryItems: queryItems, body: CreateSessionRequest(title: title))
     }
 
+    func forkSession(sessionID: String, messageID: String?, directory: String? = nil, workspaceID: String? = nil) async throws -> OpenCodeSession {
+        var queryItems: [URLQueryItem] = []
+        if let directory, !directory.isEmpty {
+            queryItems.append(URLQueryItem(name: "directory", value: directory))
+        }
+        if let workspaceID, !workspaceID.isEmpty {
+            queryItems.append(URLQueryItem(name: "workspace", value: workspaceID))
+        }
+        return try await send(
+            path: "/session/\(sessionID)/fork",
+            method: "POST",
+            queryItems: queryItems,
+            body: ForkSessionRequest(messageID: messageID),
+            directoryHeader: directory
+        )
+    }
+
     func listProjects() async throws -> [OpenCodeProject] {
         try await send(path: "/project", method: "GET")
     }
