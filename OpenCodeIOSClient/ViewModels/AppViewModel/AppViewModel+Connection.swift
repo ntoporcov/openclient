@@ -332,13 +332,15 @@ extension AppViewModel {
         await connect()
     }
 
-    private func hydratedServerConfig(from serverConfig: OpenCodeServerConfig) -> OpenCodeServerConfig {
+    func hydratedServerConfig(from serverConfig: OpenCodeServerConfig) -> OpenCodeServerConfig {
         guard serverConfig.password.isEmpty,
               let password = passwordStore.loadPassword(for: serverConfig.recentServerID) else {
             return serverConfig
         }
 
         return OpenCodeServerConfig(
+            name: serverConfig.name,
+            iconName: serverConfig.iconName,
             baseURL: serverConfig.baseURL,
             username: serverConfig.username,
             password: password
@@ -362,7 +364,7 @@ extension AppViewModel {
 
     func loadRecentServerConfigs() -> [OpenCodeServerConfig] {
         if let data = UserDefaults.standard.data(forKey: StorageKey.recentServerConfigs),
-           let savedServers = try? JSONDecoder().decode([OpenCodeSavedServer].self, from: data) {
+           let savedServers = loadSavedServers(from: data) {
             return Array(savedServers.prefix(Self.maxRecentServerCount)).map { savedServer in
                 let password = passwordStore.loadPassword(for: savedServer.recentServerID) ?? ""
                 return savedServer.serverConfig(password: password)
@@ -370,6 +372,34 @@ extension AppViewModel {
         }
 
         return []
+    }
+
+    private func loadSavedServers(from data: Data) -> [OpenCodeSavedServer]? {
+        if let savedServers = try? JSONDecoder().decode([OpenCodeSavedServer].self, from: data) {
+            return savedServers
+        }
+
+        guard let rawEntries = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else {
+            return nil
+        }
+
+        let recoveredServers = rawEntries.compactMap { entry -> OpenCodeSavedServer? in
+            guard JSONSerialization.isValidJSONObject(entry),
+                  let entryData = try? JSONSerialization.data(withJSONObject: entry) else {
+                return nil
+            }
+
+            return try? JSONDecoder().decode(OpenCodeSavedServer.self, from: entryData)
+        }
+
+        guard recoveredServers.isEmpty == false else { return nil }
+
+        // Rewrite the cleaned payload so a single bad entry does not keep wiping recents on launch.
+        if let cleanedData = try? JSONEncoder().encode(recoveredServers) {
+            UserDefaults.standard.set(cleanedData, forKey: StorageKey.recentServerConfigs)
+        }
+
+        return recoveredServers
     }
 
     func loadAppleIntelligenceWorkspaces() -> [AppleIntelligenceWorkspaceRecord] {

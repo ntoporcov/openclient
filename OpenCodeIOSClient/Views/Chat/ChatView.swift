@@ -136,16 +136,6 @@ struct ChatView: View {
         viewModel.parentSessionTitle(for: liveSession)
     }
 
-    private var isNearBottom: Bool {
-        guard listViewportHeight > 0, bottomAnchorFrame != .zero else { return true }
-        return abs(bottomAnchorFrame.minY - listViewportHeight) <= 140
-    }
-
-    private var isPinnedToBottom: Bool {
-        guard listViewportHeight > 0, bottomAnchorFrame != .zero else { return false }
-        return bottomAnchorFrame.minY <= listViewportHeight + 8 && bottomAnchorFrame.maxY >= listViewportHeight - 72
-    }
-
     private var isLoadingSelectedSession: Bool {
         viewModel.selectedSession?.id == sessionID && viewModel.directoryState.isLoadingSelectedSession && viewModel.messages.isEmpty
     }
@@ -248,7 +238,7 @@ struct ChatView: View {
                     }
                     .onChange(of: geometry.size.height) { _, height in
                         listViewportHeight = height
-                        guard isNearBottom else { return }
+                        guard isScrollGeometryAtBottom else { return }
                         scheduleScrollToBottom(with: proxy, delayMS: 20)
                     }
                     .onChange(of: composerOverlayHeight) { oldHeight, newHeight in
@@ -258,7 +248,7 @@ struct ChatView: View {
                             scheduleComposerAffordanceFollow(with: proxy, delayMS: 60)
                             return
                         }
-                        guard shouldFollowComposerAffordanceChange || isNearBottom else { return }
+                        guard shouldFollowComposerAffordanceChange || isScrollGeometryAtBottom else { return }
                         shouldFollowComposerAffordanceChange = false
                         scheduleComposerAffordanceFollow(with: proxy, delayMS: 20)
                     }
@@ -278,7 +268,7 @@ struct ChatView: View {
 
                         guard count > oldCount else { return }
 
-                        if shouldSnapOnNextMessage || isNearBottom {
+                        if shouldSnapOnNextMessage || isScrollGeometryAtBottom {
                             shouldSnapOnNextMessage = false
                             let delay = shouldDelayNextUserInsertScroll ? 180 : 10
                             shouldDelayNextUserInsertScroll = false
@@ -288,7 +278,7 @@ struct ChatView: View {
                         updateChatContentVisibility()
                     }
                     .onChange(of: streamingFollowSignature) { _, _ in
-                        guard hasLoadedInitialWindow, isNearBottom else { return }
+                        guard hasLoadedInitialWindow, isScrollGeometryAtBottom else { return }
                         scheduleScrollToBottom(with: proxy)
                     }
                     .onChange(of: isLoadingSelectedSession) { _, _ in
@@ -390,7 +380,7 @@ struct ChatView: View {
             }
         }
         .onChange(of: accessoryPresenceSignature) { _, _ in
-            shouldFollowComposerAffordanceChange = isNearBottom
+            shouldFollowComposerAffordanceChange = isScrollGeometryAtBottom
             if viewModel.draftAttachments.isEmpty || viewModel.todos.allSatisfy(\.isComplete) {
                 composerAccessoryExpansion = .collapsed
             }

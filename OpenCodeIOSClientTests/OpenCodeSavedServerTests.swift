@@ -42,6 +42,41 @@ final class OpenCodeSavedServerTests: XCTestCase {
         XCTAssertEqual(servers.first?.serverConfig(password: "secret").displayIconName, "desktopcomputer")
     }
 
+    func testHydratedServerConfigPreservesNameAndIcon() {
+        let saved = OpenCodeServerConfig(name: "Desk", iconName: "desktopcomputer", baseURL: "https://example.com", username: "nick", password: "")
+        let viewModel = AppViewModel()
+        passwordIDsToClean.insert(saved.recentServerID)
+        viewModel.passwordStore.savePassword("secret", for: saved.recentServerID)
+
+        let hydrated = viewModel.hydratedServerConfig(from: saved)
+
+        XCTAssertEqual(hydrated.name, "Desk")
+        XCTAssertEqual(hydrated.iconName, "desktopcomputer")
+        XCTAssertEqual(hydrated.password, "secret")
+    }
+
+    func testLoadRecentServerConfigsRecoversValidEntriesFromCorruptPayload() throws {
+        let data = try XCTUnwrap("""
+        [
+          {"name":"Desk","iconName":"desktopcomputer","baseURL":"https://example.com","username":"nick"},
+          {"baseURL":"https://broken.example.com"}
+        ]
+        """.data(using: .utf8))
+        defaults.set(data, forKey: storageKey)
+
+        let viewModel = AppViewModel()
+        let servers = viewModel.loadRecentServerConfigs()
+
+        XCTAssertEqual(servers.count, 1)
+        XCTAssertEqual(servers.first?.name, "Desk")
+        XCTAssertEqual(servers.first?.iconName, "desktopcomputer")
+
+        let cleanedData = try XCTUnwrap(defaults.data(forKey: storageKey))
+        let cleanedServers = try JSONDecoder().decode([OpenCodeSavedServer].self, from: cleanedData)
+        XCTAssertEqual(cleanedServers.count, 1)
+        XCTAssertEqual(cleanedServers.first?.name, "Desk")
+    }
+
     func testSaveEditedServerRenamesWithoutChangingIdentity() throws {
         let original = OpenCodeServerConfig(name: "Old Name", iconName: "server.rack", baseURL: "https://rename-only.example.com", username: "nick", password: "secret")
         let viewModel = AppViewModel()
