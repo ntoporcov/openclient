@@ -1,27 +1,14 @@
 :root {
-  color-scheme: light dark;
-  --bg: #0b1020;
-  --panel: rgba(19, 28, 56, 0.72);
-  --panel-border: rgba(255, 255, 255, 0.1);
-  --text: #ecf1ff;
-  --muted: #aab7db;
-  --accent: #7aa2ff;
-  --accent-2: #8b7dff;
-  --card: rgba(255, 255, 255, 0.04);
+  color-scheme: light;
+  --bg: #f5f7ff;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-border: rgba(17, 24, 39, 0.08);
+  --text: #111827;
+  --muted: #4b5563;
+  --accent: #325cff;
+  --accent-2: #6d4dff;
+  --card: rgba(17, 24, 39, 0.03);
   --max: 1100px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f5f7ff;
-    --panel: rgba(255, 255, 255, 0.86);
-    --panel-border: rgba(17, 24, 39, 0.08);
-    --text: #111827;
-    --muted: #4b5563;
-    --accent: #325cff;
-    --accent-2: #6d4dff;
-    --card: rgba(17, 24, 39, 0.03);
-  }
 }
 
 * {
@@ -152,7 +139,7 @@ a:hover {
   position: relative;
   width: min(100%, 1060px);
   height: clamp(430px, 50vw, 650px);
-  margin: 44px auto 0;
+  margin: 78px auto 0;
 }
 
 .hero-showcase::before {
@@ -486,7 +473,7 @@ code {
 
   .hero-showcase {
     height: clamp(350px, 88vw, 520px);
-    margin-top: 34px;
+    margin-top: 56px;
   }
 
   .hero-showcase::before {
