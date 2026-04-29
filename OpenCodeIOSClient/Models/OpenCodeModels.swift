@@ -413,6 +413,41 @@ struct OpenCodeForkableMessage: Identifiable, Hashable, Sendable {
     let created: Double?
 }
 
+struct OpenCodeChatBreadcrumb: Codable, Identifiable, Equatable, Sendable {
+    let id: UUID
+    let createdAt: Date
+    let event: String
+    let sessionID: String?
+    let selectedSessionID: String?
+    let directory: String?
+    let messageID: String?
+    let partID: String?
+    let messageCount: Int
+    let assistantTextLength: Int
+
+    init(
+        event: String,
+        sessionID: String?,
+        selectedSessionID: String?,
+        directory: String?,
+        messageID: String?,
+        partID: String?,
+        messageCount: Int,
+        assistantTextLength: Int
+    ) {
+        self.id = UUID()
+        self.createdAt = Date()
+        self.event = event
+        self.sessionID = sessionID
+        self.selectedSessionID = selectedSessionID
+        self.directory = directory
+        self.messageID = messageID
+        self.partID = partID
+        self.messageCount = messageCount
+        self.assistantTextLength = assistantTextLength
+    }
+}
+
 struct OpenCodeProvidersResponse: Codable, Hashable, Sendable {
     let providers: [OpenCodeProvider]
     let `default`: [String: String]?

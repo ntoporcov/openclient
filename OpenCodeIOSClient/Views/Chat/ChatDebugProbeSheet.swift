@@ -23,7 +23,7 @@ struct ChatDebugProbeSheet: View {
                         .disabled(viewModel.isRunningDebugProbe)
 
                         Button(copiedDebugLog ? "Copied" : "Copy Log") {
-                            OpenCodeClipboard.copy(viewModel.copyDebugProbeLog())
+                            OpenCodeClipboard.copy(debugText)
                             copiedDebugLog = true
                         }
                         .buttonStyle(.bordered)
@@ -34,7 +34,7 @@ struct ChatDebugProbeSheet: View {
                 .padding(.horizontal)
 
                 ScrollView {
-                    Text(viewModel.debugProbeLog.isEmpty ? "No probe log yet." : viewModel.copyDebugProbeLog())
+                    Text(debugText)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -58,5 +58,11 @@ struct ChatDebugProbeSheet: View {
         .onChange(of: viewModel.debugProbeLog.count) { _, _ in
             copiedDebugLog = false
         }
+    }
+
+    private var debugText: String {
+        let probe = viewModel.debugProbeLog.isEmpty ? "No probe log yet." : viewModel.copyDebugProbeLog()
+        let breadcrumbs = viewModel.chatBreadcrumbs.isEmpty ? "No chat breadcrumbs yet." : viewModel.copyChatBreadcrumbs()
+        return ["Probe Log", probe, "", "Chat Breadcrumbs", breadcrumbs].joined(separator: "\n")
     }
 }

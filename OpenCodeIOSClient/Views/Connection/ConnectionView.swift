@@ -16,17 +16,7 @@ struct ConnectionView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text("for OpenCode")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 22)
-                .padding(.trailing, 16)
-                .padding(.bottom, 14)
-                .background(OpenCodePlatformColor.groupedBackground)
-
-            List {
+        List {
             if hasRecentServers {
                 Section("Recent") {
                     ForEach(viewModel.recentServerConfigs, id: \.recentServerID) { serverConfig in
@@ -112,9 +102,8 @@ struct ConnectionView: View {
                 .listRowSeparator(.hidden)
             }
 
-            }
-            .connectionListStyle(hasRecentServers: hasRecentServers)
         }
+        .connectionListStyle(hasRecentServers: hasRecentServers)
         .navigationTitle("OpenClient")
         .opencodeLargeNavigationTitle()
         .toolbar {

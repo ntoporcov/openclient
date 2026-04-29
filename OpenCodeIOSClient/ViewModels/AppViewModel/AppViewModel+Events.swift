@@ -130,6 +130,15 @@ extension AppViewModel {
             lastStreamEventAt = .now
         }
 
+        if isLiveActivityMessageEvent(managed.envelope.type) || managed.envelope.type == "session.idle" {
+            markChatBreadcrumb(
+                "event \(managed.envelope.type)",
+                sessionID: managedEventSessionID(for: managed),
+                messageID: managed.envelope.properties.messageID ?? managed.envelope.properties.part?.messageID ?? managed.envelope.properties.info?.id,
+                partID: managed.envelope.properties.partID ?? managed.envelope.properties.part?.id
+            )
+        }
+
         if case let .sessionError(sessionID, message) = managed.typed {
             if let sessionID {
                 directoryState.sessionStatuses[sessionID] = "idle"
@@ -207,6 +216,7 @@ extension AppViewModel {
             appendDebugLog("status changed")
         case .idle:
             appendDebugLog("session idle")
+            markChatBreadcrumb("session idle", sessionID: eventSessionID)
             stopFallbackRefresh()
             if let selectedSession {
                 scheduleReload(for: selectedSession)
@@ -442,11 +452,14 @@ extension AppViewModel {
         reloadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
             guard let self, self.isConnected else { return }
+            self.markChatBreadcrumb("reload start", sessionID: session.id)
             do {
                 try await self.loadMessages(for: session)
                 try await self.reloadSessions()
                 await self.loadTodos(for: session)
+                self.markChatBreadcrumb("reload finish", sessionID: session.id)
             } catch {
+                self.markChatBreadcrumb("reload error", sessionID: session.id)
                 self.errorMessage = error.localizedDescription
             }
         }
@@ -466,12 +479,15 @@ extension AppViewModel {
                 guard Date.now.timeIntervalSince(self.lastStreamEventAt) >= 1.0 else { continue }
 
                 do {
+                    self.markChatBreadcrumb("fallback refresh start \(reason)", sessionID: session.id)
                     try await self.loadMessages(for: session)
                     await self.loadTodos(for: session)
                     self.debugLastEventSummary = self.fallbackRefreshSummary(reason: reason)
                     self.appendDebugLog(self.debugLastEventSummary)
+                    self.markChatBreadcrumb("fallback refresh finish \(reason)", sessionID: session.id)
                 } catch {
                     self.appendDebugLog("fallback error: \(error.localizedDescription)")
+                    self.markChatBreadcrumb("fallback refresh error \(reason)", sessionID: session.id)
                     self.errorMessage = error.localizedDescription
                     return
                 }
@@ -546,6 +562,57 @@ extension AppViewModel {
 #if DEBUG
         print("[OpenCodeDebug] \(stamped)")
 #endif
+    }
+
+    func markChatBreadcrumb(
+        _ event: String,
+        sessionID: String? = nil,
+        messageID: String? = nil,
+        partID: String? = nil
+    ) {
+        let breadcrumb = OpenCodeChatBreadcrumb(
+            event: event,
+            sessionID: sessionID,
+            selectedSessionID: selectedSession?.id,
+            directory: effectiveSelectedDirectory ?? streamDirectory,
+            messageID: messageID,
+            partID: partID,
+            messageCount: messages.count,
+            assistantTextLength: currentAssistantTextLength()
+        )
+        chatBreadcrumbs.append(breadcrumb)
+        if chatBreadcrumbs.count > 80 {
+            chatBreadcrumbs.removeFirst(chatBreadcrumbs.count - 80)
+        }
+        saveChatBreadcrumbs(chatBreadcrumbs)
+    }
+
+    func copyChatBreadcrumbs() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return chatBreadcrumbs.map { breadcrumb in
+            [
+                "[\(formatter.string(from: breadcrumb.createdAt))]",
+                breadcrumb.event,
+                "session=\(breadcrumb.sessionID ?? "nil")",
+                "selected=\(breadcrumb.selectedSessionID ?? "nil")",
+                "dir=\(breadcrumb.directory ?? "nil")",
+                "message=\(breadcrumb.messageID ?? "nil")",
+                "part=\(breadcrumb.partID ?? "nil")",
+                "count=\(breadcrumb.messageCount)",
+                "alen=\(breadcrumb.assistantTextLength)"
+            ].joined(separator: " ")
+        }.joined(separator: "\n")
+    }
+
+    func loadChatBreadcrumbs() -> [OpenCodeChatBreadcrumb] {
+        guard let data = UserDefaults.standard.data(forKey: StorageKey.chatBreadcrumbs) else { return [] }
+        return (try? JSONDecoder().decode([OpenCodeChatBreadcrumb].self, from: data)) ?? []
+    }
+
+    func saveChatBreadcrumbs(_ breadcrumbs: [OpenCodeChatBreadcrumb]) {
+        guard let data = try? JSONEncoder().encode(breadcrumbs) else { return }
+        UserDefaults.standard.set(data, forKey: StorageKey.chatBreadcrumbs)
     }
 
     func eventIdentitySummary(for payload: OpenCodeEventEnvelope) -> String {

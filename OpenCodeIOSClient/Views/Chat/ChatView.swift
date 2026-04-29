@@ -102,11 +102,10 @@ struct ChatView: View {
     }
 
     private var listAnimationSignature: String {
-        [
-            displayedMessages.map(\.id).joined(separator: "|"),
-            shouldShowThinking ? "thinking" : "idle",
-            thinkingInsertionMessageID ?? "none"
-        ].joined(separator: "#")
+        displayedMessages
+            .filter(shouldAnimateListInsertion)
+            .map(\.id)
+            .joined(separator: "|")
     }
 
     private var liveSession: OpenCodeSession {
@@ -208,14 +207,10 @@ struct ChatView: View {
                         }
 
                         ForEach(displayedMessages) { message in
-                            if thinkingInsertionMessageID == message.id {
-                                thinkingRowListItem
-                            }
-
                             messageRow(for: message)
                         }
 
-                        if shouldShowThinking, thinkingInsertionMessageID == nil {
+                        if shouldShowThinking {
                             thinkingRowListItem
                         }
 
@@ -752,7 +747,7 @@ struct ChatView: View {
 
     private var thinkingRowListItem: some View {
         ThinkingRow()
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .transition(.identity)
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
@@ -871,6 +866,7 @@ struct ChatView: View {
         guard viewModel.reserveUserPromptIfAllowed() else { return }
 
         OpenCodeHaptics.impact(.strong)
+        viewModel.markChatBreadcrumb("send tapped", sessionID: sessionID)
 
         shouldSnapOnNextMessage = true
         shouldDelayNextUserInsertScroll = true
@@ -906,7 +902,7 @@ struct ChatView: View {
 
             pendingOutgoingSendTask = Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(260))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, viewModel.activeChatSessionID == sessionID else { return }
 
                 pendingOutgoingSend = nil
                 await viewModel.sendMessage(
@@ -925,7 +921,7 @@ struct ChatView: View {
 
         pendingOutgoingSendTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, viewModel.activeChatSessionID == sessionID else { return }
 
             viewModel.draftMessage = pendingSend.text
             viewModel.addDraftAttachments(pendingSend.attachments)
@@ -942,7 +938,7 @@ struct ChatView: View {
             pendingOutgoingSend = nil
             if pendingSend.shouldAnimateBubble {
                 if let messageID = pendingSend.messageID {
-                    viewModel.directoryState.messages.removeAll { $0.id == messageID }
+                    viewModel.removeOptimisticUserMessage(messageID: messageID, sessionID: sessionID)
                 }
                 outgoingEntryResetTask?.cancel()
                 animatingOutgoingMessageID = nil
@@ -992,9 +988,15 @@ struct ChatView: View {
         return displayedMessages.last?.id == message.id
     }
 
-    private var thinkingInsertionMessageID: String? {
-        guard shouldShowThinking else { return nil }
-        return displayedMessages.last(where: { isStreamingMessage($0) })?.id
+    private func shouldAnimateListInsertion(_ message: OpenCodeMessageEnvelope) -> Bool {
+        guard (message.info.role ?? "").lowercased() == "assistant" else { return true }
+        return message.parts.contains { part in
+            if part.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                return true
+            }
+
+            return !["", "step-start", "step-finish", "reasoning", "text"].contains(part.type)
+        }
     }
 
     @ToolbarContentBuilder

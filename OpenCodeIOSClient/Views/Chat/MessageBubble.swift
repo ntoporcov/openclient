@@ -47,7 +47,7 @@ struct MessageBubble: View {
 
         func flushContextParts() {
             guard !contextParts.isEmpty else { return }
-            let firstID = contextParts.first?.part.id ?? "context"
+            let firstID = contextParts.first?.id ?? "context"
             result.append(.context(ContextGroup(id: "context-\(effectiveMessage.id)-\(firstID)", parts: contextParts)))
             contextParts.removeAll()
         }
@@ -208,7 +208,7 @@ struct MessageBubble: View {
                     content
                 }
             } else {
-                let content = MarkdownMessageText(text: text, isUser: isUser, style: textStyle(for: part))
+                let content = MarkdownMessageText(text: text, isUser: isUser, style: textStyle(for: part), isStreaming: isStreamingMessage)
 
                 if isUser {
                     bubbleWrapped(content)
@@ -710,7 +710,7 @@ private struct IndexedPart: Identifiable {
     let part: OpenCodePart
 
     var id: String {
-        part.id ?? "part-\(index)-\(part.type)"
+        "part-\(index)-\(part.id ?? part.type)"
     }
 }
 

@@ -34,6 +34,7 @@ final class AppViewModel: ObservableObject {
         static let pinnedSessionsByScope = "pinnedSessionsByScope"
         static let liveActivityAutoStartByScope = "liveActivityAutoStartByScope"
         static let messageDraftsByChat = "messageDraftsByChat"
+        static let chatBreadcrumbs = "chatBreadcrumbs"
     }
 
     @Published var config = OpenCodeServerConfig()
@@ -84,6 +85,7 @@ final class AppViewModel: ObservableObject {
     @Published var isShowingForkSessionSheet = false
     @Published var debugLastEventSummary = ""
     @Published var debugProbeLog: [String] = []
+    @Published var chatBreadcrumbs: [OpenCodeChatBreadcrumb] = []
     @Published var isShowingDebugProbe = false
     @Published var isRunningDebugProbe = false
     @Published var debugLastControlSummary = ""
@@ -152,6 +154,7 @@ final class AppViewModel: ObservableObject {
         pinnedSessionIDsByScope = loadPinnedSessionIDsByScope()
         liveActivityAutoStartByScope = loadLiveActivityAutoStartByScope()
         messageDraftsByChatKey = loadMessageDraftsByChatKey()
+        chatBreadcrumbs = loadChatBreadcrumbs()
         recentServerConfigs = recentConfigs
         hasSavedServer = recentConfigs.isEmpty == false
         showSavedServerPrompt = hasSavedServer

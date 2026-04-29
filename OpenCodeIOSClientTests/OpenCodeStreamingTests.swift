@@ -277,6 +277,72 @@ final class OpenCodeStreamingTests: XCTestCase {
         XCTAssertEqual(question.id, "q_1")
     }
 
+    func testReducerCreatesPlaceholderWhenDeltaArrivesBeforeMessageShell() throws {
+        let payload = try decodeEvent(
+            #"{"type":"message.part.delta","properties":{"sessionID":"ses_test","messageID":"msg_assistant","partID":"prt_text","field":"text","delta":"Hello"}}"#
+        )
+
+        let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: "ses_test", messages: [])
+
+        XCTAssertEqual(update.messages.count, 1)
+        XCTAssertEqual(update.messages[0].info.id, "msg_assistant")
+        XCTAssertEqual(update.messages[0].info.role, "assistant")
+        XCTAssertEqual(update.messages[0].parts.first?.id, "prt_text")
+        XCTAssertEqual(update.messages[0].parts.first?.text, "Hello")
+    }
+
+    func testReducerIgnoresDeltaMissingPartID() throws {
+        let payload = try decodeEvent(
+            #"{"type":"message.part.delta","properties":{"sessionID":"ses_test","messageID":"msg_assistant","field":"text","delta":"Hello"}}"#
+        )
+
+        let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: "ses_test", messages: [])
+
+        XCTAssertTrue(update.messages.isEmpty)
+        XCTAssertFalse(update.applied)
+        XCTAssertEqual(update.reason, "missing delta target")
+    }
+
+    func testReducerDoesNotDuplicateRepeatedPartUpdates() throws {
+        let first = try decodeEvent(
+            #"{"type":"message.part.updated","properties":{"sessionID":"ses_test","part":{"id":"prt_text","messageID":"msg_assistant","sessionID":"ses_test","type":"text","text":"Hello"}}}"#
+        )
+        let second = try decodeEvent(
+            #"{"type":"message.part.updated","properties":{"sessionID":"ses_test","part":{"id":"prt_text","messageID":"msg_assistant","sessionID":"ses_test","type":"text","text":"Hello world"}}}"#
+        )
+
+        var messages: [OpenCodeMessageEnvelope] = []
+        messages = OpenCodeStreamReducer.apply(payload: first, selectedSessionID: "ses_test", messages: messages).messages
+        messages = OpenCodeStreamReducer.apply(payload: second, selectedSessionID: "ses_test", messages: messages).messages
+
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0].parts.count, 1)
+        XCTAssertEqual(messages[0].parts.first?.text, "Hello world")
+    }
+
+    func testPartRemovedForMissingMessageDoesNotMutateSelectedChat() {
+        let selected = OpenCodeSession(id: "ses_test", title: "Test", workspaceID: nil, directory: nil, projectID: nil, parentID: nil)
+        var state = OpenCodeDirectoryState(
+            sessions: [],
+            selectedSession: selected,
+            messages: [.local(role: "assistant", text: "Keep me", messageID: "msg_keep", sessionID: selected.id, partID: "prt_keep")],
+            commands: [],
+            sessionStatuses: [:],
+            todos: [],
+            permissions: [],
+            questions: []
+        )
+
+        let result = OpenCodeStateReducer.applyDirectoryEvent(event: .messagePartRemoved(messageID: "msg_other", partID: "prt_other"), state: &state)
+
+        guard case .ignored = result else {
+            return XCTFail("Expected ignored result, got \(result)")
+        }
+        XCTAssertEqual(state.messages.count, 1)
+        XCTAssertEqual(state.messages.first?.id, "msg_keep")
+        XCTAssertEqual(state.messages.first?.parts.count, 1)
+    }
+
     private func decodeEvent(_ json: String) throws -> OpenCodeEventEnvelope {
         try JSONDecoder().decode(OpenCodeEventEnvelope.self, from: Data(json.utf8))
     }

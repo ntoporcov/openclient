@@ -503,9 +503,35 @@ extension HelpArticle {
                     body: "OpenClient, this native iPhone client, is being built with the same spirit. The goal is not just to wrap the server in a mobile shell, but to create a first-class open client whose behavior, UI direction, and technical tradeoffs can all be reviewed and improved in public."
                 ),
                 Section(
+                    id: "thanks-opencode-maintainers",
+                    title: "Thanks to the OpenCode maintainers",
+                    body: "OpenClient exists because the OpenCode maintainers and contributors have built the server, SDK, app patterns, and product language that this native client follows. Their work makes it possible for this app to stay aligned with the broader OpenCode ecosystem instead of becoming a separate one-off client."
+                ),
+                Section(
                     id: "why-it-matters",
                     title: "Why that matters",
                     body: "When the tools you use are open, you can understand how they work, verify how they handle your workflow, and contribute fixes or ideas when something falls short. That makes the app better for everyone and keeps the product direction grounded in real usage rather than guesswork."
+                )
+            ])
+        ),
+        HelpArticle(
+            id: "license-notices",
+            category: "Open Source",
+            title: "Licenses And Notices",
+            headline: "OpenClient includes open source software whose licenses require attribution in distributed builds.",
+            heroLabel: "Third-party notices for bundled code.",
+            symbolName: "doc.text.fill",
+            gradient: [Color(red: 0.16, green: 0.25, blue: 0.34), Color(red: 0.31, green: 0.48, blue: 0.64)],
+            content: .sections([
+                Section(
+                    id: "highlighterswift",
+                    title: "HighlighterSwift",
+                    body: "Copyright (c) 2026, Tony Smith. Portions copyright (c) 2016, Juan Pablo Illanes.\n\nMIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
+                ),
+                Section(
+                    id: "highlightjs",
+                    title: "Highlight.js",
+                    body: "Copyright (c) 2006, Ivan Sagalaev. All rights reserved.\n\nBSD 3-Clause License\n\nRedistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:\n\n1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.\n\n2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.\n\n3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
                 )
             ])
         )

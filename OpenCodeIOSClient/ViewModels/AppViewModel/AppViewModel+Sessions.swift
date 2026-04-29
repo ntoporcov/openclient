@@ -390,6 +390,7 @@ extension AppViewModel {
         withAnimation(.snappy(duration: 0.28, extraBounce: 0.02)) {
             directoryState.messages.append(localUserMessage)
         }
+        markChatBreadcrumb("optimistic insert", sessionID: selectedSession.id, messageID: resolvedMessageID, partID: resolvedPartID)
         return (resolvedMessageID, resolvedPartID)
     }
 
@@ -437,7 +438,9 @@ extension AppViewModel {
             clearPersistedMessageDraft(forSessionID: selectedSession.id)
             composerResetToken = UUID()
             directoryState.messages.append(localUserMessage)
+            markChatBreadcrumb("optimistic insert", sessionID: selectedSession.id, messageID: resolvedMessageID, partID: resolvedPartID)
         }
+        markChatBreadcrumb("send start", sessionID: selectedSession.id, messageID: resolvedMessageID, partID: resolvedPartID)
         appendDebugLog("send: \(trimmed)")
         appendDebugLog(
             "send scope session=\(debugSessionLabel(selectedSession)) selectedDir=\(debugDirectoryLabel(effectiveSelectedDirectory)) currentProject=\(currentProject?.id ?? "nil") requestDir=\(debugDirectoryLabel(requestDirectory)) msgID=\(resolvedMessageID) partID=\(resolvedPartID)"
@@ -463,6 +466,7 @@ extension AppViewModel {
                 variant: variant
             )
             appendDebugLog("prompt_async accepted session=\(debugSessionLabel(selectedSession)) msgID=\(resolvedMessageID) partID=\(resolvedPartID)")
+            markChatBreadcrumb("prompt_async accepted", sessionID: selectedSession.id, messageID: resolvedMessageID, partID: resolvedPartID)
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(500))
                 await self?.logServerMessageSnapshot(for: selectedSession, reason: "post-send 500ms")
@@ -480,14 +484,22 @@ extension AppViewModel {
             }
             if userVisible {
                 directoryState.messages.removeAll { $0.id == localUserMessage.id }
+                markChatBreadcrumb("send rollback", sessionID: selectedSession.id, messageID: resolvedMessageID, partID: resolvedPartID)
                 draftMessage = trimmed
                 addDraftAttachments(attachments)
                 persistCurrentMessageDraft(forSessionID: selectedSession.id)
             }
             directoryState.sessionStatuses[selectedSession.id] = previousStatus
             appendDebugLog("send error: \(error.localizedDescription)")
+            markChatBreadcrumb("send error", sessionID: selectedSession.id, messageID: resolvedMessageID, partID: resolvedPartID)
             errorMessage = error.localizedDescription
         }
+    }
+
+    func removeOptimisticUserMessage(messageID: String, sessionID: String) {
+        guard selectedSession?.id == sessionID else { return }
+        directoryState.messages.removeAll { $0.id == messageID && ($0.info.role ?? "").lowercased() == "user" }
+        markChatBreadcrumb("optimistic remove", sessionID: sessionID, messageID: messageID)
     }
 
     func slashCommandInput(from text: String) -> (command: OpenCodeCommand, arguments: String)? {

@@ -31,6 +31,7 @@ struct MarkdownMessageText: View {
     let text: String
     let isUser: Bool
     let style: Style
+    var isStreaming = false
 
     var body: some View {
         switch style {
@@ -43,23 +44,29 @@ struct MarkdownMessageText: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(blocks) { block in
-                switch block {
-                case let .text(_, value):
-                    styledText(markdownText(value))
-                        .padding(.bottom, textBlockBottomPadding(for: value))
-                case let .heading(_, level, value):
-                    styledHeading(markdownText(value), level: level)
-                case let .blockQuote(_, value):
-                    styledBlockQuote(markdownText(value))
-                case let .listItem(_, marker, value):
-                    styledListItem(markdownText(value), marker: marker)
-                case let .table(_, headers, rows):
-                    styledTable(headers: headers, rows: rows)
-                case let .codeBlock(_, language, value):
-                    HighlightedCodeBlock(code: value, language: language)
-                        .padding(.vertical, codeBlockOuterPadding)
+        Group {
+            if isStreaming {
+                styledText(Text(verbatim: text))
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(blocks) { block in
+                        switch block {
+                        case let .text(_, value):
+                            styledText(markdownText(value))
+                                .padding(.bottom, textBlockBottomPadding(for: value))
+                        case let .heading(_, level, value):
+                            styledHeading(markdownText(value), level: level)
+                        case let .blockQuote(_, value):
+                            styledBlockQuote(markdownText(value))
+                        case let .listItem(_, marker, value):
+                            styledListItem(markdownText(value), marker: marker)
+                        case let .table(_, headers, rows):
+                            styledTable(headers: headers, rows: rows)
+                        case let .codeBlock(_, language, value):
+                            HighlightedCodeBlock(code: value, language: language)
+                                .padding(.vertical, codeBlockOuterPadding)
+                        }
+                    }
                 }
             }
         }
