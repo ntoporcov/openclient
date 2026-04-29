@@ -247,7 +247,7 @@ struct ChatView: View {
                         chatContentOffsetY = shouldAnimateInitialChatReveal ? 14 : 0
                         shouldShowLoadingIndicator = false
                         if !hasLoadedInitialWindow {
-                            visibleMessageCount = min(viewModel.messages.count, messageWindowSize)
+                            visibleMessageCount = messageWindowSize
                             hasLoadedInitialWindow = true
                         }
                         updateChatContentVisibility()
@@ -276,11 +276,14 @@ struct ChatView: View {
                     }
                     .onChange(of: viewModel.messages.count) { oldCount, count in
                         if !hasLoadedInitialWindow {
-                            visibleMessageCount = min(count, messageWindowSize)
+                            visibleMessageCount = messageWindowSize
                             return
                         }
 
                         visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
+                        if count == 0 {
+                            visibleMessageCount = messageWindowSize
+                        }
 
                         if count > 0, !hasCompletedInitialHydrationSnap {
                             hasCompletedInitialHydrationSnap = true

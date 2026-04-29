@@ -8,7 +8,7 @@ struct AgentToolbarMenu: View {
     var body: some View {
         Menu {
             ForEach(viewModel.selectableAgents) { agent in
-                Button(agent.name) {
+                Button(agent.name.capitalized) {
                     viewModel.selectAgent(named: agent.name, for: session)
                 }
             }
