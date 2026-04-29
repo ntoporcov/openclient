@@ -585,6 +585,39 @@ struct OpenCodeProvidersResponse: Codable, Hashable, Sendable {
     let `default`: [String: String]?
 }
 
+struct OpenCodeMCPStatus: Codable, Hashable, Sendable {
+    let status: String
+    let error: String?
+
+    var isConnected: Bool {
+        status == "connected"
+    }
+
+    var displayStatus: String {
+        switch status {
+        case "connected":
+            return "Connected"
+        case "disabled":
+            return "Disabled"
+        case "failed":
+            return "Failed"
+        case "needs_auth":
+            return "Needs Auth"
+        case "needs_client_registration":
+            return "Needs Registration"
+        default:
+            return status.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+}
+
+struct OpenCodeMCPServer: Identifiable, Hashable, Sendable {
+    let name: String
+    let status: OpenCodeMCPStatus
+
+    var id: String { name }
+}
+
 struct OpenCodeDirectoryState: Equatable, Sendable {
     var isLoadingSessions = false
     var sessions: [OpenCodeSession] = []
@@ -596,6 +629,11 @@ struct OpenCodeDirectoryState: Equatable, Sendable {
     var todos: [OpenCodeTodo] = []
     var permissions: [OpenCodePermission] = []
     var questions: [OpenCodeQuestionRequest] = []
+    var mcpStatuses: [String: OpenCodeMCPStatus] = [:]
+    var isMCPReady = false
+    var isLoadingMCP = false
+    var togglingMCPServerNames: Set<String> = []
+    var mcpErrorMessage: String?
     var vcsInfo: OpenCodeVCSInfo?
     var vcsFileStatuses: [OpenCodeVCSFileStatus] = []
     var vcsDiffsByMode: [OpenCodeVCSDiffMode: [OpenCodeVCSFileDiff]] = [:]

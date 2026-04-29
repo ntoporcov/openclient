@@ -49,7 +49,7 @@ private struct MessageComposerPreviewHost: View {
     @State private var isAccessoryMenuOpen = false
 
     var body: some View {
-        MessageComposer(text: $text, isAccessoryMenuOpen: $isAccessoryMenuOpen, commands: OpenCodePreviewData.commands, attachmentCount: OpenCodePreviewData.composerAttachments.count, isBusy: false, canFork: true, onInputFrameChange: { _ in }, onFocusChange: { _ in }, onSend: {}, onStop: {}, onSelectCommand: { _ in }, onOpenFork: {}, onAddAttachments: { _ in })
+        MessageComposer(text: $text, isAccessoryMenuOpen: $isAccessoryMenuOpen, commands: OpenCodePreviewData.commands, attachmentCount: OpenCodePreviewData.composerAttachments.count, isBusy: false, canFork: true, onInputFrameChange: { _ in }, onFocusChange: { _ in }, onSend: {}, onStop: {}, onSelectCommand: { _ in }, onCompact: {}, onOpenFork: {}, onAddAttachments: { _ in })
             .padding()
             .background(OpenCodePlatformColor.groupedBackground)
     }

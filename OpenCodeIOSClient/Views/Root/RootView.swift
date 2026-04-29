@@ -30,6 +30,8 @@ struct RootView: View {
                         } else {
                             ProjectFileContentView(viewModel: viewModel)
                         }
+                    } else if viewModel.selectedProjectContentTab == .mcp {
+                        ContentUnavailableView("MCP Servers", systemImage: "server.rack", description: Text("Toggle servers from the MCP tab."))
                     } else if let session = viewModel.selectedSession {
                         ChatView(viewModel: viewModel, sessionID: session.id)
                             .id(session.id)

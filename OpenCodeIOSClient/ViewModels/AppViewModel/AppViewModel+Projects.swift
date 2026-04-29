@@ -21,6 +21,11 @@ extension AppViewModel {
             directoryState.todos = []
             directoryState.permissions = []
             directoryState.questions = []
+            directoryState.mcpStatuses = [:]
+            directoryState.isMCPReady = false
+            directoryState.isLoadingMCP = false
+            directoryState.togglingMCPServerNames = []
+            directoryState.mcpErrorMessage = nil
             directoryState.vcsInfo = nil
             directoryState.vcsFileStatuses = []
             directoryState.vcsDiffsByMode = [:]

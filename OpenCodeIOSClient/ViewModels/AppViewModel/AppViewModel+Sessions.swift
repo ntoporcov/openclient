@@ -226,6 +226,10 @@ extension AppViewModel {
                 presentForkSessionSheet()
                 return
             }
+            if isCompactClientCommand(command) {
+                await compactSession(sessionID: selectedSessionID, userVisible: true, meterPrompt: meterPrompt)
+                return
+            }
             await sendCommand(command, arguments: arguments, attachments: attachments, sessionID: selectedSessionID, userVisible: true, meterPrompt: meterPrompt)
             return
         }
@@ -247,6 +251,11 @@ extension AppViewModel {
     }
 
     func sendCommand(_ command: OpenCodeCommand, arguments: String, attachments: [OpenCodeComposerAttachment], in selectedSession: OpenCodeSession, userVisible: Bool, meterPrompt: Bool = true) async {
+        if isCompactClientCommand(command) {
+            await compactSession(selectedSession, userVisible: userVisible, meterPrompt: meterPrompt)
+            return
+        }
+
         guard directoryState.sessionStatuses[selectedSession.id] != "busy" else {
             appendDebugLog("command blocked busy session=\(debugSessionLabel(selectedSession)) command=\(command.name)")
             return
@@ -553,6 +562,81 @@ extension AppViewModel {
 
     func isForkClientCommand(_ command: OpenCodeCommand) -> Bool {
         command.source == "client" && command.name == "fork"
+    }
+
+    func isCompactClientCommand(_ command: OpenCodeCommand) -> Bool {
+        command.name == "compact"
+    }
+
+    func compactSession(sessionID: String, userVisible: Bool, meterPrompt: Bool = true) async {
+        guard let session = session(matching: sessionID) else { return }
+        await compactSession(session, userVisible: userVisible, meterPrompt: meterPrompt)
+    }
+
+    func compactSession(_ selectedSession: OpenCodeSession, userVisible: Bool, meterPrompt: Bool = true) async {
+        guard selectedSession.parentID == nil else {
+            appendDebugLog("compact blocked child session=\(debugSessionLabel(selectedSession))")
+            errorMessage = "Compact is only available in root sessions."
+            return
+        }
+
+        guard directoryState.sessionStatuses[selectedSession.id] != "busy" else {
+            appendDebugLog("compact blocked busy session=\(debugSessionLabel(selectedSession))")
+            return
+        }
+
+        guard let modelReference = effectiveModelReference(for: selectedSession) else {
+            appendDebugLog("compact blocked missing model session=\(debugSessionLabel(selectedSession))")
+            errorMessage = "Select a model before compacting this session."
+            return
+        }
+
+        if userVisible, meterPrompt, !reserveUserPromptIfAllowed() {
+            appendDebugLog("compact blocked paywall session=\(debugSessionLabel(selectedSession))")
+            return
+        }
+
+        let requestDirectory = sendDirectory(for: selectedSession)
+
+        if userVisible {
+            draftMessage = ""
+            clearDraftAttachments()
+            clearPersistedMessageDraft(forSessionID: selectedSession.id)
+            composerResetToken = UUID()
+        }
+
+        appendDebugLog(
+            "compact request session=\(debugSessionLabel(selectedSession)) selectedDir=\(debugDirectoryLabel(effectiveSelectedDirectory)) requestDir=\(debugDirectoryLabel(requestDirectory)) model=\(modelReference.providerID)/\(modelReference.modelID)"
+        )
+
+        isLoading = true
+        let previousStatus = directoryState.sessionStatuses[selectedSession.id]
+        directoryState.sessionStatuses[selectedSession.id] = "busy"
+        defer { isLoading = false }
+
+        await maybeAutoStartLiveActivity(for: selectedSession)
+
+        do {
+            try await client.summarizeSession(
+                sessionID: selectedSession.id,
+                directory: requestDirectory,
+                model: modelReference,
+                auto: false
+            )
+            appendDebugLog("compact accepted session=\(debugSessionLabel(selectedSession))")
+            startLiveRefresh(for: selectedSession, reason: "compact")
+            refreshLiveActivityIfNeeded(for: selectedSession.id)
+            errorMessage = nil
+        } catch {
+            if userVisible {
+                refundReservedUserPromptIfNeeded()
+                draftMessage = "/compact"
+                persistCurrentMessageDraft(forSessionID: selectedSession.id)
+            }
+            directoryState.sessionStatuses[selectedSession.id] = previousStatus
+            appendDebugLog("compact error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
     }
 
     func shouldOpenForkSheet(forSlashInput text: String) -> Bool {

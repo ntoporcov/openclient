@@ -120,6 +120,7 @@ private struct EquatableMessageComposerHost: View, Equatable {
     let onSend: () -> Void
     let onStop: () -> Void
     let onSelectCommand: (OpenCodeCommand) -> Void
+    let onCompact: () -> Void
     let onOpenFork: () -> Void
     let onAddAttachments: ([OpenCodeComposerAttachment]) -> Void
 
@@ -140,6 +141,7 @@ private struct EquatableMessageComposerHost: View, Equatable {
             onSend: onSend,
             onStop: onStop,
             onSelectCommand: onSelectCommand,
+            onCompact: onCompact,
             onOpenFork: onOpenFork,
             onAddAttachments: onAddAttachments
         )
@@ -606,7 +608,7 @@ struct ChatView: View {
             if composerAccessoryExpansion.isExpanded || isComposerMenuOpen {
                 GeometryReader { geometry in
                     let protectedWidth: CGFloat = isComposerMenuOpen ? 276 : 0
-                    let protectedHeight: CGFloat = isComposerMenuOpen ? 252 : 0
+                    let protectedHeight: CGFloat = isComposerMenuOpen ? 314 : 0
 
                     VStack(spacing: 0) {
                         Color.black.opacity(0.001)
@@ -761,7 +763,19 @@ struct ChatView: View {
                 }
                 guard viewModel.reserveUserPromptIfAllowed() else { return }
                 shouldSnapOnNextMessage = true
-                Task { await viewModel.sendCommand(command, sessionID: sessionID, userVisible: true, meterPrompt: false) }
+                Task {
+                    if viewModel.isCompactClientCommand(command) {
+                        await viewModel.compactSession(sessionID: sessionID, userVisible: true, meterPrompt: false)
+                    } else {
+                        await viewModel.sendCommand(command, sessionID: sessionID, userVisible: true, meterPrompt: false)
+                    }
+                }
+            },
+            onCompact: {
+                viewModel.flushBufferedTranscript(reason: "compact menu action")
+                guard viewModel.reserveUserPromptIfAllowed() else { return }
+                shouldSnapOnNextMessage = true
+                Task { await viewModel.compactSession(sessionID: sessionID, userVisible: true, meterPrompt: false) }
             },
             onOpenFork: {
                 viewModel.presentForkSessionSheet()
@@ -1107,13 +1121,15 @@ struct ChatView: View {
     }
 
     private func compactionRow(for compaction: CompactionDisplayItem) -> some View {
-        Button {
+        let isStreaming = isSessionBusy && compaction.summaryMessage?.info.time?.completed == nil
+
+        return Button {
             selectedCompactionSummary = compaction.payload
         } label: {
-            CompactionBoundaryRow(hasSummary: compaction.summaryText != nil)
+            CompactionBoundaryRow(hasSummary: compaction.summaryText != nil, isStreaming: isStreaming)
         }
         .buttonStyle(.plain)
-        .disabled(compaction.summaryText == nil)
+        .disabled(compaction.summaryText == nil || isStreaming)
         .id(compaction.id)
         .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
         .listRowSeparator(.hidden)
@@ -1233,6 +1249,16 @@ struct ChatView: View {
         }
 
         guard viewModel.reserveUserPromptIfAllowed() else { return }
+
+        if !hasAttachments,
+           viewModel.slashCommandInput(from: draftText).map({ viewModel.isCompactClientCommand($0.command) }) == true {
+            viewModel.draftMessage = ""
+            viewModel.clearPersistedMessageDraft(forSessionID: sessionID)
+            viewModel.composerResetToken = UUID()
+            shouldSnapOnNextMessage = true
+            Task { await viewModel.compactSession(sessionID: sessionID, userVisible: true, meterPrompt: false) }
+            return
+        }
 
         OpenCodeHaptics.impact(.strong)
         viewModel.markChatBreadcrumb("send tapped", sessionID: sessionID)
@@ -1514,6 +1540,7 @@ struct ChatView: View {
 
 private struct CompactionBoundaryRow: View {
     let hasSummary: Bool
+    let isStreaming: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -1522,17 +1549,26 @@ private struct CompactionBoundaryRow: View {
                 .frame(height: 1)
 
             HStack(spacing: 8) {
-                Image(systemName: "rectangle.compress.vertical")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(hasSummary ? "Session compacted" : "Compacting session")
+                if isStreaming {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: "rectangle.compress.vertical")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                Text(isStreaming ? "Compacting session" : "Session compacted")
                     .font(.caption.weight(.semibold))
-                if hasSummary {
+                    .lineLimit(1)
+                if hasSummary && !isStreaming {
                     Text("View context")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(.thinMaterial, in: Capsule())
@@ -1546,7 +1582,7 @@ private struct CompactionBoundaryRow: View {
                 .frame(height: 1)
         }
         .frame(maxWidth: .infinity)
-        .accessibilityLabel(hasSummary ? "Session compacted. View context." : "Compacting session")
+        .accessibilityLabel(isStreaming ? "Compacting session" : (hasSummary ? "Session compacted. View context." : "Session compacted"))
     }
 }
 

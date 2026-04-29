@@ -545,7 +545,8 @@ extension AppViewModel {
         guard let message = directoryState.messages.first(where: {
             $0.id == messageID &&
             $0.info.sessionID == sessionID &&
-            ($0.info.role ?? "").lowercased() == "assistant"
+            ($0.info.role ?? "").lowercased() == "assistant" &&
+            !$0.info.isCompactionSummary
         }) else {
             return false
         }

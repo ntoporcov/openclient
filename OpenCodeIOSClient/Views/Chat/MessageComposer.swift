@@ -19,6 +19,7 @@ struct MessageComposer: View {
     let onSend: () -> Void
     let onStop: () -> Void
     let onSelectCommand: (OpenCodeCommand) -> Void
+    let onCompact: () -> Void
     let onOpenFork: () -> Void
     let onAddAttachments: ([OpenCodeComposerAttachment]) -> Void
 
@@ -327,6 +328,18 @@ struct MessageComposer: View {
                 tint: .blue,
                 isDisabled: !canInsertCommandShortcut,
                 action: insertSlashCommand
+            )
+
+            AccessoryMenuAction(
+                title: "Compact",
+                subtitle: "Summarize context",
+                systemImage: "rectangle.compress.vertical",
+                tint: .teal,
+                isDisabled: isBusy,
+                action: {
+                    isAccessoryMenuOpen = false
+                    onCompact()
+                }
             )
 
             AccessoryMenuAction(

@@ -152,6 +152,18 @@ struct OpenCodeAPIClient: Sendable {
         return response.default ?? [:]
     }
 
+    func listMCPStatus(directory: String? = nil, workspaceID: String? = nil) async throws -> [String: OpenCodeMCPStatus] {
+        try await send(path: "/mcp", method: "GET", queryItems: scopedQueryItems(directory: directory, workspaceID: workspaceID), directoryHeader: directory)
+    }
+
+    func connectMCPServer(name: String, directory: String? = nil, workspaceID: String? = nil) async throws {
+        try await sendNoContent(path: "/mcp/\(encodedPathComponent(name))/connect", method: "POST", queryItems: scopedQueryItems(directory: directory, workspaceID: workspaceID), directoryHeader: directory)
+    }
+
+    func disconnectMCPServer(name: String, directory: String? = nil, workspaceID: String? = nil) async throws {
+        try await sendNoContent(path: "/mcp/\(encodedPathComponent(name))/disconnect", method: "POST", queryItems: scopedQueryItems(directory: directory, workspaceID: workspaceID), directoryHeader: directory)
+    }
+
     func listPermissions(directory: String? = nil, workspaceID: String? = nil) async throws -> [OpenCodePermission] {
         var queryItems: [URLQueryItem] = []
         if let directory, !directory.isEmpty {
@@ -296,6 +308,17 @@ struct OpenCodeAPIClient: Sendable {
         )
         let queryItems = directory.map { [URLQueryItem(name: "directory", value: $0)] } ?? []
         try await sendNoContent(path: "/session/\(sessionID)/command", method: "POST", queryItems: queryItems, body: payload, directoryHeader: directory)
+    }
+
+    func summarizeSession(
+        sessionID: String,
+        directory: String? = nil,
+        model: OpenCodeModelReference,
+        auto: Bool = false
+    ) async throws {
+        let payload = SummarizeSessionRequest(providerID: model.providerID, modelID: model.modelID, auto: auto)
+        let queryItems = directory.map { [URLQueryItem(name: "directory", value: $0)] } ?? []
+        try await sendNoContent(path: "/session/\(sessionID)/summarize", method: "POST", queryItems: queryItems, body: payload, directoryHeader: directory)
     }
 
     func abortSession(sessionID: String, directory: String? = nil, workspaceID: String? = nil) async throws {
@@ -562,6 +585,21 @@ struct OpenCodeAPIClient: Sendable {
         return directory.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? directory
     }
 
+    private func scopedQueryItems(directory: String?, workspaceID: String?) -> [URLQueryItem] {
+        var queryItems: [URLQueryItem] = []
+        if let directory, !directory.isEmpty {
+            queryItems.append(URLQueryItem(name: "directory", value: directory))
+        }
+        if let workspaceID, !workspaceID.isEmpty {
+            queryItems.append(URLQueryItem(name: "workspace", value: workspaceID))
+        }
+        return queryItems
+    }
+
+    private func encodedPathComponent(_ value: String) -> String {
+        value
+    }
+
     private func makePromptRequest(
         text: String,
         attachments: [OpenCodeComposerAttachment],
@@ -619,4 +657,10 @@ private struct SendCommandRequest: Encodable {
     let command: String
     let variant: String?
     let parts: [SendMessagePart]
+}
+
+private struct SummarizeSessionRequest: Encodable {
+    let providerID: String
+    let modelID: String
+    let auto: Bool
 }

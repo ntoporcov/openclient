@@ -19,6 +19,12 @@ struct ProjectContentView: View {
                     }
                     .tag(AppViewModel.ProjectContentTab.git)
             }
+
+            MCPListView(viewModel: viewModel)
+                .tabItem {
+                    Label(AppViewModel.ProjectContentTab.mcp.title, systemImage: "server.rack")
+                }
+                .tag(AppViewModel.ProjectContentTab.mcp)
         }
         .background(OpenCodePlatformColor.groupedBackground)
         .navigationTitle(projectTitle)
@@ -48,6 +54,8 @@ struct ProjectContentView: View {
         .onChange(of: viewModel.selectedProjectContentTab) { _, tab in
             if tab == .git {
                 viewModel.presentGitView()
+            } else if tab == .mcp {
+                viewModel.presentMCPView()
             }
         }
     }
@@ -68,6 +76,8 @@ struct ProjectContentView: View {
             return "square.and.pencil"
         case .git:
             return "arrow.clockwise"
+        case .mcp:
+            return "arrow.clockwise"
         }
     }
 
@@ -77,6 +87,8 @@ struct ProjectContentView: View {
             return "Create Session"
         case .git:
             return viewModel.projectFilesMode == .tree ? "Refresh File Tree" : "Refresh Files"
+        case .mcp:
+            return "Refresh MCP Servers"
         }
     }
 
@@ -86,6 +98,8 @@ struct ProjectContentView: View {
             return "sessions.create"
         case .git:
             return "git.refresh"
+        case .mcp:
+            return "mcp.refresh"
         }
     }
 
@@ -95,6 +109,8 @@ struct ProjectContentView: View {
             return false
         case .git:
             return viewModel.directoryState.isLoadingVCS || viewModel.directoryState.isLoadingFileTree
+        case .mcp:
+            return viewModel.directoryState.isLoadingMCP
         }
     }
 
@@ -110,6 +126,10 @@ struct ProjectContentView: View {
                 } else {
                     await viewModel.reloadGitViewData(force: true)
                 }
+            }
+        case .mcp:
+            Task {
+                await viewModel.reloadMCPStatus()
             }
         }
     }

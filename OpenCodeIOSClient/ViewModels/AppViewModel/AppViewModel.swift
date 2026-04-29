@@ -25,6 +25,7 @@ final class AppViewModel: ObservableObject {
     enum ProjectContentTab: String, CaseIterable {
         case sessions
         case git
+        case mcp
 
         var title: String {
             switch self {
@@ -32,6 +33,8 @@ final class AppViewModel: ObservableObject {
                 return "Sessions"
             case .git:
                 return "Files"
+            case .mcp:
+                return "MCP"
             }
         }
     }
@@ -226,6 +229,9 @@ final class AppViewModel: ObservableObject {
 
     func commands(canFork: Bool) -> [OpenCodeCommand] {
         var result = directoryState.commands
+        if selectedSession != nil, !result.contains(where: { $0.name == "compact" }) {
+            result.append(Self.compactClientCommand)
+        }
         if selectedSession != nil, canFork, !result.contains(where: { $0.name == "fork" }) {
             result.append(Self.forkClientCommand)
         }
@@ -258,6 +264,17 @@ final class AppViewModel: ObservableObject {
     static let forkClientCommand = OpenCodeCommand(
         name: "fork",
         description: "Create a new session from a previous message",
+        agent: nil,
+        model: nil,
+        source: "client",
+        template: "",
+        subtask: false,
+        hints: []
+    )
+
+    static let compactClientCommand = OpenCodeCommand(
+        name: "compact",
+        description: "Summarize the session context",
         agent: nil,
         model: nil,
         source: "client",

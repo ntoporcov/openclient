@@ -161,6 +161,107 @@ final class OpenCodeAPIClientTests: XCTestCase {
         await fulfillment(of: [expectation], timeout: 1)
     }
 
+    func testListMCPStatusUsesDirectoryAndWorkspaceScope() async throws {
+        let expectation = expectation(description: "request captured")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = OpenCodeAPIClient(
+            config: OpenCodeServerConfig(baseURL: "http://127.0.0.1:4096", username: "opencode", password: "pw"),
+            session: session
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/mcp")
+            XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems, [
+                URLQueryItem(name: "directory", value: "/tmp/project"),
+                URLQueryItem(name: "workspace", value: "ws_123"),
+            ])
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/tmp/project")
+            expectation.fulfill()
+
+            let data = """
+            {
+              \"github\": { \"status\": \"connected\" },
+              \"broken\": { \"status\": \"failed\", \"error\": \"boom\" },
+              \"oauth\": { \"status\": \"needs_client_registration\", \"error\": \"register first\" }
+            }
+            """.data(using: .utf8)!
+
+            return (
+                HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data
+            )
+        }
+
+        let statuses = try await client.listMCPStatus(directory: "/tmp/project", workspaceID: "ws_123")
+        XCTAssertEqual(statuses["github"]?.status, "connected")
+        XCTAssertEqual(statuses["broken"]?.error, "boom")
+        XCTAssertEqual(statuses["oauth"]?.displayStatus, "Needs Registration")
+        await fulfillment(of: [expectation], timeout: 1)
+    }
+
+    func testConnectMCPServerUsesScopedConnectEndpoint() async throws {
+        let expectation = expectation(description: "request captured")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = OpenCodeAPIClient(
+            config: OpenCodeServerConfig(baseURL: "http://127.0.0.1:4096", username: "opencode", password: "pw"),
+            session: session
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path(percentEncoded: true), "/mcp/local%20server/connect")
+            XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems, [
+                URLQueryItem(name: "directory", value: "/tmp/project"),
+                URLQueryItem(name: "workspace", value: "ws_123"),
+            ])
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/tmp/project")
+            expectation.fulfill()
+
+            return (
+                HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                Data("true".utf8)
+            )
+        }
+
+        try await client.connectMCPServer(name: "local server", directory: "/tmp/project", workspaceID: "ws_123")
+        await fulfillment(of: [expectation], timeout: 1)
+    }
+
+    func testDisconnectMCPServerUsesScopedDisconnectEndpoint() async throws {
+        let expectation = expectation(description: "request captured")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = OpenCodeAPIClient(
+            config: OpenCodeServerConfig(baseURL: "http://127.0.0.1:4096", username: "opencode", password: "pw"),
+            session: session
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/mcp/github/disconnect")
+            XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems, [
+                URLQueryItem(name: "directory", value: "/tmp/project"),
+                URLQueryItem(name: "workspace", value: "ws_123"),
+            ])
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/tmp/project")
+            expectation.fulfill()
+
+            return (
+                HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                Data("true".utf8)
+            )
+        }
+
+        try await client.disconnectMCPServer(name: "github", directory: "/tmp/project", workspaceID: "ws_123")
+        await fulfillment(of: [expectation], timeout: 1)
+    }
+
     func testReplyToPermissionUsesDirectoryAndWorkspaceScope() async throws {
         let expectation = expectation(description: "request captured")
         let configuration = URLSessionConfiguration.ephemeral
