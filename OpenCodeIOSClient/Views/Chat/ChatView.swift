@@ -3,6 +3,12 @@ import SwiftUI
 import UIKit
 #endif
 
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
 fileprivate enum AppleIntelligenceInstructionTab: String, CaseIterable, Identifiable {
     case user
     case system
@@ -29,6 +35,47 @@ private struct MessageDebugPayload: Identifiable {
         self.id = message.id
         self.title = message.info.id
         self.json = json
+    }
+}
+
+private struct CompactionSummaryPayload: Identifiable {
+    let id: String
+    let title: String
+    let summary: String
+}
+
+private struct CompactionDisplayItem: Identifiable {
+    let boundaryMessage: OpenCodeMessageEnvelope
+    let summaryMessage: OpenCodeMessageEnvelope?
+
+    var id: String { "compaction-\(boundaryMessage.id)" }
+
+    var summaryText: String? {
+        summaryMessage?.parts
+            .compactMap(\.text)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+            .nilIfEmpty
+    }
+
+    var payload: CompactionSummaryPayload? {
+        guard let summaryText else { return nil }
+        return CompactionSummaryPayload(id: id, title: "Compacted Context", summary: summaryText)
+    }
+}
+
+private enum ChatDisplayItem: Identifiable {
+    case message(OpenCodeMessageEnvelope)
+    case compaction(CompactionDisplayItem)
+
+    var id: String {
+        switch self {
+        case let .message(message):
+            return message.id
+        case let .compaction(item):
+            return item.id
+        }
     }
 }
 
@@ -106,6 +153,7 @@ struct ChatView: View {
     @Namespace private var toolbarGlassNamespace
     @State private var copiedDebugLog = false
     @State private var selectedMessageDebugPayload: MessageDebugPayload?
+    @State private var selectedCompactionSummary: CompactionSummaryPayload?
     @State private var selectedActivityDetail: ActivityDetail?
     @State private var showingTodoInspector = false
     @State private var visibleMessageCount = 80
@@ -169,8 +217,7 @@ struct ChatView: View {
     }
 
     private var listAnimationSignature: String {
-        displayedMessages
-            .filter(shouldAnimateListInsertion)
+        displayedChatItems
             .map(\.id)
             .joined(separator: "|")
     }
@@ -346,8 +393,8 @@ struct ChatView: View {
                             .listRowBackground(Color.clear)
                         }
 
-                        ForEach(displayedMessages) { message in
-                            messageRow(for: message)
+                        ForEach(displayedChatItems) { item in
+                            chatRow(for: item)
                         }
 
                         if shouldShowThinking {
@@ -518,6 +565,12 @@ struct ChatView: View {
             NavigationStack {
                 MessageDebugSheet(payload: payload)
             }
+        }
+        .sheet(item: $selectedCompactionSummary) { payload in
+            NavigationStack {
+                CompactionSummarySheet(payload: payload)
+            }
+            .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showingTodoInspector) {
             NavigationStack {
@@ -976,6 +1029,10 @@ struct ChatView: View {
         viewModel.messages.suffix(visibleMessageCount)
     }
 
+    private var displayedChatItems: [ChatDisplayItem] {
+        makeDisplayItems(from: Array(displayedMessages))
+    }
+
     private var hiddenMessageCount: Int {
         max(0, viewModel.messages.count - displayedMessages.count)
     }
@@ -1008,6 +1065,16 @@ struct ChatView: View {
             .listRowBackground(Color.clear)
     }
 
+    @ViewBuilder
+    private func chatRow(for item: ChatDisplayItem) -> some View {
+        switch item {
+        case let .message(message):
+            messageRow(for: message)
+        case let .compaction(compaction):
+            compactionRow(for: compaction)
+        }
+    }
+
     private func messageRow(for message: OpenCodeMessageEnvelope) -> some View {
         MessageBubble(
             message: message,
@@ -1037,6 +1104,50 @@ struct ChatView: View {
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
+    }
+
+    private func compactionRow(for compaction: CompactionDisplayItem) -> some View {
+        Button {
+            selectedCompactionSummary = compaction.payload
+        } label: {
+            CompactionBoundaryRow(hasSummary: compaction.summaryText != nil)
+        }
+        .buttonStyle(.plain)
+        .disabled(compaction.summaryText == nil)
+        .id(compaction.id)
+        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+    }
+
+    private func makeDisplayItems(from messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
+        var result: [ChatDisplayItem] = []
+
+        for (index, message) in messages.enumerated() {
+            if message.info.isCompactionSummary {
+                continue
+            }
+
+            if message.parts.contains(where: \.isCompaction) {
+                let summary = compactionSummary(for: message, at: index, in: messages)
+                result.append(.compaction(CompactionDisplayItem(boundaryMessage: message, summaryMessage: summary)))
+                continue
+            }
+
+            result.append(.message(message))
+        }
+
+        return result
+    }
+
+    private func compactionSummary(for boundary: OpenCodeMessageEnvelope, at index: Int, in messages: [OpenCodeMessageEnvelope]) -> OpenCodeMessageEnvelope? {
+        if let paired = messages.first(where: { $0.info.isCompactionSummary && $0.info.parentID == boundary.id }) {
+            return paired
+        }
+
+        return messages.dropFirst(index + 1).first { message in
+            message.info.isCompactionSummary
+        }
     }
 
     private func updateChatContentVisibility() {
@@ -1398,6 +1509,70 @@ struct ChatView: View {
             }.joined(separator: " ")
             return "\(role):\n\(partSummary)"
         }.joined(separator: "\n\n")
+    }
+}
+
+private struct CompactionBoundaryRow: View {
+    let hasSummary: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.22))
+                .frame(height: 1)
+
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.compress.vertical")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(hasSummary ? "Session compacted" : "Compacting session")
+                    .font(.caption.weight(.semibold))
+                if hasSummary {
+                    Text("View context")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.thinMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+            }
+
+            Rectangle()
+                .fill(Color.secondary.opacity(0.22))
+                .frame(height: 1)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel(hasSummary ? "Session compacted. View context." : "Compacting session")
+    }
+}
+
+private struct CompactionSummarySheet: View {
+    let payload: CompactionSummaryPayload
+
+    @State private var copiedSummary = false
+
+    var body: some View {
+        ScrollView {
+            MarkdownMessageText(text: payload.summary, isUser: false, style: .standard, isStreaming: false, animatesStreamingText: false)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+        .background(OpenCodePlatformColor.groupedBackground)
+        .navigationTitle(payload.title)
+        .opencodeInlineNavigationTitle()
+        .toolbar {
+            ToolbarItem(placement: .opencodeTrailing) {
+                Button(copiedSummary ? "Copied" : "Copy") {
+                    OpenCodeClipboard.copy(payload.summary)
+                    copiedSummary = true
+                }
+            }
+        }
     }
 }
 

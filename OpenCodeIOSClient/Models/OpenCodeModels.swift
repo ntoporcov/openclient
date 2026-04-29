@@ -283,6 +283,44 @@ struct OpenCodeMessage: Codable, Hashable, Sendable {
     let time: OpenCodeMessageTime?
     let agent: String?
     let model: OpenCodeMessageModelReference?
+    let parentID: String?
+    let mode: String?
+    let summary: Bool?
+    let finish: String?
+    let providerID: String?
+    let modelID: String?
+
+    init(
+        id: String,
+        role: String?,
+        sessionID: String?,
+        time: OpenCodeMessageTime?,
+        agent: String?,
+        model: OpenCodeMessageModelReference?,
+        parentID: String? = nil,
+        mode: String? = nil,
+        summary: Bool? = nil,
+        finish: String? = nil,
+        providerID: String? = nil,
+        modelID: String? = nil
+    ) {
+        self.id = id
+        self.role = role
+        self.sessionID = sessionID
+        self.time = time
+        self.agent = agent
+        self.model = model
+        self.parentID = parentID
+        self.mode = mode
+        self.summary = summary
+        self.finish = finish
+        self.providerID = providerID
+        self.modelID = modelID
+    }
+
+    var isCompactionSummary: Bool {
+        (role ?? "").lowercased() == "assistant" && (summary == true || agent == "compaction" || mode == "compaction")
+    }
 }
 
 struct OpenCodeMessageModelReference: Codable, Hashable, Sendable {
@@ -307,6 +345,11 @@ struct OpenCodeEventInfo: Codable, Hashable, Sendable {
     let directory: String?
     let projectID: String?
     let parentID: String?
+    let mode: String?
+    let summary: Bool?
+    let finish: String?
+    let providerID: String?
+    let modelID: String?
 
     init(message: OpenCodeMessage) {
         id = message.id
@@ -318,11 +361,32 @@ struct OpenCodeEventInfo: Codable, Hashable, Sendable {
         title = nil
         directory = nil
         projectID = nil
-        parentID = nil
+        parentID = message.parentID
+        mode = message.mode
+        summary = message.summary
+        finish = message.finish
+        providerID = message.providerID
+        modelID = message.modelID
     }
 
     func asMessage() -> OpenCodeMessage {
-        OpenCodeMessage(id: id, role: role, sessionID: sessionID, time: time, agent: agent, model: model)
+        let effectiveModel = model ?? providerID.flatMap { providerID in
+            modelID.map { OpenCodeMessageModelReference(providerID: providerID, modelID: $0, variant: nil) }
+        }
+        return OpenCodeMessage(
+            id: id,
+            role: role,
+            sessionID: sessionID,
+            time: time,
+            agent: agent,
+            model: effectiveModel,
+            parentID: parentID,
+            mode: mode,
+            summary: summary,
+            finish: finish,
+            providerID: providerID,
+            modelID: modelID
+        )
     }
 
     func asSession() -> OpenCodeSession {
@@ -873,6 +937,65 @@ struct OpenCodePart: Codable, Hashable, Sendable {
     let callID: String?
     let state: OpenCodeToolState?
     var text: String?
+    let auto: Bool?
+    let overflow: Bool?
+    let tailStartID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case messageID
+        case sessionID
+        case type
+        case mime
+        case filename
+        case url
+        case reason
+        case tool
+        case callID
+        case state
+        case text
+        case auto
+        case overflow
+        case tailStartID = "tail_start_id"
+    }
+
+    init(
+        id: String?,
+        messageID: String?,
+        sessionID: String?,
+        type: String,
+        mime: String?,
+        filename: String?,
+        url: String?,
+        reason: String?,
+        tool: String?,
+        callID: String?,
+        state: OpenCodeToolState?,
+        text: String?,
+        auto: Bool? = nil,
+        overflow: Bool? = nil,
+        tailStartID: String? = nil
+    ) {
+        self.id = id
+        self.messageID = messageID
+        self.sessionID = sessionID
+        self.type = type
+        self.mime = mime
+        self.filename = filename
+        self.url = url
+        self.reason = reason
+        self.tool = tool
+        self.callID = callID
+        self.state = state
+        self.text = text
+        self.auto = auto
+        self.overflow = overflow
+        self.tailStartID = tailStartID
+    }
+
+    var isCompaction: Bool {
+        type == "compaction"
+    }
 }
 
 struct OpenCodeToolState: Codable, Hashable, Sendable {
@@ -1492,7 +1615,85 @@ enum OpenCodePreviewData {
         ]
     )
 
-    static let messages = [userMessage, assistantMessage, todoMessage]
+    static let compactionBoundaryMessage = OpenCodeMessageEnvelope(
+        info: OpenCodeMessage(
+            id: "message-preview-compaction-user",
+            role: "user",
+            sessionID: primarySession.id,
+            time: OpenCodeMessageTime(created: 1_711_236_090, completed: nil),
+            agent: "build",
+            model: OpenCodeMessageModelReference(providerID: "openai", modelID: "gpt-5.4", variant: "balanced")
+        ),
+        parts: [
+            OpenCodePart(
+                id: "part-preview-compaction",
+                messageID: "message-preview-compaction-user",
+                sessionID: primarySession.id,
+                type: "compaction",
+                mime: nil,
+                filename: nil,
+                url: nil,
+                reason: nil,
+                tool: nil,
+                callID: nil,
+                state: nil,
+                text: nil,
+                auto: false,
+                overflow: nil,
+                tailStartID: nil
+            )
+        ]
+    )
+
+    static let compactionSummaryMessage = OpenCodeMessageEnvelope(
+        info: OpenCodeMessage(
+            id: "message-preview-compaction-summary",
+            role: "assistant",
+            sessionID: primarySession.id,
+            time: OpenCodeMessageTime(created: 1_711_236_091, completed: 1_711_236_120),
+            agent: "compaction",
+            model: nil,
+            parentID: compactionBoundaryMessage.id,
+            mode: "compaction",
+            summary: true,
+            finish: "stop",
+            providerID: "openai",
+            modelID: "gpt-5.4"
+        ),
+        parts: [
+            OpenCodePart(
+                id: "part-preview-compaction-summary-text",
+                messageID: "message-preview-compaction-summary",
+                sessionID: primarySession.id,
+                type: "text",
+                mime: nil,
+                filename: nil,
+                url: nil,
+                reason: nil,
+                tool: nil,
+                callID: nil,
+                state: nil,
+                text: """
+                ## Goal
+
+                Tighten the native iOS chat experience while keeping behavior aligned with upstream OpenCode.
+
+                ## Accomplished
+
+                - Added preview data and grouped tool activity rows.
+                - Verified todo updates should stay visible but disappear when complete.
+                - Identified compaction summaries as internal context rather than normal assistant replies.
+
+                ## Relevant files / directories
+
+                - OpenCodeIOSClient/Views/Chat
+                - OpenCodeIOSClient/Models/OpenCodeModels.swift
+                """
+            )
+        ]
+    )
+
+    static let messages = [userMessage, assistantMessage, todoMessage, compactionBoundaryMessage, compactionSummaryMessage]
 
     static let toolMessageDetails: [String: OpenCodeMessageEnvelope] = [
         assistantMessage.id: assistantMessage,
