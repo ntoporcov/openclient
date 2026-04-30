@@ -6,6 +6,8 @@ import WebKit
 struct ExcalidrawDrawingSheet: View {
     let onAttach: (OpenCodeComposerAttachment) -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     @State private var exportRequestID: UUID?
     @State private var isWebViewReady = false
     @State private var isExporting = false
@@ -15,6 +17,7 @@ struct ExcalidrawDrawingSheet: View {
         ZStack {
             ExcalidrawWebView(
                 exportRequestID: exportRequestID,
+                colorScheme: colorScheme,
                 onReady: {
                     isWebViewReady = true
                 },
@@ -93,9 +96,14 @@ struct ExcalidrawDrawingSheet: View {
 
 struct ExcalidrawWebView: UIViewRepresentable {
     let exportRequestID: UUID?
+    let colorScheme: ColorScheme
     let onReady: () -> Void
     let onExportedPNG: (Data) -> Void
     let onError: (ExcalidrawDrawingError) -> Void
+
+    private var excalidrawTheme: String {
+        colorScheme == .dark ? "dark" : "light"
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -104,6 +112,7 @@ struct ExcalidrawWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let userContentController = WKUserContentController()
         userContentController.add(context.coordinator, name: "excalidraw")
+        userContentController.addUserScript(Coordinator.initialThemeUserScript(theme: excalidrawTheme))
         userContentController.addUserScript(Coordinator.errorReportingUserScript)
 
         let configuration = WKWebViewConfiguration()
@@ -135,6 +144,9 @@ struct ExcalidrawWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
+        webView.backgroundColor = .systemBackground
+        webView.scrollView.backgroundColor = .systemBackground
+        context.coordinator.applyThemeIfNeeded(excalidrawTheme, in: webView)
         context.coordinator.exportIfNeeded(exportRequestID, in: webView)
     }
 
@@ -146,10 +158,36 @@ struct ExcalidrawWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var parent: ExcalidrawWebView
         private var lastExportRequestID: UUID?
+        private var lastAppliedTheme: String?
         private var hasReportedReady = false
 
         init(parent: ExcalidrawWebView) {
             self.parent = parent
+        }
+
+        func applyThemeIfNeeded(_ theme: String, in webView: WKWebView, force: Bool = false) {
+            guard force || theme != lastAppliedTheme else { return }
+
+            let themeLiteral = Self.themeLiteral(theme)
+            let script = """
+            (function() {
+              window.__openClientExcalidrawTheme = \(themeLiteral);
+              if (document.documentElement) {
+                document.documentElement.style.colorScheme = \(themeLiteral);
+              }
+              if (typeof window.setExcalidrawTheme !== 'function') {
+                return 'missing-theme-applier';
+              }
+              return window.setExcalidrawTheme(\(themeLiteral));
+            })();
+            """
+
+            webView.evaluateJavaScript(script) { [weak self] result, _ in
+                guard let self else { return }
+                if (result as? String) == theme {
+                    lastAppliedTheme = theme
+                }
+            }
         }
 
         func exportIfNeeded(_ requestID: UUID?, in webView: WKWebView) {
@@ -208,6 +246,7 @@ struct ExcalidrawWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            applyThemeIfNeeded(parent.excalidrawTheme, in: webView, force: true)
             webView.evaluateJavaScript(Self.readinessProbeScript) { [weak self] result, _ in
                 guard let self else { return }
                 if (result as? Bool) == true {
@@ -230,6 +269,24 @@ struct ExcalidrawWebView: UIViewRepresentable {
         }
 
         private static let readinessProbeScript = "window.__openClientExcalidrawReady === true && typeof window.exportExcalidrawAsPng === 'function'"
+
+        static func initialThemeUserScript(theme: String) -> WKUserScript {
+            let themeLiteral = themeLiteral(theme)
+            return WKUserScript(
+                source: """
+                window.__openClientExcalidrawTheme = \(themeLiteral);
+                if (document.documentElement) {
+                  document.documentElement.style.colorScheme = \(themeLiteral);
+                }
+                """,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        }
+
+        private static func themeLiteral(_ theme: String) -> String {
+            theme == "dark" ? "'dark'" : "'light'"
+        }
 
         func webView(
             _ webView: WKWebView,

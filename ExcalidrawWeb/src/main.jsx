@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Excalidraw, exportToBlob } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction, Excalidraw, exportToBlob } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import "./styles.css";
 
@@ -30,9 +30,35 @@ function blobToBase64(blob) {
 let excalidrawAPI = null;
 let latestScene = {
   elements: [],
-  appState: { viewBackgroundColor: "#ffffff" },
+  appState: { theme: normalizeTheme(window.__openClientExcalidrawTheme), viewBackgroundColor: "#ffffff" },
   files: {},
 };
+let currentTheme = latestScene.appState.theme;
+let setRenderedTheme = null;
+
+function normalizeTheme(theme) {
+  return theme === "dark" ? "dark" : "light";
+}
+
+function applyDocumentTheme(theme) {
+  document.documentElement.dataset.openClientTheme = theme;
+  document.documentElement.style.colorScheme = theme;
+}
+
+function applyExcalidrawTheme(theme) {
+  currentTheme = normalizeTheme(theme);
+  window.__openClientExcalidrawTheme = currentTheme;
+  applyDocumentTheme(currentTheme);
+  setRenderedTheme?.(currentTheme);
+  excalidrawAPI?.updateScene?.({
+    appState: { theme: currentTheme },
+    captureUpdate: CaptureUpdateAction.NEVER,
+  });
+  return currentTheme;
+}
+
+applyDocumentTheme(currentTheme);
+window.setExcalidrawTheme = applyExcalidrawTheme;
 
 window.__openClientExcalidrawReady = false;
 window.exportExcalidrawAsPng = async () => {
@@ -79,11 +105,25 @@ window.exportExcalidrawAsPng = async () => {
 };
 
 function App() {
+  const [theme, setTheme] = useState(currentTheme);
+
+  useEffect(() => {
+    setRenderedTheme = setTheme;
+    applyExcalidrawTheme(currentTheme);
+    return () => {
+      if (setRenderedTheme === setTheme) {
+        setRenderedTheme = null;
+      }
+    };
+  }, []);
+
   return (
-    <main className="drawing-root">
+    <main className="drawing-root" data-theme={theme}>
       <Excalidraw
+        theme={theme}
         excalidrawAPI={(api) => {
           excalidrawAPI = api;
+          applyExcalidrawTheme(currentTheme);
           window.__openClientExcalidrawReady = true;
           postToSwift({ type: "ready" });
         }}
@@ -96,6 +136,7 @@ function App() {
         }}
         initialData={{
           appState: {
+            theme,
             viewBackgroundColor: "#ffffff",
           },
         }}
