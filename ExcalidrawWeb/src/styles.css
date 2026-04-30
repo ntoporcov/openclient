@@ -10,7 +10,7 @@ body,
 html[data-open-client-theme="dark"],
 html[data-open-client-theme="dark"] body,
 html[data-open-client-theme="dark"] #root {
-  background: #000000;
+  background: #121212;
 }
 
 body {
@@ -26,7 +26,7 @@ body {
 }
 
 .drawing-root[data-theme="dark"] {
-  background: #000000;
+  background: #121212;
 }
 
 .excalidraw {

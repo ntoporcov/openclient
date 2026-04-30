@@ -3,6 +3,16 @@ import SwiftUI
 import UIKit
 import WebKit
 
+private enum ExcalidrawTheme {
+    static func backgroundColor(for colorScheme: ColorScheme) -> UIColor {
+        if colorScheme == .dark {
+            return UIColor(red: 18 / 255, green: 18 / 255, blue: 18 / 255, alpha: 1)
+        }
+
+        return .white
+    }
+}
+
 struct ExcalidrawDrawingSheet: View {
     let onAttach: (OpenCodeComposerAttachment) -> Void
 
@@ -12,6 +22,10 @@ struct ExcalidrawDrawingSheet: View {
     @State private var isWebViewReady = false
     @State private var isExporting = false
     @State private var currentError: ExcalidrawDrawingError?
+
+    private var excalidrawBackground: Color {
+        Color(uiColor: ExcalidrawTheme.backgroundColor(for: colorScheme))
+    }
 
     var body: some View {
         ZStack {
@@ -28,7 +42,7 @@ struct ExcalidrawDrawingSheet: View {
                     showError(error)
                 }
             )
-            .background(Color(uiColor: .systemBackground))
+            .background(excalidrawBackground)
 
             if !isWebViewReady {
                 VStack(spacing: 12) {
@@ -41,8 +55,12 @@ struct ExcalidrawDrawingSheet: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
+        .background(excalidrawBackground)
+        .scrollContentBackground(.hidden)
         .navigationTitle("Sketch")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(excalidrawBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button(isExporting ? "Exporting..." : "Attach") {
@@ -105,6 +123,10 @@ struct ExcalidrawWebView: UIViewRepresentable {
         colorScheme == .dark ? "dark" : "light"
     }
 
+    private var excalidrawBackgroundColor: UIColor {
+        ExcalidrawTheme.backgroundColor(for: colorScheme)
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
     }
@@ -123,8 +145,11 @@ struct ExcalidrawWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.isOpaque = false
-        webView.backgroundColor = .systemBackground
-        webView.scrollView.backgroundColor = .systemBackground
+        webView.backgroundColor = excalidrawBackgroundColor
+        webView.scrollView.backgroundColor = excalidrawBackgroundColor
+        if #available(iOS 15.0, *) {
+            webView.underPageBackgroundColor = excalidrawBackgroundColor
+        }
         webView.scrollView.bounces = false
 
         guard let indexURL = Bundle.main.url(
@@ -144,8 +169,11 @@ struct ExcalidrawWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
-        webView.backgroundColor = .systemBackground
-        webView.scrollView.backgroundColor = .systemBackground
+        webView.backgroundColor = excalidrawBackgroundColor
+        webView.scrollView.backgroundColor = excalidrawBackgroundColor
+        if #available(iOS 15.0, *) {
+            webView.underPageBackgroundColor = excalidrawBackgroundColor
+        }
         context.coordinator.applyThemeIfNeeded(excalidrawTheme, in: webView)
         context.coordinator.exportIfNeeded(exportRequestID, in: webView)
     }
