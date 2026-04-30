@@ -1,4 +1,8 @@
 import SwiftUI
+import MapKit
+#if canImport(RealityKit) && canImport(UIKit)
+import RealityKit
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -6,6 +10,16 @@ import UIKit
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
+    }
+}
+
+private extension OpenCodeMessageEnvelope {
+    var isAssistantMessage: Bool {
+        (info.role ?? "").lowercased() == "assistant"
+    }
+
+    func containsText(_ marker: String) -> Bool {
+        parts.contains { $0.text?.contains(marker) == true }
     }
 }
 
@@ -68,6 +82,8 @@ private struct CompactionDisplayItem: Identifiable {
 private enum ChatDisplayItem: Identifiable {
     case message(OpenCodeMessageEnvelope)
     case compaction(CompactionDisplayItem)
+    case findPlaceReveal(FindPlaceGameCity)
+    case findBugSolved
 
     var id: String {
         switch self {
@@ -75,6 +91,10 @@ private enum ChatDisplayItem: Identifiable {
             return message.id
         case let .compaction(item):
             return item.id
+        case let .findPlaceReveal(city):
+            return "find-place-reveal-\(city.id)"
+        case .findBugSolved:
+            return "find-bug-solved"
         }
     }
 }
@@ -90,6 +110,207 @@ private struct PendingOutgoingSend {
 private struct ReadingModeScrollRequest: Equatable {
     let id = UUID()
     let messageID: String
+}
+
+private struct FindPlaceRevealRow: View {
+    let city: FindPlaceGameCity
+    @State private var position: MapCameraPosition
+
+    init(city: FindPlaceGameCity) {
+        self.city = city
+        _position = State(initialValue: .region(MKCoordinateRegion(
+            center: city.coordinate,
+            span: MKCoordinateSpan(latitudeDelta: 0.8, longitudeDelta: 0.8)
+        )))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("You found it")
+                    .font(.headline)
+                Text("\(city.name), \(city.country)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Map(position: $position) {
+                Marker(city.name, coordinate: city.coordinate)
+            }
+            .frame(height: 220)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(.quaternary)
+            }
+        }
+        .padding(14)
+        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+}
+
+private struct FindBugSolvedRow: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            BugSolvedMedalView()
+                .frame(width: 260, height: 260)
+
+            VStack(spacing: 4) {
+                Text("Bug Found")
+                    .font(.headline)
+                Text("Nice catch. You found the broken logic.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(18)
+        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+}
+
+private struct BugSolvedMedalView: View {
+    @State private var baseSpin: Double = 0
+    @State private var dragSpin: Double = 0
+    @State private var velocity: Double = 80
+    @State private var lastDragWidth: CGFloat = 0
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            let spin = baseSpin + dragSpin + time.truncatingRemainder(dividingBy: 10) * velocity
+
+            RealityMedalView(angle: spin)
+        }
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    let delta = value.translation.width - lastDragWidth
+                    lastDragWidth = value.translation.width
+                    dragSpin += Double(delta) * 1.7
+                }
+                .onEnded { value in
+                    velocity = max(30, min(520, abs(Double(value.predictedEndTranslation.width - value.translation.width)) * 2.2))
+                    if value.predictedEndTranslation.width < value.translation.width {
+                        velocity *= -1
+                    }
+                    baseSpin += dragSpin
+                    dragSpin = 0
+                    lastDragWidth = 0
+                }
+        )
+        .accessibilityLabel("Bug found medal")
+    }
+}
+
+private struct RealityMedalView: View {
+    let angle: Double
+
+    var body: some View {
+#if canImport(RealityKit) && canImport(UIKit)
+        if #available(iOS 18.0, *) {
+            RealityKitMedalScene(angle: angle)
+        } else {
+            FallbackMedalView(angle: angle)
+        }
+#else
+        FallbackMedalView(angle: angle)
+#endif
+    }
+}
+
+#if canImport(RealityKit) && canImport(UIKit)
+@available(iOS 18.0, *)
+private struct RealityKitMedalScene: View {
+    let angle: Double
+
+    var body: some View {
+        RealityView { content in
+            let root = Entity()
+            root.name = "medal-root"
+
+            let rim = ModelEntity(
+                mesh: .generateCylinder(height: 0.16, radius: 0.92),
+                materials: [SimpleMaterial(color: UIColor.systemOrange, roughness: 0.2, isMetallic: true)]
+            )
+            rim.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+            root.addChild(rim)
+
+            let medal = ModelEntity(
+                mesh: .generateCylinder(height: 0.15, radius: 0.84),
+                materials: [SimpleMaterial(color: UIColor.systemYellow, roughness: 0.26, isMetallic: true)]
+            )
+            medal.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+            medal.position.z = 0.006
+            root.addChild(medal)
+
+            if let starMaterial = Self.starMaterial() {
+                let star = ModelEntity(mesh: .generatePlane(width: 0.92, height: 0.92), materials: [starMaterial])
+                star.position.z = 0.083
+                root.addChild(star)
+            }
+
+            root.position.z = -2.2
+            content.add(root)
+        } update: { content in
+            guard let root = content.entities.first(where: { $0.name == "medal-root" }) else { return }
+            root.orientation = simd_quatf(angle: Float(angle * .pi / 180), axis: SIMD3<Float>(0, 1, 0))
+        }
+        .background(Color.clear)
+    }
+
+    private static func starMaterial() -> UnlitMaterial? {
+        let configuration = UIImage.SymbolConfiguration(pointSize: 220, weight: .black)
+        guard let image = UIImage(systemName: "star.fill", withConfiguration: configuration) else { return nil }
+
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 320))
+        let rendered = renderer.image { context in
+            UIColor.clear.setFill()
+            context.fill(CGRect(origin: .zero, size: CGSize(width: 320, height: 320)))
+            UIColor.white.setFill()
+            image.draw(in: CGRect(x: 50, y: 50, width: 220, height: 220))
+        }
+
+        guard let cgImage = rendered.cgImage,
+              let texture = try? TextureResource.generate(from: cgImage, options: .init(semantic: .color)) else {
+            return nil
+        }
+
+        var material = UnlitMaterial()
+        material.color = .init(texture: .init(texture))
+        material.blending = .transparent(opacity: .init(floatLiteral: 1))
+        return material
+    }
+}
+#endif
+
+private struct FallbackMedalView: View {
+    let angle: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [.orange.opacity(0.85), .yellow.opacity(0.65)], startPoint: .leading, endPoint: .trailing))
+                .offset(x: 10)
+                .shadow(color: .orange.opacity(0.28), radius: 16, y: 8)
+
+            Circle()
+                .fill(AngularGradient(colors: [.yellow, .orange, .yellow, .white, .yellow], center: .center))
+                .overlay {
+                    Circle()
+                        .strokeBorder(.white.opacity(0.55), lineWidth: 5)
+                        .padding(8)
+                }
+                .shadow(color: .orange.opacity(0.35), radius: 24, y: 10)
+
+            Image(systemName: "star.fill")
+                .font(.system(size: 74, weight: .black))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.22), radius: 6, y: 3)
+        }
+        .rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.55)
+    }
 }
 
 private final class ChatViewTaskStore {
@@ -780,7 +1001,9 @@ struct ChatView: View {
                     viewModel.presentForkSessionSheet()
                     return
                 }
-                guard viewModel.reserveUserPromptIfAllowed() else { return }
+                if viewModel.shouldMeterPrompts(for: sessionID) {
+                    guard viewModel.reserveUserPromptIfAllowed() else { return }
+                }
                 shouldSnapOnNextMessage = true
                 Task {
                     if viewModel.isCompactClientCommand(command) {
@@ -792,7 +1015,9 @@ struct ChatView: View {
             },
             onCompact: {
                 viewModel.flushBufferedTranscript(reason: "compact menu action")
-                guard viewModel.reserveUserPromptIfAllowed() else { return }
+                if viewModel.shouldMeterPrompts(for: sessionID) {
+                    guard viewModel.reserveUserPromptIfAllowed() else { return }
+                }
                 shouldSnapOnNextMessage = true
                 Task { await viewModel.compactSession(sessionID: sessionID, userVisible: true, meterPrompt: false) }
             },
@@ -1111,6 +1336,18 @@ struct ChatView: View {
             messageRow(for: message)
         case let .compaction(compaction):
             compactionRow(for: compaction)
+        case let .findPlaceReveal(city):
+            FindPlaceRevealRow(city: city)
+                .id("find-place-reveal-\(city.id)")
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        case .findBugSolved:
+            FindBugSolvedRow()
+                .id("find-bug-solved")
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
         }
     }
 
@@ -1164,6 +1401,8 @@ struct ChatView: View {
     private func makeDisplayItems(from messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
         var result: [ChatDisplayItem] = []
         var displayedIDs: Set<String> = []
+        let findPlaceGame = viewModel.findPlaceGame(for: sessionID)
+        let findBugGame = viewModel.findBugGame(for: sessionID)
 
         func appendUnique(_ item: ChatDisplayItem) {
             guard displayedIDs.insert(item.id).inserted else { return }
@@ -1171,6 +1410,24 @@ struct ChatView: View {
         }
 
         for (index, message) in messages.enumerated() {
+            if message.containsText(FindPlaceGame.setupMarker) {
+                continue
+            }
+
+            if message.containsText(FindBugGame.setupMarker) {
+                continue
+            }
+
+            if message.isAssistantMessage, message.containsText(FindPlaceGame.winMarker), let game = findPlaceGame {
+                appendUnique(.findPlaceReveal(game.city))
+                continue
+            }
+
+            if message.isAssistantMessage, message.containsText(FindBugGame.winMarker), findBugGame != nil {
+                appendUnique(.findBugSolved)
+                continue
+            }
+
             if message.info.isCompactionSummary {
                 continue
             }
@@ -1279,7 +1536,9 @@ struct ChatView: View {
             return
         }
 
-        guard viewModel.reserveUserPromptIfAllowed() else { return }
+        if viewModel.shouldMeterPrompts(for: sessionID) {
+            guard viewModel.reserveUserPromptIfAllowed() else { return }
+        }
 
         if !hasAttachments,
            viewModel.slashCommandInput(from: draftText).map({ viewModel.isCompactClientCommand($0.command) }) == true {

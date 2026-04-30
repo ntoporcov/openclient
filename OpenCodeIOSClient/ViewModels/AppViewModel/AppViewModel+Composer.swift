@@ -156,6 +156,29 @@ extension AppViewModel {
         NewSessionDefaultsStore.save(preferences)
     }
 
+    func loadFunAndGamesPreferences() {
+        let scopedPreferences = FunAndGamesPreferencesStore.load()
+        guard let key = currentServerDefaultsKey else {
+            funAndGamesPreferences = FunAndGamesPreferences()
+            return
+        }
+
+        funAndGamesPreferences = scopedPreferences.preferencesByBaseURL[key] ?? FunAndGamesPreferences()
+    }
+
+    func saveFunAndGamesPreferences() {
+        guard let key = currentServerDefaultsKey else { return }
+
+        var scopedPreferences = FunAndGamesPreferencesStore.load()
+        scopedPreferences.preferencesByBaseURL[key] = funAndGamesPreferences
+        FunAndGamesPreferencesStore.save(scopedPreferences)
+    }
+
+    func setShowsFunAndGamesSection(_ showsSection: Bool) {
+        funAndGamesPreferences.showsSection = showsSection
+        saveFunAndGamesPreferences()
+    }
+
     func setNewSessionDefaultAgent(_ name: String?) {
         newSessionDefaults.agentName = name
         saveNewSessionDefaults()
@@ -348,12 +371,14 @@ extension AppViewModel {
             availableProviders = try await providers
             defaultModelsByProviderID = try await defaults
             loadNewSessionDefaults()
+            loadFunAndGamesPreferences()
             sanitizeComposerSelections()
         } catch {
             availableAgents = []
             availableProviders = []
             defaultModelsByProviderID = [:]
             loadNewSessionDefaults()
+            loadFunAndGamesPreferences()
         }
     }
 

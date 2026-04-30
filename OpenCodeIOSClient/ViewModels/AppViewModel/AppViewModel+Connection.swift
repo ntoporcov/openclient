@@ -54,6 +54,7 @@ extension AppViewModel {
             errorMessage = nil
             persistConfigAfterSuccessfulConnection()
             loadNewSessionDefaults()
+            loadFunAndGamesPreferences()
             projects = bootstrap.projects
             currentProject = nil
             selectedDirectory = nil
@@ -138,6 +139,10 @@ extension AppViewModel {
         selectedModelsBySessionID = [:]
         selectedVariantsBySessionID = [:]
         newSessionDefaults = NewSessionDefaults()
+        funAndGamesPreferences = FunAndGamesPreferences()
+        findPlaceSessionsByID = [:]
+        findBugSessionsByID = [:]
+        pendingFindBugLanguage = nil
         errorMessage = nil
         showSavedServerPrompt = hasSavedServer
     }

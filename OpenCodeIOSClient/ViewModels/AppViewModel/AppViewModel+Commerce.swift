@@ -24,6 +24,10 @@ extension AppViewModel {
         return max(0, OpenClientCommerceLimits.dailyPromptLimit - usageMeter.dailyPromptCount)
     }
 
+    var remainingFreeSessions: Int {
+        max(0, OpenClientCommerceLimits.freeSessionLimit - usageMeter.createdSessionCount)
+    }
+
     var canCreateFreeSession: Bool {
         hasProUnlock || usageMeter.createdSessionCount < OpenClientCommerceLimits.freeSessionLimit
     }

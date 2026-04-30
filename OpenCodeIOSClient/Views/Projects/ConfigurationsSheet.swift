@@ -27,6 +27,13 @@ struct ConfigurationsSheet: View {
                     .disabled(viewModel.configurationReasoningVariants.isEmpty)
                 }
 
+                Section("Fun & Games") {
+                    Toggle("Show Fun & Games", isOn: Binding(
+                        get: { viewModel.funAndGamesPreferences.showsSection },
+                        set: { viewModel.setShowsFunAndGamesSection($0) }
+                    ))
+                }
+
                 Section {
                     Text("Used when starting a new session on this server. Changes made in a chat only affect that session.")
                         .font(.footnote)

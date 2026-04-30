@@ -69,6 +69,10 @@ struct ConnectionView: View {
                 ServerConnectionSections(viewModel: viewModel)
             }
 
+#if DEBUG
+            DebugEntitlementSection(viewModel: viewModel)
+#endif
+
             Section("Apple Intelligence") {
                 Button {
                     viewModel.presentAppleIntelligenceFolderPicker()
@@ -159,6 +163,23 @@ struct ConnectionView: View {
         }
     }
 }
+
+#if DEBUG
+private struct DebugEntitlementSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        Section {
+            OpenClientDebugEntitlementControls(viewModel: viewModel)
+                .padding(.vertical, 6)
+        } header: {
+            Text("Debug")
+        } footer: {
+            Text("Switch between free, StoreKit, unlocked, and limit-reached states while testing local builds.")
+        }
+    }
+}
+#endif
 
 private struct ServerConnectionSections: View {
     private struct ConnectionIconOption: Identifiable {

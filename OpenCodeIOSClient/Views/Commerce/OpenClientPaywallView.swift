@@ -61,7 +61,8 @@ struct OpenClientPaywallView: View {
 
 #if DEBUG
                 if !isScreenshotScene {
-                    debugControls
+                    OpenClientDebugEntitlementControls(viewModel: viewModel)
+                        .padding(.top, 4)
                 }
 #endif
 
@@ -102,26 +103,4 @@ struct OpenClientPaywallView: View {
         ProcessInfo.processInfo.environment["OPENCLIENT_SCREENSHOT_SCENE"] == "paywall"
     }
 
-#if DEBUG
-    private var debugControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Debug Entitlement")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Picker("Debug Entitlement", selection: $viewModel.debugEntitlementOverride) {
-                ForEach(OpenClientDebugEntitlementOverride.allCases) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Button("Reset Free Usage Meter") {
-                viewModel.resetDebugUsageMeter()
-            }
-            .font(.caption.weight(.medium))
-        }
-        .padding(.top, 4)
-    }
-#endif
 }

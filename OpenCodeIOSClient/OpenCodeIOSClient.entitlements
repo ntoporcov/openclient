@@ -10,5 +10,7 @@
 	<array>
 		<string>group.com.ntoporcov.openclient</string>
 	</array>
+	<key>com.apple.developer.weatherkit</key>
+	<true/>
 </dict>
 </plist>

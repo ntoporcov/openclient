@@ -95,6 +95,9 @@ final class AppViewModel: ObservableObject {
     @Published var savedServerEditorMode: SavedServerEditorMode = .add
     @Published var isShowingCreateSessionSheet = false
     @Published var isShowingConfigurationsSheet = false
+    @Published var isShowingFindPlaceModelSheet = false
+    @Published var isShowingFindBugLanguageSheet = false
+    @Published var isShowingFindBugModelSheet = false
     @Published var isShowingForkSessionSheet = false
     var debugLastEventSummary = ""
     @Published var debugProbeLog: [String] = []
@@ -109,6 +112,10 @@ final class AppViewModel: ObservableObject {
     @Published var selectedModelsBySessionID: [String: OpenCodeModelReference] = [:]
     @Published var selectedVariantsBySessionID: [String: String] = [:]
     @Published var newSessionDefaults = NewSessionDefaults()
+    @Published var funAndGamesPreferences = FunAndGamesPreferences()
+    @Published var findPlaceSessionsByID: [String: FindPlaceGameSession] = [:]
+    @Published var findBugSessionsByID: [String: FindBugGameSession] = [:]
+    @Published var pendingFindBugLanguage: FindBugGameLanguage?
     @Published var activeLiveActivitySessionIDs: Set<String> = []
     @Published var activeChatSessionID: String?
     @Published var usageMeter = OpenClientUsageMeter.empty
