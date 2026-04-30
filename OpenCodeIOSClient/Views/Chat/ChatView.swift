@@ -1264,41 +1264,38 @@ struct ChatView: View {
                     let chatItems = displayedChatItems
                     let chatItemIDSignature = chatItems.map(\.id).joined(separator: "|")
 
-                    List {
-                        if hiddenMessageCount > 0 {
-                            Button {
-                                visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
-                            } label: {
-                                Text("View older messages (\(hiddenMessageCount))")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.blue)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            if hiddenMessageCount > 0 {
+                                Button {
+                                    visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
+                                } label: {
+                                    Text("View older messages (\(hiddenMessageCount))")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.blue)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .id(ChatScrollTarget.olderMessagesButton)
+                                .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
                             }
-                            .buttonStyle(.plain)
-                            .id(ChatScrollTarget.olderMessagesButton)
-                            .padding(.bottom, 4)
-                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 0, trailing: 16))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                        }
 
-                        ForEach(chatItems) { item in
-                            chatRow(for: item)
-                        }
+                            ForEach(chatItems) { item in
+                                chatRow(for: item)
+                            }
 
-                        if shouldShowThinking {
-                            thinkingRowListItem
-                        }
+                            if shouldShowThinking {
+                                thinkingRowListItem
+                            }
 
-                    bottomAnchorListItem
+                            bottomAnchorListItem
+                        }
                     }
-                    .listStyle(.plain)
                     .chatScrollBottomTracking($isScrollGeometryAtBottom)
                     .simultaneousGesture(bottomOverscrollRefreshGesture)
                     .animation(chatItemChangeAnimation, value: chatItemIDSignature)
-                    .scrollContentBackground(.hidden)
                     .opencodeInteractiveKeyboardDismiss()
                     .background(OpenCodePlatformColor.groupedBackground)
                     .accessibilityIdentifier("chat.scroll")
@@ -1787,9 +1784,6 @@ struct ChatView: View {
                 }
             }
             .id(ChatScrollTarget.bottomAnchor)
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
     }
 
     private var shouldShowBottomRefreshIndicator: Bool {
@@ -2055,9 +2049,7 @@ struct ChatView: View {
         ThinkingRow(animateEntry: isSendReadingModeActive)
             .transition(.identity)
             .id(ChatScrollTarget.thinkingRow)
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
+            .padding(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
     }
 
     @ViewBuilder
@@ -2072,15 +2064,11 @@ struct ChatView: View {
         case let .findPlaceReveal(city):
             FindPlaceRevealRow(city: city)
                 .id("find-place-reveal-\(city.id)")
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+                .padding(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
         case .findBugSolved:
             FindBugSolvedRow()
                 .id("find-bug-solved")
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+                .padding(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
         }
     }
 
@@ -2098,9 +2086,7 @@ struct ChatView: View {
             }
             .id(item.id)
             .transition(.identity)
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: item.chunk.isTail ? 6 : 0, trailing: 16))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
+            .padding(EdgeInsets(top: 0, leading: 16, bottom: item.chunk.isTail ? 6 : 0, trailing: 16))
     }
 
     @ViewBuilder
@@ -2159,9 +2145,7 @@ struct ChatView: View {
         }
         .transition(messageRowTransition(for: message))
         .id(message.id)
-        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
+        .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
     }
 
     private func messageRowTransition(for message: OpenCodeMessageEnvelope) -> AnyTransition {
@@ -2186,9 +2170,7 @@ struct ChatView: View {
         .buttonStyle(.plain)
         .disabled(compaction.summaryText == nil || isStreaming)
         .id(compaction.id)
-        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
+        .padding(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
     }
 
     private func makeDisplayItems(from messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
