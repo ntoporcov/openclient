@@ -24,3 +24,6 @@ fastlane/report.xml
 
 # Local scratch space
 tmp/
+
+# Local web dependencies
+ExcalidrawWeb/node_modules/

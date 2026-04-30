@@ -1,0 +1,21 @@
+{
+  "name": "openclient-excalidraw-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "build:ios": "vite build && npm run copy:assets",
+    "copy:assets": "mkdir -p ../Resources/ExcalidrawWeb/excalidraw-assets && cp -R node_modules/@excalidraw/excalidraw/dist/prod/fonts ../Resources/ExcalidrawWeb/excalidraw-assets/"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "5.4.11"
+  }
+}

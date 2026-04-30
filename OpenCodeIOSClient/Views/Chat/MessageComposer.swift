@@ -57,6 +57,9 @@ struct MessageComposer: View {
     @State private var isShowingPhotosPicker = false
     @State private var isShowingFileImporter = false
 #endif
+#if canImport(UIKit) && canImport(WebKit)
+    @State private var isShowingExcalidrawSheet = false
+#endif
 
     private var text: String {
         draftStore.text
@@ -346,6 +349,14 @@ struct MessageComposer: View {
             }
             .presentationDetents([.height(315), .height(expandedAccessorySheetDetentHeight), .large], selection: $accessorySheetDetent)
         }
+#if canImport(UIKit) && canImport(WebKit)
+        .sheet(isPresented: $isShowingExcalidrawSheet) {
+            ExcalidrawDrawingSheet { attachment in
+                onAddAttachments([attachment])
+            }
+            .presentationDetents([.large])
+        }
+#endif
     }
 
     private var accessoryContainer: some View {
@@ -423,6 +434,23 @@ struct MessageComposer: View {
                     )
                     .frame(maxWidth: .infinity)
                 }
+
+#if canImport(UIKit) && canImport(WebKit)
+                AccessoryMenuAction(
+                    title: "Sketch",
+                    subtitle: "Draw a diagram",
+                    systemImage: "scribble.variable",
+                    tint: .cyan,
+                    isDisabled: isBusy,
+                    accessibilityIdentifier: "chat.composer.sketch",
+                    action: {
+                        isAccessoryMenuOpen = false
+                        DispatchQueue.main.async {
+                            isShowingExcalidrawSheet = true
+                        }
+                    }
+                )
+#endif
 #endif
 
                 AccessorySectionTitle("Utilities")
