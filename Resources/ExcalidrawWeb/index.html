@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>OpenClient Sketch</title>
     <script>
+      window.process = window.process || { env: { NODE_ENV: "production" } };
       window.EXCALIDRAW_ASSET_PATH = "./excalidraw-assets/";
       window.addEventListener("error", function (event) {
         var target = event.target;
@@ -26,8 +27,8 @@
         });
       });
     </script>
-    <script type="module" crossorigin src="./assets/index-DiNg8bR0.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-mK23xpbm.css">
+    <script defer src="./assets/excalidraw.js"></script>
+    <link rel="stylesheet" href="./style.css">
   </head>
   <body>
     <div id="root"></div>

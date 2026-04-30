@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>OpenClient Sketch</title>
+    <script>
+      window.process = window.process || { env: { NODE_ENV: "production" } };
+      window.EXCALIDRAW_ASSET_PATH = "./excalidraw-assets/";
+      window.addEventListener("error", function (event) {
+        var target = event.target;
+        var message = event.message || "Unable to load the drawing app.";
+        if (target && target !== window) {
+          message = "Unable to load " + (target.src || target.href || target.tagName || "a drawing app resource") + ".";
+        }
+        window.webkit?.messageHandlers?.excalidraw?.postMessage({
+          type: "error",
+          code: "runtime-error",
+          message: message,
+        });
+      }, true);
+      window.addEventListener("unhandledrejection", function (event) {
+        window.webkit?.messageHandlers?.excalidraw?.postMessage({
+          type: "error",
+          code: "runtime-error",
+          message: event.reason?.message || "The drawing app failed to initialize.",
+        });
+      });
+    </script>
+    <script defer src="./assets/excalidraw.js"></script>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

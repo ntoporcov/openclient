@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React from "react";
 import { createRoot } from "react-dom/client";
 import { Excalidraw, exportToBlob } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
@@ -27,80 +27,68 @@ function blobToBase64(blob) {
   });
 }
 
+let excalidrawAPI = null;
+let latestScene = {
+  elements: [],
+  appState: { viewBackgroundColor: "#ffffff" },
+  files: {},
+};
+
+window.__openClientExcalidrawReady = false;
+window.exportExcalidrawAsPng = async () => {
+  try {
+    const elements = excalidrawAPI?.getSceneElements?.() || latestScene.elements;
+    const hasDrawableElements = elements.some((element) => !element.isDeleted);
+    if (!hasDrawableElements) {
+      postToSwift({ type: "error", code: "empty-scene", message: "Draw something before attaching." });
+      return false;
+    }
+
+    const appState = excalidrawAPI?.getAppState?.() || latestScene.appState;
+    const files = excalidrawAPI?.getFiles?.() || latestScene.files;
+    const blob = await exportToBlob({
+      elements,
+      appState: {
+        ...appState,
+        exportBackground: true,
+        exportWithDarkMode: false,
+        viewBackgroundColor: appState.viewBackgroundColor || "#ffffff",
+      },
+      files,
+      mimeType: "image/png",
+      exportPadding: 24,
+      maxWidthOrHeight: 2048,
+    });
+
+    if (!blob || blob.size === 0) {
+      postToSwift({ type: "error", code: "export-empty", message: "The exported drawing was empty." });
+      return false;
+    }
+
+    const base64 = await blobToBase64(blob);
+    postToSwift({ type: "exported", mime: "image/png", base64, byteLength: blob.size });
+    return true;
+  } catch (error) {
+    postToSwift({
+      type: "error",
+      code: "export-failed",
+      message: error?.message || "Unable to export drawing.",
+    });
+    return false;
+  }
+};
+
 function App() {
-  const excalidrawAPIRef = useRef(null);
-  const latestSceneRef = useRef({
-    elements: [],
-    appState: { viewBackgroundColor: "#ffffff" },
-    files: {},
-  });
-
-  useEffect(() => {
-    window.exportExcalidrawAsPng = async () => {
-      try {
-        const api = excalidrawAPIRef.current;
-        const scene = latestSceneRef.current;
-        const elements = api?.getSceneElements?.() || scene.elements;
-        const hasDrawableElements = elements.some((element) => !element.isDeleted);
-        if (!hasDrawableElements) {
-          postToSwift({ type: "error", code: "empty-scene", message: "Draw something before attaching." });
-          return false;
-        }
-
-        const appState = api?.getAppState?.() || scene.appState;
-        const files = api?.getFiles?.() || scene.files;
-        const blob = await exportToBlob({
-          elements,
-          appState: {
-            ...appState,
-            exportBackground: true,
-            exportWithDarkMode: false,
-            viewBackgroundColor: appState.viewBackgroundColor || "#ffffff",
-          },
-          files,
-          mimeType: "image/png",
-          exportPadding: 24,
-          maxWidthOrHeight: 2048,
-        });
-
-        if (!blob || blob.size === 0) {
-          postToSwift({ type: "error", code: "export-empty", message: "The exported drawing was empty." });
-          return false;
-        }
-
-        const base64 = await blobToBase64(blob);
-        postToSwift({ type: "exported", mime: "image/png", base64, byteLength: blob.size });
-        return true;
-      } catch (error) {
-        postToSwift({
-          type: "error",
-          code: "export-failed",
-          message: error?.message || "Unable to export drawing.",
-        });
-        return false;
-      }
-    };
-
-    return () => {
-      if (window.exportExcalidrawAsPng) {
-        delete window.exportExcalidrawAsPng;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    requestAnimationFrame(() => postToSwift({ type: "ready" }));
-  }, []);
-
   return (
     <main className="drawing-root">
       <Excalidraw
         excalidrawAPI={(api) => {
-          excalidrawAPIRef.current = api;
+          excalidrawAPI = api;
+          window.__openClientExcalidrawReady = true;
           postToSwift({ type: "ready" });
         }}
         onChange={(elements, appState, files) => {
-          latestSceneRef.current = {
+          latestScene = {
             elements: Array.from(elements),
             appState,
             files,

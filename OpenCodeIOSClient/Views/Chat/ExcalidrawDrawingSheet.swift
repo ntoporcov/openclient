@@ -208,7 +208,7 @@ struct ExcalidrawWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            webView.evaluateJavaScript("typeof window.exportExcalidrawAsPng === 'function'") { [weak self] result, _ in
+            webView.evaluateJavaScript(Self.readinessProbeScript) { [weak self] result, _ in
                 guard let self else { return }
                 if (result as? Bool) == true {
                     hasReportedReady = true
@@ -217,7 +217,7 @@ struct ExcalidrawWebView: UIViewRepresentable {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak webView] in
                 guard let self, let webView, !hasReportedReady else { return }
-                webView.evaluateJavaScript("typeof window.exportExcalidrawAsPng === 'function'") { [weak self] result, _ in
+                webView.evaluateJavaScript(Self.readinessProbeScript) { [weak self] result, _ in
                     guard let self, !hasReportedReady else { return }
                     if (result as? Bool) == true {
                         hasReportedReady = true
@@ -228,6 +228,8 @@ struct ExcalidrawWebView: UIViewRepresentable {
                 }
             }
         }
+
+        private static let readinessProbeScript = "window.__openClientExcalidrawReady === true && typeof window.exportExcalidrawAsPng === 'function'"
 
         func webView(
             _ webView: WKWebView,

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "build:ios": "vite build && npm run copy:assets",
+    "build:ios": "vite build && cp ios-index.html ../Resources/ExcalidrawWeb/index.html && npm run copy:assets",
     "copy:assets": "mkdir -p ../Resources/ExcalidrawWeb/excalidraw-assets && cp -R node_modules/@excalidraw/excalidraw/dist/prod/fonts ../Resources/ExcalidrawWeb/excalidraw-assets/"
   },
   "dependencies": {
