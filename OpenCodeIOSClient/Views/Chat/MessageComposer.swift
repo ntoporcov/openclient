@@ -20,6 +20,9 @@ struct MessageComposer: View {
     private enum AccessoryDestination: Hashable {
         case fork
         case mcp
+#if canImport(UIKit) && canImport(WebKit)
+        case sketch
+#endif
     }
 
     @ObservedObject var draftStore: MessageComposerDraftStore
@@ -56,9 +59,6 @@ struct MessageComposer: View {
     @State private var recentPhotoThumbnails: [String: UIImage] = [:]
     @State private var isShowingPhotosPicker = false
     @State private var isShowingFileImporter = false
-#endif
-#if canImport(UIKit) && canImport(WebKit)
-    @State private var isShowingExcalidrawSheet = false
 #endif
 
     private var text: String {
@@ -344,19 +344,18 @@ struct MessageComposer: View {
                                 onLoad: onLoadMCP,
                                 onToggle: onToggleMCP
                             )
+#if canImport(UIKit) && canImport(WebKit)
+                        case .sketch:
+                            ExcalidrawDrawingSheet { attachment in
+                                onAddAttachments([attachment])
+                                isAccessoryMenuOpen = false
+                            }
+#endif
                         }
                     }
             }
             .presentationDetents([.height(315), .height(expandedAccessorySheetDetentHeight), .large], selection: $accessorySheetDetent)
         }
-#if canImport(UIKit) && canImport(WebKit)
-        .sheet(isPresented: $isShowingExcalidrawSheet) {
-            ExcalidrawDrawingSheet { attachment in
-                onAddAttachments([attachment])
-            }
-            .presentationDetents([.large])
-        }
-#endif
     }
 
     private var accessoryContainer: some View {
@@ -444,10 +443,8 @@ struct MessageComposer: View {
                     isDisabled: isBusy,
                     accessibilityIdentifier: "chat.composer.sketch",
                     action: {
-                        isAccessoryMenuOpen = false
-                        DispatchQueue.main.async {
-                            isShowingExcalidrawSheet = true
-                        }
+                        accessorySheetDetent = .large
+                        accessoryNavigationPath.append(.sketch)
                     }
                 )
 #endif

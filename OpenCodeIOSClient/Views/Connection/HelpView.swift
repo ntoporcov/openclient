@@ -508,6 +508,11 @@ extension HelpArticle {
                     body: "OpenClient exists because the OpenCode maintainers and contributors have built the server, SDK, app patterns, and product language that this native client follows. Their work makes it possible for this app to stay aligned with the broader OpenCode ecosystem instead of becoming a separate one-off client."
                 ),
                 Section(
+                    id: "thanks-excalidraw",
+                    title: "Thanks to the Excalidraw project",
+                    body: "OpenClient's sketch attachment tool uses the @excalidraw/excalidraw React library to provide a local, offline drawing board inside the app. Thanks to the Excalidraw maintainers and contributors for making a high-quality open source diagramming tool available to embed in developer workflows. Project: https://github.com/excalidraw/excalidraw"
+                ),
+                Section(
                     id: "why-it-matters",
                     title: "Why that matters",
                     body: "When the tools you use are open, you can understand how they work, verify how they handle your workflow, and contribute fixes or ideas when something falls short. That makes the app better for everyone and keeps the product direction grounded in real usage rather than guesswork."
@@ -527,6 +532,11 @@ extension HelpArticle {
                     id: "highlighterswift",
                     title: "HighlighterSwift",
                     body: "Copyright (c) 2026, Tony Smith. Portions copyright (c) 2016, Juan Pablo Illanes.\n\nMIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
+                ),
+                Section(
+                    id: "excalidraw",
+                    title: "Excalidraw",
+                    body: "@excalidraw/excalidraw\nProject: https://github.com/excalidraw/excalidraw\n\nMIT License\n\nCopyright (c) 2020 Excalidraw\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
                 ),
                 Section(
                     id: "highlightjs",

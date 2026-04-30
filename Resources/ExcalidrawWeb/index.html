@@ -6,8 +6,27 @@
     <title>OpenClient Sketch</title>
     <script>
       window.EXCALIDRAW_ASSET_PATH = "./excalidraw-assets/";
+      window.addEventListener("error", function (event) {
+        var target = event.target;
+        var message = event.message || "Unable to load the drawing app.";
+        if (target && target !== window) {
+          message = "Unable to load " + (target.src || target.href || target.tagName || "a drawing app resource") + ".";
+        }
+        window.webkit?.messageHandlers?.excalidraw?.postMessage({
+          type: "error",
+          code: "runtime-error",
+          message: message,
+        });
+      }, true);
+      window.addEventListener("unhandledrejection", function (event) {
+        window.webkit?.messageHandlers?.excalidraw?.postMessage({
+          type: "error",
+          code: "runtime-error",
+          message: event.reason?.message || "The drawing app failed to initialize.",
+        });
+      });
     </script>
-    <script type="module" crossorigin src="./assets/index-B01O1MwZ.js"></script>
+    <script type="module" crossorigin src="./assets/index-DiNg8bR0.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-mK23xpbm.css">
   </head>
   <body>

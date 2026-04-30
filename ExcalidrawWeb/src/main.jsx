@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { Excalidraw, exportToBlob } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
@@ -28,25 +28,27 @@ function blobToBase64(blob) {
 }
 
 function App() {
-  const [excalidrawAPI, setExcalidrawAPI] = useState(null);
+  const excalidrawAPIRef = useRef(null);
+  const latestSceneRef = useRef({
+    elements: [],
+    appState: { viewBackgroundColor: "#ffffff" },
+    files: {},
+  });
 
   useEffect(() => {
     window.exportExcalidrawAsPng = async () => {
       try {
-        if (!excalidrawAPI) {
-          postToSwift({ type: "error", code: "not-ready", message: "Excalidraw is still loading." });
-          return false;
-        }
-
-        const elements = excalidrawAPI.getSceneElements();
+        const api = excalidrawAPIRef.current;
+        const scene = latestSceneRef.current;
+        const elements = api?.getSceneElements?.() || scene.elements;
         const hasDrawableElements = elements.some((element) => !element.isDeleted);
         if (!hasDrawableElements) {
           postToSwift({ type: "error", code: "empty-scene", message: "Draw something before attaching." });
           return false;
         }
 
-        const appState = excalidrawAPI.getAppState();
-        const files = excalidrawAPI.getFiles();
+        const appState = api?.getAppState?.() || scene.appState;
+        const files = api?.getFiles?.() || scene.files;
         const blob = await exportToBlob({
           elements,
           appState: {
@@ -79,21 +81,31 @@ function App() {
       }
     };
 
-    if (excalidrawAPI) {
-      postToSwift({ type: "ready" });
-    }
-
     return () => {
       if (window.exportExcalidrawAsPng) {
         delete window.exportExcalidrawAsPng;
       }
     };
-  }, [excalidrawAPI]);
+  }, []);
+
+  useEffect(() => {
+    requestAnimationFrame(() => postToSwift({ type: "ready" }));
+  }, []);
 
   return (
     <main className="drawing-root">
       <Excalidraw
-        excalidrawAPI={(api) => setExcalidrawAPI(api)}
+        excalidrawAPI={(api) => {
+          excalidrawAPIRef.current = api;
+          postToSwift({ type: "ready" });
+        }}
+        onChange={(elements, appState, files) => {
+          latestSceneRef.current = {
+            elements: Array.from(elements),
+            appState,
+            files,
+          };
+        }}
         initialData={{
           appState: {
             viewBackgroundColor: "#ffffff",

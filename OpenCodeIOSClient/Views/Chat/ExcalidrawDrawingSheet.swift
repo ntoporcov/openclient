@@ -6,63 +6,54 @@ import WebKit
 struct ExcalidrawDrawingSheet: View {
     let onAttach: (OpenCodeComposerAttachment) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var exportRequestID: UUID?
     @State private var isWebViewReady = false
     @State private var isExporting = false
     @State private var currentError: ExcalidrawDrawingError?
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                ExcalidrawWebView(
-                    exportRequestID: exportRequestID,
-                    onReady: {
-                        isWebViewReady = true
-                    },
-                    onExportedPNG: { data in
-                        attachExportedDrawing(data)
-                    },
-                    onError: { error in
-                        showError(error)
-                    }
-                )
-                .background(Color(uiColor: .systemBackground))
+        ZStack {
+            ExcalidrawWebView(
+                exportRequestID: exportRequestID,
+                onReady: {
+                    isWebViewReady = true
+                },
+                onExportedPNG: { data in
+                    attachExportedDrawing(data)
+                },
+                onError: { error in
+                    showError(error)
+                }
+            )
+            .background(Color(uiColor: .systemBackground))
 
-                if !isWebViewReady {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading Excalidraw")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(18)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            if !isWebViewReady {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading Excalidraw")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
+                .padding(18)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
-            .navigationTitle("Sketch")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+        }
+        .navigationTitle("Sketch")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(isExporting ? "Exporting..." : "Attach") {
+                    exportDrawing()
                 }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isExporting ? "Exporting..." : "Attach Drawing") {
-                        exportDrawing()
-                    }
-                    .disabled(!isWebViewReady || isExporting)
-                }
+                .disabled(!isWebViewReady || isExporting)
             }
-            .alert(item: $currentError) { error in
-                Alert(
-                    title: Text("Drawing Error"),
-                    message: Text(error.localizedDescription),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
+        }
+        .alert(item: $currentError) { error in
+            Alert(
+                title: Text("Drawing Error"),
+                message: Text(error.localizedDescription),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
 
@@ -92,7 +83,6 @@ struct ExcalidrawDrawingSheet: View {
             dataURL: "data:image/png;base64,\(data.base64EncodedString())"
         )
         onAttach(attachment)
-        dismiss()
     }
 
     private func showError(_ error: ExcalidrawDrawingError) {
@@ -114,6 +104,7 @@ struct ExcalidrawWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let userContentController = WKUserContentController()
         userContentController.add(context.coordinator, name: "excalidraw")
+        userContentController.addUserScript(Coordinator.errorReportingUserScript)
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = userContentController
@@ -155,6 +146,7 @@ struct ExcalidrawWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var parent: ExcalidrawWebView
         private var lastExportRequestID: UUID?
+        private var hasReportedReady = false
 
         init(parent: ExcalidrawWebView) {
             self.parent = parent
@@ -196,6 +188,7 @@ struct ExcalidrawWebView: UIViewRepresentable {
 
             switch type {
             case "ready":
+                hasReportedReady = true
                 parent.onReady()
             case "exported":
                 handleExportedMessage(payload)
@@ -212,6 +205,28 @@ struct ExcalidrawWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             parent.onError(.webView(error.localizedDescription))
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.evaluateJavaScript("typeof window.exportExcalidrawAsPng === 'function'") { [weak self] result, _ in
+                guard let self else { return }
+                if (result as? Bool) == true {
+                    hasReportedReady = true
+                    parent.onReady()
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak webView] in
+                guard let self, let webView, !hasReportedReady else { return }
+                webView.evaluateJavaScript("typeof window.exportExcalidrawAsPng === 'function'") { [weak self] result, _ in
+                    guard let self, !hasReportedReady else { return }
+                    if (result as? Bool) == true {
+                        hasReportedReady = true
+                        parent.onReady()
+                    } else {
+                        parent.onError(.javascript("The drawing app loaded, but the exporter did not initialize."))
+                    }
+                }
+            }
         }
 
         func webView(
@@ -256,10 +271,39 @@ struct ExcalidrawWebView: UIViewRepresentable {
                 parent.onError(.emptyScene)
             case "not-ready":
                 parent.onError(.notReady)
+            case "runtime-error":
+                parent.onError(.javascript(message ?? "The drawing app failed to initialize."))
             default:
                 parent.onError(.exportFailed(message ?? "Unable to export drawing."))
             }
         }
+
+        static let errorReportingUserScript = WKUserScript(
+            source: """
+            (function() {
+              if (window.__openClientExcalidrawErrorReporterInstalled) { return; }
+              window.__openClientExcalidrawErrorReporterInstalled = true;
+              function post(message) {
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.excalidraw) {
+                  window.webkit.messageHandlers.excalidraw.postMessage(message);
+                }
+              }
+              window.addEventListener('error', function(event) {
+                var target = event.target;
+                var message = event.message || 'The drawing app failed to initialize.';
+                if (target && target !== window) {
+                  message = 'Unable to load ' + (target.src || target.href || target.tagName || 'a drawing app resource') + '.';
+                }
+                post({ type: 'error', code: 'runtime-error', message: message });
+              }, true);
+              window.addEventListener('unhandledrejection', function(event) {
+                post({ type: 'error', code: 'runtime-error', message: (event.reason && event.reason.message) || 'The drawing app failed to initialize.' });
+              });
+            })();
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
     }
 }
 
