@@ -187,7 +187,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.messageDraftsByChatKey[viewModel.messageDraftStorageKey(for: first)]?.text, "saved draft")
     }
 
-    func testSendDirectoryPrefersSelectedWorkspaceScope() {
+    func testSendDirectoryKeepsExistingSessionScope() {
         let viewModel = AppViewModel()
         let session = OpenCodeSession(
             id: "ses_test",
@@ -208,7 +208,7 @@ final class AppViewModelTests: XCTestCase {
             time: nil
         )
 
-        XCTAssertEqual(viewModel.sendDirectory(for: session), "/tmp/selected-dir")
+        XCTAssertEqual(viewModel.sendDirectory(for: session), "/tmp/session-dir")
     }
 
     func testSendDirectoryUsesSessionScopeForLocalSessionWhenGlobalProjectSelected() {

@@ -6,7 +6,7 @@ struct MarkdownMessageText: View {
         case reasoning
     }
 
-    private enum MarkdownBlock: Identifiable {
+    fileprivate enum MarkdownBlock: Identifiable {
         case text(id: Int, value: String)
         case heading(id: Int, level: Int, value: String)
         case blockQuote(id: Int, value: String)
@@ -22,7 +22,7 @@ struct MarkdownMessageText: View {
         }
     }
 
-    private enum ListMarker {
+    fileprivate enum ListMarker {
         case unordered
         case ordered(String)
         case checkbox(isChecked: Bool)
@@ -207,10 +207,7 @@ struct MarkdownMessageText: View {
     }
 
     private func markdownText(_ value: String) -> Text {
-        if let attributed = try? AttributedString(
-            markdown: value,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
+        if let attributed = OpenCodeMarkdownRenderCache.shared.inlineMarkdown(for: value) {
             return Text(attributed)
         }
 
@@ -218,55 +215,57 @@ struct MarkdownMessageText: View {
     }
 
     private var blocks: [MarkdownBlock] {
-        let lines = text.components(separatedBy: .newlines)
-        var result: [MarkdownBlock] = []
-        var index = 0
-        var id = 0
+        OpenCodeMarkdownRenderCache.shared.blocks(for: text) {
+            let lines = text.components(separatedBy: .newlines)
+            var result: [MarkdownBlock] = []
+            var index = 0
+            var id = 0
 
-        while index < lines.count {
-            let line = lines[index]
+            while index < lines.count {
+                let line = lines[index]
 
-            if let codeBlock = fencedCodeBlock(in: lines, startingAt: index) {
-                result.append(.codeBlock(id: id, language: codeBlock.language, value: codeBlock.value))
-                id += 1
-                index = codeBlock.nextIndex
-                continue
-            }
-
-            if let table = markdownTable(in: lines, startingAt: index) {
-                result.append(.table(id: id, headers: table.headers, rows: table.rows))
-                id += 1
-                index = table.nextIndex
-                continue
-            }
-
-            if let quote = blockQuoteLine(from: line) {
-                var values = [quote]
-                index += 1
-
-                while index < lines.count, let nextQuote = blockQuoteLine(from: lines[index]) {
-                    values.append(nextQuote)
-                    index += 1
+                if let codeBlock = fencedCodeBlock(in: lines, startingAt: index) {
+                    result.append(.codeBlock(id: id, language: codeBlock.language, value: codeBlock.value))
+                    id += 1
+                    index = codeBlock.nextIndex
+                    continue
                 }
 
-                result.append(.blockQuote(id: id, value: values.joined(separator: "\n")))
+                if let table = markdownTable(in: lines, startingAt: index) {
+                    result.append(.table(id: id, headers: table.headers, rows: table.rows))
+                    id += 1
+                    index = table.nextIndex
+                    continue
+                }
+
+                if let quote = blockQuoteLine(from: line) {
+                    var values = [quote]
+                    index += 1
+
+                    while index < lines.count, let nextQuote = blockQuoteLine(from: lines[index]) {
+                        values.append(nextQuote)
+                        index += 1
+                    }
+
+                    result.append(.blockQuote(id: id, value: values.joined(separator: "\n")))
+                    id += 1
+                    continue
+                }
+
+                if let heading = heading(from: line) {
+                    result.append(.heading(id: id, level: heading.level, value: heading.value))
+                } else if let item = listItem(from: line) {
+                    result.append(.listItem(id: id, marker: item.marker, value: item.value))
+                } else {
+                    result.append(.text(id: id, value: line))
+                }
+
                 id += 1
-                continue
+                index += 1
             }
 
-            if let heading = heading(from: line) {
-                result.append(.heading(id: id, level: heading.level, value: heading.value))
-            } else if let item = listItem(from: line) {
-                result.append(.listItem(id: id, marker: item.marker, value: item.value))
-            } else {
-                result.append(.text(id: id, value: line))
-            }
-
-            id += 1
-            index += 1
+            return result
         }
-
-        return result
     }
 
     private func heading(from line: String) -> (level: Int, value: String)? {
@@ -679,6 +678,51 @@ struct MarkdownMessageText: View {
             return 5
         case .reasoning:
             return 4
+        }
+    }
+}
+
+@MainActor
+fileprivate final class OpenCodeMarkdownRenderCache {
+    static let shared = OpenCodeMarkdownRenderCache()
+
+    private var blocksByText: [String: [MarkdownMessageText.MarkdownBlock]] = [:]
+    private var inlineMarkdownByText: [String: AttributedString] = [:]
+
+    func blocks(for text: String, build: () -> [MarkdownMessageText.MarkdownBlock]) -> [MarkdownMessageText.MarkdownBlock] {
+        if let cached = blocksByText[text] {
+            return cached
+        }
+
+        let blocks = build()
+        if text.count <= 24_000 {
+            trimIfNeeded(&blocksByText, limit: 220)
+            blocksByText[text] = blocks
+        }
+        return blocks
+    }
+
+    func inlineMarkdown(for text: String) -> AttributedString? {
+        if let cached = inlineMarkdownByText[text] {
+            return cached
+        }
+
+        guard text.count <= 4_000,
+              let attributed = try? AttributedString(
+                  markdown: text,
+                  options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+              ) else {
+            return nil
+        }
+
+        trimIfNeeded(&inlineMarkdownByText, limit: 600)
+        inlineMarkdownByText[text] = attributed
+        return attributed
+    }
+
+    private func trimIfNeeded<Value>(_ cache: inout [String: Value], limit: Int) {
+        if cache.count >= limit {
+            cache.removeAll(keepingCapacity: true)
         }
     }
 }

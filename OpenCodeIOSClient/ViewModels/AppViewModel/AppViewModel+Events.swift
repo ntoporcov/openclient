@@ -748,7 +748,6 @@ extension AppViewModel {
             do {
                 try await self.loadMessages(for: session)
                 try await self.reloadSessions()
-                await self.loadTodos(for: session)
                 self.markChatBreadcrumb("reload finish", sessionID: session.id)
             } catch {
                 self.markChatBreadcrumb("reload error", sessionID: session.id)
@@ -764,16 +763,20 @@ extension AppViewModel {
         lastFallbackAssistantLength = currentAssistantTextLength()
         liveRefreshTask?.cancel()
         liveRefreshTask = Task { [weak self] in
-            for _ in 0 ..< 60 {
-                try? await Task.sleep(for: .milliseconds(350))
+            let delays: [Duration] = [
+                .milliseconds(700), .seconds(1), .milliseconds(1_500), .seconds(2), .seconds(2),
+                .seconds(3), .seconds(3), .seconds(4), .seconds(4), .seconds(5), .seconds(5),
+            ]
+
+            for delay in delays {
+                try? await Task.sleep(for: delay)
                 guard let self, self.isConnected, self.selectedSession?.id == session.id else { return }
                 guard self.liveRefreshGeneration == generation else { return }
-                guard Date.now.timeIntervalSince(self.lastStreamEventAt) >= 1.0 else { continue }
+                guard Date.now.timeIntervalSince(self.lastStreamEventAt) >= 1.25 else { continue }
 
                 do {
                     self.markChatBreadcrumb("fallback refresh start \(reason)", sessionID: session.id)
                     try await self.loadMessages(for: session)
-                    await self.loadTodos(for: session)
                     self.debugLastEventSummary = self.fallbackRefreshSummary(reason: reason)
                     self.appendDebugLog(self.debugLastEventSummary)
                     self.markChatBreadcrumb("fallback refresh finish \(reason)", sessionID: session.id)

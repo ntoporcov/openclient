@@ -479,7 +479,7 @@ struct OpenCodeAPIClient: Sendable {
         }
     }
 
-    private func makeRequest(path: String, method: String, queryItems: [URLQueryItem], directoryHeader: String? = nil) throws -> URLRequest {
+    private func makeRequest(path: String, method: String, queryItems: [URLQueryItem], directoryHeader: String? = nil, logRequest: Bool = true) throws -> URLRequest {
         guard let url = resolvedURL(path: path, queryItems: queryItems) else {
             throw OpenCodeAPIError.invalidURL
         }
@@ -494,13 +494,15 @@ struct OpenCodeAPIClient: Sendable {
             request.setValue(directoryHeader, forHTTPHeaderField: "x-opencode-directory")
         }
 
-        debugLog(request: request)
+        if logRequest {
+            debugLog(request: request)
+        }
 
         return request
     }
 
     private func makeRequest<Body: Encodable>(path: String, method: String, queryItems: [URLQueryItem], body: Body, directoryHeader: String? = nil) throws -> URLRequest {
-        var request = try makeRequest(path: path, method: method, queryItems: queryItems, directoryHeader: directoryHeader)
+        var request = try makeRequest(path: path, method: method, queryItems: queryItems, directoryHeader: directoryHeader, logRequest: false)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
 
@@ -537,6 +539,7 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     private func debugLog(request: URLRequest) {
+        #if DEBUG
         var headers = request.allHTTPHeaderFields ?? [:]
         if headers["Authorization"] != nil {
             headers["Authorization"] = "<redacted>"
@@ -546,27 +549,30 @@ struct OpenCodeAPIClient: Sendable {
             "\(key)=\(headers[key] ?? "")"
         }.joined(separator: ", ")
 
-        let body: String
-        if let httpBody = request.httpBody, !httpBody.isEmpty {
-            body = String(data: httpBody, encoding: .utf8) ?? "<\(httpBody.count) bytes binary>"
-        } else {
-            body = "<empty>"
-        }
+        let body = Self.debugBodyDescription(request.httpBody)
 
         print("[OpenCodeRequest] method=\(request.httpMethod ?? "na") url=\(request.url?.absoluteString ?? "nil") headers=[\(sortedHeaders)] body=\(body)")
+        #endif
     }
 
     private func debugLog(response: HTTPURLResponse, for request: URLRequest?, body: Data?) {
-        let responseBody: String
-        if let body, !body.isEmpty {
-            responseBody = String(data: body, encoding: .utf8) ?? "<\(body.count) bytes binary>"
-        } else {
-            responseBody = "<empty>"
-        }
+        #if DEBUG
+        let responseBody = Self.debugBodyDescription(body)
 
         print(
             "[OpenCodeResponse] status=\(response.statusCode) url=\(request?.url?.absoluteString ?? response.url?.absoluteString ?? "nil") body=\(responseBody)"
         )
+        #endif
+    }
+
+    private static func debugBodyDescription(_ body: Data?) -> String {
+        let limit = 2_048
+        guard let body, !body.isEmpty else { return "<empty>" }
+        guard let text = String(data: body, encoding: .utf8) else {
+            return "<\(body.count) bytes binary>"
+        }
+        guard text.count > limit else { return text }
+        return "\(String(text.prefix(limit)))... <truncated \(body.count) bytes>"
     }
 
     private func encodedDirectoryHeader(from queryItems: [URLQueryItem]) -> String? {

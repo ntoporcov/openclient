@@ -84,6 +84,9 @@ enum OpenCodeEventStream {
             configuration.waitsForConnectivity = true
             configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
             let streamSession = URLSession(configuration: configuration)
+            defer {
+                streamSession.invalidateAndCancel()
+            }
 
             let (bytes, response) = try await streamSession.bytes(for: request)
             guard let http = response as? HTTPURLResponse else {

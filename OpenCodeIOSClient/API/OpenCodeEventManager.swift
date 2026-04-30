@@ -72,12 +72,15 @@ final class OpenCodeEventManager {
         onDroppedEvent: (@Sendable (String) async -> Void)? = nil,
         onEvent: @escaping @Sendable (OpenCodeManagedEvent) async -> Void
     ) async {
+        var reconnectAttempt = 0
+
         while !Task.isCancelled {
             guard let url = client.globalEventURL() else {
                 await onStatus("stream invalid url")
                 return
             }
 
+            let startedAt = Date.now
             await OpenCodeEventStream.consume(
                 client: client,
                 url: url,
@@ -97,7 +100,14 @@ final class OpenCodeEventManager {
                 return
             }
 
-            try? await Task.sleep(for: .milliseconds(250))
+            if Date.now.timeIntervalSince(startedAt) > 10 {
+                reconnectAttempt = 0
+            }
+
+            let delaySeconds = min(8.0, 0.25 * pow(2.0, Double(reconnectAttempt))) + Double.random(in: 0 ... 0.2)
+            reconnectAttempt = min(reconnectAttempt + 1, 6)
+            await onStatus("stream reconnecting")
+            try? await Task.sleep(for: .milliseconds(Int(delaySeconds * 1_000)))
         }
     }
 }

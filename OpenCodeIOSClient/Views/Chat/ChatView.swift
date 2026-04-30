@@ -700,6 +700,87 @@ private enum ChatDisplayItem: Identifiable {
     }
 }
 
+private struct ChatDisplayItemCacheKey: Equatable {
+    struct MessageKey: Equatable {
+        let id: String
+        let role: String?
+        let parentID: String?
+        let isStreaming: Bool
+        let isCompactionSummary: Bool
+        let parts: [PartKey]
+    }
+
+    struct PartKey: Equatable {
+        let id: String?
+        let type: String
+        let tool: String?
+        let textCount: Int
+        let textSampleHash: Int
+        let reason: String?
+        let filename: String?
+        let mime: String?
+        let stateStatus: String?
+        let stateTitle: String?
+        let stateInputSampleHash: Int
+        let stateOutputCount: Int
+        let stateOutputSampleHash: Int
+        let metadataSessionID: String?
+        let metadataFileCount: Int?
+        let metadataLoadedCount: Int?
+        let metadataTruncated: Bool?
+    }
+
+    let messages: [MessageKey]
+    let findPlaceGameID: String?
+    let findBugGameID: String?
+}
+
+private final class ChatDisplayItemCache {
+    private var lastKey: ChatDisplayItemCacheKey?
+    private var lastItems: [ChatDisplayItem] = []
+
+    func items(
+        for key: ChatDisplayItemCacheKey,
+        messagesByID: [String: OpenCodeMessageEnvelope],
+        build: () -> [ChatDisplayItem]
+    ) -> [ChatDisplayItem] {
+        if lastKey == key {
+            let refreshedItems = lastItems.map { $0.refreshedMessages(using: messagesByID) }
+            lastItems = refreshedItems
+            return lastItems
+        }
+
+        let items = build()
+        lastKey = key
+        lastItems = items
+        return items
+    }
+}
+
+private extension ChatDisplayItem {
+    func refreshedMessages(using messagesByID: [String: OpenCodeMessageEnvelope]) -> ChatDisplayItem {
+        switch self {
+        case let .message(message):
+            return .message(messagesByID[message.id] ?? message)
+        case let .largeMessageChunk(item):
+            return .largeMessageChunk(
+                LargeMessageChunkDisplayItem(message: messagesByID[item.message.id] ?? item.message, chunk: item.chunk)
+            )
+        case let .compaction(item):
+            return .compaction(
+                CompactionDisplayItem(
+                    boundaryMessage: messagesByID[item.boundaryMessage.id] ?? item.boundaryMessage,
+                    summaryMessage: item.summaryMessage.map { messagesByID[$0.id] ?? $0 }
+                )
+            )
+        case let .findPlaceReveal(city):
+            return .findPlaceReveal(city)
+        case .findBugSolved:
+            return .findBugSolved
+        }
+    }
+}
+
 private enum ChatScrollTarget {
     static let olderMessagesButton = "chat-older-messages-button"
     static let thinkingRow = "chat-thinking-row"
@@ -967,6 +1048,58 @@ private struct MessageComposerSnapshot: Equatable {
     let actionSignature: String
 }
 
+private struct MessageBubbleSnapshot: Equatable {
+    let message: OpenCodeMessageEnvelope
+    let detailedMessage: OpenCodeMessageEnvelope?
+    let currentSessionID: String?
+    let isStreamingMessage: Bool
+    let animatesStreamingText: Bool
+    let reserveEntryFromComposer: Bool
+    let animateEntryFromComposer: Bool
+}
+
+private struct EquatableMessageBubbleHost: View, Equatable {
+    let snapshot: MessageBubbleSnapshot
+    let resolveTaskSessionID: (OpenCodePart, String) -> String?
+    let onSelectPart: (OpenCodePart) -> Void
+    let onOpenTaskSession: (String) -> Void
+    let onForkMessage: (OpenCodeMessageEnvelope) -> Void
+    let onInspectDebugMessage: (OpenCodeMessageEnvelope) -> Void
+
+    nonisolated static func == (lhs: EquatableMessageBubbleHost, rhs: EquatableMessageBubbleHost) -> Bool {
+        lhs.snapshot == rhs.snapshot
+    }
+
+    var body: some View {
+        MessageBubble(
+            message: snapshot.message,
+            detailedMessage: snapshot.detailedMessage,
+            currentSessionID: snapshot.currentSessionID,
+            isStreamingMessage: snapshot.isStreamingMessage,
+            animatesStreamingText: snapshot.animatesStreamingText,
+            reserveEntryFromComposer: snapshot.reserveEntryFromComposer,
+            animateEntryFromComposer: snapshot.animateEntryFromComposer,
+            resolveTaskSessionID: resolveTaskSessionID,
+            onSelectPart: onSelectPart,
+            onOpenTaskSession: onOpenTaskSession,
+            onForkMessage: onForkMessage,
+            onInspectDebugMessage: onInspectDebugMessage
+        )
+    }
+}
+
+private struct StreamingFollowState: Equatable {
+    let lastMessageID: String
+    let lastPartCount: Int
+    let lastTextLength: Int
+    let showsThinking: Bool
+}
+
+private struct AccessoryPresenceState: Equatable {
+    let attachmentIDs: [String]
+    let incompleteTodoIDs: [String]
+}
+
 private struct EquatableMessageComposerHost: View, Equatable {
     let draftStore: MessageComposerDraftStore
     let isAccessoryMenuOpen: Binding<Bool>
@@ -1082,6 +1215,7 @@ struct ChatView: View {
     @State private var bottomPullIsTracking = false
     @State private var hasFiredBottomPullHaptic = false
     @State private var largeMessageChunkCache = OpenCodeLargeMessageChunkCache()
+    @State private var chatDisplayItemCache = ChatDisplayItemCache()
 
     @State private var selectedInstructionTab: AppleIntelligenceInstructionTab = .user
 
@@ -1134,13 +1268,17 @@ struct ChatView: View {
         ].joined(separator: "|")
     }
 
-    private var streamingFollowSignature: String {
-        [
-            displayedMessages.last?.id ?? "none",
-            String(displayedMessages.last?.parts.count ?? 0),
-            String(lastDisplayedMessageTextLength),
-            shouldShowThinking ? "thinking" : "idle"
-        ].joined(separator: "|")
+    private var streamingFollowState: StreamingFollowState {
+        StreamingFollowState(
+            lastMessageID: displayedMessages.last?.id ?? "none",
+            lastPartCount: displayedMessages.last?.parts.count ?? 0,
+            lastTextLength: lastDisplayedMessageTextLength,
+            showsThinking: shouldShowThinking
+        )
+    }
+
+    private var shouldAnimateStreamingText: Bool {
+        shouldAutoFollowBottom && !isComposerInputFocused
     }
 
     private var isChildSession: Bool {
@@ -1262,7 +1400,7 @@ struct ChatView: View {
             GeometryReader { geometry in
                 ScrollViewReader { proxy in
                     let chatItems = displayedChatItems
-                    let chatItemIDSignature = chatItems.map(\.id).joined(separator: "|")
+                    let chatItemIDs = chatItems.map(\.id)
 
                     ScrollView {
                         LazyVStack(spacing: 0) {
@@ -1295,7 +1433,7 @@ struct ChatView: View {
                     }
                     .chatScrollBottomTracking($isScrollGeometryAtBottom)
                     .simultaneousGesture(bottomOverscrollRefreshGesture)
-                    .animation(chatItemChangeAnimation, value: chatItemIDSignature)
+                    .animation(chatItemChangeAnimation, value: chatItemIDs)
                     .opencodeInteractiveKeyboardDismiss()
                     .background(OpenCodePlatformColor.groupedBackground)
                     .accessibilityIdentifier("chat.scroll")
@@ -1384,7 +1522,7 @@ struct ChatView: View {
 
                         updateChatContentVisibility()
                     }
-                    .onChange(of: streamingFollowSignature) { _, _ in
+                    .onChange(of: streamingFollowState) { _, _ in
                         guard hasLoadedInitialWindow, shouldAutoFollowBottom, !isComposerInputFocused, !isSendReadingModeActive else { return }
                         scheduleStreamingScrollToBottom(with: proxy)
                     }
@@ -2017,8 +2155,82 @@ struct ChatView: View {
         viewModel.messages.suffix(visibleMessageCount)
     }
 
+    private var displayedMessagesArray: [OpenCodeMessageEnvelope] {
+        Array(displayedMessages)
+    }
+
     private var displayedChatItems: [ChatDisplayItem] {
-        makeDisplayItems(from: Array(displayedMessages))
+        let messages = displayedMessagesArray
+        let messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+        let key = ChatDisplayItemCacheKey(
+            messages: messages.map { message in
+                displayItemCacheMessageKey(for: message)
+            },
+            findPlaceGameID: viewModel.findPlaceGame(for: sessionID)?.city.id,
+            findBugGameID: viewModel.findBugGame(for: sessionID)?.language.id
+        )
+
+        return chatDisplayItemCache.items(for: key, messagesByID: messagesByID) {
+            makeDisplayItems(from: messages)
+        }
+    }
+
+    private func displayItemCacheMessageKey(for message: OpenCodeMessageEnvelope) -> ChatDisplayItemCacheKey.MessageKey {
+        ChatDisplayItemCacheKey.MessageKey(
+            id: message.id,
+            role: message.info.role,
+            parentID: message.info.parentID,
+            isStreaming: isStreamingMessage(message),
+            isCompactionSummary: message.info.isCompactionSummary,
+            parts: message.parts.map(displayItemCachePartKey(for:))
+        )
+    }
+
+    private func displayItemCachePartKey(for part: OpenCodePart) -> ChatDisplayItemCacheKey.PartKey {
+        ChatDisplayItemCacheKey.PartKey(
+            id: part.id,
+            type: part.type,
+            tool: part.tool,
+            textCount: part.text?.count ?? 0,
+            textSampleHash: sampledTextHash(part.text),
+            reason: part.reason,
+            filename: part.filename,
+            mime: part.mime,
+            stateStatus: part.state?.status,
+            stateTitle: part.state?.title,
+            stateInputSampleHash: sampledTextHash(part.state?.input.map { displayItemCacheInputSignature(from: $0) }),
+            stateOutputCount: part.state?.output?.count ?? 0,
+            stateOutputSampleHash: sampledTextHash(part.state?.output),
+            metadataSessionID: part.state?.metadata?.sessionId,
+            metadataFileCount: part.state?.metadata?.files?.count,
+            metadataLoadedCount: part.state?.metadata?.loaded?.count,
+            metadataTruncated: part.state?.metadata?.truncated
+        )
+    }
+
+    private func displayItemCacheInputSignature(from input: OpenCodeToolInput) -> String {
+        [
+            input.command,
+            input.description,
+            input.filePath,
+            input.name,
+            input.path,
+            input.query,
+            input.pattern,
+            input.subagentType,
+            input.url,
+        ]
+        .map { $0 ?? "" }
+        .joined(separator: "\u{1f}")
+    }
+
+    private func sampledTextHash(_ value: String?) -> Int {
+        guard let value, !value.isEmpty else { return 0 }
+        if value.count <= 512 {
+            return value.hashValue
+        }
+
+        return "\(value.prefix(160))\u{1f}\(value.suffix(160))".hashValue
     }
 
     private var hiddenMessageCount: Int {
@@ -2031,11 +2243,11 @@ struct ChatView: View {
         } ?? 0
     }
 
-    private var accessoryPresenceSignature: String {
-        [
-            viewModel.draftAttachments.map(\.id).joined(separator: "|"),
-            viewModel.todos.filter { !$0.isComplete }.map(\.id).joined(separator: "|")
-        ].joined(separator: "#")
+    private var accessoryPresenceSignature: AccessoryPresenceState {
+        AccessoryPresenceState(
+            attachmentIDs: viewModel.draftAttachments.map(\.id),
+            incompleteTodoIDs: viewModel.todos.filter { !$0.isComplete }.map(\.id)
+        )
     }
 
     private func dismissComposerOverlays() {
@@ -2123,14 +2335,18 @@ struct ChatView: View {
     }
 
     private func messageRow(for message: OpenCodeMessageEnvelope) -> some View {
-        MessageBubble(
+        let snapshot = MessageBubbleSnapshot(
             message: message,
             detailedMessage: viewModel.toolMessageDetails[message.id],
             currentSessionID: sessionID,
             isStreamingMessage: isStreamingMessage(message),
-            animatesStreamingText: !isComposerInputFocused,
+            animatesStreamingText: shouldAnimateStreamingText,
             reserveEntryFromComposer: message.id == preparingOutgoingMessageID,
-            animateEntryFromComposer: message.id == animatingOutgoingMessageID,
+            animateEntryFromComposer: message.id == animatingOutgoingMessageID
+        )
+
+        return EquatableMessageBubbleHost(
+            snapshot: snapshot,
             resolveTaskSessionID: { part, currentSessionID in
                 viewModel.resolveTaskSessionID(from: part, currentSessionID: currentSessionID)
             }
@@ -2143,6 +2359,7 @@ struct ChatView: View {
         } onInspectDebugMessage: { debugMessage in
             selectedMessageDebugPayload = MessageDebugPayload(message: debugMessage)
         }
+        .equatable()
         .transition(messageRowTransition(for: message))
         .id(message.id)
         .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))

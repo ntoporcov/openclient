@@ -495,13 +495,15 @@ extension AppViewModel {
             )
             appendDebugLog("prompt_async accepted session=\(debugSessionLabel(selectedSession)) msgID=\(resolvedMessageID) partID=\(resolvedPartID)")
             markChatBreadcrumb("prompt_async accepted", sessionID: selectedSession.id, messageID: resolvedMessageID, partID: resolvedPartID)
-            Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(500))
-                await self?.logServerMessageSnapshot(for: selectedSession, reason: "post-send 500ms")
-            }
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(2))
-                await self?.logServerMessageSnapshot(for: selectedSession, reason: "post-send 2s")
+            if isCapturingStreamingDiagnostics {
+                Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    await self?.logServerMessageSnapshot(for: selectedSession, reason: "post-send 500ms")
+                }
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(2))
+                    await self?.logServerMessageSnapshot(for: selectedSession, reason: "post-send 2s")
+                }
             }
             startLiveRefresh(for: selectedSession, reason: "send")
             refreshLiveActivityIfNeeded(for: selectedSession.id)
@@ -1176,9 +1178,7 @@ extension AppViewModel {
     }
 
     func prefetchToolMessageDetails(for session: OpenCodeSession, messages: [OpenCodeMessageEnvelope]) {
-        let toolMessageIDs = Set(messages.filter { envelope in
-            envelope.parts.contains(where: { $0.type == "tool" })
-        }.map(\.info.id))
+        let toolMessageIDs = recentToolMessageIDs(in: messages, limit: 12)
 
         for messageID in toolMessageIDs where toolMessageDetails[messageID] == nil {
             Task { [weak self] in
@@ -1196,9 +1196,7 @@ extension AppViewModel {
     }
 
     func refreshToolMessageDetails(for session: OpenCodeSession, messages: [OpenCodeMessageEnvelope]) async {
-        let toolMessageIDs = Set(messages.filter { envelope in
-            envelope.parts.contains(where: { $0.type == "tool" })
-        }.map(\.info.id))
+        let toolMessageIDs = recentToolMessageIDs(in: messages, limit: 20)
 
         for messageID in toolMessageIDs {
             do {
@@ -1207,6 +1205,20 @@ extension AppViewModel {
                 appendDebugLog("tool detail refresh failed session=\(debugSessionLabel(session)) message=\(messageID) error=\(error.localizedDescription)")
             }
         }
+    }
+
+    private func recentToolMessageIDs(in messages: [OpenCodeMessageEnvelope], limit: Int) -> [String] {
+        var seen = Set<String>()
+        var ids: [String] = []
+
+        for message in messages.reversed() {
+            guard ids.count < limit else { break }
+            guard message.parts.contains(where: { $0.type == "tool" }) else { continue }
+            guard seen.insert(message.info.id).inserted else { continue }
+            ids.append(message.info.id)
+        }
+
+        return ids
     }
 
     func sendCurrentAppleIntelligenceMessage() async {

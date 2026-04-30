@@ -19,7 +19,9 @@ final class OpenCodeAPIClientTests: XCTestCase {
 
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/session/ses_test/prompt_async")
-            XCTAssertNil(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+            XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems, [
+                URLQueryItem(name: "directory", value: "/tmp/project"),
+            ])
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Basic b3BlbmNvZGU6cHc=")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/tmp/project")
@@ -280,7 +282,7 @@ final class OpenCodeAPIClientTests: XCTestCase {
             ])
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/tmp/project")
-            XCTAssertEqual(String(data: try XCTUnwrap(request.httpBody), encoding: .utf8), #"{"reply":"once"}"#)
+            XCTAssertEqual(try XCTUnwrap(requestBodyString(for: request)), #"{"reply":"once"}"#)
             expectation.fulfill()
 
             return (
@@ -311,7 +313,7 @@ final class OpenCodeAPIClientTests: XCTestCase {
             ])
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/tmp/project")
-            XCTAssertEqual(String(data: try XCTUnwrap(request.httpBody), encoding: .utf8), #"{"answers":[["Build"],["Ship"]]}"#)
+            XCTAssertEqual(try XCTUnwrap(requestBodyString(for: request)), #"{"answers":[["Build"],["Ship"]]}"#)
             expectation.fulfill()
 
             return (
@@ -362,6 +364,30 @@ final class OpenCodeAPIClientTests: XCTestCase {
             "http://127.0.0.1:4096/global/event",
         ])
     }
+}
+
+private func requestBodyString(for request: URLRequest) -> String? {
+    if let body = request.httpBody {
+        return String(data: body, encoding: .utf8)
+    }
+
+    guard let stream = request.httpBodyStream else { return nil }
+    stream.open()
+    defer { stream.close() }
+
+    var data = Data()
+    let bufferSize = 1_024
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+
+    while stream.hasBytesAvailable {
+        let count = stream.read(buffer, maxLength: bufferSize)
+        if count < 0 { return nil }
+        if count == 0 { break }
+        data.append(buffer, count: count)
+    }
+
+    return String(data: data, encoding: .utf8)
 }
 
 private final class MockURLProtocol: URLProtocol {

@@ -19,6 +19,8 @@ settings:
   configs:
     Debug:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      ENABLE_TESTABILITY: YES
+      SWIFT_OPTIMIZATION_LEVEL: -Onone
 schemes:
   OpenCodeIOSClientScreenshots:
     build:

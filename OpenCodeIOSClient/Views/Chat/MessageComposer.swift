@@ -49,6 +49,14 @@ struct MessageComposer: View {
     let onToggleMCP: (String) -> Void
     let onAddAttachments: ([OpenCodeComposerAttachment]) -> Void
 
+#if canImport(PhotosUI) && canImport(UIKit)
+    private enum AttachmentImportLimits {
+        static let maxItemCount = 10
+        static let maxInlineBytes = 10 * 1_024 * 1_024
+        static let maxTotalBytes = 24 * 1_024 * 1_024
+    }
+#endif
+
     @State private var selectedCommandName: String?
     @State private var accessorySheetDetent: PresentationDetent = .height(315)
     @State private var accessoryNavigationPath: [AccessoryDestination] = []
@@ -59,6 +67,8 @@ struct MessageComposer: View {
     @State private var recentPhotoThumbnails: [String: UIImage] = [:]
     @State private var isShowingPhotosPicker = false
     @State private var isShowingFileImporter = false
+    @State private var isImportingAttachments = false
+    @State private var attachmentImportError: String?
 #endif
 
     private var text: String {
@@ -196,9 +206,26 @@ struct MessageComposer: View {
         .photosPicker(
             isPresented: $isShowingPhotosPicker,
             selection: $selectedPhotoItems,
-            maxSelectionCount: 10,
+            maxSelectionCount: AttachmentImportLimits.maxItemCount,
             matching: .images
         )
+        .alert(
+            "Attachment Not Added",
+            isPresented: Binding(
+                get: { attachmentImportError != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        attachmentImportError = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                attachmentImportError = nil
+            }
+        } message: {
+            Text(attachmentImportError ?? "")
+        }
 #endif
         .animation(opencodeSelectionAnimation, value: filteredCommands.map(\.name).joined(separator: "|"))
         .animation(opencodeSelectionAnimation, value: isAccessoryMenuOpen)
@@ -406,7 +433,7 @@ struct MessageComposer: View {
                         subtitle: "Add images",
                         systemImage: "photo.on.rectangle.angled",
                         tint: .pink,
-                        isDisabled: isBusy,
+                        isDisabled: isBusy || isImportingAttachments,
                         accessibilityIdentifier: "chat.composer.photos",
                         action: {
                             isAccessoryMenuOpen = false
@@ -422,7 +449,7 @@ struct MessageComposer: View {
                         subtitle: "Add files",
                         systemImage: "doc.badge.plus",
                         tint: .orange,
-                        isDisabled: isBusy,
+                        isDisabled: isBusy || isImportingAttachments,
                         accessibilityIdentifier: "chat.composer.files",
                         action: {
                             isAccessoryMenuOpen = false
@@ -432,6 +459,14 @@ struct MessageComposer: View {
                         }
                     )
                     .frame(maxWidth: .infinity)
+                }
+
+                if isImportingAttachments {
+                    Label("Preparing attachments", systemImage: "hourglass")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 2)
                 }
 
 #if canImport(UIKit) && canImport(WebKit)
@@ -535,7 +570,7 @@ struct MessageComposer: View {
                             .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
                         }
                         .buttonStyle(.plain)
-                        .disabled(isBusy)
+                        .disabled(isBusy || isImportingAttachments)
                         .accessibilityLabel("Attach recent photo")
                     }
                 }
@@ -653,8 +688,10 @@ struct MessageComposer: View {
     }
 
     private func attachRecentPhoto(_ asset: PHAsset) {
-        guard !isBusy else { return }
+        guard !isBusy, !isImportingAttachments else { return }
         Task {
+            isImportingAttachments = true
+            defer { isImportingAttachments = false }
             guard let attachment = await makeAttachment(from: asset) else { return }
             onAddAttachments([attachment])
             isAccessoryMenuOpen = false
@@ -664,18 +701,12 @@ struct MessageComposer: View {
     private func makeAttachment(from asset: PHAsset) async -> OpenCodeComposerAttachment? {
         guard let (data, uti) = await requestImageData(for: asset), !data.isEmpty else { return nil }
         let type = uti.flatMap(UTType.init) ?? .jpeg
-        let mime = type.preferredMIMEType ?? "image/jpeg"
-        let fileExtension = type.preferredFilenameExtension ?? "jpg"
-        let filename = "image-\(OpenCodeIdentifier.part()).\(fileExtension)"
-        let dataURL = "data:\(mime);base64,\(data.base64EncodedString())"
+        guard data.count <= AttachmentImportLimits.maxInlineBytes else {
+            attachmentImportError = Self.attachmentTooLargeMessage(filename: "Photo", byteCount: data.count)
+            return nil
+        }
 
-        return OpenCodeComposerAttachment(
-            id: OpenCodeIdentifier.part(),
-            kind: .image,
-            filename: filename,
-            mime: mime,
-            dataURL: dataURL
-        )
+        return Self.imageAttachment(from: data, type: type)
     }
 
     private func requestImageData(for asset: PHAsset) async -> (Data, String?)? {
@@ -696,41 +727,69 @@ struct MessageComposer: View {
     }
 
     private func loadSelectedPhotoItems() async {
-        guard !selectedPhotoItems.isEmpty else { return }
+        let items = selectedPhotoItems
+        selectedPhotoItems = []
+        guard !items.isEmpty else { return }
 
+        isImportingAttachments = true
+        defer { isImportingAttachments = false }
         var attachments: [OpenCodeComposerAttachment] = []
+        var skippedMessages: [String] = []
+        var totalBytes = 0
 
-        for item in selectedPhotoItems {
+        for item in items.prefix(AttachmentImportLimits.maxItemCount) {
             guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty else { continue }
+            guard data.count <= AttachmentImportLimits.maxInlineBytes else {
+                skippedMessages.append(Self.attachmentTooLargeMessage(filename: "Image", byteCount: data.count))
+                continue
+            }
+            guard totalBytes + data.count <= AttachmentImportLimits.maxTotalBytes else {
+                skippedMessages.append("Some images were skipped because attachments are limited to \(Self.formattedByteCount(AttachmentImportLimits.maxTotalBytes)) per message.")
+                break
+            }
 
             let type = item.supportedContentTypes.first(where: { $0.conforms(to: .image) }) ?? .png
-            let mime = type.preferredMIMEType ?? "image/png"
-            let filename = "image-\(OpenCodeIdentifier.part()).\(type.preferredFilenameExtension ?? "png")"
-            let dataURL = "data:\(mime);base64,\(data.base64EncodedString())"
-            attachments.append(
-                OpenCodeComposerAttachment(
-                    id: OpenCodeIdentifier.part(),
-                    kind: .image,
-                    filename: filename,
-                    mime: mime,
-                    dataURL: dataURL
-                )
-            )
+            attachments.append(Self.imageAttachment(from: data, type: type))
+            totalBytes += data.count
         }
 
-        selectedPhotoItems = []
-        guard !attachments.isEmpty else { return }
-
-        onAddAttachments(attachments)
-        isAccessoryMenuOpen = false
+        if !attachments.isEmpty {
+            onAddAttachments(attachments)
+            isAccessoryMenuOpen = false
+        }
+        if !skippedMessages.isEmpty {
+            attachmentImportError = Self.skippedAttachmentMessage(skippedMessages)
+        }
     }
 
     private func importSelectedFiles(_ result: Result<[URL], Error>) {
-        guard case let .success(urls) = result, !urls.isEmpty else { return }
+        guard case let .success(urls) = result, !urls.isEmpty, !isImportingAttachments else { return }
 
+        let importURLs = Array(urls.prefix(AttachmentImportLimits.maxItemCount))
+        isImportingAttachments = true
+        Task {
+            let importResult = await Task.detached(priority: .userInitiated) {
+                Self.makeFileAttachments(from: importURLs)
+            }.value
+
+            isImportingAttachments = false
+            if !importResult.attachments.isEmpty {
+                onAddAttachments(importResult.attachments)
+                isAccessoryMenuOpen = false
+            }
+            if !importResult.skippedMessages.isEmpty {
+                attachmentImportError = Self.skippedAttachmentMessage(importResult.skippedMessages)
+            }
+        }
+    }
+
+    nonisolated private static func makeFileAttachments(from urls: [URL]) -> (attachments: [OpenCodeComposerAttachment], skippedMessages: [String]) {
         var attachments: [OpenCodeComposerAttachment] = []
+        var skippedMessages: [String] = []
+        var totalBytes = 0
 
         for url in urls {
+            let filename = url.lastPathComponent
             let didAccess = url.startAccessingSecurityScopedResource()
             defer {
                 if didAccess {
@@ -738,36 +797,81 @@ struct MessageComposer: View {
                 }
             }
 
-            guard let data = try? Data(contentsOf: url), !data.isEmpty else { continue }
+            let values = try? url.resourceValues(forKeys: [.contentTypeKey, .fileSizeKey])
+            if let fileSize = values?.fileSize, fileSize > AttachmentImportLimits.maxInlineBytes {
+                skippedMessages.append(attachmentTooLargeMessage(filename: filename, byteCount: fileSize))
+                continue
+            }
 
-            let values = try? url.resourceValues(forKeys: [.contentTypeKey])
+            guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty else {
+                skippedMessages.append("\(filename) could not be read.")
+                continue
+            }
+            guard data.count <= AttachmentImportLimits.maxInlineBytes else {
+                skippedMessages.append(attachmentTooLargeMessage(filename: filename, byteCount: data.count))
+                continue
+            }
+            guard totalBytes + data.count <= AttachmentImportLimits.maxTotalBytes else {
+                skippedMessages.append("Some files were skipped because attachments are limited to \(formattedByteCount(AttachmentImportLimits.maxTotalBytes)) per message.")
+                break
+            }
+
             let type = values?.contentType ?? UTType(filenameExtension: url.pathExtension) ?? .data
-            guard let mime = fileAttachmentMimeType(for: type, filename: url.lastPathComponent, data: data) else {
+            guard let mime = fileAttachmentMimeType(for: type, filename: filename, data: data) else {
+                skippedMessages.append("\(filename) is not a supported attachment type.")
                 continue
             }
             let attachment = OpenCodeComposerAttachment(
                 id: OpenCodeIdentifier.part(),
                 kind: mime.lowercased().hasPrefix("image/") ? .image : .file,
-                filename: url.lastPathComponent,
+                filename: filename,
                 mime: mime,
                 dataURL: "data:\(mime);base64,\(data.base64EncodedString())"
             )
             attachments.append(attachment)
+            totalBytes += data.count
         }
 
-        guard !attachments.isEmpty else { return }
-
-        onAddAttachments(attachments)
-        isAccessoryMenuOpen = false
+        return (attachments, skippedMessages)
     }
 
-    private func defaultMimeType(for type: UTType) -> String {
+    nonisolated private static func imageAttachment(from data: Data, type: UTType) -> OpenCodeComposerAttachment {
+        let mime = type.preferredMIMEType ?? "image/jpeg"
+        let fileExtension = type.preferredFilenameExtension ?? "jpg"
+        let filename = "image-\(OpenCodeIdentifier.part()).\(fileExtension)"
+
+        return OpenCodeComposerAttachment(
+            id: OpenCodeIdentifier.part(),
+            kind: .image,
+            filename: filename,
+            mime: mime,
+            dataURL: "data:\(mime);base64,\(data.base64EncodedString())"
+        )
+    }
+
+    nonisolated private static func attachmentTooLargeMessage(filename: String, byteCount: Int) -> String {
+        "\(filename) is \(formattedByteCount(byteCount)). Attachments must be under \(formattedByteCount(AttachmentImportLimits.maxInlineBytes))."
+    }
+
+    nonisolated private static func skippedAttachmentMessage(_ messages: [String]) -> String {
+        let visibleMessages = messages.prefix(3).joined(separator: "\n")
+        if messages.count > 3 {
+            return "\(visibleMessages)\n\(messages.count - 3) more attachments were skipped."
+        }
+        return visibleMessages
+    }
+
+    nonisolated private static func formattedByteCount(_ byteCount: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(byteCount), countStyle: .file)
+    }
+
+    nonisolated private static func defaultMimeType(for type: UTType) -> String {
         if type.conforms(to: .pdf) { return "application/pdf" }
         if type.conforms(to: .image) { return "image/png" }
         return "application/octet-stream"
     }
 
-    private func fileAttachmentMimeType(for type: UTType, filename: String, data: Data) -> String? {
+    nonisolated private static func fileAttachmentMimeType(for type: UTType, filename: String, data: Data) -> String? {
         let mime = (type.preferredMIMEType ?? defaultMimeType(for: type)).lowercased()
 
         if mime.hasPrefix("image/") { return mime }
@@ -781,7 +885,7 @@ struct MessageComposer: View {
         return nil
     }
 
-    private func isTextLikeMime(_ mime: String) -> Bool {
+    nonisolated private static func isTextLikeMime(_ mime: String) -> Bool {
         if mime.hasPrefix("text/") { return true }
         if mime.hasSuffix("+json") || mime.hasSuffix("+xml") { return true }
         return [
@@ -795,7 +899,7 @@ struct MessageComposer: View {
         ].contains(mime)
     }
 
-    private func isTextLikeFilename(_ filename: String) -> Bool {
+    nonisolated private static func isTextLikeFilename(_ filename: String) -> Bool {
         let ext = URL(fileURLWithPath: filename).pathExtension.lowercased()
         return [
             "c", "cc", "cjs", "conf", "cpp", "css", "csv", "cts", "env", "go", "gql", "graphql",
@@ -805,7 +909,7 @@ struct MessageComposer: View {
         ].contains(ext)
     }
 
-    private func isProbablyText(_ data: Data) -> Bool {
+    nonisolated private static func isProbablyText(_ data: Data) -> Bool {
         if data.isEmpty { return true }
         let sample = data.prefix(4096)
         var controlByteCount = 0

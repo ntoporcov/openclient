@@ -53,7 +53,10 @@ struct HighlightedCodeBlock: View {
 
     private var highlightedText: some View {
         Group {
-            if let attributed = OpenCodeSyntaxHighlighter.shared.highlight(code, language: language, colorScheme: colorScheme) {
+            if shouldUsePlainTextFallback {
+                Text(verbatim: code)
+                    .foregroundStyle(.primary)
+            } else if let attributed = OpenCodeSyntaxHighlighter.shared.highlight(code, language: language, colorScheme: colorScheme) {
                 Text(attributed)
             } else {
                 Text(verbatim: code)
@@ -64,6 +67,14 @@ struct HighlightedCodeBlock: View {
         .lineSpacing(3)
         .fixedSize(horizontal: true, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var shouldUsePlainTextFallback: Bool {
+        if code.count > 12_000 {
+            return true
+        }
+
+        return code.filter(\.isNewline).count > 260
     }
 
     private var languageLabel: String? {
@@ -154,10 +165,18 @@ enum OpenCodeCodeLanguage {
 
 @MainActor
 final class OpenCodeSyntaxHighlighter {
+    private struct CacheKey: Hashable {
+        let codeHash: Int
+        let characterCount: Int
+        let language: String?
+        let theme: String
+    }
+
     static let shared = OpenCodeSyntaxHighlighter()
 
     private let highlighter: Highlighter?
     private var configuredTheme: String?
+    private var highlightedCodeCache: [CacheKey: AttributedString] = [:]
 
     private init() {
         highlighter = Highlighter()
@@ -168,13 +187,27 @@ final class OpenCodeSyntaxHighlighter {
         guard !code.isEmpty, let highlighter else { return nil }
 
         let normalizedLanguage = normalizedLanguage(language)
-        configureTheme(named: themeName(for: normalizedLanguage, colorScheme: colorScheme))
+        let theme = themeName(for: normalizedLanguage, colorScheme: colorScheme)
+        let cacheKey = CacheKey(codeHash: code.hashValue, characterCount: code.count, language: normalizedLanguage, theme: theme)
+        if let cached = highlightedCodeCache[cacheKey] {
+            return cached
+        }
+
+        configureTheme(named: theme)
 
         guard let highlighted = highlighter.highlight(code, as: normalizedLanguage) else {
             return nil
         }
 
-        return platformAttributedString(from: highlighted)
+        guard let attributed = platformAttributedString(from: highlighted) else {
+            return nil
+        }
+
+        if highlightedCodeCache.count >= 96 {
+            highlightedCodeCache.removeAll(keepingCapacity: true)
+        }
+        highlightedCodeCache[cacheKey] = attributed
+        return attributed
     }
 
     private func configureTheme(named theme: String) {

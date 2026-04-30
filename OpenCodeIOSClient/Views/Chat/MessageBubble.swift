@@ -27,6 +27,7 @@ struct MessageBubble: View {
     @State private var entryScale: CGFloat = 1
     @State private var hasRunEntryAnimation = false
     @State private var entryAnimationTask: Task<Void, Never>?
+    @State private var displayEntryCache = MessageBubbleDisplayEntryCache()
 
     private var effectiveMessage: OpenCodeMessageEnvelope {
         detailedMessage ?? message
@@ -45,28 +46,16 @@ struct MessageBubble: View {
     }
 
     private var displayEntries: [DisplayEntry] {
-        var result: [DisplayEntry] = []
-        var contextParts: [IndexedPart] = []
-
-        func flushContextParts() {
-            guard !contextParts.isEmpty else { return }
-            let firstID = contextParts.first?.id ?? "context"
-            result.append(.context(ContextGroup(id: "context-\(effectiveMessage.id)-\(firstID)", parts: contextParts)))
-            contextParts.removeAll()
+        let parts = effectiveMessage.parts
+        let key = MessageBubbleDisplayEntryCacheKey(
+            messageID: effectiveMessage.id,
+            isUser: isUser,
+            parts: parts.map(displayEntryCachePartKey(for:))
+        )
+        let plan = displayEntryCache.plan(for: key) {
+            makeDisplayEntryPlan(from: parts)
         }
-
-        for entry in Array(effectiveMessage.parts.enumerated()) {
-            let indexed = IndexedPart(index: entry.offset, part: entry.element)
-            if shouldGroupInContext(indexed.part) {
-                contextParts.append(indexed)
-            } else {
-                flushContextParts()
-                result.append(.part(indexed))
-            }
-        }
-
-        flushContextParts()
-        return result
+        return materializeDisplayEntryPlan(plan, parts: parts)
     }
 
     private var entryStartOffset: CGSize {
@@ -434,6 +423,61 @@ struct MessageBubble: View {
         isRunning(part) || isStreamingMessage
     }
 
+    private func displayEntryCachePartKey(for part: OpenCodePart) -> MessageBubbleDisplayEntryCacheKey.PartKey {
+        MessageBubbleDisplayEntryCacheKey.PartKey(
+            id: part.id,
+            type: part.type,
+            toolName: toolName(for: part),
+            hasRenderableText: renderableText(for: part) != nil
+        )
+    }
+
+    private func makeDisplayEntryPlan(from parts: [OpenCodePart]) -> [MessageBubbleDisplayEntryPlan] {
+        var result: [MessageBubbleDisplayEntryPlan] = []
+        var contextIndices: [Int] = []
+
+        func flushContextParts() {
+            guard !contextIndices.isEmpty else { return }
+            let firstIndex = contextIndices[0]
+            let firstID = displayEntryPartID(index: firstIndex, part: parts[firstIndex])
+            result.append(.context(id: "context-\(effectiveMessage.id)-\(firstID)", indices: contextIndices))
+            contextIndices.removeAll(keepingCapacity: true)
+        }
+
+        for (index, part) in parts.enumerated() {
+            if shouldGroupInContext(part) {
+                contextIndices.append(index)
+            } else {
+                flushContextParts()
+                result.append(.part(index: index))
+            }
+        }
+
+        flushContextParts()
+        return result
+    }
+
+    private func materializeDisplayEntryPlan(_ plan: [MessageBubbleDisplayEntryPlan], parts: [OpenCodePart]) -> [DisplayEntry] {
+        plan.compactMap { entry in
+            switch entry {
+            case let .part(index):
+                guard parts.indices.contains(index) else { return nil }
+                return .part(IndexedPart(index: index, part: parts[index]))
+            case let .context(id, indices):
+                let indexedParts = indices.compactMap { index -> IndexedPart? in
+                    guard parts.indices.contains(index) else { return nil }
+                    return IndexedPart(index: index, part: parts[index])
+                }
+                guard !indexedParts.isEmpty else { return nil }
+                return .context(ContextGroup(id: id, parts: indexedParts))
+            }
+        }
+    }
+
+    private func displayEntryPartID(index: Int, part: OpenCodePart) -> String {
+        "part-\(index)-\(part.id ?? part.type)"
+    }
+
     private func shouldGroupInContext(_ part: OpenCodePart) -> Bool {
         !isUser && renderableText(for: part) == nil && contextGroupTools.contains(toolName(for: part))
     }
@@ -762,6 +806,40 @@ private struct ContextSummary {
     var reads = 0
     var searches = 0
     var lists = 0
+}
+
+private struct MessageBubbleDisplayEntryCacheKey: Equatable {
+    struct PartKey: Equatable {
+        let id: String?
+        let type: String
+        let toolName: String
+        let hasRenderableText: Bool
+    }
+
+    let messageID: String
+    let isUser: Bool
+    let parts: [PartKey]
+}
+
+private enum MessageBubbleDisplayEntryPlan {
+    case part(index: Int)
+    case context(id: String, indices: [Int])
+}
+
+private final class MessageBubbleDisplayEntryCache {
+    private var lastKey: MessageBubbleDisplayEntryCacheKey?
+    private var lastPlan: [MessageBubbleDisplayEntryPlan] = []
+
+    func plan(for key: MessageBubbleDisplayEntryCacheKey, build: () -> [MessageBubbleDisplayEntryPlan]) -> [MessageBubbleDisplayEntryPlan] {
+        if key == lastKey {
+            return lastPlan
+        }
+
+        let plan = build()
+        lastKey = key
+        lastPlan = plan
+        return plan
+    }
 }
 
 private enum DisplayEntry: Identifiable {
