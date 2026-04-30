@@ -30,15 +30,21 @@ struct ProjectListView: View {
                 }
             }
 
-            Section {
-                Button("Disconnect", role: .destructive) {
-                    viewModel.disconnect()
-                }
-            }
         }
         .listStyle(.sidebar)
         .navigationTitle("Projects")
         .toolbar {
+            ToolbarItem(placement: .opencodeLeading) {
+                Button {
+                    viewModel.disconnect()
+                } label: {
+                    Label("Servers", systemImage: "chevron.left")
+                        .labelStyle(.titleAndIcon)
+                }
+                .accessibilityLabel("Disconnect")
+                .accessibilityIdentifier("projects.disconnect")
+            }
+
             ToolbarItem(placement: .opencodeTrailing) {
                 Button {
                     viewModel.presentConfigurationsSheet()

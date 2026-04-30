@@ -418,6 +418,19 @@ extension AppViewModel {
         appendOptimisticMessage: Bool = true,
         meterPrompt: Bool = true
     ) async {
+        if isUsingAppleIntelligence {
+            await sendAppleIntelligenceMessage(
+                text,
+                attachments: attachments,
+                in: selectedSession,
+                userVisible: userVisible,
+                messageID: messageID,
+                partID: partID,
+                appendOptimisticMessage: appendOptimisticMessage
+            )
+            return
+        }
+
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
 
@@ -1201,7 +1214,15 @@ extension AppViewModel {
         await sendAppleIntelligenceMessage(text, attachments: attachments, in: selectedSession, userVisible: true)
     }
 
-    func sendAppleIntelligenceMessage(_ text: String, attachments: [OpenCodeComposerAttachment] = [], in session: OpenCodeSession, userVisible: Bool) async {
+    func sendAppleIntelligenceMessage(
+        _ text: String,
+        attachments: [OpenCodeComposerAttachment] = [],
+        in session: OpenCodeSession,
+        userVisible: Bool,
+        messageID: String? = nil,
+        partID: String? = nil,
+        appendOptimisticMessage: Bool = true
+    ) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
         guard let workspace = activeAppleIntelligenceWorkspace else {
@@ -1209,11 +1230,11 @@ extension AppViewModel {
             return
         }
 
-        let priorMessages = directoryState.messages
-        let userMessageID = OpenCodeIdentifier.message()
-        let userPartID = OpenCodeIdentifier.part()
+        let userMessageID = messageID ?? OpenCodeIdentifier.message()
+        let userPartID = partID ?? OpenCodeIdentifier.part()
         let assistantMessageID = OpenCodeIdentifier.message()
         let assistantPartID = OpenCodeIdentifier.part()
+        let priorMessages = directoryState.messages.filter { $0.id != userMessageID }
 
         let localUserMessage = OpenCodeMessageEnvelope.local(
             role: "user",
@@ -1251,7 +1272,9 @@ extension AppViewModel {
             clearPersistedMessageDraft(forSessionID: session.id)
             composerResetToken = UUID()
             withAnimation(opencodeSelectionAnimation) {
-                directoryState.messages.append(localUserMessage)
+                if appendOptimisticMessage {
+                    directoryState.messages.append(localUserMessage)
+                }
                 directoryState.messages.append(localAssistantMessage)
             }
         }

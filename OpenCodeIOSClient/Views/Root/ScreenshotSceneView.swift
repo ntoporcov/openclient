@@ -1,4 +1,5 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
 
 #if DEBUG
@@ -82,4 +83,5 @@ struct ScreenshotSceneView: View {
         UIDevice.current.userInterfaceIdiom == .pad
     }
 }
+#endif
 #endif

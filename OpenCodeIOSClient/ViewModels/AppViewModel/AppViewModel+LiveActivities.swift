@@ -235,6 +235,7 @@ extension AppViewModel {
         activeLiveActivitySessionIDs.contains(session.id)
     }
 
+    #if canImport(ActivityKit) && os(iOS)
     private func liveActivityState(for session: OpenCodeSession) -> OpenCodeChatActivityAttributes.ContentState {
         let pendingPermission = permissions(for: session.id).first
         let pendingQuestion = questions(for: session.id).first
@@ -377,6 +378,7 @@ extension AppViewModel {
 
         return opencodePreviewText(text, limit: limit)
     }
+    #endif
 
     private func latestMeaningfulSnippet(in messages: [OpenCodeMessageEnvelope], role: String) -> String? {
         messages

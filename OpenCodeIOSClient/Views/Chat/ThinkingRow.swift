@@ -8,6 +8,7 @@ struct ThinkingRow: View {
     @State private var entryOpacity: Double = 1
     @State private var entryScale: CGFloat = 1
     @State private var hasRunEntryAnimation = false
+    @State private var entryAnimationTask: Task<Void, Never>?
 
     var body: some View {
         HStack {
@@ -43,6 +44,8 @@ struct ThinkingRow: View {
             runEntryAnimationIfNeeded()
         }
         .onDisappear {
+            entryAnimationTask?.cancel()
+            entryAnimationTask = nil
             phase = false
         }
     }
@@ -60,12 +63,16 @@ struct ThinkingRow: View {
             entryScale = 0.985
         }
 
-        DispatchQueue.main.async {
+        entryAnimationTask?.cancel()
+        entryAnimationTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
             withAnimation(.spring(response: 0.46, dampingFraction: 0.86)) {
                 entryOffset = 0
                 entryOpacity = 1
                 entryScale = 1
             }
+            entryAnimationTask = nil
         }
     }
 }

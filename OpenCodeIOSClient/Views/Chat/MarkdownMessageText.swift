@@ -47,7 +47,7 @@ struct MarkdownMessageText: View {
     private var content: some View {
         Group {
             if isStreaming {
-                if animatesStreamingText, !isUser {
+                if shouldUseStreamingTextFade {
                     StreamingTextFade(
                         text: text,
                         font: textFont,
@@ -82,6 +82,12 @@ struct MarkdownMessageText: View {
         }
         .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
         .textSelection(.enabled)
+    }
+
+    private var shouldUseStreamingTextFade: Bool {
+        guard animatesStreamingText, !isUser else { return false }
+        guard text.count <= 4_000 else { return false }
+        return text.filter(\.isNewline).count <= 120
     }
 
     private func styledText(_ text: Text) -> some View {
@@ -702,6 +708,7 @@ private struct StreamingTextFade: View {
         }
         .onDisappear {
             writerTask?.cancel()
+            writerTask = nil
         }
     }
 
@@ -748,11 +755,11 @@ private struct StreamingTextFade: View {
         guard writerTask == nil else { return }
 
         writerTask = Task { @MainActor in
+            defer { writerTask = nil }
             while !Task.isCancelled {
                 let remaining = Double(targetText.count) - revealProgress
                 guard remaining > 0.01 else {
                     revealProgress = Double(targetText.count)
-                    writerTask = nil
                     return
                 }
 

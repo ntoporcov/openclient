@@ -6,10 +6,12 @@ final class AppViewModelTests: XCTestCase {
     override func setUp() {
         super.setUp()
         UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.messageDraftsByChat)
+        UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.appleIntelligenceWorkspaces)
     }
 
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.messageDraftsByChat)
+        UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.appleIntelligenceWorkspaces)
         super.tearDown()
     }
 
@@ -31,6 +33,88 @@ final class AppViewModelTests: XCTestCase {
 
         viewModel.restoreMessageDraft(for: second)
         XCTAssertEqual(viewModel.draftMessage, "second draft")
+    }
+
+    func testAppleIntelligenceMessagesPersistToRecentWorkspaceStorage() {
+        let viewModel = AppViewModel()
+        let workspace = AppleIntelligenceWorkspaceRecord(
+            id: "apple-workspace:test",
+            title: "Test Workspace",
+            bookmarkData: Data(),
+            lastKnownPath: "/tmp/apple-workspace-test",
+            sessionID: "apple-session:test",
+            messages: [],
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        let message = OpenCodeMessageEnvelope.local(
+            role: "user",
+            text: "hello apple intelligence",
+            messageID: "msg_test",
+            sessionID: workspace.sessionID,
+            partID: "part_test"
+        )
+
+        viewModel.activeAppleIntelligenceWorkspaceID = workspace.id
+        viewModel.currentAppleIntelligenceWorkspace = workspace
+        viewModel.selectedDirectory = workspace.lastKnownPath
+        viewModel.directoryState.messages = [message]
+
+        viewModel.persistAppleIntelligenceMessages()
+
+        XCTAssertEqual(viewModel.appleIntelligenceRecentWorkspaces.first?.id, workspace.id)
+        XCTAssertEqual(viewModel.appleIntelligenceRecentWorkspaces.first?.messages.map(\.id), ["msg_test"])
+
+        let restored = AppViewModel()
+        XCTAssertEqual(restored.appleIntelligenceRecentWorkspaces.first?.id, workspace.id)
+        XCTAssertEqual(restored.appleIntelligenceRecentWorkspaces.first?.messages.map(\.id), ["msg_test"])
+    }
+
+    func testAppleIntelligenceAnimatedSendKeepsOptimisticUserMessage() async {
+        let viewModel = AppViewModel()
+        let workspace = AppleIntelligenceWorkspaceRecord(
+            id: "apple-workspace:test",
+            title: "Test Workspace",
+            bookmarkData: Data(),
+            lastKnownPath: "/tmp/apple-workspace-test",
+            sessionID: "apple-session:test",
+            messages: [],
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        let session = workspace.session
+        let optimistic = OpenCodeMessageEnvelope.local(
+            role: "user",
+            text: "hello apple intelligence",
+            messageID: "msg_user",
+            sessionID: session.id,
+            partID: "part_user"
+        )
+
+        viewModel.backendMode = .appleIntelligence
+        viewModel.activeAppleIntelligenceWorkspaceID = workspace.id
+        viewModel.currentAppleIntelligenceWorkspace = workspace
+        viewModel.selectedDirectory = workspace.lastKnownPath
+        viewModel.directoryState = OpenCodeDirectoryState(
+            sessions: [session],
+            selectedSession: session,
+            messages: [optimistic],
+            sessionStatuses: [session.id: "idle"]
+        )
+
+        await viewModel.sendMessage(
+            "hello apple intelligence",
+            in: session,
+            userVisible: true,
+            messageID: "msg_user",
+            partID: "part_user",
+            appendOptimisticMessage: false,
+            meterPrompt: false
+        )
+        viewModel.appleIntelligenceResponseTask?.cancel()
+
+        XCTAssertEqual(viewModel.directoryState.messages.filter { $0.id == "msg_user" }.count, 1)
+        XCTAssertEqual(viewModel.directoryState.messages.first?.parts.first?.text, "hello apple intelligence")
+        XCTAssertEqual(viewModel.directoryState.messages.count, 2)
+        XCTAssertEqual(viewModel.directoryState.messages.last?.info.role, "assistant")
     }
 
     func testMessageDraftPersistsAcrossViewModels() {

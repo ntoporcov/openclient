@@ -26,6 +26,7 @@ struct MessageBubble: View {
     @State private var entryOpacity: Double = 1
     @State private var entryScale: CGFloat = 1
     @State private var hasRunEntryAnimation = false
+    @State private var entryAnimationTask: Task<Void, Never>?
 
     private var effectiveMessage: OpenCodeMessageEnvelope {
         detailedMessage ?? message
@@ -97,6 +98,10 @@ struct MessageBubble: View {
         }
         .onChange(of: animateEntryFromComposer) { _, _ in
             runEntryAnimationIfNeeded()
+        }
+        .onDisappear {
+            entryAnimationTask?.cancel()
+            entryAnimationTask = nil
         }
     }
 
@@ -196,12 +201,16 @@ struct MessageBubble: View {
             entryScale = 0.985
         }
 
-        DispatchQueue.main.async {
+        entryAnimationTask?.cancel()
+        entryAnimationTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
             withAnimation(.spring(response: 0.48, dampingFraction: 0.84)) {
                 entryOffset = .zero
                 entryOpacity = 1
                 entryScale = 1
             }
+            entryAnimationTask = nil
         }
     }
 

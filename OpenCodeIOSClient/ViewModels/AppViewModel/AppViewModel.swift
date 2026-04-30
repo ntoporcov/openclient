@@ -158,6 +158,7 @@ final class AppViewModel: ObservableObject {
         }
 
         let recentConfigs = loadRecentServerConfigs()
+        appleIntelligenceRecentWorkspaces = loadAppleIntelligenceWorkspaces()
         appleIntelligenceUserInstructions = defaultAppleIntelligenceUserInstructions
         appleIntelligenceSystemInstructions = defaultAppleIntelligenceSystemInstructions
         usageMeter = usageStore.load()

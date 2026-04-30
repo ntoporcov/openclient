@@ -2,7 +2,7 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
-#if canImport(PhotosUI)
+#if canImport(PhotosUI) && canImport(UIKit)
 import Photos
 import PhotosUI
 import UniformTypeIdentifiers
@@ -41,7 +41,7 @@ struct MessageComposer: View {
     @State private var accessorySheetDetent: PresentationDetent = .height(315)
     @State private var accessoryNavigationPath: [AccessoryDestination] = []
     @Namespace private var accessoryGlassNamespace
-#if canImport(PhotosUI)
+#if canImport(PhotosUI) && canImport(UIKit)
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var recentPhotoAssets: [PHAsset] = []
     @State private var recentPhotoThumbnails: [String: UIImage] = [:]
@@ -145,7 +145,7 @@ struct MessageComposer: View {
             guard frame != .zero else { return }
             onInputFrameChange(frame)
         }
-#if canImport(PhotosUI)
+#if canImport(PhotosUI) && canImport(UIKit)
         .onChange(of: selectedPhotoItems) { _, _ in
             Task { await loadSelectedPhotoItems() }
         }
@@ -355,7 +355,7 @@ struct MessageComposer: View {
     private var expandedAccessoryMenu: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 10) {
-#if canImport(PhotosUI)
+#if canImport(PhotosUI) && canImport(UIKit)
                 AccessorySectionTitle("Attachments")
 
                 recentPhotosStrip
@@ -449,7 +449,7 @@ struct MessageComposer: View {
         }
     }
 
-#if canImport(PhotosUI)
+#if canImport(PhotosUI) && canImport(UIKit)
     @ViewBuilder
     private var recentPhotosStrip: some View {
         if !recentPhotoAssets.isEmpty {
@@ -523,7 +523,7 @@ struct MessageComposer: View {
         isAccessoryMenuOpen = false
     }
 
-#if canImport(PhotosUI)
+#if canImport(PhotosUI) && canImport(UIKit)
     private func loadRecentPhotosIfAllowed() async {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         let authorizedStatus: PHAuthorizationStatus

@@ -242,6 +242,7 @@ extension AppViewModel {
             commands: [],
             sessionStatuses: [workspace.session.id: "idle"]
         )
+        upsertAppleIntelligenceWorkspace(currentAppleIntelligenceWorkspace ?? workspace)
         draftTitle = ""
         restoreMessageDraft(for: workspace.session)
         errorMessage = nil
@@ -324,6 +325,16 @@ extension AppViewModel {
             currentAppleIntelligenceWorkspace.lastKnownPath = selectedDirectory
         }
         self.currentAppleIntelligenceWorkspace = currentAppleIntelligenceWorkspace
+        upsertAppleIntelligenceWorkspace(currentAppleIntelligenceWorkspace)
+    }
+
+    func upsertAppleIntelligenceWorkspace(_ workspace: AppleIntelligenceWorkspaceRecord) {
+        appleIntelligenceRecentWorkspaces.removeAll { $0.id == workspace.id }
+        appleIntelligenceRecentWorkspaces.insert(workspace, at: 0)
+        if appleIntelligenceRecentWorkspaces.count > Self.maxRecentServerCount {
+            appleIntelligenceRecentWorkspaces = Array(appleIntelligenceRecentWorkspaces.prefix(Self.maxRecentServerCount))
+        }
+        persistAppleIntelligenceWorkspaces()
     }
 
     func reconnectToSavedServer() async {

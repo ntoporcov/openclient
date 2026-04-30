@@ -1163,6 +1163,12 @@ struct ChatView: View {
 
     private func makeDisplayItems(from messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
         var result: [ChatDisplayItem] = []
+        var displayedIDs: Set<String> = []
+
+        func appendUnique(_ item: ChatDisplayItem) {
+            guard displayedIDs.insert(item.id).inserted else { return }
+            result.append(item)
+        }
 
         for (index, message) in messages.enumerated() {
             if message.info.isCompactionSummary {
@@ -1171,11 +1177,11 @@ struct ChatView: View {
 
             if message.parts.contains(where: \.isCompaction) {
                 let summary = compactionSummary(for: message, at: index, in: messages)
-                result.append(.compaction(CompactionDisplayItem(boundaryMessage: message, summaryMessage: summary)))
+                appendUnique(.compaction(CompactionDisplayItem(boundaryMessage: message, summaryMessage: summary)))
                 continue
             }
 
-            result.append(.message(message))
+            appendUnique(.message(message))
         }
 
         return result

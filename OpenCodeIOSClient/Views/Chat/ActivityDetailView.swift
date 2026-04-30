@@ -102,7 +102,7 @@ struct ActivityDetailView: View {
 
             if !patchDiffs.isEmpty {
                 Section(patchDiffs.count == 1 ? "Patch Diff" : "Patch Diffs") {
-                    ForEach(patchDiffs) { diff in
+                    ForEach(Array(patchDiffs.enumerated()), id: \.offset) { _, diff in
                         VStack(alignment: .leading, spacing: 12) {
                             Text(diff.file)
                                 .font(.subheadline.weight(.medium))
