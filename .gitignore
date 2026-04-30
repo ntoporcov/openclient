@@ -19,6 +19,7 @@ project.local.yml
 *.local.xcconfig
 fastlane/.env*
 !fastlane/.env.default
+fastlane/report.xml
 
 # Local scratch space
 tmp/

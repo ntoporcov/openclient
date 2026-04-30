@@ -66,9 +66,7 @@ struct MCPListView: View {
                 }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(OpenCodePlatformColor.groupedBackground)
+        .opencodeGroupedListStyle()
         .searchable(text: $searchText, prompt: "Search MCP servers")
         .task {
             await viewModel.loadMCPStatusIfNeeded()
