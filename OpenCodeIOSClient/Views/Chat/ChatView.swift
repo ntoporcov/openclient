@@ -1380,13 +1380,20 @@ struct ChatView: View {
                     viewModel.flushBufferedTranscript(reason: "jump to latest")
                     jumpToLatestRequest += 1
                 } label: {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 14, weight: .bold))
-                        .frame(width: 36, height: 36)
+                    ZStack {
+                        Circle()
+                            .fill(Color.clear)
+                            .frame(width: 40, height: 40)
+                            .opencodeGlassSurface(clear: true, in: Circle())
+
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 15, weight: .bold))
+                    }
+                    .frame(width: 56, height: 56)
+                    .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
-                .background(.thinMaterial, in: Circle())
                 .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
                 .accessibilityLabel("Jump to latest")
                 Spacer(minLength: 0)
