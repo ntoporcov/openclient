@@ -172,7 +172,7 @@ struct SessionListView: View {
         sessionRow(
             for: session,
             showsPinnedBadge: true,
-            workspaceOverline: viewModel.workspaceDisplayName(for: session.directory)
+            workspaceOverline: viewModel.isProjectWorkspacesEnabled ? viewModel.workspaceDisplayName(for: session.directory) : nil
         )
     }
 

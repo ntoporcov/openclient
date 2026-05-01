@@ -891,12 +891,22 @@ private struct BugSolvedMedalView: View {
     @State private var velocity: Double = 80
     @State private var lastDragWidth: CGFloat = 0
 
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate
-            let spin = baseSpin + dragSpin + time.truncatingRemainder(dividingBy: 10) * velocity
+    private var isScreenshotScene: Bool {
+        ProcessInfo.processInfo.environment["OPENCLIENT_SCREENSHOT_SCENE"] != nil
+    }
 
-            RealityMedalView(angle: spin)
+    var body: some View {
+        Group {
+            if isScreenshotScene {
+                RealityMedalView(angle: 0)
+            } else {
+                TimelineView(.animation) { timeline in
+                    let time = timeline.date.timeIntervalSinceReferenceDate
+                    let spin = baseSpin + dragSpin + time.truncatingRemainder(dividingBy: 10) * velocity
+
+                    RealityMedalView(angle: spin)
+                }
+            }
         }
         .gesture(
             DragGesture()
