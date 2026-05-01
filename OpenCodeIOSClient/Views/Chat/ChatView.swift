@@ -1036,6 +1036,7 @@ private struct FallbackMedalView: View {
 private final class ChatViewTaskStore {
     var autoScrollTask: Task<Void, Never>?
     var streamingAutoScrollTask: Task<Void, Never>?
+    var initialBottomSnapTask: Task<Void, Never>?
     var readingModeSettleScrollTask: Task<Void, Never>?
     var composerDraftPersistenceTask: Task<Void, Never>?
     var lastStreamingAutoScrollAt = Date.distantPast
@@ -1484,10 +1485,11 @@ struct ChatView: View {
                     .animation(.easeOut(duration: 0.18), value: isChatContentVisible)
                     .animation(.easeOut(duration: 0.18), value: chatContentOffsetY)
                     .onAppear {
+                        viewModel.activeChatSessionID = sessionID
                         listViewportHeight = geometry.size.height
                         needsInitialBottomSnap = true
                         needsInitialComposerHeightSnap = true
-                        hasCompletedInitialHydrationSnap = false
+                        hasCompletedInitialHydrationSnap = !viewModel.messages.isEmpty
                         isChatContentVisible = !shouldAnimateInitialChatReveal
                         chatContentOffsetY = shouldAnimateInitialChatReveal ? 14 : 0
                         shouldShowLoadingIndicator = false
@@ -1496,12 +1498,11 @@ struct ChatView: View {
                             hasLoadedInitialWindow = true
                         }
                         updateChatContentVisibility()
-                        scheduleScrollToBottom(with: proxy)
+                        scheduleInitialBottomSnap(with: proxy)
                     }
                     .onChange(of: bottomAnchorFrame) { _, frame in
                         guard needsInitialBottomSnap, frame != .zero else { return }
-                        needsInitialBottomSnap = false
-                        scheduleScrollToBottom(with: proxy, delayMS: 80)
+                        scheduleInitialBottomSnap(with: proxy)
                     }
                     .onChange(of: geometry.size.height) { _, height in
                         listViewportHeight = height
@@ -1518,7 +1519,7 @@ struct ChatView: View {
                         updateReadingModeBottomSpacerHeight(animated: false)
                         if needsInitialComposerHeightSnap, !viewModel.messages.isEmpty {
                             needsInitialComposerHeightSnap = false
-                            scheduleComposerAffordanceFollow(with: proxy, delayMS: 60)
+                            scheduleInitialBottomSnap(with: proxy)
                             return
                         }
                         guard !isSendReadingModeActive, shouldFollowComposerAffordanceChange || shouldAutoFollowBottom else { return }
@@ -1622,6 +1623,7 @@ struct ChatView: View {
             viewModel.setComposerStreamingFocus(false)
             taskStore.autoScrollTask?.cancel()
             taskStore.streamingAutoScrollTask?.cancel()
+            taskStore.initialBottomSnapTask?.cancel()
             taskStore.readingModeSettleScrollTask?.cancel()
             taskStore.composerDraftPersistenceTask?.cancel()
             affordanceScrollTask?.cancel()
@@ -2031,6 +2033,27 @@ struct ChatView: View {
 
     private func scheduleScrollToBottom(with proxy: ScrollViewProxy, delayMS: Int = 10) {
         scheduleScrollToBottom(with: proxy, delayMS: delayMS, animated: false)
+    }
+
+    private func scheduleInitialBottomSnap(with proxy: ScrollViewProxy) {
+        taskStore.initialBottomSnapTask?.cancel()
+        taskStore.initialBottomSnapTask = Task { @MainActor in
+            defer { taskStore.initialBottomSnapTask = nil }
+
+            for delayMS in [0, 50, 160, 320] {
+                if delayMS > 0 {
+                    try? await Task.sleep(for: .milliseconds(delayMS))
+                } else {
+                    await Task.yield()
+                }
+
+                guard !Task.isCancelled else { return }
+                guard canPerformScheduledChatScroll else { continue }
+                needsInitialBottomSnap = false
+                shouldFollowStreamingUpdates = true
+                scrollToBottom(with: proxy, animated: false)
+            }
+        }
     }
 
     private func scheduleScrollToBottom(with proxy: ScrollViewProxy, delayMS: Int = 10, animated: Bool) {
