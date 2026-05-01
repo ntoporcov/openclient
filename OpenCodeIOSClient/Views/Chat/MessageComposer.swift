@@ -1292,9 +1292,11 @@ private struct PinnedCommandStrip: View {
                     .accessibilityIdentifier("chat.pinned-command.\(command.name)")
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 16)
         }
+        .scrollClipDisabled()
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, -12)
     }
 }
 

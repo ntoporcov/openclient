@@ -21,7 +21,7 @@ struct SessionListView: View {
             if viewModel.hasProUnlock {
                 if !viewModel.currentProjectActions.isEmpty {
                     ProjectActionStrip(viewModel: viewModel, actions: viewModel.currentProjectActions)
-                        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 8, trailing: 0))
+                        .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
@@ -29,7 +29,7 @@ struct SessionListView: View {
                 LockedProjectActionStrip {
                     viewModel.presentPaywall(reason: .actions)
                 }
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 0))
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
@@ -359,7 +359,7 @@ private struct ProjectActionStrip: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.trailing, 16)
+            .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 10) {
@@ -373,8 +373,9 @@ private struct ProjectActionStrip: View {
                         }
                     }
                 }
-                .padding(.trailing, 16)
+                .padding(.horizontal, 16)
             }
+            .scrollClipDisabled()
         }
     }
 }
@@ -446,38 +447,44 @@ private struct LockedProjectActionStrip: View {
     let onUnlock: () -> Void
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 10) {
-                Button(action: onUnlock) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.orange)
-                            .frame(width: 38, height: 38)
-                            .background(.orange.opacity(0.14), in: Circle())
+        Button(action: onUnlock) {
+            HStack(spacing: 12) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 38, height: 38)
+                    .background(.orange.opacity(0.14), in: Circle())
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Actions")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Actions")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
 
-                            Text("Unlock Pro")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(Color.orange.opacity(0.16), lineWidth: 1)
-                    }
+                    Text("Run /commands in temporary sessions that only stick around when they need debugging.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
+
+                Spacer(minLength: 8)
+
+                Text("PRO")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.orange.opacity(0.14), in: Capsule())
             }
-            .padding(.trailing, 16)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.orange.opacity(0.16), lineWidth: 1)
+            }
         }
+        .buttonStyle(.plain)
     }
 }
 
