@@ -1049,6 +1049,7 @@ private struct MessageComposerSnapshot: Equatable {
     let canFork: Bool
     let forkSignature: String
     let mcpSignature: String
+    let pinnedCommandSignature: String
     let actionSignature: String
 }
 
@@ -1109,6 +1110,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
     let isAccessoryMenuOpen: Binding<Bool>
     let snapshot: MessageComposerSnapshot
     let commands: [OpenCodeCommand]
+    let pinnedCommands: [OpenCodeCommand]
+    let pinnedCommandNames: Set<String>
     let attachmentCount: Int
     let isBusy: Bool
     let canFork: Bool
@@ -1125,6 +1128,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
     let onSend: () -> Void
     let onStop: () -> Void
     let onSelectCommand: (OpenCodeCommand) -> Void
+    let onPinCommand: (OpenCodeCommand) -> Void
+    let onUnpinCommand: (OpenCodeCommand) -> Void
     let onCompact: () -> Void
     let onForkMessage: (String) -> Void
     let onLoadMCP: () -> Void
@@ -1140,6 +1145,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
             draftStore: draftStore,
             isAccessoryMenuOpen: isAccessoryMenuOpen,
             commands: commands,
+            pinnedCommands: pinnedCommands,
+            pinnedCommandNames: pinnedCommandNames,
             attachmentCount: attachmentCount,
             isBusy: isBusy,
             canFork: canFork,
@@ -1155,6 +1162,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
             onSend: onSend,
             onStop: onStop,
             onSelectCommand: onSelectCommand,
+            onPinCommand: onPinCommand,
+            onUnpinCommand: onUnpinCommand,
             onCompact: onCompact,
             onForkMessage: onForkMessage,
             onLoadMCP: onLoadMCP,
@@ -1180,6 +1189,7 @@ struct ChatView: View {
     @State private var questionCustomAnswers: [String: String] = [:]
     @State private var taskStore = ChatViewTaskStore()
     @State private var composerDraftStore = MessageComposerDraftStore()
+    @StateObject private var pinnedCommandStore = PinnedCommandStore()
     @State private var isComposerInputFocused = false
     @State private var shouldSnapOnNextMessage = false
     @State private var shouldDelayNextUserInsertScroll = false
@@ -1814,6 +1824,9 @@ struct ChatView: View {
     private func activeMessageComposer(isBusy: Bool) -> some View {
         let canFork = !viewModel.forkableMessages.isEmpty
         let commands = viewModel.commands(canFork: canFork)
+        let commandScopeKey = viewModel.currentProjectPreferenceScopeKey
+        let pinnedCommands = pinnedCommandStore.pinnedCommands(from: commands, scopeKey: commandScopeKey)
+        let pinnedCommandNames = Set(pinnedCommandStore.pinnedNames(for: commandScopeKey))
         let forkableMessages = viewModel.forkableMessages
         let forkSignature = forkableMessages
             .map { "\($0.id):\($0.text):\($0.created ?? 0)" }
@@ -1822,6 +1835,7 @@ struct ChatView: View {
         let mcpSignature = mcpServers
             .map { "\($0.name):\($0.status.status):\($0.status.error ?? "")" }
             .joined(separator: "|") + "|loading=\(viewModel.directoryState.isLoadingMCP)|toggling=\(viewModel.directoryState.togglingMCPServerNames.sorted().joined(separator: ","))|error=\(viewModel.directoryState.mcpErrorMessage ?? "")"
+        let pinnedCommandSignature = [commandScopeKey, pinnedCommands.map(\.name).joined(separator: ",")].joined(separator: "|")
         let snapshot = MessageComposerSnapshot(
             isAccessoryMenuOpenValue: isComposerMenuOpen,
             commands: commands,
@@ -1830,6 +1844,7 @@ struct ChatView: View {
             canFork: canFork,
             forkSignature: forkSignature,
             mcpSignature: mcpSignature,
+            pinnedCommandSignature: pinnedCommandSignature,
             actionSignature: composerActionSignature
         )
 
@@ -1838,6 +1853,8 @@ struct ChatView: View {
             isAccessoryMenuOpen: $isComposerMenuOpen,
             snapshot: snapshot,
             commands: commands,
+            pinnedCommands: pinnedCommands,
+            pinnedCommandNames: pinnedCommandNames,
             attachmentCount: snapshot.attachmentCount,
             isBusy: isBusy,
             canFork: canFork,
@@ -1879,6 +1896,16 @@ struct ChatView: View {
                     } else {
                         await viewModel.sendCommand(command, sessionID: sessionID, userVisible: true, meterPrompt: false)
                     }
+                }
+            },
+            onPinCommand: { command in
+                withAnimation(opencodeSelectionAnimation) {
+                    pinnedCommandStore.pin(command, scopeKey: commandScopeKey)
+                }
+            },
+            onUnpinCommand: { command in
+                withAnimation(opencodeSelectionAnimation) {
+                    pinnedCommandStore.unpin(command, scopeKey: commandScopeKey)
                 }
             },
             onCompact: {

@@ -66,7 +66,9 @@ struct RootView: View {
             OpenClientPaywallView(viewModel: viewModel, purchaseManager: viewModel.purchaseManager, reason: reason)
         }
         .onChange(of: viewModel.isConnected) { _, _ in
-            preferredCompactColumn = .sidebar
+            withAnimation(opencodeSelectionAnimation) {
+                preferredCompactColumn = .sidebar
+            }
         }
         .animation(opencodeSelectionAnimation, value: viewModel.hasActiveWorkspace)
     }

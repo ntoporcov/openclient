@@ -28,6 +28,8 @@ struct MessageComposer: View {
     @ObservedObject var draftStore: MessageComposerDraftStore
     @Binding var isAccessoryMenuOpen: Bool
     let commands: [OpenCodeCommand]
+    let pinnedCommands: [OpenCodeCommand]
+    let pinnedCommandNames: Set<String>
     let attachmentCount: Int
     let isBusy: Bool
     let canFork: Bool
@@ -43,6 +45,8 @@ struct MessageComposer: View {
     let onSend: () -> Void
     let onStop: () -> Void
     let onSelectCommand: (OpenCodeCommand) -> Void
+    let onPinCommand: (OpenCodeCommand) -> Void
+    let onUnpinCommand: (OpenCodeCommand) -> Void
     let onCompact: () -> Void
     let onForkMessage: (String) -> Void
     let onLoadMCP: () -> Void
@@ -104,6 +108,10 @@ struct MessageComposer: View {
         text.isEmpty && attachmentCount == 0 && !isBusy
     }
 
+    private var showsPinnedCommands: Bool {
+        text.isEmpty && attachmentCount == 0 && !isBusy && !pinnedCommands.isEmpty
+    }
+
     private var slashQuery: String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.first == "/" else { return nil }
@@ -151,9 +159,29 @@ struct MessageComposer: View {
                 CommandPicker(
                     commands: filteredCommands,
                     selectedCommandName: selectedCommand?.name,
+                    pinnedCommandNames: pinnedCommandNames,
                     onSelect: { command in
                         onSelectCommand(command)
+                    },
+                    onPin: { command in
+                        onPinCommand(command)
+                    },
+                    onUnpin: { command in
+                        onUnpinCommand(command)
                     }
+                )
+                .transition(
+                    .move(edge: .bottom)
+                        .combined(with: .opacity)
+                        .combined(with: .scale(scale: 0.98, anchor: .bottom))
+                )
+            }
+
+            if showsPinnedCommands {
+                PinnedCommandStrip(
+                    commands: pinnedCommands,
+                    onSelect: onSelectCommand,
+                    onUnpin: onUnpinCommand
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -228,6 +256,8 @@ struct MessageComposer: View {
         }
 #endif
         .animation(opencodeSelectionAnimation, value: filteredCommands.map(\.name).joined(separator: "|"))
+        .animation(opencodeSelectionAnimation, value: showsPinnedCommands)
+        .animation(opencodeSelectionAnimation, value: pinnedCommands.map(\.name).joined(separator: "|"))
         .animation(opencodeSelectionAnimation, value: isAccessoryMenuOpen)
     }
 
@@ -1126,10 +1156,24 @@ private struct ComposerInputFramePreferenceKey: PreferenceKey {
 private struct CommandPicker: View {
     let commands: [OpenCodeCommand]
     let selectedCommandName: String?
+    let pinnedCommandNames: Set<String>
     let onSelect: (OpenCodeCommand) -> Void
+    let onPin: (OpenCodeCommand) -> Void
+    let onUnpin: (OpenCodeCommand) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "hand.tap")
+                    .font(.caption.weight(.semibold))
+                Text("Hold for more options")
+                    .font(.caption.weight(.medium))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, commands.isEmpty ? 0 : 4)
+
             if commands.isEmpty {
                 Text("No matching commands")
                     .font(.footnote)
@@ -1145,9 +1189,13 @@ private struct CommandPicker: View {
                                 onSelect(command)
                             } label: {
                                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                    Text("/\(command.name)")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.primary)
+                                    HStack(spacing: 1) {
+                                        Text("/")
+                                            .foregroundStyle(.secondary.opacity(0.7))
+                                        Text(command.name)
+                                            .foregroundStyle(.primary)
+                                    }
+                                    .font(.subheadline.weight(.semibold))
 
                                     if let description = command.description, !description.isEmpty {
                                         Text(description)
@@ -1168,6 +1216,21 @@ private struct CommandPicker: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                if pinnedCommandNames.contains(command.name) {
+                                    Button {
+                                        onUnpin(command)
+                                    } label: {
+                                        Label("Unpin", systemImage: "pin.slash")
+                                    }
+                                } else {
+                                    Button {
+                                        onPin(command)
+                                    } label: {
+                                        Label("Pin", systemImage: "pin")
+                                    }
+                                }
+                            }
                             .accessibilityIdentifier("chat.command.\(command.name)")
                         }
                     }
@@ -1177,6 +1240,51 @@ private struct CommandPicker: View {
             }
         }
         .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+private struct PinnedCommandStrip: View {
+    let commands: [OpenCodeCommand]
+    let onSelect: (OpenCodeCommand) -> Void
+    let onUnpin: (OpenCodeCommand) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(commands) { command in
+                    Button {
+                        onSelect(command)
+                    } label: {
+                        HStack(spacing: 1) {
+                            Text("/")
+                                .foregroundStyle(.secondary.opacity(0.7))
+                            Text(command.name)
+                                .foregroundStyle(.primary)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.thinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            onUnpin(command)
+                        } label: {
+                            Label("Unpin", systemImage: "pin.slash")
+                        }
+                    }
+                    .accessibilityIdentifier("chat.pinned-command.\(command.name)")
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

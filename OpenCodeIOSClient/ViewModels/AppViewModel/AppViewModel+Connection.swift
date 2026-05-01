@@ -49,7 +49,6 @@ extension AppViewModel {
         do {
             let bootstrap = try await OpenCodeBootstrap.bootstrapGlobal(client: client)
             backendMode = .server
-            isConnected = bootstrap.health.healthy
             serverVersion = bootstrap.health.version
             errorMessage = nil
             persistConfigAfterSuccessfulConnection()
@@ -59,9 +58,10 @@ extension AppViewModel {
             currentProject = nil
             selectedDirectory = nil
             selectedProjectContentTab = .sessions
-            try await reloadSessions()
+            directoryState = OpenCodeDirectoryState()
+            streamDirectory = nil
+            isConnected = bootstrap.health.healthy
             await loadComposerOptions()
-            streamDirectory = directoryState.sessions.first?.directory
             startEventStream()
             await runUITestBootstrapIfNeeded()
         } catch {

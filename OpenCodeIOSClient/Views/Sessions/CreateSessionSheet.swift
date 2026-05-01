@@ -46,6 +46,6 @@ struct CreateSessionSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents(viewModel.hasProUnlock ? [.medium] : [.large])
     }
 }

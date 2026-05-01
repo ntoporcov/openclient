@@ -524,6 +524,24 @@ extension AppViewModel {
         setPinnedSessionIDs(pinnedSessionIDs.filter { visibleSessionIDs.contains($0) })
     }
 
+    func removePinnedSessionIDFromAllScopes(_ sessionID: String) {
+        var next = pinnedSessionIDsByScope
+
+        for (key, ids) in pinnedSessionIDsByScope {
+            let filtered = ids.filter { $0 != sessionID }
+            if filtered.isEmpty {
+                next[key] = nil
+            } else {
+                next[key] = filtered
+            }
+        }
+
+        guard next != pinnedSessionIDsByScope else { return }
+        pinnedSessionIDsByScope = next
+        persistPinnedSessionIDsByScope()
+        publishWidgetSnapshots()
+    }
+
     func setPinnedSessionIDs(_ sessionIDs: [String], for scopeKey: String? = nil) {
         let key = scopeKey ?? currentPinScopeKey
         var deduplicated: [String] = []

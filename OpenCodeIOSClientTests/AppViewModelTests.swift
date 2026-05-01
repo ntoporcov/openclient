@@ -3,16 +3,106 @@ import XCTest
 
 @MainActor
 final class AppViewModelTests: XCTestCase {
+    private let pinnedCommandTestStorageKey = "PinnedCommandStoreTests"
+
     override func setUp() {
         super.setUp()
         UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.messageDraftsByChat)
         UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.appleIntelligenceWorkspaces)
+        UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.pinnedSessionsByScope)
+        UserDefaults.standard.removeObject(forKey: pinnedCommandTestStorageKey)
     }
 
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.messageDraftsByChat)
         UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.appleIntelligenceWorkspaces)
+        UserDefaults.standard.removeObject(forKey: AppViewModel.StorageKey.pinnedSessionsByScope)
+        UserDefaults.standard.removeObject(forKey: pinnedCommandTestStorageKey)
         super.tearDown()
+    }
+
+    func testPinnedCommandsPersistPerScopeAndIgnoreDuplicates() {
+        let store = PinnedCommandStore(storageKey: pinnedCommandTestStorageKey)
+        let build = makeCommand("build")
+        let test = makeCommand("test")
+
+        store.pin(build, scopeKey: "project-a")
+        store.pin(build, scopeKey: "project-a")
+        store.pin(test, scopeKey: "project-b")
+
+        XCTAssertEqual(store.pinnedNames(for: "project-a"), ["build"])
+        XCTAssertEqual(store.pinnedNames(for: "project-b"), ["test"])
+
+        let restored = PinnedCommandStore(storageKey: pinnedCommandTestStorageKey)
+        XCTAssertEqual(restored.pinnedNames(for: "project-a"), ["build"])
+        XCTAssertEqual(restored.pinnedNames(for: "project-b"), ["test"])
+    }
+
+    func testPinnedCommandDerivationPreservesOrderAndFiltersUnavailableCommands() {
+        let store = PinnedCommandStore(storageKey: pinnedCommandTestStorageKey)
+        let build = makeCommand("build")
+        let test = makeCommand("test")
+        let deploy = makeCommand("deploy")
+
+        store.pin(deploy, scopeKey: "project-a")
+        store.pin(build, scopeKey: "project-a")
+        store.pin(test, scopeKey: "project-a")
+
+        let visible = store.pinnedCommands(from: [test, build], scopeKey: "project-a")
+
+        XCTAssertEqual(visible.map(\.name), ["build", "test"])
+    }
+
+    func testPinnedCommandUnpinRemovesOnlySelectedScope() {
+        let store = PinnedCommandStore(storageKey: pinnedCommandTestStorageKey)
+        let build = makeCommand("build")
+
+        store.pin(build, scopeKey: "project-a")
+        store.pin(build, scopeKey: "project-b")
+        store.unpin(build, scopeKey: "project-a")
+
+        XCTAssertEqual(store.pinnedNames(for: "project-a"), [])
+        XCTAssertEqual(store.pinnedNames(for: "project-b"), ["build"])
+    }
+
+    func testPinnedSessionsCanBeTemporarilyMissingWithoutMutatingStorage() {
+        let viewModel = AppViewModel()
+        let visible = makeSession(id: "ses_visible")
+        let hidden = makeSession(id: "ses_hidden")
+
+        viewModel.selectedDirectory = "/tmp/project"
+        viewModel.directoryState.sessions = [visible]
+        viewModel.setPinnedSessionIDs([visible.id, hidden.id])
+
+        XCTAssertEqual(viewModel.pinnedRootSessions.map(\.id), [visible.id])
+        XCTAssertEqual(viewModel.pinnedSessionIDs, [visible.id, hidden.id])
+
+        let restored = AppViewModel()
+        restored.selectedDirectory = "/tmp/project"
+        XCTAssertEqual(restored.pinnedSessionIDs, [visible.id, hidden.id])
+    }
+
+    func testSessionDeletedEventRemovesPinnedSession() {
+        let viewModel = AppViewModel()
+        let deleted = makeSession(id: "ses_deleted")
+        let kept = makeSession(id: "ses_kept")
+
+        viewModel.isConnected = true
+        viewModel.selectedDirectory = "/tmp/project"
+        viewModel.directoryState.sessions = [deleted, kept]
+        viewModel.setPinnedSessionIDs([deleted.id, kept.id])
+        viewModel.setPinnedSessionIDs([deleted.id], for: "other-scope")
+
+        viewModel.handleManagedEvent(
+            OpenCodeManagedEvent(
+                directory: "/tmp/project",
+                envelope: OpenCodeEventEnvelope(type: "session.deleted", properties: .init()),
+                typed: .sessionDeleted(deleted)
+            )
+        )
+
+        XCTAssertEqual(viewModel.pinnedSessionIDs, [kept.id])
+        XCTAssertNil(viewModel.pinnedSessionIDsByScope["other-scope"])
     }
 
     func testMessageDraftRestoresPerSession() {
@@ -570,5 +660,29 @@ final class AppViewModelTests: XCTestCase {
         viewModel.defaultModelsByProviderID = ["openai": "gpt-5.4-mini"]
 
         XCTAssertEqual(viewModel.defaultModelReference(), OpenCodeModelReference(providerID: "openai", modelID: "gpt-5.4-mini"))
+    }
+
+    private func makeCommand(_ name: String) -> OpenCodeCommand {
+        OpenCodeCommand(
+            name: name,
+            description: nil,
+            agent: nil,
+            model: nil,
+            source: "test",
+            template: "",
+            subtask: nil,
+            hints: []
+        )
+    }
+
+    private func makeSession(id: String) -> OpenCodeSession {
+        OpenCodeSession(
+            id: id,
+            title: id,
+            workspaceID: nil,
+            directory: "/tmp/project",
+            projectID: "proj_test",
+            parentID: nil
+        )
     }
 }

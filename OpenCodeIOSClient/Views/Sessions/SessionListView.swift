@@ -9,6 +9,13 @@ struct SessionListView: View {
         let snapshot = sessionListSnapshot
 
         List {
+            if !viewModel.hasProUnlock {
+                ProjectUsageCTA(viewModel: viewModel)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+
             if snapshot.isLoadingEmpty {
                 Section {
                     ForEach(0 ..< 3, id: \.self) { _ in
@@ -196,6 +203,49 @@ struct SessionListView: View {
                 Label("Delete", systemImage: "trash")
             }
         }
+    }
+}
+
+private struct ProjectUsageCTA: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.tint)
+                .frame(width: 34, height: 34)
+                .background(.tint.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Free plan")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(usageSummary)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.84)
+            }
+
+            Spacer(minLength: 6)
+
+            Button("Upgrade") {
+                viewModel.presentPaywall(reason: .manual)
+            }
+            .font(.caption.weight(.bold))
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(12)
+        .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityIdentifier("project.usage.cta")
+    }
+
+    private var usageSummary: String {
+        let prompts = viewModel.remainingFreePromptsToday
+        let sessions = viewModel.remainingFreeSessions
+        return "\(prompts) \(prompts == 1 ? "message" : "messages") today, \(sessions) \(sessions == 1 ? "session" : "sessions") left"
     }
 }
 

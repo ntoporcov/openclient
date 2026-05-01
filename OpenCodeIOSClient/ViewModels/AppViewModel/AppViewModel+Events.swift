@@ -279,6 +279,7 @@ extension AppViewModel {
 
         switch managed.typed {
         case let .sessionDeleted(session):
+            removePinnedSessionIDFromAllScopes(session.id)
             removeSessionPreview(for: session.id)
             if activeLiveActivitySessionIDs.contains(session.id) {
                 Task { [weak self] in
