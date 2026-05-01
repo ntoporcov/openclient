@@ -1042,6 +1042,7 @@ private final class ChatViewTaskStore {
     var autoScrollTask: Task<Void, Never>?
     var streamingAutoScrollTask: Task<Void, Never>?
     var initialBottomSnapTask: Task<Void, Never>?
+    var mountAnimationCleanupTask: Task<Void, Never>?
     var composerDraftPersistenceTask: Task<Void, Never>?
     var lastStreamingAutoScrollAt = Date.distantPast
 }
@@ -1225,6 +1226,7 @@ struct ChatView: View {
     @State private var selectedCompactionSummary: CompactionSummaryPayload?
     @State private var selectedActivityDetail: ActivityDetail?
     @State private var showingTodoInspector = false
+    @State private var visibleMessageCount = 80
     @State private var questionAnswers: [String: Set<String>] = [:]
     @State private var questionCustomAnswers: [String: String] = [:]
     @State private var taskStore = ChatViewTaskStore()
@@ -1270,6 +1272,7 @@ struct ChatView: View {
 
     @State private var selectedInstructionTab: AppleIntelligenceInstructionTab = .user
 
+    private let messageWindowSize = 80
     private let streamingAutoScrollMinimumInterval: TimeInterval = 0.12
     private let bottomRefreshThreshold: CGFloat = 72
     private let bottomRefreshIndicatorHeight: CGFloat = 34
@@ -1416,6 +1419,22 @@ struct ChatView: View {
 
                     ScrollView {
                         LazyVStack(spacing: 0) {
+                            if hiddenMessageCount > 0 {
+                                Button {
+                                    visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
+                                } label: {
+                                    Text("View older messages (\(hiddenMessageCount))")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.blue)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .id(ChatScrollTarget.olderMessagesButton)
+                                .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+                            }
+
                             ForEach(chatItems) { item in
                                 chatRow(for: item)
                             }
@@ -1462,7 +1481,9 @@ struct ChatView: View {
                         scheduleComposerAffordanceFollow(with: proxy, delayMS: 20)
                     }
                     .onChange(of: viewModel.messages.count) { oldCount, count in
+                        visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
                         if count == 0 {
+                            visibleMessageCount = messageWindowSize
                             chatMountAnimationStartDate = nil
                         }
 
@@ -1471,7 +1492,7 @@ struct ChatView: View {
                             needsInitialBottomSnap = true
                             scheduleInitialBottomSnap(with: proxy)
                             if oldCount == 0, pendingOutgoingSend == nil {
-                                chatMountAnimationStartDate = Date().addingTimeInterval(0.04)
+                                startChatMountAnimation()
                             }
                         }
 
@@ -1530,6 +1551,7 @@ struct ChatView: View {
             taskStore.autoScrollTask?.cancel()
             taskStore.streamingAutoScrollTask?.cancel()
             taskStore.initialBottomSnapTask?.cancel()
+            taskStore.mountAnimationCleanupTask?.cancel()
             taskStore.composerDraftPersistenceTask?.cancel()
             affordanceScrollTask?.cancel()
             pendingOutgoingSendTask?.cancel()
@@ -2103,7 +2125,11 @@ struct ChatView: View {
     private var messageBottomPadding: CGFloat { 20 }
 
     private var displayedMessages: ArraySlice<OpenCodeMessageEnvelope> {
-        viewModel.messages[...]
+        viewModel.messages.suffix(visibleMessageCount)
+    }
+
+    private var hiddenMessageCount: Int {
+        max(0, viewModel.messages.count - displayedMessages.count)
     }
 
     private var displayedMessagesArray: [OpenCodeMessageEnvelope] {
@@ -2197,6 +2223,19 @@ struct ChatView: View {
             attachmentIDs: viewModel.draftAttachments.map(\.id),
             incompleteTodoIDs: viewModel.todos.filter { !$0.isComplete }.map(\.id)
         )
+    }
+
+    private func startChatMountAnimation() {
+        let startDate = Date().addingTimeInterval(0.04)
+        chatMountAnimationStartDate = startDate
+
+        taskStore.mountAnimationCleanupTask?.cancel()
+        taskStore.mountAnimationCleanupTask = Task { @MainActor in
+            defer { taskStore.mountAnimationCleanupTask = nil }
+            try? await Task.sleep(for: .milliseconds(320))
+            guard !Task.isCancelled, chatMountAnimationStartDate == startDate else { return }
+            chatMountAnimationStartDate = nil
+        }
     }
 
     private func dismissComposerOverlays() {
@@ -2897,11 +2936,16 @@ private extension View {
     func chatScrollBottomTracking(_ isAtBottom: Binding<Bool>) -> some View {
 #if os(iOS) || targetEnvironment(macCatalyst)
         if #available(iOS 18.0, *) {
-            self.onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.visibleRect.maxY >= geometry.contentSize.height - 80
-            } action: { _, newValue in
-                guard isAtBottom.wrappedValue != newValue else { return }
-                isAtBottom.wrappedValue = newValue
+            self.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                max(0, geometry.contentSize.height - geometry.visibleRect.maxY)
+            } action: { _, distanceFromBottom in
+                if isAtBottom.wrappedValue {
+                    guard distanceFromBottom > 140 else { return }
+                    isAtBottom.wrappedValue = false
+                } else {
+                    guard distanceFromBottom < 24 else { return }
+                    isAtBottom.wrappedValue = true
+                }
             }
         } else {
             self

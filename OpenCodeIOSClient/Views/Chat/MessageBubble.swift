@@ -116,14 +116,23 @@ struct MessageBubble: View {
         }
     }
 
+    @ViewBuilder
     private var measuredMessageContent: some View {
-        messageContent
-            .background {
-                GeometryReader { geometry in
-                    Color.clear
-                        .preference(key: MessageBubbleContentFramePreferenceKey.self, value: geometry.frame(in: .named("chat-view-space")))
+        if shouldMeasureEntryFrame {
+            messageContent
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear
+                            .preference(key: MessageBubbleContentFramePreferenceKey.self, value: geometry.frame(in: .named("chat-view-space")))
+                    }
                 }
-            }
+        } else {
+            messageContent
+        }
+    }
+
+    private var shouldMeasureEntryFrame: Bool {
+        isUser && entrySourceFrame != nil && (reserveEntryFromComposer || animateEntryFromComposer) && !hasRunEntryAnimation
     }
 
     private var messageContent: some View {
