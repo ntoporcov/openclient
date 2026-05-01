@@ -37,10 +37,14 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             ("chat", "05-chat"),
             ("permission", "06-permission"),
             ("question", "07-question"),
-            ("paywall", "08-paywall"),
-            ("recent-widget", "09-recent-widget"),
-            ("pinned-widget", "10-pinned-widget"),
-            ("live-activity", "11-live-activity"),
+            ("fun-games", "08-fun-games"),
+            ("find-place-game", "09-find-place-game"),
+            ("find-bug-game", "10-find-bug-game"),
+            ("composer-actions", "11-composer-actions"),
+            ("paywall", "12-paywall"),
+            ("recent-widget", "13-recent-widget"),
+            ("pinned-widget", "14-pinned-widget"),
+            ("live-activity", "15-live-activity"),
         ]
 
         for (scene, screenshotName) in scenes {
@@ -51,6 +55,14 @@ final class OpenCodeIOSClientUITests: XCTestCase {
 
             let sceneMarker = app.staticTexts["screenshot.scene.\(scene)"]
             XCTAssertTrue(sceneMarker.waitForExistence(timeout: 10), "Expected screenshot scene \(scene) to load")
+
+            if scene == "composer-actions" {
+                let composerMenu = app.buttons["chat.composer.menu"]
+                XCTAssertTrue(composerMenu.waitForExistence(timeout: 10), "Expected composer menu button to load")
+                composerMenu.tap()
+                XCTAssertTrue(app.navigationBars["Message Tools"].waitForExistence(timeout: 10), "Expected composer actions sheet to load")
+            }
+
             snapshot(screenshotName)
             app.terminate()
         }

@@ -212,6 +212,7 @@ platform :ios do
           "-parallel-testing-enabled", "NO",
           "-maximum-concurrent-test-simulator-destinations", "1",
           "-derivedDataPath", File.join(repo_root, ".derived-data-screenshots").shellescape,
+          "ONLY_ACTIVE_ARCH=YES",
         ].join(" ")
       )
       normalize_ipad_landscape_screenshots(screenshot_output, device)

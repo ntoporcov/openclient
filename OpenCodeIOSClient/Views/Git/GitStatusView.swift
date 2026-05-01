@@ -8,6 +8,10 @@ struct GitStatusView: View {
         viewModel.vcsFileStatuses.map(\.id).joined(separator: "|")
     }
 
+    private var workspaceDirectories: [String] {
+        viewModel.workspaceDirectories()
+    }
+
     var body: some View {
         List {
             if let info = viewModel.vcsInfo {
@@ -50,17 +54,17 @@ struct GitStatusView: View {
                 }
             }
 
-            if !viewModel.availableVCSDiffModes.isEmpty {
+            if !workspaceDirectories.isEmpty {
                 Section {
-                    Picker("Diff Mode", selection: Binding(
-                        get: { viewModel.selectedVCSDiffMode },
-                        set: { viewModel.selectVCSMode($0) }
+                    Picker("Workspace", selection: Binding(
+                        get: { viewModel.effectiveFilesDirectory ?? workspaceDirectories.first ?? "" },
+                        set: { viewModel.selectFilesWorkspaceDirectory($0) }
                     )) {
-                        ForEach(viewModel.availableVCSDiffModes, id: \.self) { mode in
-                            Text(mode.title).tag(mode)
+                        ForEach(workspaceDirectories, id: \.self) { directory in
+                            Text(viewModel.workspaceDisplayName(for: directory) ?? URL(fileURLWithPath: directory).lastPathComponent)
+                                .tag(directory)
                         }
                     }
-                    .pickerStyle(.segmented)
                 }
             }
 
@@ -92,7 +96,7 @@ struct GitStatusView: View {
             }
 
             if viewModel.projectFilesMode == .changes {
-                Section(viewModel.selectedVCSDiffMode == .git ? "Working Tree" : "Branch Diff") {
+                Section(viewModel.workspaceDisplayName(for: viewModel.effectiveFilesDirectory) ?? "Working Tree") {
                     changesSectionContent
                 }
             } else {
@@ -106,6 +110,12 @@ struct GitStatusView: View {
             await viewModel.loadGitViewDataIfNeeded()
         }
         .task(id: viewModel.projectFilesMode) {
+            if viewModel.projectFilesMode == .tree {
+                await viewModel.loadFileTreeIfNeeded()
+            }
+        }
+        .task(id: viewModel.effectiveFilesDirectory ?? "") {
+            await viewModel.loadGitViewDataIfNeeded()
             if viewModel.projectFilesMode == .tree {
                 await viewModel.loadFileTreeIfNeeded()
             }

@@ -32,6 +32,7 @@ extension AppViewModel {
             worktree: "",
             vcs: nil,
             name: "Global",
+            sandboxes: nil,
             icon: nil,
             time: nil
         )
@@ -93,6 +94,7 @@ extension AppViewModel {
             worktree: "",
             vcs: nil,
             name: "Global",
+            sandboxes: nil,
             icon: nil,
             time: nil
         )

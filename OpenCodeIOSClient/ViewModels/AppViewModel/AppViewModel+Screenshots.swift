@@ -9,6 +9,10 @@ enum OpenClientScreenshotScene: String, CaseIterable {
     case chat
     case permission
     case question
+    case funGames = "fun-games"
+    case findPlaceGame = "find-place-game"
+    case findBugGame = "find-bug-game"
+    case composerActions = "composer-actions"
     case paywall
     case recentWidget = "recent-widget"
     case pinnedWidget = "pinned-widget"
@@ -43,6 +47,14 @@ extension AppViewModel {
             return screenshotPermission()
         case .question, .recentWidget, .pinnedWidget, .liveActivity:
             return screenshotQuestion()
+        case .funGames:
+            return screenshotFunGames()
+        case .findPlaceGame:
+            return screenshotFindPlaceGame()
+        case .findBugGame:
+            return screenshotFindBugGame()
+        case .composerActions:
+            return screenshotChat()
         case .paywall:
             return screenshotPaywall()
         }
@@ -89,6 +101,46 @@ extension AppViewModel {
         return viewModel
     }
 
+    private static func screenshotFunGames() -> AppViewModel {
+        let viewModel = baseConnectedScreenshotViewModel(selectedSession: nil)
+        viewModel.funAndGamesPreferences.showsSection = true
+        return viewModel
+    }
+
+    private static func screenshotFindPlaceGame() -> AppViewModel {
+        let viewModel = baseConnectedScreenshotViewModel(
+            selectedSession: OpenClientScreenshotData.findPlaceSession,
+            sessions: OpenClientScreenshotData.gameSessions,
+            messages: OpenClientScreenshotData.findPlaceMessages,
+            todos: []
+        )
+        viewModel.findPlaceSessionsByID = [
+            OpenClientScreenshotData.findPlaceSession.id: FindPlaceGameSession(
+                sessionID: OpenClientScreenshotData.findPlaceSession.id,
+                city: OpenClientScreenshotData.findPlaceCity
+            )
+        ]
+        viewModel.sessionPreviews = OpenClientScreenshotData.gameSessionPreviews
+        return viewModel
+    }
+
+    private static func screenshotFindBugGame() -> AppViewModel {
+        let viewModel = baseConnectedScreenshotViewModel(
+            selectedSession: OpenClientScreenshotData.findBugSession,
+            sessions: OpenClientScreenshotData.gameSessions,
+            messages: OpenClientScreenshotData.findBugMessages,
+            todos: []
+        )
+        viewModel.findBugSessionsByID = [
+            OpenClientScreenshotData.findBugSession.id: FindBugGameSession(
+                sessionID: OpenClientScreenshotData.findBugSession.id,
+                language: OpenClientScreenshotData.findBugLanguage
+            )
+        ]
+        viewModel.sessionPreviews = OpenClientScreenshotData.gameSessionPreviews
+        return viewModel
+    }
+
     private static func screenshotPaywall() -> AppViewModel {
         let viewModel = baseConnectedScreenshotViewModel(selectedSession: OpenClientScreenshotData.releaseSession)
         viewModel.paywallReason = .manual
@@ -98,15 +150,20 @@ extension AppViewModel {
         return viewModel
     }
 
-    private static func baseConnectedScreenshotViewModel(selectedSession: OpenCodeSession? = OpenClientScreenshotData.releaseSession) -> AppViewModel {
+    private static func baseConnectedScreenshotViewModel(
+        selectedSession: OpenCodeSession? = OpenClientScreenshotData.releaseSession,
+        sessions: [OpenCodeSession] = OpenClientScreenshotData.sessions,
+        messages: [OpenCodeMessageEnvelope] = OpenClientScreenshotData.messages,
+        todos: [OpenCodeTodo] = OpenClientScreenshotData.todos
+    ) -> AppViewModel {
         let viewModel = AppViewModel.preview(
             isConnected: true,
             currentProject: OpenClientScreenshotData.repoProject,
             selectedDirectory: OpenClientScreenshotData.repoProject.worktree,
-            sessions: OpenClientScreenshotData.sessions,
+            sessions: sessions,
             selectedSession: selectedSession,
-            messages: OpenClientScreenshotData.messages,
-            todos: OpenClientScreenshotData.todos,
+            messages: messages,
+            todos: todos,
             permissions: [],
             questions: [],
             sessionStatuses: [OpenClientScreenshotData.releaseSession.id: "busy"],
@@ -140,6 +197,7 @@ enum OpenClientScreenshotData {
         worktree: "/Users/nick/Code/openclient",
         vcs: "git",
         name: "openclient",
+        sandboxes: ["/Users/nick/Code/openclient-review"],
         icon: OpenCodeProject.Icon(color: "#5B7CFF"),
         time: OpenCodeProject.Time(created: 1_712_200_000, updated: 1_712_286_400)
     )
@@ -149,6 +207,7 @@ enum OpenClientScreenshotData {
         worktree: "/Users/nick/Notes/product-playbook",
         vcs: nil,
         name: "product-playbook",
+        sandboxes: nil,
         icon: OpenCodeProject.Icon(color: "#22C55E"),
         time: OpenCodeProject.Time(created: 1_712_100_000, updated: 1_712_180_000)
     )
@@ -184,6 +243,29 @@ enum OpenClientScreenshotData {
 
     static let sessions = [releaseSession, followupSession, archivedSession]
 
+    static let findPlaceSession = OpenCodeSession(
+        id: "session-screenshot-find-place",
+        title: "Find the Place",
+        workspaceID: nil,
+        directory: repoProject.worktree,
+        projectID: repoProject.id,
+        parentID: nil
+    )
+
+    static let findBugSession = OpenCodeSession(
+        id: "session-screenshot-find-bug",
+        title: "Find the Bug",
+        workspaceID: nil,
+        directory: repoProject.worktree,
+        projectID: repoProject.id,
+        parentID: nil
+    )
+
+    static let gameSessions = [findPlaceSession, findBugSession, releaseSession]
+
+    static let findPlaceCity = FindPlaceGameCity(name: "Reykjavik", country: "Iceland", latitude: 64.1466, longitude: -21.9426)
+    static let findBugLanguage = FindBugGameLanguage(id: "swift", title: "Swift")
+
     static let recentServers = [
         OpenCodeServerConfig(name: "Demo Cloud", iconName: "cloud.fill", baseURL: secureConfig.baseURL, username: secureConfig.username, password: secureConfig.password),
         OpenCodeServerConfig(name: "Tailscale", iconName: "network", baseURL: "http://100.92.11.7:4096", username: "nick", password: "tailnet-token"),
@@ -194,6 +276,12 @@ enum OpenClientScreenshotData {
         releaseSession.id: SessionPreview(text: "Tightened the release surface and App Store flow.", date: Date().addingTimeInterval(-180)),
         followupSession.id: SessionPreview(text: "Verified question actions route into the tracked chat.", date: Date().addingTimeInterval(-1_200)),
         archivedSession.id: SessionPreview(text: "Added deterministic screenshot scenes for launch assets.", date: Date().addingTimeInterval(-3_200)),
+    ]
+
+    static let gameSessionPreviews: [String: SessionPreview] = [
+        findPlaceSession.id: SessionPreview(text: "A cold North Atlantic clue narrowed the city down.", date: Date().addingTimeInterval(-120)),
+        findBugSession.id: SessionPreview(text: "The hidden Swift bug is almost solved.", date: Date().addingTimeInterval(-420)),
+        releaseSession.id: sessionPreviews[releaseSession.id] ?? SessionPreview(text: "Launch polish pass", date: Date().addingTimeInterval(-1_200)),
     ]
 
     static let todos = [
@@ -296,6 +384,71 @@ enum OpenClientScreenshotData {
     )
 
     static let messages = [userMessage, assistantMessage, toolMessage]
+
+    static let findPlaceMessages = [
+        OpenCodeMessageEnvelope.local(
+            role: "user",
+            text: FindPlaceGame.starterPrompt(
+                city: findPlaceCity,
+                weather: FindPlaceWeatherSummary(text: "2°C / 36°F, cloudy, humidity 82%, wind 31 km/h", errorDescription: nil)
+            ),
+            messageID: "message-find-place-setup",
+            sessionID: findPlaceSession.id
+        ),
+        OpenCodeMessageEnvelope.local(
+            role: "assistant",
+            text: "I am thinking of a city. Your clue: it is cool, windy, and coastal, with volcanic landscapes nearby. Ask for a hint or make a guess.",
+            messageID: "message-find-place-intro",
+            sessionID: findPlaceSession.id,
+            agent: "build",
+            model: OpenCodeMessageModelReference(providerID: "openai", modelID: "gpt-5.4", variant: "balanced")
+        ),
+        OpenCodeMessageEnvelope.local(
+            role: "user",
+            text: "Is it Reykjavik?",
+            messageID: "message-find-place-guess",
+            sessionID: findPlaceSession.id
+        ),
+        OpenCodeMessageEnvelope.local(
+            role: "assistant",
+            text: FindPlaceGame.winMarker,
+            messageID: "message-find-place-win",
+            sessionID: findPlaceSession.id,
+            agent: "build",
+            model: OpenCodeMessageModelReference(providerID: "openai", modelID: "gpt-5.4", variant: "balanced")
+        ),
+    ]
+
+    static let findBugMessages = [
+        OpenCodeMessageEnvelope.local(
+            role: "user",
+            text: FindBugGame.starterPrompt(language: findBugLanguage),
+            messageID: "message-find-bug-setup",
+            sessionID: findBugSession.id
+        ),
+        OpenCodeMessageEnvelope.local(
+            role: "assistant",
+            text: "Find the one real bug in this Swift snippet:\n\n```swift\nfunc average(_ values: [Int]) -> Double {\n    var total = 0\n    for index in 0...values.count {\n        total += values[index]\n    }\n    return Double(total) / Double(values.count)\n}\n```\n\nTell me what breaks and why.",
+            messageID: "message-find-bug-intro",
+            sessionID: findBugSession.id,
+            agent: "build",
+            model: OpenCodeMessageModelReference(providerID: "openai", modelID: "gpt-5.4", variant: "balanced")
+        ),
+        OpenCodeMessageEnvelope.local(
+            role: "user",
+            text: "The closed range goes one past the last array index.",
+            messageID: "message-find-bug-answer",
+            sessionID: findBugSession.id
+        ),
+        OpenCodeMessageEnvelope.local(
+            role: "assistant",
+            text: FindBugGame.winMarker,
+            messageID: "message-find-bug-win",
+            sessionID: findBugSession.id,
+            agent: "build",
+            model: OpenCodeMessageModelReference(providerID: "openai", modelID: "gpt-5.4", variant: "balanced")
+        ),
+    ]
 
     static let permission = OpenCodePermission(
         id: "permission-screenshot-1",

@@ -34,6 +34,14 @@ struct ScreenshotSceneView: View {
                     ProjectListView(viewModel: viewModel) {}
                 }
             }
+        case .funGames:
+            if isRunningOniPad {
+                RootView(viewModel: viewModel)
+            } else {
+                NavigationStack {
+                    ProjectListView(viewModel: viewModel) {}
+                }
+            }
         case .sessions:
             if isRunningOniPad {
                 RootView(viewModel: viewModel)
@@ -50,6 +58,18 @@ struct ScreenshotSceneView: View {
                 NavigationStack {
                     ChatView(viewModel: viewModel, sessionID: OpenClientScreenshotData.releaseSession.id)
                 }
+            }
+        case .findPlaceGame:
+            NavigationStack {
+                ChatView(viewModel: viewModel, sessionID: OpenClientScreenshotData.findPlaceSession.id)
+            }
+        case .findBugGame:
+            NavigationStack {
+                ChatView(viewModel: viewModel, sessionID: OpenClientScreenshotData.findBugSession.id)
+            }
+        case .composerActions:
+            NavigationStack {
+                ChatView(viewModel: viewModel, sessionID: OpenClientScreenshotData.releaseSession.id)
             }
         case .paywall:
             OpenClientPaywallView(

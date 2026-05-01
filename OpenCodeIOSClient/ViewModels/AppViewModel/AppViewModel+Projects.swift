@@ -31,6 +31,7 @@ extension AppViewModel {
             directoryState.vcsDiffsByMode = [:]
             directoryState.selectedVCSMode = .git
             directoryState.selectedVCSFile = nil
+            selectedFilesWorkspaceDirectory = nil
             directoryState.projectFilesMode = .changes
             directoryState.fileTreeRootNodes = []
             directoryState.fileTreeChildrenByParentPath = [:]
@@ -92,6 +93,12 @@ extension AppViewModel {
         createProjectSelectedDirectory = nil
         withAnimation(opencodeSelectionAnimation) {
             isShowingCreateProjectSheet = true
+        }
+    }
+
+    func presentProjectSettingsSheet() {
+        withAnimation(opencodeSelectionAnimation) {
+            isShowingProjectSettingsSheet = true
         }
     }
 
@@ -192,6 +199,7 @@ extension AppViewModel {
                     worktree: normalizedDirectory,
                     vcs: nil,
                     name: projectName,
+                    sandboxes: nil,
                     icon: nil,
                     time: nil
                 )
@@ -447,6 +455,14 @@ extension AppViewModel {
         return decoded
     }
 
+    func loadProjectWorkspacesEnabledByScope() -> [String: Bool] {
+        guard let data = UserDefaults.standard.data(forKey: StorageKey.projectWorkspacesEnabledByScope),
+              let decoded = try? JSONDecoder().decode([String: Bool].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
     func persistSessionPreviews() {
         guard let data = try? JSONEncoder().encode(sessionPreviews) else { return }
         UserDefaults.standard.set(data, forKey: StorageKey.sessionPreviews)
@@ -460,6 +476,11 @@ extension AppViewModel {
     func persistLiveActivityAutoStartByScope() {
         guard let data = try? JSONEncoder().encode(liveActivityAutoStartByScope) else { return }
         UserDefaults.standard.set(data, forKey: StorageKey.liveActivityAutoStartByScope)
+    }
+
+    func persistProjectWorkspacesEnabledByScope() {
+        guard let data = try? JSONEncoder().encode(projectWorkspacesEnabledByScope) else { return }
+        UserDefaults.standard.set(data, forKey: StorageKey.projectWorkspacesEnabledByScope)
     }
 
     func setSessionPreview(_ preview: SessionPreview, for sessionID: String) {
@@ -571,6 +592,86 @@ extension AppViewModel {
         }
 
         persistLiveActivityAutoStartByScope()
+    }
+
+    func setProjectWorkspacesEnabled(_ isEnabled: Bool, for scopeKey: String? = nil) {
+        let key = scopeKey ?? currentProjectPreferenceScopeKey
+
+        if isEnabled {
+            projectWorkspacesEnabledByScope[key] = true
+        } else {
+            projectWorkspacesEnabledByScope[key] = nil
+        }
+
+        persistProjectWorkspacesEnabledByScope()
+    }
+
+    func workspaceDirectories(for project: OpenCodeProject? = nil) -> [String] {
+        guard let project = project ?? currentProject, project.id != "global" else { return [] }
+        var directories = [project.worktree]
+        var seen = Set(directories.map(workspaceKey))
+
+        for sandbox in project.sandboxes ?? [] {
+            let key = workspaceKey(sandbox)
+            guard seen.insert(key).inserted else { continue }
+            directories.append(sandbox)
+        }
+
+        return directories
+    }
+
+    func workspaceDisplayName(for directory: String?) -> String? {
+        guard let directory, !directory.isEmpty else { return nil }
+        guard let project = currentProject else {
+            return URL(fileURLWithPath: directory).lastPathComponent
+        }
+
+        if workspaceKey(directory) == workspaceKey(project.worktree) {
+            return "Local"
+        }
+
+        return URL(fileURLWithPath: directory).lastPathComponent
+    }
+
+    func newSessionWorkspaceTitle(for selection: NewSessionWorkspaceSelection) -> String {
+        switch selection {
+        case .main:
+            return workspaceDisplayName(for: currentProject?.worktree) ?? "Main branch"
+        case let .directory(directory):
+            return workspaceDisplayName(for: directory) ?? URL(fileURLWithPath: directory).lastPathComponent
+        case .createNew:
+            return "Create new worktree"
+        }
+    }
+
+    func appendSandboxDirectory(_ directory: String, to project: OpenCodeProject) {
+        let key = workspaceKey(directory)
+        let existingSandboxes = project.sandboxes ?? []
+        guard !existingSandboxes.contains(where: { workspaceKey($0) == key }) else { return }
+
+        let updatedProject = OpenCodeProject(
+            id: project.id,
+            worktree: project.worktree,
+            vcs: project.vcs,
+            name: project.name,
+            sandboxes: existingSandboxes + [directory],
+            icon: project.icon,
+            time: project.time
+        )
+
+        if currentProject?.id == project.id {
+            currentProject = updatedProject
+        }
+
+        if let index = projects.firstIndex(where: { $0.id == project.id }) {
+            projects[index] = updatedProject
+        }
+    }
+
+    func workspaceKey(_ directory: String) -> String {
+        let normalized = directory.replacingOccurrences(of: "\\", with: "/")
+        if normalized.allSatisfy({ $0 == "/" }) { return "/" }
+        return normalized.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression)
     }
 
     func refreshSessionPreview(for sessionID: String, messages: [OpenCodeMessageEnvelope]) {

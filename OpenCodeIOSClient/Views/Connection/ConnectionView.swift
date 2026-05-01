@@ -15,6 +15,10 @@ struct ConnectionView: View {
         viewModel.recentServerConfigs.isEmpty == false
     }
 
+    private var isScreenshotScene: Bool {
+        ProcessInfo.processInfo.environment["OPENCLIENT_SCREENSHOT_SCENE"] != nil
+    }
+
     var body: some View {
         List {
             if hasRecentServers {
@@ -70,7 +74,9 @@ struct ConnectionView: View {
             }
 
 #if DEBUG
-            DebugEntitlementSection(viewModel: viewModel)
+            if !isScreenshotScene {
+                DebugEntitlementSection(viewModel: viewModel)
+            }
 #endif
 
             Section("Apple Intelligence") {

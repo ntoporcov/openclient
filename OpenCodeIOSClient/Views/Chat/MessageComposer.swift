@@ -153,6 +153,10 @@ struct MessageComposer: View {
         #endif
     }
 
+    private var isComposerActionsScreenshotScene: Bool {
+        ProcessInfo.processInfo.environment["OPENCLIENT_SCREENSHOT_SCENE"] == "composer-actions"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if showsCommandPicker {
@@ -208,7 +212,7 @@ struct MessageComposer: View {
         }
         .onChange(of: isAccessoryMenuOpen) { _, isOpen in
             if isOpen {
-                accessorySheetDetent = .height(315)
+                accessorySheetDetent = isComposerActionsScreenshotScene ? .height(expandedAccessorySheetDetentHeight) : .height(315)
                 accessoryNavigationPath = []
             }
         }
@@ -651,6 +655,12 @@ struct MessageComposer: View {
 
 #if canImport(PhotosUI) && canImport(UIKit)
     private func loadRecentPhotosIfAllowed() async {
+        if isComposerActionsScreenshotScene {
+            recentPhotoAssets = []
+            recentPhotoThumbnails = [:]
+            return
+        }
+
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         let authorizedStatus: PHAuthorizationStatus
 

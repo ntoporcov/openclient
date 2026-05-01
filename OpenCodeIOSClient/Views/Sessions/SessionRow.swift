@@ -10,6 +10,7 @@ struct SessionRow: View {
     let session: OpenCodeSession
     var isSelected = false
     var showsPinnedBadge = false
+    var workspaceOverline: String?
     var style: Style = .regular
 
     private var isBusy: Bool {
@@ -54,6 +55,14 @@ struct SessionRow: View {
             SessionAvatar(title: session.title ?? "Untitled Session")
 
             VStack(alignment: .leading, spacing: 3) {
+                if let workspaceOverline, !workspaceOverline.isEmpty {
+                    Text(workspaceOverline)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .lineLimit(1)
+                }
+
                 HStack(spacing: 8) {
                     titleLine
 

@@ -38,6 +38,7 @@
 		207ABDA2A8973B1AE93F4E95 /* OpenCodePlatformSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841ABDC8F062F8727E983C0A /* OpenCodePlatformSupport.swift */; };
 		23886D92B15F6BE27FAB627B /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E24421CE08AEAB38EEC236 /* AppViewModel.swift */; };
 		245053FBB9532BBFD479B277 /* OpenCodeWidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B362EA66509E48608C95477 /* OpenCodeWidgetModels.swift */; };
+		24EDA7482B67BC9C4338D02A /* ProjectSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266C15C3288E0BF0BE49CBA7 /* ProjectSettingsSheet.swift */; };
 		28CF3363B05EEFDA379C92F7 /* SessionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 751BF1A887341EC96213F975 /* SessionRow.swift */; };
 		2B735C6C5359A927E892AEF2 /* AppViewModel+VCS.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44D3044D46925B3F7A5326B /* AppViewModel+VCS.swift */; };
 		2B9C3C0F09640F040B6B163B /* AgentToolbarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638D31E01C9E7027BBEF7770 /* AgentToolbarMenu.swift */; };
@@ -157,6 +158,7 @@
 		BF2CC9979B5A906197DD8E0B /* OpenCodeChatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD22634739A584D72F8DFA45 /* OpenCodeChatActivityAttributes.swift */; };
 		BF46C26DEF4B2706BAF1E6D1 /* SessionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5495928F452F10791C0614E4 /* SessionListView.swift */; };
 		BF9C50581431223AA4C85299 /* ChatPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9403CD63018375C683CB8CB9 /* ChatPreviews.swift */; };
+		C11D54CABA26421308878A34 /* ProjectSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266C15C3288E0BF0BE49CBA7 /* ProjectSettingsSheet.swift */; };
 		C7132E70603513B56BF2F17A /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BC5EB9EFFE91C43D15E42DB /* MessageBubble.swift */; };
 		C7CA43007F7D03B653B97EB5 /* OpenCodeStableHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70A5B94B94132296B0A9AB18 /* OpenCodeStableHash.swift */; };
 		C97B32A827B47B9F6E355037 /* OpenCodeServerPasswordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AA5B93EFBA292AE8B56323 /* OpenCodeServerPasswordStore.swift */; };
@@ -274,6 +276,7 @@
 		22123DE9C0CFED1D040013EC /* ProjectListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectListView.swift; sourceTree = "<group>"; };
 		23AEA0FBAD7E163A8F35C72E /* OpenCodeWidgetTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeWidgetTimeline.swift; sourceTree = "<group>"; };
 		24200A73829BD02C29A419F2 /* AppViewModel+Projects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Projects.swift"; sourceTree = "<group>"; };
+		266C15C3288E0BF0BE49CBA7 /* ProjectSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSettingsSheet.swift; sourceTree = "<group>"; };
 		2B362EA66509E48608C95477 /* OpenCodeWidgetModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeWidgetModels.swift; sourceTree = "<group>"; };
 		2C863806B8786D01DC82EE9E /* AppViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModelTests.swift; sourceTree = "<group>"; };
 		2FBF691A45B28DA836E7479A /* ConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionView.swift; sourceTree = "<group>"; };
@@ -543,6 +546,7 @@
 				E174CC4F5F328F7652FFFE5F /* MCPListView.swift */,
 				22123DE9C0CFED1D040013EC /* ProjectListView.swift */,
 				976E7B6C266BBE6C7E32DCC6 /* ProjectRow.swift */,
+				266C15C3288E0BF0BE49CBA7 /* ProjectSettingsSheet.swift */,
 				CFD078B7015EA38C5705FD47 /* ProjectsPreviews.swift */,
 			);
 			path = Projects;
@@ -1041,6 +1045,7 @@
 				CF29802BEBD5A466A64AC665 /* ProjectContentView.swift in Sources */,
 				BB94AA4E6B73101B0416978C /* ProjectListView.swift in Sources */,
 				194DADD1B8B8C8CFB3D19FDF /* ProjectRow.swift in Sources */,
+				24EDA7482B67BC9C4338D02A /* ProjectSettingsSheet.swift in Sources */,
 				F145065AF7E6EFE76CBAC3A9 /* ProjectsPreviews.swift in Sources */,
 				D6AF347489033040BC60018F /* QuestionPanel.swift in Sources */,
 				B26FDEB79CB98BD9ED814807 /* ReasoningBlock.swift in Sources */,
@@ -1133,6 +1138,7 @@
 				179E8151B6C2BB86AF74F08C /* ProjectContentView.swift in Sources */,
 				BA5ED6B3A311F0D083977D8B /* ProjectListView.swift in Sources */,
 				6B846E22927BA463D441809F /* ProjectRow.swift in Sources */,
+				C11D54CABA26421308878A34 /* ProjectSettingsSheet.swift in Sources */,
 				58A74000A88032AF9BC5A383 /* ProjectsPreviews.swift in Sources */,
 				D1BA395F41B7CFC8873FC4BD /* QuestionPanel.swift in Sources */,
 				35F4201348FB82F0689166EB /* ReasoningBlock.swift in Sources */,

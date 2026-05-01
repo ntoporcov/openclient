@@ -129,6 +129,56 @@ extension AppViewModel {
         }
 
         publishWidgetSnapshots()
+        await loadWorkspaceSessionsIfNeeded()
+    }
+
+    func loadWorkspaceSessionsIfNeeded() async {
+        guard isProjectWorkspacesEnabled else { return }
+        await loadWorkspaceSessions()
+    }
+
+    func loadWorkspaceSessions() async {
+        let directories = workspaceDirectories()
+        guard !directories.isEmpty else { return }
+
+        for directory in directories {
+            await loadWorkspaceSessions(directory: directory, client: client)
+        }
+    }
+
+    func loadMoreWorkspaceSessions(directory: String) async {
+        var state = workspaceSessionsByDirectory[directory] ?? OpenCodeWorkspaceSessionState()
+        state.limit += 5
+        workspaceSessionsByDirectory[directory] = state
+        await loadWorkspaceSessions(directory: directory, client: client, force: true)
+    }
+
+    private func loadWorkspaceSessions(directory: String, client: OpenCodeAPIClient, force: Bool = false) async {
+        var state = workspaceSessionsByDirectory[directory] ?? OpenCodeWorkspaceSessionState()
+        if state.isLoading { return }
+        if !force, !state.sessions.isEmpty, state.rootSessions.count >= state.limit { return }
+
+        state.isLoading = true
+        workspaceSessionsByDirectory[directory] = state
+
+        do {
+            let requestLimit = max(state.limit, 5)
+            let loaded = try await client.listSessions(directory: directory, roots: true, limit: requestLimit)
+                .filter(\.isRootSession)
+            let estimatedTotal = loaded.count < requestLimit ? loaded.count : loaded.count + 1
+
+            withAnimation(opencodeSelectionAnimation) {
+                workspaceSessionsByDirectory[directory] = OpenCodeWorkspaceSessionState(
+                    isLoading: false,
+                    sessions: loaded,
+                    sessionTotal: estimatedTotal,
+                    limit: state.limit
+                )
+            }
+        } catch {
+            state.isLoading = false
+            workspaceSessionsByDirectory[directory] = state
+        }
     }
 
     func reloadSessionStatuses() async throws {
@@ -143,8 +193,11 @@ extension AppViewModel {
 
         do {
             let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            let session = try await client.createSession(title: title.isEmpty ? nil : title, directory: effectiveSelectedDirectory)
+            let targetDirectory = try await resolveNewSessionDirectory()
+            let session = try await client.createSession(title: title.isEmpty ? nil : title, directory: targetDirectory)
             draftTitle = ""
+            newWorkspaceName = ""
+            newSessionWorkspaceSelection = .main
             withAnimation(opencodeSelectionAnimation) {
                 isShowingCreateSessionSheet = false
             }
@@ -167,6 +220,31 @@ extension AppViewModel {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func resolveNewSessionDirectory() async throws -> String? {
+        guard isProjectWorkspacesEnabled,
+              hasGitProject,
+              let project = currentProject,
+              project.id != "global" else {
+            return effectiveSelectedDirectory
+        }
+
+        switch newSessionWorkspaceSelection {
+        case .main:
+            return project.worktree
+        case let .directory(directory):
+            return directory
+        case .createNew:
+            let name = newWorkspaceName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let created = try await client.createWorktree(
+                directory: project.worktree,
+                name: name.isEmpty ? nil : name
+            )
+            appendSandboxDirectory(created.directory, to: project)
+            workspaceSessionsByDirectory[created.directory] = workspaceSessionsByDirectory[created.directory] ?? OpenCodeWorkspaceSessionState(isLoading: true)
+            return created.directory
         }
     }
 
@@ -1026,8 +1104,28 @@ extension AppViewModel {
         }
     }
 
+    func renameSession(_ session: OpenCodeSession, title: String) async {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return }
+
+        do {
+            let updatedSession = try await client.updateSessionTitle(sessionID: session.id, title: trimmedTitle)
+            upsertVisibleSession(updatedSession)
+            if directoryState.selectedSession?.id == updatedSession.id {
+                withAnimation(opencodeSelectionAnimation) {
+                    directoryState.selectedSession = updatedSession
+                }
+            }
+            publishWidgetSnapshots()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func presentCreateSessionSheet() {
         draftTitle = ""
+        newWorkspaceName = ""
+        newSessionWorkspaceSelection = .main
         withAnimation(opencodeSelectionAnimation) {
             isShowingCreateSessionSheet = true
         }
@@ -1040,6 +1138,18 @@ extension AppViewModel {
             } else {
                 directoryState.sessions.insert(session, at: 0)
             }
+
+            if let directory = session.directory, !directory.isEmpty {
+                var workspaceState = workspaceSessionsByDirectory[directory] ?? OpenCodeWorkspaceSessionState()
+                if let index = workspaceState.sessions.firstIndex(where: { $0.id == session.id }) {
+                    workspaceState.sessions[index] = session
+                } else {
+                    workspaceState.sessions.insert(session, at: 0)
+                    workspaceState.sessionTotal = max(workspaceState.sessionTotal, workspaceState.rootSessions.count)
+                }
+                workspaceState.isLoading = false
+                workspaceSessionsByDirectory[directory] = workspaceState
+            }
         }
     }
 
@@ -1048,7 +1158,14 @@ extension AppViewModel {
             return selectedSession
         }
 
-        return directoryState.sessions.first(where: { $0.id == sessionID })
+        if let session = directoryState.sessions.first(where: { $0.id == sessionID }) {
+            return session
+        }
+
+        return workspaceSessionsByDirectory.values
+            .lazy
+            .flatMap(\.sessions)
+            .first(where: { $0.id == sessionID })
     }
 
     func parentSession(for session: OpenCodeSession) -> OpenCodeSession? {
@@ -1057,7 +1174,9 @@ extension AppViewModel {
     }
 
     func childSessions(for sessionID: String) -> [OpenCodeSession] {
-        directoryState.sessions.filter { $0.parentID == sessionID }
+        let workspaceChildren = workspaceSessionsByDirectory.values.flatMap(\.sessions).filter { $0.parentID == sessionID }
+        if !workspaceChildren.isEmpty { return workspaceChildren }
+        return directoryState.sessions.filter { $0.parentID == sessionID }
     }
 
     func ensureAllSessionsLoaded() async {

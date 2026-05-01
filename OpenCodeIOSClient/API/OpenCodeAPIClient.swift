@@ -32,6 +32,10 @@ struct OpenCodeAPIClient: Sendable {
         try await sendNoContent(path: "/session/\(sessionID)", method: "DELETE")
     }
 
+    func updateSessionTitle(sessionID: String, title: String) async throws -> OpenCodeSession {
+        try await send(path: "/session/\(sessionID)", method: "PATCH", body: UpdateSessionRequest(title: title))
+    }
+
     func createSession(title: String?, directory: String? = nil) async throws -> OpenCodeSession {
         let queryItems = directory.map { [URLQueryItem(name: "directory", value: $0)] } ?? []
         return try await send(path: "/session", method: "POST", queryItems: queryItems, body: CreateSessionRequest(title: title))
@@ -69,6 +73,19 @@ struct OpenCodeAPIClient: Sendable {
     func updateProject(projectID: String, directory: String? = nil, name: String? = nil) async throws -> OpenCodeProject {
         let queryItems = directory.map { [URLQueryItem(name: "directory", value: $0)] } ?? []
         return try await send(path: "/project/\(projectID)", method: "PATCH", queryItems: queryItems, body: UpdateProjectRequest(name: name))
+    }
+
+    func listWorktrees(directory: String) async throws -> [String] {
+        try await send(path: "/experimental/worktree", method: "GET", queryItems: [URLQueryItem(name: "directory", value: directory)])
+    }
+
+    func createWorktree(directory: String, name: String? = nil, startCommand: String? = nil) async throws -> OpenCodeWorktree {
+        try await send(
+            path: "/experimental/worktree",
+            method: "POST",
+            queryItems: [URLQueryItem(name: "directory", value: directory)],
+            body: WorktreeCreateRequest(name: name, startCommand: startCommand)
+        )
     }
 
     func findFiles(query: String, directory: String) async throws -> [String] {
@@ -654,6 +671,11 @@ struct OpenCodeAPIClient: Sendable {
 
 private struct UpdateProjectRequest: Encodable {
     let name: String?
+}
+
+private struct WorktreeCreateRequest: Encodable {
+    let name: String?
+    let startCommand: String?
 }
 
 private struct SendCommandRequest: Encodable {

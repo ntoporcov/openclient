@@ -34,6 +34,19 @@ extension AppViewModel {
         flattenFileTree(nodes: directoryState.fileTreeRootNodes, depth: 0)
     }
 
+    var effectiveFilesDirectory: String? {
+        guard hasGitProject else { return effectiveSelectedDirectory }
+        let directories = workspaceDirectories()
+        guard !directories.isEmpty else { return effectiveSelectedDirectory }
+
+        if let selectedFilesWorkspaceDirectory,
+           directories.contains(where: { workspaceKey($0) == workspaceKey(selectedFilesWorkspaceDirectory) }) {
+            return selectedFilesWorkspaceDirectory
+        }
+
+        return currentProject?.worktree ?? effectiveSelectedDirectory
+    }
+
     func isExpandedDirectory(_ path: String) -> Bool {
         directoryState.expandedFileTreeDirectories.contains(path)
     }
@@ -82,6 +95,9 @@ extension AppViewModel {
     func presentGitView() {
         guard hasGitProject else { return }
         preserveCurrentMessageDraftForNavigation()
+        if selectedFilesWorkspaceDirectory == nil {
+            selectedFilesWorkspaceDirectory = currentProject?.worktree
+        }
         withAnimation(opencodeSelectionAnimation) {
             selectedProjectContentTab = .git
             directoryState.selectedSession = nil
@@ -104,6 +120,25 @@ extension AppViewModel {
 
         Task {
             await loadVCSDiff(mode: mode)
+        }
+    }
+
+    func selectFilesWorkspaceDirectory(_ directory: String) {
+        guard workspaceDirectories().contains(where: { workspaceKey($0) == workspaceKey(directory) }) else { return }
+        guard selectedFilesWorkspaceDirectory == nil || workspaceKey(selectedFilesWorkspaceDirectory ?? "") != workspaceKey(directory) else { return }
+
+        preserveCurrentMessageDraftForNavigation()
+        withAnimation(opencodeSelectionAnimation) {
+            selectedFilesWorkspaceDirectory = directory
+            directoryState.selectedVCSMode = .git
+            clearVCSWorkspaceData()
+        }
+
+        Task {
+            await reloadGitViewData(force: true)
+            if projectFilesMode == .tree {
+                await reloadFileTree(force: true)
+            }
         }
     }
 
@@ -173,7 +208,7 @@ extension AppViewModel {
     }
 
     func reloadFileTree(force: Bool) async {
-        guard hasGitProject, let directory = effectiveSelectedDirectory else { return }
+        guard hasGitProject, let directory = effectiveFilesDirectory else { return }
 
         directoryState.isLoadingFileTree = true
         if force {
@@ -198,7 +233,7 @@ extension AppViewModel {
     }
 
     func loadFileTreeChildren(for node: OpenCodeFileNode, force: Bool) async {
-        guard node.isDirectory, let directory = effectiveSelectedDirectory else { return }
+        guard node.isDirectory, let directory = effectiveFilesDirectory else { return }
         if !force, directoryState.fileTreeChildrenByParentPath[node.absolute] != nil {
             return
         }
@@ -224,7 +259,7 @@ extension AppViewModel {
     }
 
     func loadFileContent(for node: OpenCodeFileNode, force: Bool) async {
-        guard !node.isDirectory, let directory = effectiveSelectedDirectory else { return }
+        guard !node.isDirectory, let directory = effectiveFilesDirectory else { return }
         if !force, directoryState.fileContentsByPath[node.absolute] != nil {
             return
         }
@@ -253,7 +288,7 @@ extension AppViewModel {
     }
 
     func reloadGitViewData(force: Bool) async {
-        guard hasGitProject else { return }
+        guard hasGitProject, let directory = effectiveFilesDirectory else { return }
 
         withAnimation(opencodeSelectionAnimation) {
             directoryState.isLoadingVCS = true
@@ -263,8 +298,8 @@ extension AppViewModel {
         }
 
         do {
-            async let info = client.getVCSInfo(directory: effectiveSelectedDirectory)
-            async let status = client.listFileStatus(directory: effectiveSelectedDirectory)
+            async let info = client.getVCSInfo(directory: directory)
+            async let status = client.listFileStatus(directory: directory)
 
             let loadedInfo = try await info
             applyLoadedVCSInfo(loadedInfo)
@@ -272,7 +307,7 @@ extension AppViewModel {
             let loadedStatus = try await status
             applyLoadedVCSStatus(loadedStatus)
 
-            let loadedDiff = try await client.getVCSDiff(mode: directoryState.selectedVCSMode, directory: effectiveSelectedDirectory)
+            let loadedDiff = try await client.getVCSDiff(mode: directoryState.selectedVCSMode, directory: directory)
             applyLoadedVCSDiff(loadedDiff, mode: directoryState.selectedVCSMode)
             directoryState.vcsErrorMessage = nil
         } catch {
@@ -283,7 +318,7 @@ extension AppViewModel {
     }
 
     func loadVCSDiff(mode: OpenCodeVCSDiffMode, force: Bool = false) async {
-        guard hasGitProject else { return }
+        guard hasGitProject, let directory = effectiveFilesDirectory else { return }
         if !force, directoryState.vcsDiffsByMode[mode] != nil {
             selectReasonableVCSFileIfNeeded()
             return
@@ -293,7 +328,7 @@ extension AppViewModel {
         defer { directoryState.isLoadingVCS = false }
 
         do {
-            let diff = try await client.getVCSDiff(mode: mode, directory: effectiveSelectedDirectory)
+            let diff = try await client.getVCSDiff(mode: mode, directory: directory)
             applyLoadedVCSDiff(diff, mode: mode)
             directoryState.vcsErrorMessage = nil
         } catch {
@@ -309,7 +344,7 @@ extension AppViewModel {
     }
 
     func relativeGitPath(_ path: String) -> String {
-        guard let root = effectiveSelectedDirectory, !root.isEmpty else { return path }
+        guard let root = effectiveFilesDirectory, !root.isEmpty else { return path }
         if path == root {
             return URL(fileURLWithPath: path).lastPathComponent
         }
@@ -404,15 +439,30 @@ extension AppViewModel {
             normalized.removeLast()
         }
 
-        if let directory = effectiveSelectedDirectory,
+        if let directory = effectiveFilesDirectory,
            normalized.hasPrefix(directory + "/") {
             return String(normalized.dropFirst(directory.count + 1))
         }
 
-        if normalized == effectiveSelectedDirectory {
+        if normalized == effectiveFilesDirectory {
             return ""
         }
 
         return normalized
+    }
+
+    private func clearVCSWorkspaceData() {
+        directoryState.vcsInfo = nil
+        directoryState.vcsFileStatuses = []
+        directoryState.vcsDiffsByMode = [:]
+        directoryState.selectedVCSFile = nil
+        directoryState.selectedProjectFilePath = nil
+        directoryState.fileTreeRootNodes = []
+        directoryState.fileTreeChildrenByParentPath = [:]
+        directoryState.expandedFileTreeDirectories = []
+        directoryState.fileContentsByPath = [:]
+        directoryState.fileTreeErrorMessage = nil
+        directoryState.fileContentErrorMessage = nil
+        directoryState.vcsErrorMessage = nil
     }
 }

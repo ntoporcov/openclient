@@ -46,6 +46,7 @@ final class AppViewModel: ObservableObject {
         static let sessionPreviews = "sessionPreviews"
         static let pinnedSessionsByScope = "pinnedSessionsByScope"
         static let liveActivityAutoStartByScope = "liveActivityAutoStartByScope"
+        static let projectWorkspacesEnabledByScope = "projectWorkspacesEnabledByScope"
         static let messageDraftsByChat = "messageDraftsByChat"
         static let chatBreadcrumbs = "chatBreadcrumbs"
     }
@@ -74,7 +75,12 @@ final class AppViewModel: ObservableObject {
     @Published var sessionPreviews: [String: SessionPreview] = [:]
     @Published var pinnedSessionIDsByScope: [String: [String]] = [:]
     @Published var liveActivityAutoStartByScope: [String: Bool] = [:]
+    @Published var projectWorkspacesEnabledByScope: [String: Bool] = [:]
+    @Published var workspaceSessionsByDirectory: [String: OpenCodeWorkspaceSessionState] = [:]
     @Published var draftTitle = ""
+    @Published var newSessionWorkspaceSelection: NewSessionWorkspaceSelection = .main
+    @Published var newWorkspaceName = ""
+    @Published var selectedFilesWorkspaceDirectory: String?
     @Published var draftMessage = ""
     @Published var draftAttachments: [OpenCodeComposerAttachment] = []
     @Published var messageDraftsByChatKey: [String: OpenCodeMessageDraft] = [:]
@@ -94,6 +100,7 @@ final class AppViewModel: ObservableObject {
     @Published var isShowingAddServerSheet = false
     @Published var savedServerEditorMode: SavedServerEditorMode = .add
     @Published var isShowingCreateSessionSheet = false
+    @Published var isShowingProjectSettingsSheet = false
     @Published var isShowingConfigurationsSheet = false
     @Published var isShowingFindPlaceModelSheet = false
     @Published var isShowingFindBugLanguageSheet = false
@@ -178,6 +185,7 @@ final class AppViewModel: ObservableObject {
         sessionPreviews = loadSessionPreviews()
         pinnedSessionIDsByScope = loadPinnedSessionIDsByScope()
         liveActivityAutoStartByScope = loadLiveActivityAutoStartByScope()
+        projectWorkspacesEnabledByScope = loadProjectWorkspacesEnabledByScope()
         messageDraftsByChatKey = loadMessageDraftsByChatKey()
         chatBreadcrumbs = loadChatBreadcrumbs()
         recentServerConfigs = recentConfigs
@@ -210,6 +218,10 @@ final class AppViewModel: ObservableObject {
     }
 
     var sessions: [OpenCodeSession] { directoryState.sessions.filter(\.isRootSession) }
+
+    var isProjectWorkspacesEnabled: Bool {
+        projectWorkspacesEnabledByScope[currentProjectPreferenceScopeKey] ?? false
+    }
 
     var pinnedSessionIDs: [String] {
         pinnedSessionIDsByScope[currentPinScopeKey] ?? []

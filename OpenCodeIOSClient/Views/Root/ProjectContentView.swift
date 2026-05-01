@@ -30,10 +30,14 @@ struct ProjectContentView: View {
         .navigationTitle(projectTitle)
         .opencodeInlineNavigationTitle()
         .toolbar {
-            if viewModel.selectedProjectContentTab == .sessions {
-                ToolbarItem(placement: .opencodeTrailing) {
-                    SessionLiveActivityMenu(viewModel: viewModel)
+            ToolbarItem(placement: .opencodeTrailing) {
+                Button {
+                    viewModel.presentProjectSettingsSheet()
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
                 }
+                .accessibilityLabel("Project Settings")
+                .accessibilityIdentifier("project.settings")
             }
 
             ToolbarItem(placement: .opencodeTrailing) {
@@ -47,6 +51,9 @@ struct ProjectContentView: View {
         }
         .onAppear {
             syncProjectTabIfNeeded()
+        }
+        .sheet(isPresented: $viewModel.isShowingProjectSettingsSheet) {
+            ProjectSettingsSheet(viewModel: viewModel)
         }
         .onChange(of: viewModel.currentProject?.id) { _, _ in
             syncProjectTabIfNeeded()

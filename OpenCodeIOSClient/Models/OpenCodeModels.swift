@@ -94,8 +94,36 @@ struct OpenCodeProject: Codable, Identifiable, Hashable, Sendable {
     let worktree: String
     let vcs: String?
     let name: String?
+    let sandboxes: [String]?
     let icon: Icon?
     let time: Time?
+}
+
+struct OpenCodeWorkspaceSessionState: Codable, Equatable, Sendable {
+    var isLoading = false
+    var sessions: [OpenCodeSession] = []
+    var sessionTotal = 0
+    var limit = 5
+
+    var rootSessions: [OpenCodeSession] {
+        sessions.filter(\.isRootSession)
+    }
+
+    var hasMore: Bool {
+        sessionTotal > rootSessions.count
+    }
+}
+
+struct OpenCodeWorktree: Codable, Hashable, Sendable {
+    let name: String
+    let branch: String
+    let directory: String
+}
+
+enum NewSessionWorkspaceSelection: Codable, Hashable, Sendable {
+    case main
+    case directory(String)
+    case createNew
 }
 
 struct OpenCodeFileNode: Codable, Hashable, Sendable {
@@ -700,6 +728,7 @@ struct AppleIntelligenceWorkspaceRecord: Codable, Identifiable, Hashable, Sendab
             worktree: lastKnownPath,
             vcs: nil,
             name: title,
+            sandboxes: nil,
             icon: nil,
             time: nil
         )
@@ -1480,6 +1509,7 @@ enum OpenCodePreviewData {
         worktree: "Global",
         vcs: nil,
         name: nil,
+        sandboxes: nil,
         icon: OpenCodeProject.Icon(color: nil),
         time: OpenCodeProject.Time(created: nil, updated: nil)
     )
@@ -1489,6 +1519,7 @@ enum OpenCodePreviewData {
         worktree: "/path/to/opencode-ios-client",
         vcs: "git",
         name: "opencode-ios-client",
+        sandboxes: nil,
         icon: OpenCodeProject.Icon(color: "#4F46E5"),
         time: OpenCodeProject.Time(created: 1_711_234_567, updated: 1_711_235_678)
     )
@@ -1912,6 +1943,10 @@ enum OpenCodeStreamReducer {
 
 struct CreateSessionRequest: Encodable {
     let title: String?
+}
+
+struct UpdateSessionRequest: Encodable {
+    let title: String
 }
 
 struct ForkSessionRequest: Encodable {
