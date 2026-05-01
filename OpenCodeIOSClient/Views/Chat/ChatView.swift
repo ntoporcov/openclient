@@ -1219,6 +1219,7 @@ struct ChatView: View {
     @State private var needsInitialComposerHeightSnap = true
     @State private var contentRevealTask: Task<Void, Never>?
     @State private var isChatContentVisible = false
+    @State private var isWaitingForInitialChatReveal = false
     @State private var loadingIndicatorTask: Task<Void, Never>?
     @State private var shouldShowLoadingIndicator = false
     @State private var chatContentOffsetY: CGFloat = 14
@@ -1441,8 +1442,9 @@ struct ChatView: View {
                         needsInitialBottomSnap = true
                         needsInitialComposerHeightSnap = true
                         hasCompletedInitialHydrationSnap = !viewModel.messages.isEmpty
-                        isChatContentVisible = !shouldAnimateInitialChatReveal
-                        chatContentOffsetY = shouldAnimateInitialChatReveal ? 14 : 0
+                        isWaitingForInitialChatReveal = viewModel.messages.isEmpty
+                        isChatContentVisible = !isWaitingForInitialChatReveal
+                        chatContentOffsetY = isWaitingForInitialChatReveal ? 10 : 0
                         shouldShowLoadingIndicator = false
                         if !hasLoadedInitialWindow {
                             visibleMessageCount = messageWindowSize
@@ -1453,7 +1455,7 @@ struct ChatView: View {
                     }
                     .onChange(of: bottomAnchorFrame) { _, frame in
                         guard needsInitialBottomSnap, frame != .zero else { return }
-                        scheduleInitialBottomSnap(with: proxy)
+                        scheduleInitialBottomSnap(with: proxy, revealAfterSnap: isWaitingForInitialChatReveal)
                     }
                     .onChange(of: geometry.size.height) { _, _ in
                         guard shouldAutoFollowBottom else { return }
@@ -1463,7 +1465,7 @@ struct ChatView: View {
                         guard newHeight > 0, abs(newHeight - oldHeight) > 1 else { return }
                         if needsInitialComposerHeightSnap, !viewModel.messages.isEmpty {
                             needsInitialComposerHeightSnap = false
-                            scheduleInitialBottomSnap(with: proxy)
+                            scheduleInitialBottomSnap(with: proxy, revealAfterSnap: isWaitingForInitialChatReveal)
                             return
                         }
                         guard shouldFollowComposerAffordanceChange || shouldAutoFollowBottom else { return }
@@ -1483,8 +1485,10 @@ struct ChatView: View {
 
                         if count > 0, !hasCompletedInitialHydrationSnap {
                             hasCompletedInitialHydrationSnap = true
-                            scheduleScrollToBottom(with: proxy, delayMS: 120)
-                            scheduleChatContentReveal(delayMS: 180)
+                            needsInitialBottomSnap = true
+                            isWaitingForInitialChatReveal = true
+                            setChatContentHiddenForInitialReveal()
+                            scheduleInitialBottomSnap(with: proxy, revealAfterSnap: true)
                         }
 
                         guard count > oldCount else { return }
@@ -1957,10 +1961,11 @@ struct ChatView: View {
         scheduleScrollToBottom(with: proxy, delayMS: delayMS, animated: false)
     }
 
-    private func scheduleInitialBottomSnap(with proxy: ScrollViewProxy) {
+    private func scheduleInitialBottomSnap(with proxy: ScrollViewProxy, revealAfterSnap: Bool = false) {
         taskStore.initialBottomSnapTask?.cancel()
         taskStore.initialBottomSnapTask = Task { @MainActor in
             defer { taskStore.initialBottomSnapTask = nil }
+            var didScheduleReveal = false
 
             for delayMS in [0, 50, 160, 320] {
                 if delayMS > 0 {
@@ -1974,6 +1979,11 @@ struct ChatView: View {
                 needsInitialBottomSnap = false
                 shouldFollowStreamingUpdates = true
                 scrollToBottom(with: proxy, animated: false)
+
+                if revealAfterSnap, !didScheduleReveal {
+                    didScheduleReveal = true
+                    scheduleChatContentReveal(delayMS: 90)
+                }
             }
         }
     }
@@ -2415,7 +2425,7 @@ struct ChatView: View {
         if isLoadingSelectedSession {
             contentRevealTask?.cancel()
             isChatContentVisible = !shouldAnimateInitialChatReveal
-            chatContentOffsetY = shouldAnimateInitialChatReveal ? 14 : 0
+            chatContentOffsetY = shouldAnimateInitialChatReveal ? 10 : 0
             scheduleLoadingIndicatorReveal()
             return
         }
@@ -2429,11 +2439,18 @@ struct ChatView: View {
             return
         }
 
+        if isWaitingForInitialChatReveal {
+            loadingIndicatorTask?.cancel()
+            shouldShowLoadingIndicator = false
+            setChatContentHiddenForInitialReveal()
+            return
+        }
+
         guard hasCompletedInitialHydrationSnap else {
             loadingIndicatorTask?.cancel()
             shouldShowLoadingIndicator = false
             isChatContentVisible = !shouldAnimateInitialChatReveal
-            chatContentOffsetY = shouldAnimateInitialChatReveal ? 14 : 0
+            chatContentOffsetY = shouldAnimateInitialChatReveal ? 10 : 0
             return
         }
 
@@ -2449,6 +2466,15 @@ struct ChatView: View {
         scheduleChatContentReveal(delayMS: 120)
     }
 
+    private func setChatContentHiddenForInitialReveal() {
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
+            isChatContentVisible = false
+            chatContentOffsetY = 10
+        }
+    }
+
     private func scheduleChatContentReveal(delayMS: Int) {
         guard !isLoadingSelectedSession else { return }
         contentRevealTask?.cancel()
@@ -2457,6 +2483,7 @@ struct ChatView: View {
         contentRevealTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(delayMS))
             guard !Task.isCancelled, !isLoadingSelectedSession else { return }
+            isWaitingForInitialChatReveal = false
             withAnimation(.easeOut(duration: 0.18)) {
                 isChatContentVisible = true
                 chatContentOffsetY = 0
