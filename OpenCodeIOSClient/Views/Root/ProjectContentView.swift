@@ -2,30 +2,11 @@ import SwiftUI
 
 struct ProjectContentView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let onDetailChosen: () -> Void
 
     var body: some View {
-        TabView(selection: $viewModel.selectedProjectContentTab) {
-            SessionListView(viewModel: viewModel, onSessionChosen: onDetailChosen)
-                .tabItem {
-                    Label(AppViewModel.ProjectContentTab.sessions.title, systemImage: "bubble.left.and.bubble.right")
-                }
-                .tag(AppViewModel.ProjectContentTab.sessions)
-
-            if viewModel.hasGitProject {
-                GitStatusView(viewModel: viewModel, onFileChosen: onDetailChosen)
-                    .tabItem {
-                        Label(AppViewModel.ProjectContentTab.git.title, systemImage: "doc.on.doc")
-                    }
-                    .tag(AppViewModel.ProjectContentTab.git)
-            }
-
-            MCPListView(viewModel: viewModel)
-                .tabItem {
-                    Label(AppViewModel.ProjectContentTab.mcp.title, systemImage: "server.rack")
-                }
-                .tag(AppViewModel.ProjectContentTab.mcp)
-        }
+        rootContent
         .background(OpenCodePlatformColor.groupedBackground)
         .navigationTitle(projectTitle)
         .opencodeInlineNavigationTitle()
@@ -64,6 +45,72 @@ struct ProjectContentView: View {
             } else if tab == .mcp {
                 viewModel.presentMCPView()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        if usesSystemTabView {
+            tabContent
+        } else {
+            VStack(spacing: 0) {
+                ProjectContentTabSelector(
+                    selection: $viewModel.selectedProjectContentTab,
+                    tabs: availableTabs
+                )
+
+                content
+            }
+        }
+    }
+
+    private var usesSystemTabView: Bool {
+        horizontalSizeClass == .compact
+    }
+
+    private var tabContent: some View {
+        TabView(selection: $viewModel.selectedProjectContentTab) {
+            SessionListView(viewModel: viewModel, onSessionChosen: onDetailChosen)
+                .tabItem {
+                    Label(AppViewModel.ProjectContentTab.sessions.title, systemImage: "bubble.left.and.bubble.right")
+                }
+                .tag(AppViewModel.ProjectContentTab.sessions)
+
+            if viewModel.hasGitProject {
+                GitStatusView(viewModel: viewModel, onFileChosen: onDetailChosen)
+                    .tabItem {
+                        Label(AppViewModel.ProjectContentTab.git.title, systemImage: "doc.on.doc")
+                    }
+                    .tag(AppViewModel.ProjectContentTab.git)
+            }
+
+            MCPListView(viewModel: viewModel)
+                .tabItem {
+                    Label(AppViewModel.ProjectContentTab.mcp.title, systemImage: "server.rack")
+                }
+                .tag(AppViewModel.ProjectContentTab.mcp)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch viewModel.selectedProjectContentTab {
+        case .sessions:
+            SessionListView(viewModel: viewModel, onSessionChosen: onDetailChosen)
+        case .git:
+            if viewModel.hasGitProject {
+                GitStatusView(viewModel: viewModel, onFileChosen: onDetailChosen)
+            } else {
+                SessionListView(viewModel: viewModel, onSessionChosen: onDetailChosen)
+            }
+        case .mcp:
+            MCPListView(viewModel: viewModel)
+        }
+    }
+
+    private var availableTabs: [AppViewModel.ProjectContentTab] {
+        AppViewModel.ProjectContentTab.allCases.filter { tab in
+            tab != .git || viewModel.hasGitProject
         }
     }
 
@@ -138,6 +185,38 @@ struct ProjectContentView: View {
             Task {
                 await viewModel.reloadMCPStatus()
             }
+        }
+    }
+}
+
+struct ProjectContentTabSelector: View {
+    @Binding var selection: AppViewModel.ProjectContentTab
+    let tabs: [AppViewModel.ProjectContentTab]
+
+    var body: some View {
+        Picker("Project Content", selection: $selection.animation(opencodeSelectionAnimation)) {
+            ForEach(tabs, id: \.self) { tab in
+                Label(tab.title, systemImage: systemImage(for: tab))
+                    .labelStyle(.titleAndIcon)
+                    .tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 420)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+    }
+
+    private func systemImage(for tab: AppViewModel.ProjectContentTab) -> String {
+        switch tab {
+        case .sessions:
+            return "bubble.left.and.bubble.right"
+        case .git:
+            return "doc.on.doc"
+        case .mcp:
+            return "server.rack"
         }
     }
 }

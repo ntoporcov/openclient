@@ -2,14 +2,16 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
 
     var body: some View {
         Group {
             if viewModel.isConnected {
-                NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
+                NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $preferredCompactColumn) {
                     ProjectListView(viewModel: viewModel) {
                         withAnimation(opencodeSelectionAnimation) {
+                            columnVisibility = .doubleColumn
                             preferredCompactColumn = .content
                         }
                     }
@@ -50,6 +52,11 @@ struct RootView: View {
                         }
                     }
                 }
+                .onChange(of: viewModel.currentProject?.id) { _, projectID in
+                    withAnimation(opencodeSelectionAnimation) {
+                        columnVisibility = projectID == nil ? .all : .doubleColumn
+                    }
+                }
                 .animation(opencodeSelectionAnimation, value: viewModel.selectedSession?.id)
             } else if viewModel.isUsingAppleIntelligence, let session = viewModel.selectedSession {
                 NavigationStack {
@@ -67,6 +74,7 @@ struct RootView: View {
         }
         .onChange(of: viewModel.isConnected) { _, _ in
             withAnimation(opencodeSelectionAnimation) {
+                columnVisibility = .all
                 preferredCompactColumn = .sidebar
             }
         }
