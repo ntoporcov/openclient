@@ -1034,6 +1034,7 @@ private struct FallbackMedalView: View {
 private final class ChatViewTaskStore {
     var autoScrollTask: Task<Void, Never>?
     var streamingAutoScrollTask: Task<Void, Never>?
+    var readingModeSettleScrollTask: Task<Void, Never>?
     var composerDraftPersistenceTask: Task<Void, Never>?
     var lastStreamingAutoScrollAt = Date.distantPast
 }
@@ -1193,6 +1194,8 @@ struct ChatView: View {
     @State private var animatingOutgoingMessageID: String?
     @State private var readingModeScrollRequest: ReadingModeScrollRequest?
     @State private var pinnedReadingModeScrollRequestID: UUID?
+    @State private var hasInterruptedReadingModeAutoScroll = false
+    @State private var hasStartedReadingModeLiveTail = false
     @State private var isSendReadingModeActive = false
     @State private var animatedReadingModeBottomSpacerHeight: CGFloat = 0
     @State private var jumpToLatestRequest = 0
@@ -1225,6 +1228,7 @@ struct ChatView: View {
     private let streamingAutoScrollMinimumInterval: TimeInterval = 0.12
     private let bottomRefreshThreshold: CGFloat = 72
     private let bottomRefreshIndicatorHeight: CGFloat = 34
+    private let readingModeSentMessageAnchor = UnitPoint(x: 0.5, y: 0.12)
     private var todoIDs: String {
         viewModel.todos.map { $0.id }.joined(separator: "|")
     }
@@ -1325,9 +1329,7 @@ struct ChatView: View {
 
     private var shouldLiveTailStreamingUpdates: Bool {
         if isSendReadingModeActive {
-            guard hasReadingModeOverflowContent else { return false }
-            if shouldFollowStreamingUpdates { return true }
-            return isScrollGeometryAtBottom && pinnedReadingModeScrollRequestID == readingModeScrollRequest?.id
+            return hasStartedReadingModeLiveTail && !hasInterruptedReadingModeAutoScroll
         }
 
         return shouldAutoFollowBottom
@@ -1342,6 +1344,13 @@ struct ChatView: View {
               let messageID = readingModeScrollRequest?.messageID,
               let messageIndex = displayedMessages.firstIndex(where: { $0.id == messageID }) else {
             return false
+        }
+
+        if bottomAnchorFrame != .zero {
+            let visibleBottom = max(160, listViewportHeight - composerOverlayHeight)
+            if bottomAnchorFrame.minY > visibleBottom - 24 {
+                return true
+            }
         }
 
         let messagesAfterSend = displayedMessages.suffix(from: displayedMessages.index(after: messageIndex))
@@ -1375,6 +1384,8 @@ struct ChatView: View {
                     isSendReadingModeActive = false
                     readingModeScrollRequest = nil
                     pinnedReadingModeScrollRequestID = nil
+                    hasInterruptedReadingModeAutoScroll = false
+                    hasStartedReadingModeLiveTail = false
                     jumpToLatestRequest += 1
                 } label: {
                     Image(systemName: "arrow.down")
@@ -1537,6 +1548,11 @@ struct ChatView: View {
                         updateChatContentVisibility()
                     }
                     .onChange(of: streamingFollowState) { _, _ in
+                        if isSendReadingModeActive {
+                            updateReadingModeLiveTail(with: proxy)
+                            return
+                        }
+
                         guard hasLoadedInitialWindow, shouldLiveTailStreamingUpdates, !isComposerInputFocused else { return }
                         scheduleStreamingScrollToBottom(with: proxy)
                     }
@@ -1556,12 +1572,15 @@ struct ChatView: View {
                     .onChange(of: isReadingModeStreamActive) { _, isActive in
                         updateReadingModeBottomSpacerHeight(animated: !isActive)
                         if !isActive {
-                            retireSendReadingModeAfterStream()
+                            retireSendReadingModeAfterStream(with: proxy)
                         }
                     }
                     .onPreferenceChange(ChatBottomAnchorFramePreferenceKey.self) { frame in
-                        guard needsInitialBottomSnap, bottomAnchorFrame != frame else { return }
+                        guard frame != .zero, bottomAnchorFrame != frame else { return }
                         bottomAnchorFrame = frame
+                        if isSendReadingModeActive {
+                            updateReadingModeLiveTail(with: proxy)
+                        }
                     }
 #if canImport(UIKit)
                     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
@@ -1591,6 +1610,7 @@ struct ChatView: View {
             viewModel.setComposerStreamingFocus(false)
             taskStore.autoScrollTask?.cancel()
             taskStore.streamingAutoScrollTask?.cancel()
+            taskStore.readingModeSettleScrollTask?.cancel()
             taskStore.composerDraftPersistenceTask?.cancel()
             affordanceScrollTask?.cancel()
             contentRevealTask?.cancel()
@@ -2019,7 +2039,7 @@ struct ChatView: View {
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
         guard canPerformScheduledChatScroll else { return }
         shouldFollowStreamingUpdates = true
-        withoutListScrollAnimation {
+        performChatScroll(animated: animated) {
             proxy.scrollTo(ChatScrollTarget.bottomAnchor, anchor: .bottom)
         }
     }
@@ -2030,7 +2050,7 @@ struct ChatView: View {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(24))
             guard !Task.isCancelled, isSendReadingModeActive, canPerformScheduledChatScroll else { return }
-            scrollToMessage(messageID, with: proxy, anchor: .top, animated: true)
+            scrollToMessage(messageID, with: proxy, anchor: readingModeSentMessageAnchor, animated: false)
         }
     }
 
@@ -2040,6 +2060,21 @@ struct ChatView: View {
         scheduleReadingModeScroll(to: request.messageID, with: proxy)
     }
 
+    private func updateReadingModeLiveTail(with proxy: ScrollViewProxy) {
+        guard hasLoadedInitialWindow, !isComposerInputFocused, isSendReadingModeActive else { return }
+        guard pinnedReadingModeScrollRequestID == readingModeScrollRequest?.id else { return }
+        guard !hasInterruptedReadingModeAutoScroll, hasReadingModeOverflowContent else { return }
+
+        if !hasStartedReadingModeLiveTail {
+            hasStartedReadingModeLiveTail = true
+            shouldFollowStreamingUpdates = true
+            scrollToBottom(with: proxy, animated: false)
+            return
+        }
+
+        scheduleStreamingScrollToBottom(with: proxy)
+    }
+
     private func scrollToMessage(_ messageID: String, with proxy: ScrollViewProxy, anchor: UnitPoint, animated: Bool) {
         guard displayedChatItems.contains(where: { $0.id == messageID }) else {
             guard !isSendReadingModeActive else { return }
@@ -2047,8 +2082,16 @@ struct ChatView: View {
             return
         }
 
-        withoutListScrollAnimation {
+        performChatScroll(animated: animated) {
             proxy.scrollTo(messageID, anchor: anchor)
+        }
+    }
+
+    private func performChatScroll(animated: Bool, _ operation: @escaping () -> Void) {
+        if animated {
+            withAnimation(.snappy(duration: 0.26, extraBounce: 0.02), operation)
+        } else {
+            withoutListScrollAnimation(operation)
         }
     }
 
@@ -2072,6 +2115,14 @@ struct ChatView: View {
     private var bottomOverscrollRefreshGesture: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .local)
             .onChanged { value in
+                if isSendReadingModeActive, abs(value.translation.height) > 8 {
+                    hasInterruptedReadingModeAutoScroll = true
+                    hasStartedReadingModeLiveTail = false
+                    shouldFollowStreamingUpdates = false
+                    taskStore.streamingAutoScrollTask?.cancel()
+                    taskStore.streamingAutoScrollTask = nil
+                }
+
                 if value.translation.height > 4 {
                     shouldFollowStreamingUpdates = false
                 }
@@ -2160,13 +2211,35 @@ struct ChatView: View {
         }
     }
 
-    private func retireSendReadingModeAfterStream() {
+    private func retireSendReadingModeAfterStream(with proxy: ScrollViewProxy) {
         guard isSendReadingModeActive, !isReadingModeStreamActive else { return }
 
+        let shouldSettleToBottom = !hasInterruptedReadingModeAutoScroll || hasStartedReadingModeLiveTail || isScrollGeometryAtBottom
         isSendReadingModeActive = false
         readingModeScrollRequest = nil
         pinnedReadingModeScrollRequestID = nil
+        hasInterruptedReadingModeAutoScroll = false
+        hasStartedReadingModeLiveTail = false
         taskStore.autoScrollTask?.cancel()
+
+        if shouldSettleToBottom {
+            scheduleReadingModeSettleScrollToBottom(with: proxy)
+        }
+    }
+
+    private func scheduleReadingModeSettleScrollToBottom(with proxy: ScrollViewProxy) {
+        taskStore.readingModeSettleScrollTask?.cancel()
+        taskStore.readingModeSettleScrollTask = Task { @MainActor in
+            defer { taskStore.readingModeSettleScrollTask = nil }
+
+            try? await Task.sleep(for: .milliseconds(40))
+            guard !Task.isCancelled, canPerformScheduledChatScroll else { return }
+            scrollToBottom(with: proxy, animated: true)
+
+            try? await Task.sleep(for: .milliseconds(240))
+            guard !Task.isCancelled, canPerformScheduledChatScroll else { return }
+            scrollToBottom(with: proxy, animated: false)
+        }
     }
 
     private var displayedMessages: ArraySlice<OpenCodeMessageEnvelope> {
@@ -2641,6 +2714,8 @@ struct ChatView: View {
         taskStore.streamingAutoScrollTask?.cancel()
         taskStore.streamingAutoScrollTask = nil
         pinnedReadingModeScrollRequestID = nil
+        hasInterruptedReadingModeAutoScroll = false
+        hasStartedReadingModeLiveTail = false
         isSendReadingModeActive = true
         isComposerInputFocused = false
         viewModel.setComposerStreamingFocus(false)
