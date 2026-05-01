@@ -106,6 +106,11 @@ struct MessageBubble: View {
                         .transition(.identity)
                 }
             }
+
+            if let error = effectiveMessage.info.error?.displayMessage {
+                ErrorMessageCard(message: error, title: effectiveMessage.info.error?.name)
+                    .transition(.identity)
+            }
         }
         .contextMenu { messageContextMenu }
     }
@@ -912,5 +917,44 @@ private struct AttachmentBubblePart: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+}
+
+private struct ErrorMessageCard: View {
+    let message: String
+    let title: String?
+
+    private var displayTitle: String {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return "Error" }
+        return trimmed
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+
+                Text(displayTitle)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(.red)
+
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .lineSpacing(2)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.red.opacity(0.28), lineWidth: 1)
+        }
     }
 }

@@ -705,6 +705,8 @@ private struct ChatDisplayItemCacheKey: Equatable {
         let id: String
         let role: String?
         let parentID: String?
+        let errorName: String?
+        let errorMessage: String?
         let isStreaming: Bool
         let isCompactionSummary: Bool
         let parts: [PartKey]
@@ -2271,6 +2273,8 @@ struct ChatView: View {
             id: message.id,
             role: message.info.role,
             parentID: message.info.parentID,
+            errorName: message.info.error?.name,
+            errorMessage: message.info.error?.displayMessage,
             isStreaming: isStreamingMessage(message),
             isCompactionSummary: message.info.isCompactionSummary,
             parts: message.parts.map(displayItemCachePartKey(for:))

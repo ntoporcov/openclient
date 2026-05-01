@@ -266,11 +266,16 @@ struct OpenCodeMessageEnvelope: Codable, Identifiable, Hashable, Sendable {
     }
 
     func copiedTextContent() -> String? {
-        let text = parts
+        var segments = parts
             .compactMap(\ .text)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
+
+        if let errorText = info.error?.displayMessage {
+            segments.append("Error: \(errorText)")
+        }
+
+        let text = segments.joined(separator: "\n\n")
 
         return text.isEmpty ? nil : text
     }
@@ -289,6 +294,7 @@ struct OpenCodeMessage: Codable, Hashable, Sendable {
     let finish: String?
     let providerID: String?
     let modelID: String?
+    let error: OpenCodeSessionErrorPayload?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -303,6 +309,7 @@ struct OpenCodeMessage: Codable, Hashable, Sendable {
         case finish
         case providerID
         case modelID
+        case error
     }
 
     init(
@@ -317,7 +324,8 @@ struct OpenCodeMessage: Codable, Hashable, Sendable {
         summary: Bool? = nil,
         finish: String? = nil,
         providerID: String? = nil,
-        modelID: String? = nil
+        modelID: String? = nil,
+        error: OpenCodeSessionErrorPayload? = nil
     ) {
         self.id = id
         self.role = role
@@ -331,6 +339,7 @@ struct OpenCodeMessage: Codable, Hashable, Sendable {
         self.finish = finish
         self.providerID = providerID
         self.modelID = modelID
+        self.error = error
     }
 
     var isCompactionSummary: Bool {
@@ -351,6 +360,7 @@ struct OpenCodeMessage: Codable, Hashable, Sendable {
         finish = try container.decodeIfPresent(String.self, forKey: .finish)
         providerID = try container.decodeIfPresent(String.self, forKey: .providerID)
         modelID = try container.decodeIfPresent(String.self, forKey: .modelID)
+        error = try container.decodeIfPresent(OpenCodeSessionErrorPayload.self, forKey: .error)
     }
 }
 
@@ -381,6 +391,7 @@ struct OpenCodeEventInfo: Codable, Hashable, Sendable {
     let finish: String?
     let providerID: String?
     let modelID: String?
+    let error: OpenCodeSessionErrorPayload?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -398,6 +409,7 @@ struct OpenCodeEventInfo: Codable, Hashable, Sendable {
         case finish
         case providerID
         case modelID
+        case error
     }
 
     init(message: OpenCodeMessage) {
@@ -416,6 +428,7 @@ struct OpenCodeEventInfo: Codable, Hashable, Sendable {
         finish = message.finish
         providerID = message.providerID
         modelID = message.modelID
+        error = message.error
     }
 
     func asMessage() -> OpenCodeMessage {
@@ -434,7 +447,8 @@ struct OpenCodeEventInfo: Codable, Hashable, Sendable {
             summary: summary,
             finish: finish,
             providerID: providerID,
-            modelID: modelID
+            modelID: modelID,
+            error: error
         )
     }
 
@@ -459,6 +473,7 @@ struct OpenCodeEventInfo: Codable, Hashable, Sendable {
         finish = try container.decodeIfPresent(String.self, forKey: .finish)
         providerID = try container.decodeIfPresent(String.self, forKey: .providerID)
         modelID = try container.decodeIfPresent(String.self, forKey: .modelID)
+        error = try container.decodeIfPresent(OpenCodeSessionErrorPayload.self, forKey: .error)
     }
 }
 
@@ -1191,6 +1206,16 @@ struct OpenCodeSessionErrorData: Codable, Hashable, Sendable {
 struct OpenCodeSessionErrorPayload: Codable, Hashable, Sendable {
     let name: String?
     let data: OpenCodeSessionErrorData?
+
+    var displayMessage: String? {
+        let message = data?.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let message, !message.isEmpty {
+            return message
+        }
+
+        let fallback = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback?.isEmpty == false ? fallback : nil
+    }
 }
 
 enum OpenCodeTypedEvent: Sendable {

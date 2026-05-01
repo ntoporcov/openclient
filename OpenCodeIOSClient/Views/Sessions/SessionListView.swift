@@ -6,11 +6,10 @@ struct SessionListView: View {
     let onSessionChosen: () -> Void
 
     var body: some View {
-        let sessionIDs = viewModel.sessions.map(\.id).joined(separator: "|")
-        let pinnedSessionIDs = viewModel.pinnedRootSessions.map(\.id).joined(separator: "|")
+        let snapshot = sessionListSnapshot
 
         List {
-            if viewModel.directoryState.isLoadingSessions && viewModel.sessions.isEmpty {
+            if snapshot.isLoadingEmpty {
                 Section {
                     ForEach(0 ..< 3, id: \.self) { _ in
                         SessionRowSkeleton()
@@ -21,9 +20,9 @@ struct SessionListView: View {
                 } header: {
                     SessionSectionHeader(title: "Pinned", systemImage: "pin")
                 }
-            } else if !viewModel.pinnedRootSessions.isEmpty {
+            } else if !snapshot.pinnedSessions.isEmpty {
                 Section {
-                    ForEach(viewModel.pinnedRootSessions) { session in
+                    ForEach(snapshot.pinnedSessions) { session in
                         pinnedSessionRow(for: session)
                             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                             .listRowBackground(Color.clear)
@@ -31,27 +30,27 @@ struct SessionListView: View {
                     }
                     .onMove(perform: movePinnedSessions)
                 } header: {
-                    SessionSectionHeader(title: "Pinned", systemImage: "pin.fill", accessory: "\(viewModel.pinnedRootSessions.count)")
+                    SessionSectionHeader(title: "Pinned", systemImage: "pin.fill", accessory: "\(snapshot.pinnedSessions.count)")
                 }
             }
 
             Section {
-                if viewModel.directoryState.isLoadingSessions && viewModel.sessions.isEmpty {
+                if snapshot.isLoadingEmpty {
                     ForEach(0 ..< 6, id: \.self) { _ in
                         SessionRowSkeleton()
                             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
-                } else if viewModel.unpinnedRootSessions.isEmpty {
-                    Text(viewModel.sessions.isEmpty ? "Create a session to start chatting." : "All visible sessions are pinned.")
+                } else if snapshot.unpinnedSessions.isEmpty {
+                    Text(snapshot.isEmpty ? "Create a session to start chatting." : "All visible sessions are pinned.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 } else {
-                    ForEach(viewModel.unpinnedRootSessions) { session in
+                    ForEach(snapshot.unpinnedSessions) { session in
                         sessionRow(for: session)
                             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                             .listRowBackground(Color.clear)
@@ -62,7 +61,7 @@ struct SessionListView: View {
                 SessionSectionHeader(title: "Sessions", systemImage: "bubble.left.and.bubble.right")
             }
 
-            if let errorMessage = viewModel.errorMessage {
+            if let errorMessage = snapshot.errorMessage {
                 Section {
                     Text(errorMessage)
                         .foregroundStyle(.red)
@@ -74,6 +73,7 @@ struct SessionListView: View {
                 }
             }
         }
+        .id(snapshot.structuralID)
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(OpenCodePlatformColor.groupedBackground)
@@ -82,9 +82,23 @@ struct SessionListView: View {
             CreateSessionSheet(viewModel: viewModel)
         }
         .animation(opencodeSelectionAnimation, value: viewModel.selectedSession?.id)
-        .animation(opencodeSelectionAnimation, value: sessionIDs)
-        .animation(opencodeSelectionAnimation, value: pinnedSessionIDs)
-        .animation(opencodeSelectionAnimation, value: viewModel.errorMessage ?? "")
+    }
+
+    private var sessionListSnapshot: SessionListSnapshot {
+        let sessions = viewModel.sessions
+        let pinnedIDs = viewModel.pinnedSessionIDs
+        let sessionsByID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let pinnedSessions = pinnedIDs.compactMap { sessionsByID[$0] }
+        let pinnedIDSet = Set(pinnedIDs)
+        let unpinnedSessions = sessions.filter { !pinnedIDSet.contains($0.id) }
+
+        return SessionListSnapshot(
+            isLoadingEmpty: viewModel.directoryState.isLoadingSessions && sessions.isEmpty,
+            isEmpty: sessions.isEmpty,
+            pinnedSessions: pinnedSessions,
+            unpinnedSessions: unpinnedSessions,
+            errorMessage: viewModel.errorMessage
+        )
     }
 
     private func pinnedSessionRow(for session: OpenCodeSession) -> some View {
@@ -182,6 +196,23 @@ struct SessionListView: View {
                 Label("Delete", systemImage: "trash")
             }
         }
+    }
+}
+
+private struct SessionListSnapshot {
+    let isLoadingEmpty: Bool
+    let isEmpty: Bool
+    let pinnedSessions: [OpenCodeSession]
+    let unpinnedSessions: [OpenCodeSession]
+    let errorMessage: String?
+
+    var structuralID: String {
+        [
+            isLoadingEmpty ? "loading" : "loaded",
+            pinnedSessions.map(\.id).joined(separator: ","),
+            unpinnedSessions.map(\.id).joined(separator: ","),
+            errorMessage == nil ? "no-error" : "error"
+        ].joined(separator: "|")
     }
 }
 
