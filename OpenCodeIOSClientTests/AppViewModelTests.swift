@@ -521,6 +521,87 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertGreaterThan(viewModel.lastStreamEventAt, .distantPast)
     }
 
+    func testActiveLiveActivityMessageEventBypassesSelectedDirectoryGateAndUpdatesCache() {
+        let viewModel = AppViewModel()
+        let selected = makeSession(id: "ses_selected")
+        let live = OpenCodeSession(
+            id: "ses_live",
+            title: "Live",
+            workspaceID: nil,
+            directory: "/tmp/live-project",
+            projectID: "proj_live",
+            parentID: nil
+        )
+
+        viewModel.isConnected = true
+        viewModel.selectedDirectory = "/tmp/selected-project"
+        viewModel.directoryState.selectedSession = selected
+        viewModel.activeLiveActivitySessionIDs = [live.id]
+
+        viewModel.handleManagedEvent(
+            OpenCodeManagedEvent(
+                directory: "/tmp/live-project",
+                envelope: OpenCodeEventEnvelope(
+                    type: "message.part.delta",
+                    properties: OpenCodeEventProperties(
+                        sessionID: live.id,
+                        messageID: "msg_live_assistant",
+                        partID: "prt_live_text",
+                        field: "text",
+                        delta: "Streaming live"
+                    )
+                ),
+                typed: .messagePartDelta(
+                    sessionID: live.id,
+                    messageID: "msg_live_assistant",
+                    partID: "prt_live_text",
+                    field: "text",
+                    delta: "Streaming live"
+                )
+            )
+        )
+
+        let cachedText = viewModel.cachedMessagesBySessionID[live.id]?.first?.parts.first?.text
+        XCTAssertEqual(cachedText, "Streaming live")
+    }
+
+    func testActiveLiveActivityPromptEventBypassesSelectedDirectoryGate() {
+        let viewModel = AppViewModel()
+        let selected = makeSession(id: "ses_selected")
+        let permission = OpenCodePermission(
+            id: "perm_live",
+            sessionID: "ses_live",
+            permission: "bash",
+            patterns: ["xcodebuild test"],
+            always: nil,
+            metadata: nil,
+            tool: nil
+        )
+
+        viewModel.isConnected = true
+        viewModel.selectedDirectory = "/tmp/selected-project"
+        viewModel.directoryState.selectedSession = selected
+        viewModel.activeLiveActivitySessionIDs = [permission.sessionID]
+
+        viewModel.handleManagedEvent(
+            OpenCodeManagedEvent(
+                directory: "/tmp/live-project",
+                envelope: OpenCodeEventEnvelope(
+                    type: "permission.asked",
+                    properties: OpenCodeEventProperties(
+                        sessionID: permission.sessionID,
+                        id: permission.id,
+                        permission: permission.permission,
+                        patterns: permission.patterns
+                    )
+                ),
+                typed: .permissionAsked(permission)
+            )
+        )
+
+        XCTAssertEqual(viewModel.permissions(for: permission.sessionID).map(\.id), [permission.id])
+    }
+
     func testLiveActivityTranscriptShowsLatestAssistantLineOnly() {
         let viewModel = AppViewModel()
         let session = OpenCodeSession(

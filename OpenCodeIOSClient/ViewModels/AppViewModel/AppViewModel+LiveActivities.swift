@@ -66,11 +66,21 @@ extension AppViewModel {
         await startLiveActivity(for: session, userVisibleErrors: false)
     }
 
+    func reconcileLiveActivities() {
+        #if canImport(ActivityKit) && os(iOS)
+        let activities = Activity<OpenCodeChatActivityAttributes>.activities
+        activeLiveActivitySessionIDs.formUnion(activities.map(\.attributes.sessionID))
+        for activity in activities {
+            lastLiveActivityStatesBySessionID[activity.attributes.sessionID] = activity.content.state
+        }
+        #endif
+    }
+
     func scheduleLiveActivityPreviewRefreshIfNeeded(for sessionID: String?) {
         guard let sessionID,
               activeLiveActivitySessionIDs.contains(sessionID),
               selectedSession?.id != sessionID,
-              let session = session(matching: sessionID) ?? sessions.first(where: { $0.id == sessionID }) else {
+              let session = liveActivitySessionSnapshot(for: sessionID) else {
             return
         }
 
@@ -101,7 +111,7 @@ extension AppViewModel {
         #if canImport(ActivityKit) && os(iOS)
         liveActivityRefreshTasksBySessionID[sessionID]?.cancel()
         liveActivityRefreshTasksBySessionID[sessionID] = nil
-        let session = session(matching: sessionID) ?? sessions.first(where: { $0.id == sessionID }) ?? (selectedSession?.id == sessionID ? selectedSession : nil)
+        let session = liveActivitySessionSnapshot(for: sessionID)
         let finalState = session.map { liveActivityState(for: $0) }
         let gracePeriod = immediate ? nil : Self.liveActivityGracePeriod
         await Task.detached(priority: .userInitiated) {
@@ -117,11 +127,21 @@ extension AppViewModel {
         #endif
     }
 
+    nonisolated static func shouldScheduleLiveActivityRefresh(pendingRefreshExists: Bool, immediate: Bool, endIfIdle: Bool) -> Bool {
+        !pendingRefreshExists && !immediate && !endIfIdle
+    }
+
     func refreshLiveActivityIfNeeded(for sessionID: String? = nil, endIfIdle: Bool = false, immediate: Bool = false) {
         #if canImport(ActivityKit) && os(iOS)
         if let sessionID, !immediate, !endIfIdle {
             guard activeLiveActivitySessionIDs.contains(sessionID) else { return }
-            liveActivityRefreshTasksBySessionID[sessionID]?.cancel()
+            guard Self.shouldScheduleLiveActivityRefresh(
+                pendingRefreshExists: liveActivityRefreshTasksBySessionID[sessionID] != nil,
+                immediate: immediate,
+                endIfIdle: endIfIdle
+            ) else {
+                return
+            }
             liveActivityRefreshTasksBySessionID[sessionID] = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: Self.liveActivityRefreshDelay)
                 guard !Task.isCancelled else { return }
@@ -149,7 +169,7 @@ extension AppViewModel {
             }
 
             for targetSessionID in targetSessionIDs {
-                guard let session = self.session(matching: targetSessionID) ?? self.sessions.first(where: { $0.id == targetSessionID }) ?? (self.selectedSession?.id == targetSessionID ? self.selectedSession : nil) else {
+                guard let session = self.liveActivitySessionSnapshot(for: targetSessionID) else {
                     continue
                 }
 
@@ -233,6 +253,29 @@ extension AppViewModel {
 
     func isLiveActivityActive(for session: OpenCodeSession) -> Bool {
         activeLiveActivitySessionIDs.contains(session.id)
+    }
+
+    private func liveActivitySessionSnapshot(for sessionID: String) -> OpenCodeSession? {
+        if let session = session(matching: sessionID) ?? sessions.first(where: { $0.id == sessionID }) ?? (selectedSession?.id == sessionID ? selectedSession : nil) {
+            return session
+        }
+
+        #if canImport(ActivityKit) && os(iOS)
+        guard let activity = Activity<OpenCodeChatActivityAttributes>.activities.first(where: { $0.attributes.sessionID == sessionID }) else {
+            return nil
+        }
+
+        return OpenCodeSession(
+            id: activity.attributes.sessionID,
+            title: activity.attributes.sessionTitle,
+            workspaceID: activity.attributes.workspaceID,
+            directory: activity.attributes.directory,
+            projectID: nil,
+            parentID: nil
+        )
+        #else
+        return nil
+        #endif
     }
 
     #if canImport(ActivityKit) && os(iOS)

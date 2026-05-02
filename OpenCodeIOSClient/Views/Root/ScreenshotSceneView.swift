@@ -42,7 +42,7 @@ struct ScreenshotSceneView: View {
                     ProjectListView(viewModel: viewModel) {}
                 }
             }
-        case .sessions:
+        case .sessions, .sessionActions, .sessionPinned:
             if isRunningOniPad {
                 RootView(viewModel: viewModel)
             } else {

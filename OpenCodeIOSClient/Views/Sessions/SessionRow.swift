@@ -1,28 +1,33 @@
 import SwiftUI
 
-struct SessionRow: View {
+struct SessionRow: View, Equatable {
     enum Style {
         case regular
         case compact
     }
 
-    @ObservedObject var viewModel: AppViewModel
     let session: OpenCodeSession
     var isSelected = false
     var showsPinnedBadge = false
     var workspaceOverline: String?
     var style: Style = .regular
+    var preview: SessionPreview?
+    var isBusy = false
+    var hasLiveActivity = false
+    var hasDraft = false
+    var hasPermissionRequest = false
 
-    private var isBusy: Bool {
-        viewModel.sessionStatuses[session.id] == "busy"
-    }
-
-    private var hasLiveActivity: Bool {
-        viewModel.isLiveActivityActive(for: session)
-    }
-
-    private var hasDraft: Bool {
-        viewModel.hasMessageDraft(for: session)
+    nonisolated static func == (lhs: SessionRow, rhs: SessionRow) -> Bool {
+        lhs.session == rhs.session
+            && lhs.isSelected == rhs.isSelected
+            && lhs.showsPinnedBadge == rhs.showsPinnedBadge
+            && lhs.workspaceOverline == rhs.workspaceOverline
+            && lhs.style == rhs.style
+            && lhs.preview == rhs.preview
+            && lhs.isBusy == rhs.isBusy
+            && lhs.hasLiveActivity == rhs.hasLiveActivity
+            && lhs.hasDraft == rhs.hasDraft
+            && lhs.hasPermissionRequest == rhs.hasPermissionRequest
     }
 
     var body: some View {
@@ -46,8 +51,7 @@ struct SessionRow: View {
         .animation(opencodeSelectionAnimation, value: isBusy)
         .animation(opencodeSelectionAnimation, value: hasLiveActivity)
         .animation(opencodeSelectionAnimation, value: hasDraft)
-        .animation(opencodeSelectionAnimation, value: viewModel.hasPermissionRequest(for: session))
-        .animation(opencodeSelectionAnimation, value: viewModel.sessionPreviews[session.id]?.text ?? "")
+        .animation(opencodeSelectionAnimation, value: hasPermissionRequest)
     }
 
     private var regularContent: some View {
@@ -68,8 +72,7 @@ struct SessionRow: View {
 
                     Spacer(minLength: 8)
 
-                    if let preview = viewModel.sessionPreviews[session.id],
-                       let date = preview.date {
+                    if let date = preview?.date {
                         Text(date, style: .relative)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -77,7 +80,7 @@ struct SessionRow: View {
                     }
                 }
 
-                Text(viewModel.sessionPreviews[session.id]?.text ?? "No messages yet")
+                Text(preview?.text ?? "No messages yet")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -106,7 +109,7 @@ struct SessionRow: View {
                         badgeIcon(systemName: "pencil", foreground: .secondary, background: Color.gray.opacity(0.12))
                     }
 
-                    if viewModel.hasPermissionRequest(for: session) {
+                    if hasPermissionRequest {
                         badgeIcon(systemName: "hand.raised.fill", foreground: .orange, background: Color.orange.opacity(0.12))
                     }
                 }
@@ -145,7 +148,7 @@ struct SessionRow: View {
                 badgeIcon(systemName: "pencil", foreground: .secondary, background: Color.gray.opacity(0.12))
             }
 
-            if viewModel.hasPermissionRequest(for: session) {
+            if hasPermissionRequest {
                 badgeIcon(systemName: "hand.raised.fill", foreground: .orange, background: Color.orange.opacity(0.12))
             }
         }

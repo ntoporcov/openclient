@@ -45,6 +45,8 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             ("recent-widget", "13-recent-widget"),
             ("pinned-widget", "14-pinned-widget"),
             ("live-activity", "15-live-activity"),
+            ("session-actions", "16-session-actions"),
+            ("session-pinned", "17-session-pinned"),
         ]
 
         for (scene, screenshotName) in scenes {

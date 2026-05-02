@@ -217,7 +217,7 @@ extension AppViewModel {
 
         switch result {
         case let .message(reason):
-            if let selectedSession, shouldRefreshSessionPreview(for: payload.type) {
+            if let selectedSession, shouldRefreshSessionPreview(for: selectedSession.id, eventType: payload.type) {
                 refreshSessionPreview(for: selectedSession.id, messages: directoryState.messages)
             }
             scheduleLiveActivityPreviewRefreshIfNeeded(for: managedEventSessionID(for: managed))
@@ -266,6 +266,9 @@ extension AppViewModel {
             markChatBreadcrumb("session idle", sessionID: eventSessionID)
             stopFallbackRefresh()
             if let selectedSession {
+                refreshSessionPreview(for: selectedSession.id, messages: directoryState.messages)
+            }
+            if let selectedSession {
                 scheduleReload(for: selectedSession)
             }
         case let .ignored(reason):
@@ -304,14 +307,34 @@ extension AppViewModel {
             }
         }
 
-        refreshLiveActivityIfNeeded(for: eventSessionID)
+        refreshLiveActivityIfNeeded(
+            for: eventSessionID,
+            immediate: Self.shouldRefreshLiveActivityImmediately(after: result, event: managed.typed)
+        )
         if shouldPublishWidgetSnapshots(after: result) {
             publishWidgetSnapshots()
         }
     }
 
-    private func shouldRefreshSessionPreview(for eventType: String) -> Bool {
-        eventType != "message.part.delta"
+    nonisolated static func shouldRefreshLiveActivityImmediately(after result: SessionEventResult, event: OpenCodeTypedEvent) -> Bool {
+        switch result {
+        case .permissionChanged, .questionChanged:
+            return true
+        default:
+            break
+        }
+
+        switch event {
+        case .permissionAsked, .permissionReplied, .questionAsked, .questionReplied, .questionRejected:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func shouldRefreshSessionPreview(for sessionID: String, eventType: String) -> Bool {
+        guard eventType != "message.part.delta" else { return false }
+        return sessionStatuses[sessionID] != "busy"
     }
 
     private func shouldPublishWidgetSnapshots(after result: SessionEventResult) -> Bool {
@@ -590,7 +613,9 @@ extension AppViewModel {
         }
 
         cachedMessagesBySessionID[sessionID] = cachedMessages
-        refreshSessionPreview(for: sessionID, messages: cachedMessages)
+        if sessionStatuses[sessionID] != "busy" {
+            refreshSessionPreview(for: sessionID, messages: cachedMessages)
+        }
     }
 
     private func shouldApplyDirectoryEvent(from managed: OpenCodeManagedEvent) -> Bool {
@@ -599,6 +624,11 @@ extension AppViewModel {
 
         if let selectedSessionID = selectedSession?.id,
            eventSessionID == selectedSessionID {
+            return true
+        }
+
+        if let eventSessionID,
+           activeLiveActivitySessionIDs.contains(eventSessionID) {
             return true
         }
 

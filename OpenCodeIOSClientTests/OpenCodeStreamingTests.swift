@@ -356,6 +356,53 @@ final class OpenCodeStreamingTests: XCTestCase {
         ))
     }
 
+    func testLiveActivityRefreshSchedulingThrottlesInsteadOfDebouncing() {
+        XCTAssertTrue(AppViewModel.shouldScheduleLiveActivityRefresh(
+            pendingRefreshExists: false,
+            immediate: false,
+            endIfIdle: false
+        ))
+
+        XCTAssertFalse(AppViewModel.shouldScheduleLiveActivityRefresh(
+            pendingRefreshExists: true,
+            immediate: false,
+            endIfIdle: false
+        ))
+
+        XCTAssertFalse(AppViewModel.shouldScheduleLiveActivityRefresh(
+            pendingRefreshExists: false,
+            immediate: true,
+            endIfIdle: false
+        ))
+    }
+
+    func testPermissionAndQuestionEventsRefreshLiveActivitiesImmediately() {
+        XCTAssertTrue(AppViewModel.shouldRefreshLiveActivityImmediately(
+            after: .permissionChanged,
+            event: .unknown("permission.asked")
+        ))
+
+        XCTAssertTrue(AppViewModel.shouldRefreshLiveActivityImmediately(
+            after: .questionChanged,
+            event: .unknown("question.asked")
+        ))
+
+        XCTAssertTrue(AppViewModel.shouldRefreshLiveActivityImmediately(
+            after: .statusChanged,
+            event: .permissionReplied(sessionID: "ses_live", requestID: "perm_1", reply: nil)
+        ))
+
+        XCTAssertTrue(AppViewModel.shouldRefreshLiveActivityImmediately(
+            after: .statusChanged,
+            event: .questionRejected(sessionID: "ses_live", requestID: "q_1")
+        ))
+
+        XCTAssertFalse(AppViewModel.shouldRefreshLiveActivityImmediately(
+            after: .message("delta applied"),
+            event: .messagePartDelta(sessionID: "ses_live", messageID: "msg_1", partID: "prt_1", field: "text", delta: "Hello")
+        ))
+    }
+
     func testPartRemovedForMissingMessageDoesNotMutateSelectedChat() {
         let selected = OpenCodeSession(id: "ses_test", title: "Test", workspaceID: nil, directory: nil, projectID: nil, parentID: nil)
         var state = OpenCodeDirectoryState(

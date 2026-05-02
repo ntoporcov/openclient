@@ -30,7 +30,11 @@ import SwiftUI
 
 #Preview("Session Row") {
     List {
-        SessionRow(viewModel: AppViewModel.preview(permissions: [OpenCodePreviewData.permission]), session: OpenCodePreviewData.primarySession)
+        SessionRow(
+            session: OpenCodePreviewData.primarySession,
+            preview: OpenCodePreviewData.sessionPreviews[OpenCodePreviewData.primarySession.id],
+            hasPermissionRequest: true
+        )
     }
     .listStyle(.plain)
 }

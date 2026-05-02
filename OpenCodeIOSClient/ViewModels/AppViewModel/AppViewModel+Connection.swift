@@ -61,6 +61,7 @@ extension AppViewModel {
             directoryState = OpenCodeDirectoryState()
             streamDirectory = nil
             isConnected = bootstrap.health.healthy
+            reconcileLiveActivities()
             await loadComposerOptions()
             startEventStream()
             await runUITestBootstrapIfNeeded()

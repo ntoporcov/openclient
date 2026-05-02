@@ -17,6 +17,8 @@ enum OpenClientScreenshotScene: String, CaseIterable {
     case recentWidget = "recent-widget"
     case pinnedWidget = "pinned-widget"
     case liveActivity = "live-activity"
+    case sessionActions = "session-actions"
+    case sessionPinned = "session-pinned"
 
     static var current: OpenClientScreenshotScene? {
         guard let rawValue = ProcessInfo.processInfo.environment["OPENCLIENT_SCREENSHOT_SCENE"] else {
@@ -41,6 +43,10 @@ extension AppViewModel {
             return screenshotProjects()
         case .sessions:
             return screenshotSessions()
+        case .sessionActions:
+            return screenshotSessionActions()
+        case .sessionPinned:
+            return screenshotSessionPinned()
         case .chat:
             return screenshotChat()
         case .permission:
@@ -82,6 +88,29 @@ extension AppViewModel {
     private static func screenshotSessions() -> AppViewModel {
         let viewModel = baseConnectedScreenshotViewModel()
         viewModel.pinnedSessionIDsByScope = [viewModel.currentPinScopeKey: [OpenClientScreenshotData.releaseSession.id]]
+        return viewModel
+    }
+
+    private static func screenshotSessionActions() -> AppViewModel {
+        let viewModel = baseConnectedScreenshotViewModel()
+        viewModel.projectActionsByScope = [viewModel.currentProjectPreferenceScopeKey: OpenClientScreenshotData.projectActions]
+        viewModel.pinnedSessionIDsByScope = [viewModel.currentPinScopeKey: [OpenClientScreenshotData.releaseSession.id]]
+        return viewModel
+    }
+
+    private static func screenshotSessionPinned() -> AppViewModel {
+        let viewModel = baseConnectedScreenshotViewModel(sessions: OpenClientScreenshotData.pinnedSectionSessions)
+        viewModel.projectActionsByScope = [viewModel.currentProjectPreferenceScopeKey: OpenClientScreenshotData.projectActions]
+        viewModel.setProjectWorkspacesEnabled(true)
+        viewModel.pinnedSessionIDsByScope = [
+            viewModel.currentPinScopeKey: [
+                OpenClientScreenshotData.releaseSession.id,
+                OpenClientScreenshotData.archivedSession.id,
+                OpenClientScreenshotData.reviewSession.id,
+            ]
+        ]
+        viewModel.workspaceSessionsByDirectory = OpenClientScreenshotData.workspaceSessionStates
+        viewModel.sessionPreviews = OpenClientScreenshotData.pinnedSectionSessionPreviews
         return viewModel
     }
 
@@ -241,7 +270,32 @@ enum OpenClientScreenshotData {
         parentID: nil
     )
 
+    static let reviewSession = OpenCodeSession(
+        id: "session-screenshot-review",
+        title: "PR review checklist",
+        workspaceID: nil,
+        directory: repoProject.worktree,
+        projectID: repoProject.id,
+        parentID: nil
+    )
+
+    static let sandboxSession = OpenCodeSession(
+        id: "session-screenshot-sandbox",
+        title: "Sandbox regression pass",
+        workspaceID: nil,
+        directory: repoProject.sandboxes?.first,
+        projectID: repoProject.id,
+        parentID: nil
+    )
+
     static let sessions = [releaseSession, followupSession, archivedSession]
+
+    static let pinnedSectionSessions = [releaseSession, followupSession, archivedSession, reviewSession]
+
+    static let projectActions = [
+        OpenCodeAction(commandName: "review", iconName: "checkmark.seal.fill"),
+        OpenCodeAction(commandName: "compact", iconName: "rectangle.compress.vertical"),
+    ]
 
     static let findPlaceSession = OpenCodeSession(
         id: "session-screenshot-find-place",
@@ -277,6 +331,28 @@ enum OpenClientScreenshotData {
         followupSession.id: SessionPreview(text: "Verified question actions route into the tracked chat.", date: Date().addingTimeInterval(-1_200)),
         archivedSession.id: SessionPreview(text: "Added deterministic screenshot scenes for launch assets.", date: Date().addingTimeInterval(-3_200)),
     ]
+
+    static let pinnedSectionSessionPreviews: [String: SessionPreview] = [
+        releaseSession.id: SessionPreview(text: "Running final App Store polish before the next TestFlight.", date: Date().addingTimeInterval(-120)),
+        followupSession.id: SessionPreview(text: "Queued Live Activity follow-ups for later verification.", date: Date().addingTimeInterval(-840)),
+        archivedSession.id: SessionPreview(text: "Pinned as the canonical screenshot automation reference.", date: Date().addingTimeInterval(-1_800)),
+        reviewSession.id: SessionPreview(text: "Pinned checklist for every release candidate review.", date: Date().addingTimeInterval(-2_400)),
+        sandboxSession.id: SessionPreview(text: "Workspace-only session for the review sandbox.", date: Date().addingTimeInterval(-3_600)),
+    ]
+
+    static var workspaceSessionStates: [String: OpenCodeWorkspaceSessionState] {
+        var main = OpenCodeWorkspaceSessionState(isLoading: false, sessions: pinnedSectionSessions, sessionTotal: pinnedSectionSessions.count, limit: 5)
+        main.sessionTotal = pinnedSectionSessions.count
+
+        let sandboxSessions = [sandboxSession]
+        let sandbox = OpenCodeWorkspaceSessionState(isLoading: false, sessions: sandboxSessions, sessionTotal: sandboxSessions.count, limit: 5)
+
+        var states = [repoProject.worktree: main]
+        if let sandboxDirectory = repoProject.sandboxes?.first {
+            states[sandboxDirectory] = sandbox
+        }
+        return states
+    }
 
     static let gameSessionPreviews: [String: SessionPreview] = [
         findPlaceSession.id: SessionPreview(text: "A cold North Atlantic clue narrowed the city down.", date: Date().addingTimeInterval(-120)),
