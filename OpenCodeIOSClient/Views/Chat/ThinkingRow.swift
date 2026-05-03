@@ -8,6 +8,7 @@ struct ThinkingRow: View {
     @State private var entryOffset: CGFloat = 0
     @State private var entryOpacity: Double = 1
     @State private var entryScale: CGFloat = 1
+    @State private var entryAnimationStartDate: Date?
     @State private var hasRunEntryAnimation = false
     @State private var entryAnimationTask: Task<Void, Never>?
 
@@ -30,7 +31,9 @@ struct ThinkingRow: View {
     }
 
     private func thinkingRow(phase: Double) -> some View {
-        HStack {
+        let entryProgress = entryAnimationStartDate.map { entryAnimationProgress(at: Date(), startDate: $0) } ?? 1
+
+        return HStack {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Circle()
@@ -55,9 +58,9 @@ struct ThinkingRow: View {
             Spacer(minLength: 44)
         }
         .frame(maxWidth: .infinity)
-        .offset(y: entryOffset)
-        .opacity(entryOpacity)
-        .scaleEffect(entryScale, anchor: .bottomLeading)
+        .offset(y: entryAnimationStartDate == nil ? entryOffset : 560 * (1 - entryProgress))
+        .opacity(entryAnimationStartDate == nil ? entryOpacity : 0.72 + 0.28 * entryProgress)
+        .scaleEffect(entryAnimationStartDate == nil ? entryScale : 0.94 + 0.06 * entryProgress, anchor: .bottomLeading)
     }
 
     private func breathingGlassGlow(phase: Double) -> some View {
@@ -93,25 +96,24 @@ struct ThinkingRow: View {
         guard animateEntry, !hasRunEntryAnimation else { return }
 
         hasRunEntryAnimation = true
-        var transaction = Transaction()
-        transaction.animation = nil
-
-        withTransaction(transaction) {
-            entryOffset = 220
-            entryOpacity = 0.001
-            entryScale = 0.985
-        }
+        entryAnimationStartDate = Date()
 
         entryAnimationTask?.cancel()
         entryAnimationTask = Task { @MainActor in
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(560))
             guard !Task.isCancelled else { return }
-            withAnimation(.spring(response: 0.46, dampingFraction: 0.86)) {
-                entryOffset = 0
-                entryOpacity = 1
-                entryScale = 1
-            }
+            entryAnimationStartDate = nil
+            entryOffset = 0
+            entryOpacity = 1
+            entryScale = 1
             entryAnimationTask = nil
         }
+    }
+
+    private func entryAnimationProgress(at date: Date, startDate: Date) -> CGFloat {
+        let elapsed = max(0, date.timeIntervalSince(startDate))
+        let duration = 0.48
+        let linear = min(1, elapsed / duration)
+        return CGFloat(1 - pow(1 - linear, 3))
     }
 }

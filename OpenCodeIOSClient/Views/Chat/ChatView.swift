@@ -786,7 +786,12 @@ private extension ChatDisplayItem {
 private enum ChatScrollTarget {
     static let olderMessagesButton = "chat-older-messages-button"
     static let thinkingRow = "chat-thinking-row"
-    static let bottomAnchor = "chat-bottom-anchor"
+    static let readerModeSpacer = "chat-reader-mode-spacer"
+}
+
+private struct ReaderModeScrollRequest: Equatable {
+    let id = UUID()
+    let messageID: String
 }
 
 private struct PendingOutgoingSend {
@@ -1039,12 +1044,45 @@ private struct FallbackMedalView: View {
 }
 
 private final class ChatViewTaskStore {
-    var autoScrollTask: Task<Void, Never>?
-    var streamingAutoScrollTask: Task<Void, Never>?
-    var initialBottomSnapTask: Task<Void, Never>?
+    var keyboardBottomSnapTask: Task<Void, Never>?
+    var composerBottomFollowTask: Task<Void, Never>?
+    var readerModeScrollTask: Task<Void, Never>?
     var mountAnimationCleanupTask: Task<Void, Never>?
+    var delayedLoadingIndicatorTask: Task<Void, Never>?
     var composerDraftPersistenceTask: Task<Void, Never>?
-    var lastStreamingAutoScrollAt = Date.distantPast
+}
+
+private struct ChatMountTimelineModifier: ViewModifier {
+    let startDate: Date?
+
+    private let duration: TimeInterval = 0.22
+    private let initialOffset: CGFloat = 10
+
+    func body(content: Content) -> some View {
+        if let startDate {
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+                let progress = progress(at: timeline.date, startDate: startDate)
+
+                content
+                    .opacity(progress)
+                    .offset(y: initialOffset * (1 - progress))
+            }
+        } else {
+            content
+        }
+    }
+
+    private func progress(at date: Date, startDate: Date) -> Double {
+        let elapsed = max(0, date.timeIntervalSince(startDate))
+        let linear = min(1, elapsed / duration)
+        return linear * linear * (3 - 2 * linear)
+    }
+}
+
+private extension View {
+    func chatMountTimeline(startDate: Date?) -> some View {
+        modifier(ChatMountTimelineModifier(startDate: startDate))
+    }
 }
 
 private struct MessageComposerSnapshot: Equatable {
@@ -1103,49 +1141,9 @@ private struct EquatableMessageBubbleHost: View, Equatable {
     }
 }
 
-private struct StreamingFollowState: Equatable {
-    let lastMessageID: String
-    let lastPartCount: Int
-    let lastTextLength: Int
-    let showsThinking: Bool
-}
-
 private struct AccessoryPresenceState: Equatable {
     let attachmentIDs: [String]
     let incompleteTodoIDs: [String]
-}
-
-private struct ChatMountTimelineModifier: ViewModifier {
-    let startDate: Date?
-
-    private let duration: TimeInterval = 0.22
-    private let initialOffset: CGFloat = 10
-
-    func body(content: Content) -> some View {
-        if let startDate {
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
-                let progress = progress(at: timeline.date, startDate: startDate)
-
-                content
-                    .opacity(progress)
-                    .offset(y: initialOffset * (1 - progress))
-            }
-        } else {
-            content
-        }
-    }
-
-    private func progress(at date: Date, startDate: Date) -> Double {
-        let elapsed = max(0, date.timeIntervalSince(startDate))
-        let linear = min(1, elapsed / duration)
-        return linear * linear * (3 - 2 * linear)
-    }
-}
-
-private extension View {
-    func chatMountTimeline(startDate: Date?) -> some View {
-        modifier(ChatMountTimelineModifier(startDate: startDate))
-    }
 }
 
 private struct EquatableMessageComposerHost: View, Equatable {
@@ -1233,8 +1231,6 @@ struct ChatView: View {
     @State private var composerDraftStore = MessageComposerDraftStore()
     @StateObject private var pinnedCommandStore = PinnedCommandStore()
     @State private var isComposerInputFocused = false
-    @State private var shouldSnapOnNextMessage = false
-    @State private var shouldDelayNextUserInsertScroll = false
     @State private var composerAccessoryExpansion: ComposerAccessoryExpansion = .collapsed
     @State private var selectedAttachmentPreview: OpenCodeComposerAttachment?
     @State private var isComposerMenuOpen = false
@@ -1249,33 +1245,29 @@ struct ChatView: View {
     @State private var outgoingEntryAnimationStartedMessageIDs: Set<String> = []
     @State private var outgoingEntrySourceFrame: CGRect?
     @State private var composerInputFrame: CGRect = .zero
-    @State private var jumpToLatestRequest = 0
-    @State private var bottomAnchorFrame: CGRect = .zero
-    @State private var needsInitialBottomSnap = true
     @State private var hasCompletedInitialHydrationSnap = false
     @State private var chatMountAnimationStartDate: Date?
     @State private var composerOverlayHeight: CGFloat = 0
-    @State private var shouldFollowComposerAffordanceChange = false
-    @State private var affordanceScrollTask: Task<Void, Never>?
-    @State private var needsInitialComposerHeightSnap = true
     @State private var isScrollGeometryAtBottom = true
-    @State private var shouldFollowStreamingUpdates = true
-    @State private var isUserDraggingChatScroll = false
-    @State private var hasUserInterruptedStreamingFollow = false
     @State private var isRefreshingChatData = false
+    @State private var showsDelayedLoadingIndicator = false
     @State private var bottomPullDistance: CGFloat = 0
     @State private var bottomPullStartedAtBottom = false
     @State private var bottomPullIsTracking = false
     @State private var hasFiredBottomPullHaptic = false
+    @State private var chatViewportHeight: CGFloat = 0
+    @State private var readerModeSpacerHeight: CGFloat = 0
+    @State private var readerModeScrollRequest: ReaderModeScrollRequest?
     @State private var largeMessageChunkCache = OpenCodeLargeMessageChunkCache()
     @State private var chatDisplayItemCache = ChatDisplayItemCache()
 
     @State private var selectedInstructionTab: AppleIntelligenceInstructionTab = .user
 
     private let messageWindowSize = 80
-    private let streamingAutoScrollMinimumInterval: TimeInterval = 0.12
     private let bottomRefreshThreshold: CGFloat = 72
     private let bottomRefreshIndicatorHeight: CGFloat = 34
+    private let collapsedTailSpacerHeight: CGFloat = 1
+    private let readerModeSentMessageAnchor = UnitPoint(x: 0.5, y: 0.14)
     private var todoIDs: String {
         viewModel.todos.map { $0.id }.joined(separator: "|")
     }
@@ -1321,17 +1313,12 @@ struct ChatView: View {
         ].joined(separator: "|")
     }
 
-    private var streamingFollowState: StreamingFollowState {
-        StreamingFollowState(
-            lastMessageID: displayedMessages.last?.id ?? "none",
-            lastPartCount: displayedMessages.last?.parts.count ?? 0,
-            lastTextLength: lastDisplayedMessageTextLength,
-            showsThinking: shouldShowThinking
-        )
+    private var shouldAnimateStreamingText: Bool {
+        true
     }
 
-    private var shouldAnimateStreamingText: Bool {
-        shouldLiveTailStreamingUpdates
+    private var isReaderModeActive: Bool {
+        readerModeSpacerHeight > collapsedTailSpacerHeight + 0.5
     }
 
     private var isChildSession: Bool {
@@ -1350,20 +1337,9 @@ struct ChatView: View {
         viewModel.parentSessionTitle(for: liveSession)
     }
 
-    private var shouldShowJumpToLatestButton: Bool {
-        return !isScrollGeometryAtBottom && !shouldFollowStreamingUpdates
-    }
-
-    private var shouldAutoFollowBottom: Bool {
-        !hasUserInterruptedStreamingFollow && (isScrollGeometryAtBottom || shouldFollowStreamingUpdates)
-    }
-
-    private var shouldLiveTailStreamingUpdates: Bool {
-        shouldAutoFollowBottom
-    }
-
     private var chatItemChangeAnimation: Animation? {
-        isSendChoreographyActive ? sendChoreographyAnimation : (isSessionBusy ? nil : .snappy(duration: 0.28, extraBounce: 0.02))
+        if isReaderModeActive { return nil }
+        return isSendChoreographyActive ? sendChoreographyAnimation : (isSessionBusy ? nil : .snappy(duration: 0.28, extraBounce: 0.02))
     }
 
     private var isSendChoreographyActive: Bool {
@@ -1372,39 +1348,6 @@ struct ChatView: View {
 
     private var sendChoreographyAnimation: Animation {
         .spring(response: 0.42, dampingFraction: 0.86)
-    }
-
-    private var jumpToLatestButton: some View {
-        VStack {
-            Spacer(minLength: 0)
-            HStack {
-                Spacer(minLength: 0)
-                Button {
-                    viewModel.flushBufferedTranscript(reason: "jump to latest")
-                    jumpToLatestRequest += 1
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color.clear)
-                            .frame(width: 40, height: 40)
-                            .opencodeGlassSurface(clear: true, in: Circle())
-
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 15, weight: .bold))
-                    }
-                    .frame(width: 56, height: 56)
-                    .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.primary)
-                .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
-                .accessibilityLabel("Jump to latest")
-                Spacer(minLength: 0)
-            }
-            .padding(.bottom, max(16, composerOverlayHeight + 12))
-        }
-        .transition(.opacity.combined(with: .scale(scale: 0.92)))
-        .animation(.easeOut(duration: 0.16), value: shouldShowJumpToLatestButton)
     }
 
     var body: some View {
@@ -1444,41 +1387,34 @@ struct ChatView: View {
                             }
 
                             bottomAnchorListItem
+
+                            readerModeSpacer
                         }
                     }
+                    .defaultScrollAnchor(.bottom)
+                    .animation(chatItemChangeAnimation, value: chatItemIDs)
                     .chatScrollBottomTracking($isScrollGeometryAtBottom)
                     .simultaneousGesture(bottomOverscrollRefreshGesture)
-                    .animation(chatItemChangeAnimation, value: chatItemIDs)
                     .opencodeInteractiveKeyboardDismiss()
                     .background(OpenCodePlatformColor.groupedBackground)
                     .accessibilityIdentifier("chat.scroll")
                     .chatMountTimeline(startDate: chatMountAnimationStartDate)
                     .onAppear {
                         viewModel.activeChatSessionID = sessionID
-                        needsInitialBottomSnap = true
-                        needsInitialComposerHeightSnap = true
                         hasCompletedInitialHydrationSnap = !viewModel.messages.isEmpty
                         chatMountAnimationStartDate = nil
-                        scheduleInitialBottomSnap(with: proxy)
+                        chatViewportHeight = geometry.size.height
+                        updateDelayedLoadingIndicator()
                     }
-                    .onChange(of: bottomAnchorFrame) { _, frame in
-                        guard needsInitialBottomSnap, frame != .zero else { return }
-                        scheduleInitialBottomSnap(with: proxy)
-                    }
-                    .onChange(of: geometry.size.height) { _, _ in
-                        guard shouldAutoFollowBottom else { return }
-                        scheduleScrollToBottom(with: proxy, delayMS: 20)
+                    .onChange(of: geometry.size.height) { _, height in
+                        chatViewportHeight = height
+                        guard isReaderModeActive else { return }
+                        readerModeSpacerHeight = height * 0.5
                     }
                     .onChange(of: composerOverlayHeight) { oldHeight, newHeight in
-                        guard newHeight > 0, abs(newHeight - oldHeight) > 1 else { return }
-                        if needsInitialComposerHeightSnap, !viewModel.messages.isEmpty {
-                            needsInitialComposerHeightSnap = false
-                            scheduleInitialBottomSnap(with: proxy)
-                            return
-                        }
-                        guard shouldFollowComposerAffordanceChange || shouldAutoFollowBottom else { return }
-                        shouldFollowComposerAffordanceChange = false
-                        scheduleComposerAffordanceFollow(with: proxy, delayMS: 20)
+                        guard abs(newHeight - oldHeight) > 1 else { return }
+                        guard isScrollGeometryAtBottom, !isReaderModeActive else { return }
+                        scheduleComposerBottomFollow(with: proxy)
                     }
                     .onChange(of: viewModel.messages.count) { oldCount, count in
                         visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
@@ -1489,50 +1425,27 @@ struct ChatView: View {
 
                         if count > 0, !hasCompletedInitialHydrationSnap {
                             hasCompletedInitialHydrationSnap = true
-                            needsInitialBottomSnap = true
-                            scheduleInitialBottomSnap(with: proxy)
                             if oldCount == 0, pendingOutgoingSend == nil {
                                 startChatMountAnimation()
                             }
                         }
-
-                        guard count > oldCount else { return }
-
-                        if shouldSnapOnNextMessage || shouldAutoFollowBottom {
-                            let shouldAnimateScroll = shouldSnapOnNextMessage
-                            shouldSnapOnNextMessage = false
-                            let delay = shouldDelayNextUserInsertScroll ? 180 : 10
-                            shouldDelayNextUserInsertScroll = false
-                            scheduleScrollToBottom(with: proxy, delayMS: delay, animated: shouldAnimateScroll)
-                        }
+                        updateDelayedLoadingIndicator()
                     }
-                    .onChange(of: streamingFollowState) { oldState, newState in
-                        if newState.showsThinking, !oldState.showsThinking, pendingOutgoingSend != nil {
-                            scheduleScrollToBottom(with: proxy, delayMS: 20, animated: true)
-                            return
-                        }
-
-                        guard shouldLiveTailStreamingUpdates else { return }
-                        scheduleStreamingScrollToBottom(with: proxy)
+                    .onChange(of: readerModeScrollRequest) { _, _ in
+                        guard let request = readerModeScrollRequest else { return }
+                        scrollToReaderModeMessage(request.messageID, with: proxy)
                     }
-                    .onChange(of: jumpToLatestRequest) { _, _ in
-                        scrollToBottom(with: proxy, animated: true)
+#if canImport(UIKit)
+                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                        guard keyboardWillShow(from: notification), isScrollGeometryAtBottom, !isReaderModeActive else { return }
+                        scheduleKeyboardBottomSnap(with: proxy, animation: keyboardAnimation(from: notification))
                     }
-                    .onChange(of: isScrollGeometryAtBottom) { _, isAtBottom in
-                        if isAtBottom, !isUserDraggingChatScroll {
-                            hasUserInterruptedStreamingFollow = false
-                            shouldFollowStreamingUpdates = true
-                        }
-                    }
-                    .onPreferenceChange(ChatBottomAnchorFramePreferenceKey.self) { frame in
-                        guard frame != .zero, bottomAnchorFrame != frame else { return }
-                        bottomAnchorFrame = frame
-                    }
+#endif
                 }
             }
 
-            if shouldShowJumpToLatestButton {
-                jumpToLatestButton
+            if showsDelayedLoadingIndicator {
+                delayedLoadingOverlay
             }
         }
         .coordinateSpace(name: "chat-view-space")
@@ -1544,19 +1457,23 @@ struct ChatView: View {
         .onAppear {
             viewModel.activeChatSessionID = sessionID
             syncComposerDraftFromViewModel()
+            updateDelayedLoadingIndicator()
         }
         .onDisappear {
             persistComposerDraftNow()
             viewModel.setComposerStreamingFocus(false)
-            taskStore.autoScrollTask?.cancel()
-            taskStore.streamingAutoScrollTask?.cancel()
-            taskStore.initialBottomSnapTask?.cancel()
+            taskStore.keyboardBottomSnapTask?.cancel()
+            taskStore.composerBottomFollowTask?.cancel()
+            taskStore.readerModeScrollTask?.cancel()
             taskStore.mountAnimationCleanupTask?.cancel()
+            taskStore.delayedLoadingIndicatorTask?.cancel()
             taskStore.composerDraftPersistenceTask?.cancel()
-            affordanceScrollTask?.cancel()
             pendingOutgoingSendTask?.cancel()
             outgoingEntryResetTask?.cancel()
             thinkingRowRevealTask?.cancel()
+            readerModeSpacerHeight = collapsedTailSpacerHeight
+            readerModeScrollRequest = nil
+            showsDelayedLoadingIndicator = false
             if viewModel.activeChatSessionID == sessionID {
                 viewModel.activeChatSessionID = nil
             }
@@ -1629,7 +1546,6 @@ struct ChatView: View {
             }
         }
         .onChange(of: accessoryPresenceSignature) { _, _ in
-            shouldFollowComposerAffordanceChange = isScrollGeometryAtBottom
             if viewModel.draftAttachments.isEmpty || viewModel.todos.allSatisfy(\.isComplete) {
                 composerAccessoryExpansion = .collapsed
             }
@@ -1639,6 +1555,9 @@ struct ChatView: View {
         }
         .onChange(of: viewModel.composerResetToken) { _, _ in
             syncComposerDraftFromViewModel()
+        }
+        .onChange(of: viewModel.directoryState.isLoadingSelectedSession) { _, _ in
+            updateDelayedLoadingIndicator()
         }
     }
 
@@ -1819,7 +1738,6 @@ struct ChatView: View {
                     guard viewModel.reserveUserPromptIfAllowed() else { return }
                 }
                 clearComposerDraft()
-                shouldSnapOnNextMessage = true
                 Task {
                     if viewModel.isCompactClientCommand(command) {
                         await viewModel.compactSession(sessionID: sessionID, userVisible: true, meterPrompt: false, restoreDraftOnFailure: false)
@@ -1843,7 +1761,6 @@ struct ChatView: View {
                 if viewModel.shouldMeterPrompts(for: sessionID) {
                     guard viewModel.reserveUserPromptIfAllowed() else { return }
                 }
-                shouldSnapOnNextMessage = true
                 Task { await viewModel.compactSession(sessionID: sessionID, userVisible: true, meterPrompt: false) }
             },
             onForkMessage: { messageID in
@@ -1900,6 +1817,36 @@ struct ChatView: View {
             .background(Color.clear)
     }
 
+    private var delayedLoadingOverlay: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.regular)
+            Text("Loading chat...")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading chat")
+    }
+
+    private var measuredComposerStack: some View {
+        composerStack
+            .background {
+                GeometryReader { geometry in
+                    Color.clear
+                        .preference(key: ComposerOverlayHeightPreferenceKey.self, value: geometry.size.height)
+                }
+            }
+            .onPreferenceChange(ComposerOverlayHeightPreferenceKey.self) { height in
+                guard abs(composerOverlayHeight - height) > 0.5 else { return }
+                composerOverlayHeight = height
+            }
+    }
+
     private var bottomAnchorListItem: some View {
         VStack(spacing: 8) {
             if shouldShowBottomRefreshIndicator {
@@ -1908,13 +1855,13 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: messageBottomPadding + bottomRefreshIndicatorHeight * bottomPullProgress)
-        .background {
-            GeometryReader { anchorGeometry in
-                Color.clear
-                    .preference(key: ChatBottomAnchorFramePreferenceKey.self, value: anchorGeometry.frame(in: .named("chat-view-space")))
-            }
-        }
-        .id(ChatScrollTarget.bottomAnchor)
+    }
+
+    private var readerModeSpacer: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: max(collapsedTailSpacerHeight, readerModeSpacerHeight))
+            .id(ChatScrollTarget.readerModeSpacer)
     }
 
     private var shouldShowBottomRefreshIndicator: Bool {
@@ -1945,117 +1892,9 @@ struct ChatView: View {
         .transition(.opacity.combined(with: .scale(scale: 0.86)))
     }
 
-    private var measuredComposerStack: some View {
-        composerStack
-            .background {
-                GeometryReader { geometry in
-                    Color.clear
-                        .preference(key: ComposerOverlayHeightPreferenceKey.self, value: geometry.size.height)
-                }
-            }
-            .onPreferenceChange(ComposerOverlayHeightPreferenceKey.self) { height in
-                guard abs(composerOverlayHeight - height) > 0.5 else { return }
-                composerOverlayHeight = height
-            }
-    }
-
-    private func scheduleScrollToBottom(with proxy: ScrollViewProxy, delayMS: Int = 10) {
-        scheduleScrollToBottom(with: proxy, delayMS: delayMS, animated: false)
-    }
-
-    private func scheduleInitialBottomSnap(with proxy: ScrollViewProxy) {
-        taskStore.initialBottomSnapTask?.cancel()
-        taskStore.initialBottomSnapTask = Task { @MainActor in
-            defer { taskStore.initialBottomSnapTask = nil }
-
-            for delayMS in [0, 50, 160, 320] {
-                if delayMS > 0 {
-                    try? await Task.sleep(for: .milliseconds(delayMS))
-                } else {
-                    await Task.yield()
-                }
-
-                guard !Task.isCancelled else { return }
-                guard canPerformScheduledChatScroll else { continue }
-                needsInitialBottomSnap = false
-                shouldFollowStreamingUpdates = true
-                scrollToBottom(with: proxy, animated: false)
-            }
-        }
-    }
-
-    private func scheduleScrollToBottom(with proxy: ScrollViewProxy, delayMS: Int = 10, animated: Bool) {
-        taskStore.autoScrollTask?.cancel()
-        taskStore.autoScrollTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(delayMS))
-            guard !Task.isCancelled, canPerformScheduledChatScroll else { return }
-            scrollToBottom(with: proxy, animated: animated)
-        }
-    }
-
-    private func scheduleStreamingScrollToBottom(with proxy: ScrollViewProxy) {
-        guard taskStore.streamingAutoScrollTask == nil else { return }
-
-        let elapsed = Date().timeIntervalSince(taskStore.lastStreamingAutoScrollAt)
-        let delayMS = max(0, Int((streamingAutoScrollMinimumInterval - elapsed) * 1000))
-
-        taskStore.streamingAutoScrollTask = Task { @MainActor in
-            defer { taskStore.streamingAutoScrollTask = nil }
-            if delayMS > 0 {
-                try? await Task.sleep(for: .milliseconds(delayMS))
-            }
-            guard !Task.isCancelled, canPerformScheduledChatScroll else { return }
-            guard shouldLiveTailStreamingUpdates else { return }
-
-            taskStore.lastStreamingAutoScrollAt = Date()
-            scrollToBottom(with: proxy, animated: false)
-        }
-    }
-
-    private var canPerformScheduledChatScroll: Bool {
-        viewModel.activeChatSessionID == sessionID && bottomAnchorFrame != .zero
-    }
-
-    private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
-        guard canPerformScheduledChatScroll else { return }
-        hasUserInterruptedStreamingFollow = false
-        shouldFollowStreamingUpdates = true
-        performChatScroll(animated: animated) {
-            proxy.scrollTo(ChatScrollTarget.bottomAnchor, anchor: .bottom)
-        }
-    }
-
-    private func performChatScroll(animated: Bool, _ operation: @escaping () -> Void) {
-        if animated {
-            withAnimation(sendChoreographyAnimation, operation)
-        } else {
-            withoutListScrollAnimation(operation)
-        }
-    }
-
-    private func withoutListScrollAnimation(_ operation: () -> Void) {
-        var transaction = Transaction()
-        transaction.animation = nil
-        withTransaction(transaction, operation)
-    }
-
-    private func scheduleComposerAffordanceFollow(with proxy: ScrollViewProxy, delayMS: Int) {
-        affordanceScrollTask?.cancel()
-        affordanceScrollTask = Task { @MainActor in
-            guard canPerformScheduledChatScroll else { return }
-            scheduleScrollToBottom(with: proxy, delayMS: delayMS)
-            try? await Task.sleep(for: .milliseconds(140))
-            guard !Task.isCancelled, canPerformScheduledChatScroll else { return }
-            scheduleScrollToBottom(with: proxy, delayMS: 0)
-        }
-    }
-
     private var bottomOverscrollRefreshGesture: some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .local)
             .onChanged { value in
-                isUserDraggingChatScroll = true
-                interruptStreamingFollowForUserScroll()
-
                 if !bottomPullIsTracking {
                     bottomPullIsTracking = true
                     bottomPullStartedAtBottom = isScrollGeometryAtBottom && !isRefreshingChatData
@@ -2075,12 +1914,6 @@ struct ChatView: View {
                 }
             }
             .onEnded { _ in
-                isUserDraggingChatScroll = false
-                if isScrollGeometryAtBottom {
-                    hasUserInterruptedStreamingFollow = false
-                    shouldFollowStreamingUpdates = true
-                }
-
                 let shouldRefresh = bottomPullStartedAtBottom && bottomPullDistance >= bottomRefreshThreshold && !isRefreshingChatData
                 bottomPullIsTracking = false
                 bottomPullStartedAtBottom = false
@@ -2098,14 +1931,6 @@ struct ChatView: View {
             }
     }
 
-    private func interruptStreamingFollowForUserScroll() {
-        guard shouldFollowStreamingUpdates || !hasUserInterruptedStreamingFollow else { return }
-        hasUserInterruptedStreamingFollow = true
-        shouldFollowStreamingUpdates = false
-        taskStore.streamingAutoScrollTask?.cancel()
-        taskStore.streamingAutoScrollTask = nil
-    }
-
     @MainActor
     private func refreshChatDataFromBottomOverscroll() async {
         guard !isRefreshingChatData else { return }
@@ -2121,6 +1946,119 @@ struct ChatView: View {
         }
         await viewModel.refreshChatData(for: sessionID)
     }
+
+    private func activateReaderModeSpacer(screenHeight: CGFloat, messageID: String) {
+        readerModeSpacerHeight = screenHeight * 0.5
+        readerModeScrollRequest = ReaderModeScrollRequest(messageID: messageID)
+    }
+
+    private func scheduleKeyboardBottomSnap(with proxy: ScrollViewProxy, animation: Animation) {
+        taskStore.keyboardBottomSnapTask?.cancel()
+        taskStore.keyboardBottomSnapTask = Task { @MainActor in
+            defer { taskStore.keyboardBottomSnapTask = nil }
+
+            for delayMS in [0, 80, 220] {
+                if delayMS > 0 {
+                    try? await Task.sleep(for: .milliseconds(delayMS))
+                } else {
+                    await Task.yield()
+                }
+
+                guard !Task.isCancelled, isScrollGeometryAtBottom, !isReaderModeActive else { return }
+                withAnimation(animation) {
+                    proxy.scrollTo(ChatScrollTarget.readerModeSpacer, anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    private func scheduleComposerBottomFollow(with proxy: ScrollViewProxy) {
+        guard taskStore.composerBottomFollowTask == nil else { return }
+        taskStore.composerBottomFollowTask = Task { @MainActor in
+            defer { taskStore.composerBottomFollowTask = nil }
+
+            for delayMS in [20, 140] {
+                try? await Task.sleep(for: .milliseconds(delayMS))
+                guard !Task.isCancelled, isScrollGeometryAtBottom, !isReaderModeActive else { return }
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(ChatScrollTarget.readerModeSpacer, anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    private func scrollToReaderModeMessage(_ messageID: String, with proxy: ScrollViewProxy) {
+        taskStore.readerModeScrollTask?.cancel()
+        taskStore.readerModeScrollTask = Task { @MainActor in
+            defer { taskStore.readerModeScrollTask = nil }
+
+            for delayMS in [0, 120, 320, 560] {
+                if delayMS > 0 {
+                    try? await Task.sleep(for: .milliseconds(delayMS))
+                } else {
+                    await Task.yield()
+                }
+
+                guard !Task.isCancelled, isReaderModeActive else { return }
+                withoutScrollAnimation {
+                    proxy.scrollTo(messageID, anchor: readerModeSentMessageAnchor)
+                }
+            }
+        }
+    }
+
+    private func updateDelayedLoadingIndicator() {
+        guard shouldDelayLoadingIndicator else {
+            taskStore.delayedLoadingIndicatorTask?.cancel()
+            taskStore.delayedLoadingIndicatorTask = nil
+            if showsDelayedLoadingIndicator {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    showsDelayedLoadingIndicator = false
+                }
+            }
+            return
+        }
+
+        guard taskStore.delayedLoadingIndicatorTask == nil else { return }
+        taskStore.delayedLoadingIndicatorTask = Task { @MainActor in
+            defer { taskStore.delayedLoadingIndicatorTask = nil }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, shouldDelayLoadingIndicator else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                showsDelayedLoadingIndicator = true
+            }
+        }
+    }
+
+    private var shouldDelayLoadingIndicator: Bool {
+        viewModel.directoryState.isLoadingSelectedSession && viewModel.messages.isEmpty && pendingOutgoingSend == nil
+    }
+
+    private func withoutScrollAnimation(_ operation: () -> Void) {
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction, operation)
+    }
+
+    private func dismissKeyboardForReaderMode() {
+#if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+#endif
+        isComposerInputFocused = false
+        viewModel.setComposerStreamingFocus(false)
+    }
+
+#if canImport(UIKit)
+    private func keyboardWillShow(from notification: Notification) -> Bool {
+        guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return false }
+        return frame.minY < UIScreen.main.bounds.height
+    }
+
+    private func keyboardAnimation(from notification: Notification) -> Animation {
+        let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        return .easeOut(duration: max(0.12, duration))
+    }
+#endif
 
     private var messageBottomPadding: CGFloat { 20 }
 
@@ -2210,12 +2148,6 @@ struct ChatView: View {
         }
 
         return "\(value.prefix(160))\u{1f}\(value.suffix(160))".hashValue
-    }
-
-    private var lastDisplayedMessageTextLength: Int {
-        displayedMessages.last?.parts.reduce(0) { partialResult, part in
-            partialResult + (part.text?.count ?? 0)
-        } ?? 0
     }
 
     private var accessoryPresenceSignature: AccessoryPresenceState {
@@ -2480,41 +2412,37 @@ struct ChatView: View {
         if !hasAttachments,
            viewModel.slashCommandInput(from: draftText).map({ viewModel.isCompactClientCommand($0.command) }) == true {
             clearComposerDraft()
-            shouldSnapOnNextMessage = true
             Task { await viewModel.compactSession(sessionID: sessionID, userVisible: true, meterPrompt: false) }
             return
         }
 
         OpenCodeHaptics.impact(.strong)
         viewModel.markChatBreadcrumb("send tapped", sessionID: sessionID)
-        shouldSnapOnNextMessage = false
-        shouldFollowStreamingUpdates = true
 
         let messageID = OpenCodeIdentifier.message()
         let partID = OpenCodeIdentifier.part()
+        dismissKeyboardForReaderMode()
+        activateReaderModeSpacer(screenHeight: max(chatViewportHeight, composerInputFrame.maxY), messageID: messageID)
 
         let pendingSend = PendingOutgoingSend(
             text: draftText,
             attachments: draftAttachments,
-            shouldAnimateBubble: false,
+            shouldAnimateBubble: true,
             messageID: messageID,
             partID: partID
         )
 
         pendingOutgoingSendTask?.cancel()
         pendingOutgoingSend = pendingSend
-        withAnimation(sendChoreographyAnimation) {
-            _ = viewModel.insertOptimisticUserMessage(draftText, attachments: draftAttachments, in: liveSession, messageID: messageID, partID: partID, animated: false)
-        }
+        outgoingEntrySourceFrame = composerInputFrame
+        preparingOutgoingMessageID = messageID
+        _ = viewModel.insertOptimisticUserMessage(draftText, attachments: draftAttachments, in: liveSession, messageID: messageID, partID: partID, animated: false)
+        scheduleOutgoingEntryAnimation(messageID: messageID)
         scheduleThinkingRowReveal(delayMS: 180)
         clearComposerDraft()
         viewModel.clearDraftAttachments()
 
         pendingOutgoingSendTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled, viewModel.activeChatSessionID == sessionID else { return }
-
-            pendingOutgoingSend = nil
             await viewModel.sendMessage(
                 pendingSend.text,
                 attachments: pendingSend.attachments,
@@ -2525,6 +2453,8 @@ struct ChatView: View {
                 appendOptimisticMessage: false,
                 meterPrompt: false
             )
+            guard !Task.isCancelled, pendingOutgoingSend?.messageID == pendingSend.messageID else { return }
+            pendingOutgoingSend = nil
         }
     }
 
@@ -2912,17 +2842,6 @@ private struct ChatSkeletonRow: View {
     }
 }
 
-private struct ChatBottomAnchorFramePreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        let next = nextValue()
-        if next != .zero {
-            value = next
-        }
-    }
-}
-
 private struct ComposerOverlayHeightPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 
@@ -2951,7 +2870,7 @@ private extension View {
             self
         }
 #else
-            self
+        self
 #endif
     }
 }
