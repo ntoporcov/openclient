@@ -24,6 +24,7 @@ fastlane/report.xml
 
 # Local scratch space
 tmp/
+.opencode/.env*
 
 # Local web dependencies
 ExcalidrawWeb/node_modules/

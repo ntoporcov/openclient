@@ -39,7 +39,6 @@ struct MessageComposer: View {
     let isLoadingMCP: Bool
     let togglingMCPServerNames: Set<String>
     let mcpErrorMessage: String?
-    let onInputFrameChange: (CGRect) -> Void
     let onFocusChange: (Bool) -> Void
     let onTextChange: (String) -> Void
     let onSend: () -> Void
@@ -216,10 +215,6 @@ struct MessageComposer: View {
                 accessoryNavigationPath = []
             }
         }
-        .onPreferenceChange(ComposerInputFramePreferenceKey.self) { frame in
-            guard frame != .zero else { return }
-            onInputFrameChange(frame)
-        }
 #if canImport(PhotosUI) && canImport(UIKit)
         .onChange(of: selectedPhotoItems) { _, _ in
             Task { await loadSelectedPhotoItems() }
@@ -334,12 +329,6 @@ struct MessageComposer: View {
                     .frame(minHeight: ComposerTextViewMetrics.minimumHeight)
                     .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .background {
-                        GeometryReader { geometry in
-                            Color.clear
-                                .preference(key: ComposerInputFramePreferenceKey.self, value: geometry.frame(in: .named("chat-view-space")))
-                        }
-                    }
                     .accessibilityIdentifier("chat.input")
                 #else
                 TextField("Message", text: textBinding, axis: .vertical)
@@ -347,12 +336,6 @@ struct MessageComposer: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 11)
                     .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .background {
-                        GeometryReader { geometry in
-                            Color.clear
-                                .preference(key: ComposerInputFramePreferenceKey.self, value: geometry.frame(in: .named("chat-view-space")))
-                        }
-                    }
                     .accessibilityIdentifier("chat.input")
                     .simultaneousGesture(TapGesture().onEnded {
                         dismissAccessoryMenu()
@@ -876,8 +859,9 @@ struct MessageComposer: View {
     }
 
     nonisolated private static func imageAttachment(from data: Data, type: UTType) -> OpenCodeComposerAttachment {
-        let mime = type.preferredMIMEType ?? "image/jpeg"
-        let fileExtension = type.preferredFilenameExtension ?? "jpg"
+        let normalized = supportedImagePayload(from: data, type: type)
+        let mime = normalized.mime
+        let fileExtension = normalized.fileExtension
         let filename = "image-\(OpenCodeIdentifier.part()).\(fileExtension)"
 
         return OpenCodeComposerAttachment(
@@ -885,8 +869,60 @@ struct MessageComposer: View {
             kind: .image,
             filename: filename,
             mime: mime,
-            dataURL: "data:\(mime);base64,\(data.base64EncodedString())"
+            dataURL: "data:\(mime);base64,\(normalized.data.base64EncodedString())"
         )
+    }
+
+    nonisolated private static func supportedImagePayload(from data: Data, type: UTType) -> (data: Data, mime: String, fileExtension: String) {
+        if let detected = detectedSupportedImageFormat(from: data) {
+            return (data, detected.mime, detected.fileExtension)
+        }
+
+        let mime = (type.preferredMIMEType ?? "image/jpeg").lowercased()
+        if supportedImageMIMETypes.contains(mime) {
+            return (data, mime, type.preferredFilenameExtension ?? fileExtension(forSupportedImageMIME: mime))
+        }
+
+        if let jpegData = UIImage(data: data)?.jpegData(compressionQuality: 0.9) {
+            return (jpegData, "image/jpeg", "jpg")
+        }
+
+        return (data, "image/jpeg", "jpg")
+    }
+
+    nonisolated private static let supportedImageMIMETypes: Set<String> = [
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+    ]
+
+    nonisolated private static func detectedSupportedImageFormat(from data: Data) -> (mime: String, fileExtension: String)? {
+        let bytes = Array(data.prefix(12))
+        if bytes.starts(with: [0xFF, 0xD8, 0xFF]) {
+            return ("image/jpeg", "jpg")
+        }
+        if bytes.starts(with: [0x89, 0x50, 0x4E, 0x47]) {
+            return ("image/png", "png")
+        }
+        if bytes.starts(with: [0x47, 0x49, 0x46, 0x38]) {
+            return ("image/gif", "gif")
+        }
+        if bytes.count >= 12,
+           bytes[0...3] == [0x52, 0x49, 0x46, 0x46],
+           bytes[8...11] == [0x57, 0x45, 0x42, 0x50] {
+            return ("image/webp", "webp")
+        }
+        return nil
+    }
+
+    nonisolated private static func fileExtension(forSupportedImageMIME mime: String) -> String {
+        switch mime {
+        case "image/png": return "png"
+        case "image/gif": return "gif"
+        case "image/webp": return "webp"
+        default: return "jpg"
+        }
     }
 
     nonisolated private static func attachmentTooLargeMessage(filename: String, byteCount: Int) -> String {
@@ -1151,17 +1187,6 @@ private final class ComposerPlaceholderTextView: UITextView {
 }
 
 #endif
-
-private struct ComposerInputFramePreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        let next = nextValue()
-        if next != .zero {
-            value = next
-        }
-    }
-}
 
 private struct CommandPicker: View {
     let commands: [OpenCodeCommand]

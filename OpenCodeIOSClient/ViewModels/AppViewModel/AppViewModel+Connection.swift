@@ -43,35 +43,28 @@ extension AppViewModel {
     }
 
     func connect() async {
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            let bootstrap = try await OpenCodeBootstrap.bootstrapGlobal(client: client)
-            backendMode = .server
-            serverVersion = bootstrap.health.version
-            errorMessage = nil
-            persistConfigAfterSuccessfulConnection()
-            loadNewSessionDefaults()
-            loadFunAndGamesPreferences()
-            projects = bootstrap.projects
-            currentProject = nil
-            selectedDirectory = nil
-            selectedProjectContentTab = .sessions
-            directoryState = OpenCodeDirectoryState()
-            streamDirectory = nil
-            isConnected = bootstrap.health.healthy
-            reconcileLiveActivities()
-            await loadComposerOptions()
-            startEventStream()
-            await runUITestBootstrapIfNeeded()
-        } catch {
-            stopEventStream()
-            backendMode = .none
-            isConnected = false
-            directoryState = OpenCodeDirectoryState()
-            errorMessage = error.localizedDescription
-        }
+        await connectionCoordinator.connect(
+            client: client,
+            applyBootstrap: { bootstrap in
+                persistConfigAfterSuccessfulConnection()
+                loadNewSessionDefaults()
+                loadFunAndGamesPreferences()
+                projects = bootstrap.projects
+                currentProject = nil
+                selectedDirectory = nil
+                selectedProjectContentTab = .sessions
+                directoryStore.reset()
+                streamDirectory = nil
+                reconcileLiveActivities()
+                await loadComposerOptions()
+                startEventStream()
+                await runUITestBootstrapIfNeeded()
+            },
+            handleFailure: {
+                stopEventStream()
+                directoryStore.reset()
+            }
+        )
     }
 
     func connect(to serverConfig: OpenCodeServerConfig) async {
@@ -81,22 +74,19 @@ extension AppViewModel {
 
     func presentAddServerSheet() {
         config = OpenCodeServerConfig()
-        errorMessage = nil
-        savedServerEditorMode = .add
+        connectionStore.prepareAddServerSheet()
         isShowingAddServerSheet = true
     }
 
     func prepareToEditRecentServer(_ serverConfig: OpenCodeServerConfig) {
         config = hydratedServerConfig(from: serverConfig)
-        errorMessage = nil
-        savedServerEditorMode = .edit(originalServerID: serverConfig.recentServerID)
+        connectionStore.prepareEditServerSheet(originalServerID: serverConfig.recentServerID)
         isShowingAddServerSheet = true
     }
 
     func dismissAddServerSheet() {
         isShowingAddServerSheet = false
-        savedServerEditorMode = .add
-        errorMessage = nil
+        connectionStore.dismissServerSheet()
     }
 
     var isEditingSavedServer: Bool {
@@ -113,59 +103,66 @@ extension AppViewModel {
 
     func saveEditedServer() {
         guard case let .edit(originalServerID) = savedServerEditorMode else { return }
-        errorMessage = nil
+        connectionStore.clearError()
         upsertSavedServer(config: config, replacingServerID: originalServerID)
         dismissAddServerSheet()
     }
 
     func disconnect() {
         appleIntelligenceResponseTask?.cancel()
-        stopAccessingActiveAppleIntelligenceWorkspace()
-        currentAppleIntelligenceWorkspace = nil
-        stopEventStream()
-        backendMode = .none
-        isConnected = false
-        serverVersion = ""
-        activeAppleIntelligenceWorkspaceID = nil
-        projects = []
-        currentProject = nil
-        selectedDirectory = nil
-        selectedProjectContentTab = .sessions
-        projectSearchQuery = ""
-        projectSearchResults = []
-        directoryState = OpenCodeDirectoryState()
-        availableAgents = []
-        availableProviders = []
-        selectedAgentNamesBySessionID = [:]
-        selectedModelsBySessionID = [:]
-        selectedVariantsBySessionID = [:]
-        newSessionDefaults = NewSessionDefaults()
-        funAndGamesPreferences = FunAndGamesPreferences()
-        findPlaceSessionsByID = [:]
-        findBugSessionsByID = [:]
-        pendingFindBugLanguage = nil
-        errorMessage = nil
-        showSavedServerPrompt = hasSavedServer
+        connectionCoordinator.disconnect(
+            hasSavedServer: hasSavedServer,
+            stopActiveWorkspace: {
+                stopAccessingActiveAppleIntelligenceWorkspace()
+                currentAppleIntelligenceWorkspace = nil
+            },
+            stopEventStream: {
+                stopEventStream()
+            },
+            resetAppState: {
+                activeAppleIntelligenceWorkspaceID = nil
+                projects = []
+                currentProject = nil
+                selectedDirectory = nil
+                selectedProjectContentTab = .sessions
+                projectSearchQuery = ""
+                projectSearchResults = []
+                directoryStore.reset()
+                modelConfigurationStore.reset()
+                funAndGamesPreferences = FunAndGamesPreferences()
+                findPlaceSessionsByID = [:]
+                findBugSessionsByID = [:]
+                pendingFindBugLanguage = nil
+            }
+        )
     }
 
     func leaveAppleIntelligenceSession() {
         appleIntelligenceResponseTask?.cancel()
-        preserveCurrentMessageDraftForNavigation()
-        stopAccessingActiveAppleIntelligenceWorkspace()
-        currentAppleIntelligenceWorkspace = nil
-        backendMode = .none
-        activeAppleIntelligenceWorkspaceID = nil
-        currentProject = nil
-        selectedDirectory = nil
-        selectedProjectContentTab = .sessions
-        directoryState = OpenCodeDirectoryState()
-        draftMessage = ""
-        clearDraftAttachments()
-        errorMessage = nil
+        connectionCoordinator.leaveAppleIntelligenceSession(
+            preserveDraft: {
+                preserveCurrentMessageDraftForNavigation()
+            },
+            stopActiveWorkspace: {
+                stopAccessingActiveAppleIntelligenceWorkspace()
+                currentAppleIntelligenceWorkspace = nil
+            },
+            resetAppState: {
+                activeAppleIntelligenceWorkspaceID = nil
+                currentProject = nil
+                selectedDirectory = nil
+                selectedProjectContentTab = .sessions
+                directoryStore.reset()
+            },
+            clearComposer: {
+                objectWillChange.send()
+                composerStore.resetActiveDraft()
+            }
+        )
     }
 
     func presentAppleIntelligenceFolderPicker() {
-        errorMessage = nil
+        connectionStore.clearError()
         isShowingAppleIntelligenceFolderPicker = true
     }
 
@@ -181,7 +178,7 @@ extension AppViewModel {
         } catch {
             stopAccessingActiveAppleIntelligenceWorkspace()
             removeAppleIntelligenceWorkspace(workspace)
-            errorMessage = error.localizedDescription
+            connectionStore.applyErrorMessage(error.localizedDescription)
             isShowingAppleIntelligenceFolderPicker = true
             return
         }
@@ -208,7 +205,7 @@ extension AppViewModel {
             await openAppleIntelligenceWorkspace(workspace, resolvedURL: importedURL)
         } catch {
             stopAccessingActiveAppleIntelligenceWorkspace()
-            errorMessage = error.localizedDescription
+            connectionStore.applyErrorMessage(error.localizedDescription)
         }
     }
 
@@ -217,15 +214,13 @@ extension AppViewModel {
             try setActiveAppleIntelligenceWorkspaceURL(resolvedURL)
         } catch {
             stopAccessingActiveAppleIntelligenceWorkspace()
-            errorMessage = error.localizedDescription
+            connectionStore.applyErrorMessage(error.localizedDescription)
             return
         }
 
         appleIntelligenceResponseTask?.cancel()
         stopEventStream()
-        backendMode = .appleIntelligence
-        isConnected = false
-        serverVersion = ""
+        connectionStore.applyAppleIntelligenceMode()
         activeAppleIntelligenceWorkspaceID = workspace.id
         currentAppleIntelligenceWorkspace = AppleIntelligenceWorkspaceRecord(
             id: workspace.id,
@@ -241,17 +236,14 @@ extension AppViewModel {
         selectedDirectory = resolvedURL.path(percentEncoded: false)
         selectedProjectContentTab = .sessions
         streamDirectory = resolvedURL.path(percentEncoded: false)
-        directoryState = OpenCodeDirectoryState(
-            sessions: [workspace.session],
-            selectedSession: workspace.session,
-            messages: workspace.messages,
-            commands: [],
-            sessionStatuses: [workspace.session.id: "idle"]
-        )
+        allSessions = [workspace.session]
+        selectedSession = workspace.session
+        directoryCommands = []
+        sessionStatuses = [workspace.session.id: "idle"]
+        messages = workspace.messages
         upsertAppleIntelligenceWorkspace(currentAppleIntelligenceWorkspace ?? workspace)
         draftTitle = ""
         restoreMessageDraft(for: workspace.session)
-        errorMessage = nil
     }
 
     func setActiveAppleIntelligenceWorkspaceURL(_ url: URL) throws {
@@ -325,7 +317,7 @@ extension AppViewModel {
 
     func persistAppleIntelligenceMessages() {
         guard var currentAppleIntelligenceWorkspace else { return }
-        currentAppleIntelligenceWorkspace.messages = directoryState.messages
+        currentAppleIntelligenceWorkspace.messages = messages
         currentAppleIntelligenceWorkspace.updatedAt = Date()
         if let selectedDirectory, !selectedDirectory.isEmpty {
             currentAppleIntelligenceWorkspace.lastKnownPath = selectedDirectory
@@ -365,7 +357,7 @@ extension AppViewModel {
     }
 
     func dismissSavedServerPrompt() {
-        showSavedServerPrompt = false
+        connectionStore.markSavedServerPromptDismissed()
     }
 
     func persistConfigAfterSuccessfulConnection() {
@@ -375,8 +367,7 @@ extension AppViewModel {
         case let .edit(originalServerID):
             upsertSavedServer(config: config, replacingServerID: originalServerID)
         }
-        savedServerEditorMode = .add
-        showSavedServerPrompt = false
+        connectionStore.markSavedServerPersistenceComplete()
     }
 
     func loadRecentServerConfigs() -> [OpenCodeServerConfig] {
@@ -434,9 +425,7 @@ extension AppViewModel {
     }
 
     func removeRecentServer(_ serverConfig: OpenCodeServerConfig) {
-        recentServerConfigs.removeAll { $0.recentServerID == serverConfig.recentServerID }
-        hasSavedServer = recentServerConfigs.isEmpty == false
-        showSavedServerPrompt = hasSavedServer && showSavedServerPrompt
+        connectionStore.removeRecentServer(serverConfig)
 
         if config.recentServerID == serverConfig.recentServerID,
            let replacement = recentServerConfigs.first {
@@ -464,9 +453,11 @@ extension AppViewModel {
 
         let updatedConfig = config
         let updatedID = updatedConfig.recentServerID
-        let replacedConfig = originalServerID.flatMap { originalID in
-            recentServerConfigs.first { $0.recentServerID == originalID }
-        }
+        let replacedConfig = connectionStore.upsertRecentServerConfig(
+            updatedConfig,
+            replacingServerID: originalServerID,
+            maxCount: Self.maxRecentServerCount
+        )
         let migratedPassword: String?
         if let replacedConfig, replacedConfig.recentServerID != updatedID, updatedConfig.password.isEmpty {
             migratedPassword = passwordStore.loadPassword(for: replacedConfig.recentServerID) ?? replacedConfig.password
@@ -474,31 +465,13 @@ extension AppViewModel {
             migratedPassword = nil
         }
 
-        var orderedConfigs = [updatedConfig]
-        orderedConfigs.append(contentsOf: recentServerConfigs.filter { existing in
-            if existing.recentServerID == updatedID {
-                return false
-            }
-
-            if let originalServerID, existing.recentServerID == originalServerID {
-                return false
-            }
-
-            return true
-        })
-
-        recentServerConfigs = Array(orderedConfigs.prefix(Self.maxRecentServerCount))
-        hasSavedServer = recentServerConfigs.isEmpty == false
-
         if let originalServerID, originalServerID != updatedID {
             passwordStore.deletePassword(for: originalServerID)
         }
 
         if let migratedPassword, migratedPassword.isEmpty == false {
             passwordStore.savePassword(migratedPassword, for: updatedID)
-                if recentServerConfigs.first?.recentServerID == updatedID {
-                    recentServerConfigs[0].password = migratedPassword
-                }
+            connectionStore.updateRecentServerPassword(for: updatedID, password: migratedPassword)
         }
 
         for serverConfig in recentServerConfigs {
@@ -530,8 +503,7 @@ extension AppViewModel {
         uiTestBootstrapTitle = environment["OPENCODE_UI_TEST_SESSION_TITLE"]
         uiTestBootstrapPrompt = environment["OPENCODE_UI_TEST_PROMPT"]
         uiTestDirectory = environment["OPENCODE_UI_TEST_DIRECTORY"]
-        hasSavedServer = false
-        showSavedServerPrompt = false
+        connectionStore.clearRecentServers()
         return true
     }
 
@@ -550,7 +522,7 @@ extension AppViewModel {
             }
             let session = try await client.createSession(title: title, directory: effectiveSelectedDirectory)
             upsertVisibleSession(session)
-            directoryState.selectedSession = session
+            selectedSession = session
             restoreMessageDraft(for: session)
             try await loadMessages(for: session)
             try await client.sendMessageAsync(sessionID: session.id, text: prompt, directory: sendDirectory(for: session))
@@ -558,7 +530,7 @@ extension AppViewModel {
             try await reloadSessions()
             upsertVisibleSession(session)
         } catch {
-            errorMessage = error.localizedDescription
+            connectionStore.applyErrorMessage(error.localizedDescription)
         }
     }
 }

@@ -2,23 +2,37 @@ import Foundation
 import SwiftUI
 
 extension AppViewModel {
+    struct MCPSnapshot: Hashable {
+        let servers: [OpenCodeMCPServer]
+        let connectedServerCount: Int
+        let isLoading: Bool
+        let togglingServerNames: Set<String>
+        let errorMessage: String?
+    }
+
+    var mcpSnapshot: MCPSnapshot {
+        MCPSnapshot(
+            servers: mcpServers,
+            connectedServerCount: connectedMCPServerCount,
+            isLoading: isLoadingMCP,
+            togglingServerNames: togglingMCPServerNames,
+            errorMessage: mcpErrorMessage
+        )
+    }
+
     var mcpServers: [OpenCodeMCPServer] {
-        directoryState.mcpStatuses
-            .map { OpenCodeMCPServer(name: $0.key, status: $0.value) }
-            .sorted { lhs, rhs in
-                lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
+        mcpStore.servers
     }
 
     var connectedMCPServerCount: Int {
-        mcpServers.filter { $0.status.isConnected }.count
+        mcpStore.connectedServerCount
     }
 
     func presentMCPView() {
         preserveCurrentMessageDraftForNavigation()
         withAnimation(opencodeSelectionAnimation) {
             selectedProjectContentTab = .mcp
-            directoryState.selectedSession = nil
+            selectedSession = nil
         }
 
         Task {
@@ -27,35 +41,41 @@ extension AppViewModel {
     }
 
     func loadMCPStatusIfNeeded() async {
-        guard !directoryState.isMCPReady, !directoryState.isLoadingMCP else { return }
+        guard mcpStore.shouldLoadStatus() else { return }
         await reloadMCPStatus()
     }
 
     func reloadMCPStatus() async {
-        directoryState.isLoadingMCP = true
-        defer { directoryState.isLoadingMCP = false }
+        objectWillChange.send()
+        mcpStore.beginLoading()
+        defer {
+            objectWillChange.send()
+            mcpStore.finishLoading()
+        }
 
         do {
             let statuses = try await client.listMCPStatus(directory: effectiveSelectedDirectory)
             withAnimation(opencodeSelectionAnimation) {
-                directoryState.mcpStatuses = statuses
-                directoryState.isMCPReady = true
-                directoryState.mcpErrorMessage = nil
+                objectWillChange.send()
+                mcpStore.applyLoadedStatuses(statuses)
             }
         } catch {
-            directoryState.isMCPReady = true
-            directoryState.mcpErrorMessage = error.localizedDescription
+            objectWillChange.send()
+            mcpStore.applyLoadError(error)
         }
     }
 
     func toggleMCPServer(name: String) async {
-        guard !directoryState.togglingMCPServerNames.contains(name) else { return }
+        objectWillChange.send()
+        guard mcpStore.beginToggling(name: name) else { return }
 
-        directoryState.togglingMCPServerNames.insert(name)
-        defer { directoryState.togglingMCPServerNames.remove(name) }
+        defer {
+            objectWillChange.send()
+            mcpStore.finishToggling(name: name)
+        }
 
         do {
-            if directoryState.mcpStatuses[name]?.isConnected == true {
+            if mcpStore.isConnected(name: name) {
                 try await client.disconnectMCPServer(name: name, directory: effectiveSelectedDirectory)
             } else {
                 try await client.connectMCPServer(name: name, directory: effectiveSelectedDirectory)
@@ -63,12 +83,12 @@ extension AppViewModel {
 
             let statuses = try await client.listMCPStatus(directory: effectiveSelectedDirectory)
             withAnimation(opencodeSelectionAnimation) {
-                directoryState.mcpStatuses = statuses
-                directoryState.isMCPReady = true
-                directoryState.mcpErrorMessage = nil
+                objectWillChange.send()
+                mcpStore.applyLoadedStatuses(statuses)
             }
         } catch {
-            directoryState.mcpErrorMessage = error.localizedDescription
+            objectWillChange.send()
+            mcpStore.applyToggleError(error)
         }
     }
 }

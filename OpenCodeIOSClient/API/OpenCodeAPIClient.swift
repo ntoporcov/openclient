@@ -28,12 +28,36 @@ struct OpenCodeAPIClient: Sendable {
         return response.mapValues { $0.type }
     }
 
-    func deleteSession(sessionID: String) async throws {
-        try await sendNoContent(path: "/session/\(sessionID)", method: "DELETE")
+    func deleteSession(sessionID: String, directory: String? = nil, workspaceID: String? = nil) async throws {
+        try await sendNoContent(
+            path: "/session/\(sessionID)",
+            method: "DELETE",
+            queryItems: scopedQueryItems(directory: directory, workspaceID: workspaceID),
+            directoryHeader: directory
+        )
     }
 
-    func updateSessionTitle(sessionID: String, title: String) async throws -> OpenCodeSession {
-        try await send(path: "/session/\(sessionID)", method: "PATCH", body: UpdateSessionRequest(title: title))
+    func updateSessionTitle(sessionID: String, title: String, directory: String? = nil, workspaceID: String? = nil) async throws -> OpenCodeSession {
+        try await send(
+            path: "/session/\(sessionID)",
+            method: "PATCH",
+            queryItems: scopedQueryItems(directory: directory, workspaceID: workspaceID),
+            body: UpdateSessionRequest(title: title),
+            directoryHeader: directory
+        )
+    }
+
+    func archiveSession(sessionID: String, directory: String? = nil, workspaceID: String? = nil, archivedAt: Date = Date()) async throws -> OpenCodeSession {
+        try await send(
+            path: "/session/\(sessionID)",
+            method: "PATCH",
+            queryItems: scopedQueryItems(directory: directory, workspaceID: workspaceID),
+            body: UpdateSessionRequest(
+                title: nil,
+                time: UpdateSessionTimeRequest(archived: archivedAt.timeIntervalSince1970 * 1000)
+            ),
+            directoryHeader: directory
+        )
     }
 
     func createSession(title: String?, directory: String? = nil) async throws -> OpenCodeSession {

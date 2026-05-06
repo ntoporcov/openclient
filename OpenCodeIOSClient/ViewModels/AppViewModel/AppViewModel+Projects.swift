@@ -2,47 +2,19 @@ import Foundation
 import SwiftUI
 
 extension AppViewModel {
-    private struct DirectorySearchScope {
-        let directory: String
-        let path: String
-        let isPathLike: Bool
-        let displayPrefix: String?
-    }
-
     func prepareDirectorySelection(_ directory: String?) {
         preserveCurrentMessageDraftForNavigation()
         withAnimation(opencodeSelectionAnimation) {
             selectedDirectory = directory
             selectedProjectContentTab = .sessions
-            directoryState.isLoadingSessions = true
-            directoryState.selectedSession = nil
-            directoryState.isLoadingSelectedSession = false
-            directoryState.messages = []
-            directoryState.todos = []
-            directoryState.permissions = []
-            directoryState.questions = []
-            directoryState.mcpStatuses = [:]
-            directoryState.isMCPReady = false
-            directoryState.isLoadingMCP = false
-            directoryState.togglingMCPServerNames = []
-            directoryState.mcpErrorMessage = nil
-            directoryState.vcsInfo = nil
-            directoryState.vcsFileStatuses = []
-            directoryState.vcsDiffsByMode = [:]
-            directoryState.selectedVCSMode = .git
-            directoryState.selectedVCSFile = nil
+            isLoadingSessions = true
+            selectedSession = nil
+            isLoadingSelectedSession = false
+            messages = []
+            sessionInteractionStore.reset()
+            mcpStore.reset()
+            projectFilesStore.reset()
             selectedFilesWorkspaceDirectory = nil
-            directoryState.projectFilesMode = .changes
-            directoryState.fileTreeRootNodes = []
-            directoryState.fileTreeChildrenByParentPath = [:]
-            directoryState.expandedFileTreeDirectories = []
-            directoryState.selectedProjectFilePath = nil
-            directoryState.fileContentsByPath = [:]
-            directoryState.isLoadingFileTree = false
-            directoryState.isLoadingSelectedFileContent = false
-            directoryState.fileTreeErrorMessage = nil
-            directoryState.fileContentErrorMessage = nil
-            directoryState.vcsErrorMessage = nil
         }
     }
 
@@ -103,61 +75,21 @@ extension AppViewModel {
     }
 
     func searchProjects() async {
-        let query = projectSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else {
-            projectSearchResults = []
-            return
-        }
-
-        do {
-            projectSearchResults = try await client.findFiles(query: query, directory: defaultSearchRoot)
-                .filter { $0.hasSuffix("/") }
-                .map { value in
-                    let trimmed = String(value.dropLast())
-                    if trimmed.hasPrefix("/") { return trimmed }
-                    return defaultSearchRoot + "/" + trimmed
-                }
-        } catch {
-            projectSearchResults = []
-        }
+        projectSearchResults = await projectCoordinator.searchProjects(
+            client: client,
+            query: projectSearchQuery,
+            defaultSearchRoot: defaultSearchRoot
+        )
     }
 
     func searchCreateProjectDirectories() async {
-        let query = cleanedDirectorySearchInput(createProjectQuery)
-
-        do {
-            if query.isEmpty {
-                createProjectSelectedDirectory = nil
-                createProjectResults = try await client.listFiles(directory: "/")
-                    .filter { $0.type == "directory" }
-                    .map(\.absolute)
-                return
-            }
-
-            guard let scope = directorySearchScope(for: query) else {
-                createProjectResults = []
-                return
-            }
-
-            if scope.isPathLike {
-                let results = try await pathAutocompleteResults(for: scope)
-                createProjectSelectedDirectory = try await resolveCreateProjectDirectory(for: query, scope: scope)
-                createProjectResults = Array(results.prefix(50))
-                return
-            }
-
-            createProjectSelectedDirectory = nil
-            createProjectResults = try await client.findFiles(query: query, directory: defaultSearchRoot)
-                .filter { $0.hasSuffix("/") }
-                .map { value in
-                    let trimmed = String(value.dropLast())
-                    if trimmed.hasPrefix("/") { return trimmed }
-                    return defaultSearchRoot + "/" + trimmed
-                }
-        } catch {
-            createProjectSelectedDirectory = nil
-            createProjectResults = []
-        }
+        let result = await projectCoordinator.searchCreateProjectDirectories(
+            client: client,
+            query: createProjectQuery,
+            defaultSearchRoot: defaultSearchRoot
+        )
+        createProjectSelectedDirectory = result.selectedDirectory
+        createProjectResults = result.results
     }
 
     func selectCreateProjectDirectory(_ directory: String) async {
@@ -170,46 +102,30 @@ extension AppViewModel {
     }
 
     func createProjectResultPath(_ absolute: String) -> String {
-        let query = cleanedDirectorySearchInput(createProjectQuery)
-        guard query.hasPrefix("~") else { return absolute }
-        let home = defaultSearchRoot
-        if absolute == home { return "~" }
-        if absolute.hasPrefix(home + "/") {
-            return "~" + String(absolute.dropFirst(home.count))
-        }
-        return absolute
+        projectCoordinator.createProjectResultPath(
+            absolute,
+            query: createProjectQuery,
+            defaultSearchRoot: defaultSearchRoot
+        )
     }
 
     func createProject(from directory: String) async {
         isLoading = true
         defer { isLoading = false }
 
-        let normalizedDirectory = directory.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedDirectory.isEmpty else { return }
-
         do {
-            _ = try? await client.listSessions(directory: normalizedDirectory, roots: true, limit: 55)
-            let discovered = try await client.currentProject(directory: normalizedDirectory)
-            let projectName = URL(fileURLWithPath: normalizedDirectory).lastPathComponent
-            let selectedProjectDirectory: String
+            guard let result = try await projectCoordinator.createProject(
+                client: client,
+                directory: directory,
+                currentProjects: projects
+            ) else {
+                return
+            }
 
-            if discovered.id == "global" {
-                let localProject = OpenCodeProject(
-                    id: localProjectID(for: normalizedDirectory),
-                    worktree: normalizedDirectory,
-                    vcs: nil,
-                    name: projectName,
-                    sandboxes: nil,
-                    icon: nil,
-                    time: nil
-                )
-                mergeProjectsPreservingLocal(serverProjects: projects + [localProject])
-                selectedProjectDirectory = normalizedDirectory
+            if let nextProjects = result.projects {
+                projects = nextProjects
             } else {
-                let canonicalDirectory = discovered.worktree
-                _ = try await client.updateProject(projectID: discovered.id, directory: canonicalDirectory, name: projectName)
                 try await refreshProjects()
-                selectedProjectDirectory = canonicalDirectory
             }
 
             createProjectQuery = ""
@@ -218,7 +134,7 @@ extension AppViewModel {
             withAnimation(opencodeSelectionAnimation) {
                 isShowingCreateProjectSheet = false
             }
-            await selectDirectory(selectedProjectDirectory)
+            await selectDirectory(result.selectedDirectory)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -239,32 +155,17 @@ extension AppViewModel {
                 isShowingProjectPicker = false
             }
         } catch {
-            directoryState.isLoadingSessions = false
+            isLoadingSessions = false
             errorMessage = error.localizedDescription
         }
     }
 
     func selectProject(_ project: OpenCodeProject?) async {
-        guard let project else {
-            withAnimation(opencodeSelectionAnimation) {
-                currentProject = projects.first(where: { $0.id == "global" })
-            }
-            await selectDirectory(nil)
-            return
-        }
-
-        if project.id == "global" {
-            withAnimation(opencodeSelectionAnimation) {
-                currentProject = project
-            }
-            await selectDirectory(nil)
-            return
-        }
-
+        let selection = projectCoordinator.selectionResult(for: project, projects: projects)
         withAnimation(opencodeSelectionAnimation) {
-            currentProject = project
+            currentProject = selection.currentProject
         }
-        await selectDirectory(project.worktree)
+        await selectDirectory(selection.selectedDirectory)
     }
 
     var projectScopeTitle: String {
@@ -289,146 +190,14 @@ extension AppViewModel {
     }
 
     func refreshProjects() async throws {
-        let serverProjects = try await client.listProjects()
-        mergeProjectsPreservingLocal(serverProjects: serverProjects)
-        let serverProject = try? await client.currentProject()
-        reconcileCurrentProjectSelection(serverProject: serverProject)
-    }
-
-    private func cleanedDirectorySearchInput(_ value: String) -> String {
-        value
-            .components(separatedBy: .newlines).first?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
-
-    private func directorySearchScope(for query: String) -> DirectorySearchScope? {
-        if query.hasPrefix("~/") {
-            return .init(directory: defaultSearchRoot, path: String(query.dropFirst(2)), isPathLike: true, displayPrefix: "~")
-        }
-
-        if query == "~" {
-            return .init(directory: defaultSearchRoot, path: "", isPathLike: true, displayPrefix: "~")
-        }
-
-        if query.hasPrefix("/") {
-            return .init(directory: "/", path: String(query.dropFirst()), isPathLike: true, displayPrefix: nil)
-        }
-
-        if query.contains("/") {
-            return .init(directory: defaultSearchRoot, path: query, isPathLike: true, displayPrefix: nil)
-        }
-
-        return .init(directory: defaultSearchRoot, path: query, isPathLike: false, displayPrefix: nil)
-    }
-
-    private func pathAutocompleteResults(for scope: DirectorySearchScope) async throws -> [String] {
-        let normalizedPath = scope.path.replacingOccurrences(of: "//", with: "/")
-        let trimmedTrailingSlash = normalizedPath.hasSuffix("/") ? String(normalizedPath.dropLast()) : normalizedPath
-
-        let parentPath: String
-        let partialName: String
-        let shouldListChildrenDirectly = normalizedPath.isEmpty || normalizedPath.hasSuffix("/")
-
-        if shouldListChildrenDirectly {
-            parentPath = trimmedTrailingSlash
-            partialName = ""
-        } else if let slashIndex = trimmedTrailingSlash.lastIndex(of: "/") {
-            parentPath = String(trimmedTrailingSlash[..<slashIndex])
-            partialName = String(trimmedTrailingSlash[trimmedTrailingSlash.index(after: slashIndex)...])
-        } else {
-            parentPath = ""
-            partialName = trimmedTrailingSlash
-        }
-
-        let nodes = try await client.listFiles(directory: scope.directory, path: parentPath)
-        let directories = nodes
-            .filter { $0.type == "directory" }
-            .map(\.absolute)
-
-        guard !partialName.isEmpty else {
-            return directories.sorted()
-        }
-
-        let lowercasedPartial = partialName.lowercased()
-        let prefixMatches = directories.filter {
-            URL(fileURLWithPath: $0).lastPathComponent.lowercased().hasPrefix(lowercasedPartial)
-        }
-        if !prefixMatches.isEmpty {
-            return prefixMatches.sorted()
-        }
-
-        let containsMatches = directories.filter {
-            URL(fileURLWithPath: $0).lastPathComponent.lowercased().contains(lowercasedPartial)
-        }
-        return containsMatches.sorted()
-    }
-
-    private func localProjectID(for directory: String) -> String {
-        "local:\(directory)"
-    }
-
-    private func mergeProjectsPreservingLocal(serverProjects: [OpenCodeProject]) {
-        let localProjects = projects.filter { $0.id.hasPrefix("local:") }
-        var merged: [String: OpenCodeProject] = [:]
-
-        for project in localProjects {
-            merged[project.id] = project
-        }
-
-        for project in serverProjects {
-            merged[project.id] = project
-        }
-
-        projects = merged.values.sorted { lhs, rhs in
-            if lhs.id == "global" { return true }
-            if rhs.id == "global" { return false }
-            return (lhs.name ?? lhs.worktree) < (rhs.name ?? rhs.worktree)
-        }
-    }
-
-    private func resolveCreateProjectDirectory(for query: String, scope: DirectorySearchScope) async throws -> String? {
-        guard scope.isPathLike,
-              let candidate = absoluteDirectoryCandidate(for: query, scope: scope) else {
-            return nil
-        }
-
-        _ = try await client.listFiles(directory: candidate, path: "")
-        return candidate
-    }
-
-    private func absoluteDirectoryCandidate(for query: String, scope: DirectorySearchScope) -> String? {
-        if query == "~" || query == "~/" {
-            return defaultSearchRoot
-        }
-
-        if query == "/" {
-            return "/"
-        }
-
-        let trimmedPath = scope.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if trimmedPath.isEmpty {
-            return scope.directory
-        }
-
-        let baseURL = URL(fileURLWithPath: scope.directory, isDirectory: true)
-        return baseURL.appendingPathComponent(trimmedPath, isDirectory: true).path
-    }
-
-    func reconcileCurrentProjectSelection(serverProject: OpenCodeProject?) {
-        if let selectedDirectory, !selectedDirectory.isEmpty {
-            currentProject = projects.first(where: { $0.worktree == selectedDirectory })
-                ?? serverProject.flatMap { project in
-                    project.worktree == selectedDirectory ? project : nil
-                }
-            return
-        }
-
-        guard currentProject != nil else { return }
-
-        currentProject = projects.first(where: { $0.id == "global" })
-            ?? serverProject.flatMap { project in
-                project.id == "global" ? project : nil
-            }
+        let result = try await projectCoordinator.refreshProjects(
+            client: client,
+            currentProjects: projects,
+            currentProject: currentProject,
+            selectedDirectory: selectedDirectory
+        )
+        projects = result.projects
+        currentProject = result.currentProject
     }
 
     func loadSessionPreviews() -> [String: SessionPreview] {
@@ -497,14 +266,13 @@ extension AppViewModel {
     }
 
     func setSessionPreview(_ preview: SessionPreview, for sessionID: String) {
-        guard sessionPreviews[sessionID] != preview else { return }
-        sessionPreviews[sessionID] = preview
+        guard sessionListStore.setPreview(preview, for: sessionID) else { return }
         persistSessionPreviews()
         publishWidgetSnapshots()
     }
 
     func removeSessionPreview(for sessionID: String) {
-        sessionPreviews[sessionID] = nil
+        sessionListStore.removePreview(for: sessionID)
         persistSessionPreviews()
         removeWidgetSessionSnapshot(for: sessionID)
     }
@@ -559,38 +327,16 @@ extension AppViewModel {
     }
 
     func removePinnedSessionIDFromAllScopes(_ sessionID: String) {
-        var next = pinnedSessionIDsByScope
-
-        for (key, ids) in pinnedSessionIDsByScope {
-            let filtered = ids.filter { $0 != sessionID }
-            if filtered.isEmpty {
-                next[key] = nil
-            } else {
-                next[key] = filtered
-            }
-        }
-
-        guard next != pinnedSessionIDsByScope else { return }
-        pinnedSessionIDsByScope = next
+        guard sessionListStore.removePinnedSessionIDFromAllScopes(sessionID) else { return }
+        objectWillChange.send()
         persistPinnedSessionIDsByScope()
         publishWidgetSnapshots()
     }
 
     func setPinnedSessionIDs(_ sessionIDs: [String], for scopeKey: String? = nil) {
         let key = scopeKey ?? currentPinScopeKey
-        var deduplicated: [String] = []
-        var seen = Set<String>()
-
-        for sessionID in sessionIDs where seen.insert(sessionID).inserted {
-            deduplicated.append(sessionID)
-        }
-
-        if deduplicated.isEmpty {
-            pinnedSessionIDsByScope[key] = nil
-        } else {
-            pinnedSessionIDsByScope[key] = deduplicated
-        }
-
+        objectWillChange.send()
+        sessionListStore.setPinnedSessionIDs(sessionIDs, for: key)
         persistPinnedSessionIDsByScope()
         publishWidgetSnapshots()
     }
@@ -625,7 +371,7 @@ extension AppViewModel {
 
     var actionEligibleCommands: [OpenCodeCommand] {
         var seen = Set<String>()
-        return directoryState.commands
+        return directoryCommands
             .filter { command in
                 guard command.source != "client" else { return false }
                 return seen.insert(command.name).inserted

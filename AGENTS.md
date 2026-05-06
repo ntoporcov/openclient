@@ -333,6 +333,110 @@ The current refactor should continue in this order.
 - Views should consume derived project/session/chat state from a thin facade.
 - Avoid direct mutation paths from views into raw arrays/maps held by `AppViewModel`.
 
+## State Separation Map
+
+The long-term direction is for `AppViewModel` to become a coordinator/facade rather than the owner of canonical app data. It may route user actions, select the active stores, and expose view-facing derived state, but domain state should live in focused stores that can be hydrated, reduced, cached, and tested independently.
+
+### Highest-priority surfaces
+
+- **Connection/app shell state**
+  - Current state includes `config`, `backendMode`, `isConnected`, `serverVersion`, `isLoading`, `errorMessage`, recent servers, and saved-server sheet state.
+  - Target owner: `ConnectionStore` or `AppSessionStore`.
+  - Keep this global. It should coordinate global bootstrap and teardown without owning project/session/chat arrays.
+
+- **Project state**
+  - Current state includes `projects`, `currentProject`, `selectedDirectory`, project picker/search state, and create-project form state.
+  - Target owner: `ProjectStore`.
+  - This store should expose the active directory scope used by directory/session stores.
+
+- **Directory/workspace sync state**
+  - Current state is mostly `OpenCodeDirectoryState`.
+  - Target owner: `DirectoryStore`, keyed by directory, with missing directory treated as `global`.
+  - This should own directory bootstrap state, sessions, commands, statuses, pending interactions, and session-local child stores.
+
+- **Session list state**
+  - Current state includes `directoryState.sessions`, `sessionPreviews`, `pinnedSessionIDsByScope`, `workspaceSessionsByDirectory`, and `pendingActionRunsBySessionID`.
+  - Target owner: `SessionStore` or a session-list slice inside `DirectoryStore`.
+  - The session list should consume a prepared snapshot rather than assembling rows directly from unrelated `AppViewModel` maps.
+
+- **Chat session state**
+  - Current state includes `directoryState.messages`, `cachedMessagesBySessionID`, `toolMessageDetails`, selected-session hydration flags, and stream/transcript buffering.
+  - Target owner: `ChatStore` per session, backed later by SwiftData/Core Data as a read-through cache.
+  - Chat open should read cached messages immediately, then reconcile from server bootstrap and live SSE events.
+
+### Next-priority surfaces
+
+- **Composer state**
+  - Current state includes `draftMessage`, `draftAttachments`, `messageDraftsByChatKey`, `composerResetToken`, and active composer focus/streaming flags.
+  - Target owner: `ComposerStore`, scoped per session and persisted by server/workspace/session key.
+  - Navigation should save/restore drafts through this store rather than mutating active draft fields directly.
+
+- **Model, agent, and command configuration**
+  - Current state includes `availableAgents`, `availableProviders`, `defaultModelsByProviderID`, `newSessionDefaults`, `selectedAgentNamesBySessionID`, `selectedModelsBySessionID`, and `selectedVariantsBySessionID`.
+  - Target owner: `ModelConfigurationStore`.
+  - This store should provide defaults for new sessions and effective selections for sends/actions.
+
+- **Permissions and questions**
+  - Current state includes `directoryState.permissions` and `directoryState.questions`.
+  - Target owner: `SessionInteractionStore` or the interaction slice inside `ChatStore`.
+  - Permissions/questions are first-class pending user actions. They should be hydrated up front, reduced from live events, and cleaned up by lifecycle events per session.
+
+- **Todos**
+  - Current state includes `directoryState.todos`.
+  - Target owner: `SessionTodoStore` or the todo slice inside `ChatStore`.
+  - Todos are session-local. `GET /session/:id/todo` remains the source of truth, with `todo.updated` reducing the active cache.
+
+- **VCS/files state**
+  - Current state includes `vcsInfo`, `vcsFileStatuses`, `vcsDiffsByMode`, `selectedVCSMode`, `selectedVCSFile`, `projectFilesMode`, file tree nodes/children, selected file, file contents, and loading/error flags.
+  - Target owner: `ProjectFilesStore` or `VCSStore`, scoped by project/directory/workspace.
+  - Files/Git is a separate product surface from chat and should have its own loading lifecycle and cache.
+
+- **MCP state**
+  - Current state includes `mcpStatuses`, `isMCPReady`, `isLoadingMCP`, `togglingMCPServerNames`, and `mcpErrorMessage`.
+  - Target owner: `MCPStore`, scoped by active directory.
+  - MCP status should be loaded and toggled independently of chat/session selection.
+
+### Lower-priority or side-effect surfaces
+
+- **Live Activities**
+  - Target owner: `LiveActivityStore`.
+  - ActivityKit should consume session/chat snapshots from sync stores and manage ActivityKit tasks/state separately.
+
+- **Widgets**
+  - Target owner: `WidgetSnapshotPublisher`.
+  - Widget publishing should be a side-effect of project/session/preview changes, not a responsibility of the main coordinator.
+
+- **Commerce and paywall**
+  - Target owner: `CommerceStore`.
+  - Entitlements, usage metering, and paywall presentation are app-global business state. Session creation and send-message paths should query this store.
+
+- **Apple Intelligence local workspace mode**
+  - Target owner: `AppleIntelligenceWorkspaceStore`.
+  - Treat this as a second backend that implements the same project/session/chat facade shape where practical.
+
+- **Debug probe and streaming diagnostics**
+  - Target owner: `DiagnosticsStore`.
+  - Diagnostics should observe the event pipeline and transcript buffering without owning canonical chat state.
+
+- **Fun and Games**
+  - Target owner: `FunAndGamesStore`.
+  - Feature-specific game state can annotate sessions, but should not live in the core app coordinator.
+
+### Extraction order
+
+1. Wrap the existing `OpenCodeDirectoryState` in a `DirectoryStore` without changing behavior.
+2. Split session-list and chat-session state out of that wrapper once callers route through the store.
+3. Move composer drafts and model/agent selections into dedicated stores.
+4. Move VCS/files and MCP into separate directory-scoped stores.
+5. Move Live Activities, Widgets, Commerce, Diagnostics, Apple Intelligence, and Fun/Games into side-effect or feature stores.
+
+### Local cache direction
+
+- A local database should be introduced as a read-through cache behind the sync stores, not as a replacement source of truth.
+- Good cache candidates are projects, sessions, messages, message parts, todos, and pending permissions/questions.
+- The OpenCode server remains canonical. Bootstrap reconciles cache state, SSE events update memory and cache, and full server responses win over stale local data.
+- Persist reducer-applied state transitions where possible. Avoid adding database writes as another ad hoc mutation path inside `AppViewModel`.
+
 ## Feedback Workflow
 
 This project is being shaped iteratively from hands-on device feedback.

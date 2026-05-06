@@ -797,7 +797,6 @@ private struct ReaderModeScrollRequest: Equatable {
 private struct PendingOutgoingSend {
     let text: String
     let attachments: [OpenCodeComposerAttachment]
-    let shouldAnimateBubble: Bool
     let messageID: String?
     let partID: String?
 }
@@ -1045,7 +1044,6 @@ private struct FallbackMedalView: View {
 
 private final class ChatViewTaskStore {
     var keyboardBottomSnapTask: Task<Void, Never>?
-    var composerBottomFollowTask: Task<Void, Never>?
     var readerModeScrollTask: Task<Void, Never>?
     var mountAnimationCleanupTask: Task<Void, Never>?
     var delayedLoadingIndicatorTask: Task<Void, Never>?
@@ -1105,7 +1103,81 @@ private struct MessageBubbleSnapshot: Equatable {
     let animatesStreamingText: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
-    let entrySourceFrame: CGRect?
+}
+
+private struct MessageRowRenderSnapshot {
+    let bubble: MessageBubbleSnapshot
+    let transition: AnyTransition
+}
+
+private struct CompactionRowRenderSnapshot {
+    let hasSummary: Bool
+    let isStreaming: Bool
+    let isDisabled: Bool
+}
+
+private struct LargeMessageChunkRowRenderSnapshot {
+    let text: String
+    let allowsTextSelection: Bool
+    let isStreamingTail: Bool
+    let animatesStreamingText: Bool
+    let bottomPadding: CGFloat
+}
+
+private struct ThinkingRowRenderSnapshot {
+    let animateEntry: Bool
+}
+
+private struct BottomRefreshRenderSnapshot {
+    let showsIndicator: Bool
+    let progress: CGFloat
+    let isRefreshing: Bool
+    let colorIsActive: Bool
+}
+
+private struct ChatProgressOverlaySnapshot {
+    let title: String
+    let accessibilityLabel: String
+}
+
+private struct ReaderModeSpacerSnapshot {
+    let height: CGFloat
+    let id: String
+}
+
+private enum ChatOverlayKind {
+    case forkPreparation
+    case delayedLoading
+}
+
+private struct ChatOverlayVisibilitySnapshot {
+    let visibleOverlay: ChatOverlayKind?
+}
+
+private struct DelayedLoadingIndicatorSnapshot {
+    let shouldDelay: Bool
+}
+
+private enum ComposerOverlayMode {
+    case permissions
+    case questions
+    case childSessionNotice
+    case activeComposer
+}
+
+private struct ComposerOverlayModeSnapshot {
+    let mode: ComposerOverlayMode
+}
+
+private struct ChatDisplaySnapshot {
+    let messages: [OpenCodeMessageEnvelope]
+    let hiddenMessageCount: Int
+    let items: [ChatDisplayItem]
+    let showsThinking: Bool
+
+    var itemIDs: [String] {
+        items.map(\.id) + (showsThinking ? [ChatScrollTarget.thinkingRow] : [])
+    }
 }
 
 private struct EquatableMessageBubbleHost: View, Equatable {
@@ -1130,7 +1202,6 @@ private struct EquatableMessageBubbleHost: View, Equatable {
             animatesStreamingText: snapshot.animatesStreamingText,
             reserveEntryFromComposer: snapshot.reserveEntryFromComposer,
             animateEntryFromComposer: snapshot.animateEntryFromComposer,
-            entrySourceFrame: snapshot.entrySourceFrame,
             resolveTaskSessionID: resolveTaskSessionID,
             onSelectPart: onSelectPart,
             onOpenTaskSession: onOpenTaskSession,
@@ -1163,7 +1234,6 @@ private struct EquatableMessageComposerHost: View, Equatable {
     let togglingMCPServerNames: Set<String>
     let mcpErrorMessage: String?
     let actionSignature: String
-    let onInputFrameChange: (CGRect) -> Void
     let onFocusChange: (Bool) -> Void
     let onTextChange: (String) -> Void
     let onSend: () -> Void
@@ -1197,7 +1267,6 @@ private struct EquatableMessageComposerHost: View, Equatable {
             isLoadingMCP: isLoadingMCP,
             togglingMCPServerNames: togglingMCPServerNames,
             mcpErrorMessage: mcpErrorMessage,
-            onInputFrameChange: onInputFrameChange,
             onFocusChange: onFocusChange,
             onTextChange: onTextChange,
             onSend: onSend,
@@ -1238,16 +1307,12 @@ struct ChatView: View {
     @State private var pendingOutgoingSend: PendingOutgoingSend?
     @State private var pendingOutgoingSendTask: Task<Void, Never>?
     @State private var outgoingEntryResetTask: Task<Void, Never>?
-    @State private var thinkingRowRevealTask: Task<Void, Never>?
     @State private var isThinkingRowRevealAllowed = true
     @State private var preparingOutgoingMessageID: String?
     @State private var animatingOutgoingMessageID: String?
     @State private var outgoingEntryAnimationStartedMessageIDs: Set<String> = []
-    @State private var outgoingEntrySourceFrame: CGRect?
-    @State private var composerInputFrame: CGRect = .zero
     @State private var hasCompletedInitialHydrationSnap = false
     @State private var chatMountAnimationStartDate: Date?
-    @State private var composerOverlayHeight: CGFloat = 0
     @State private var isScrollGeometryAtBottom = true
     @State private var isRefreshingChatData = false
     @State private var showsDelayedLoadingIndicator = false
@@ -1267,17 +1332,23 @@ struct ChatView: View {
     private let bottomRefreshThreshold: CGFloat = 72
     private let bottomRefreshIndicatorHeight: CGFloat = 34
     private let collapsedTailSpacerHeight: CGFloat = 1
+    private let outgoingRequestDelayMS = 720
+    private let thinkingRevealHoldMS = 140
     private let readerModeSentMessageAnchor = UnitPoint(x: 0.5, y: 0.14)
+    private var composerOverlaySnapshot: AppViewModel.ChatComposerOverlaySnapshot {
+        viewModel.chatComposerOverlaySnapshot(forSessionID: sessionID)
+    }
+
     private var todoIDs: String {
-        viewModel.todos.map { $0.id }.joined(separator: "|")
+        composerOverlaySnapshot.todos.map { $0.id }.joined(separator: "|")
     }
 
     private var permissionIDs: String {
-        viewModel.permissions(for: sessionID).map { $0.id }.joined(separator: "|")
+        composerOverlaySnapshot.permissions.map { $0.id }.joined(separator: "|")
     }
 
     private var questionIDs: String {
-        viewModel.questions(for: sessionID).map { $0.id }.joined(separator: "|")
+        composerOverlaySnapshot.questions.map { $0.id }.joined(separator: "|")
     }
 
     private var liveSession: OpenCodeSession {
@@ -1303,16 +1374,6 @@ struct ChatView: View {
         isSessionBusy || pendingOutgoingSend != nil
     }
 
-    private var composerActionSignature: String {
-        [
-            liveSession.id,
-            liveSession.directory ?? "",
-            liveSession.workspaceID ?? "",
-            liveSession.projectID ?? "",
-            liveSession.parentID ?? ""
-        ].joined(separator: "|")
-    }
-
     private var shouldAnimateStreamingText: Bool {
         true
     }
@@ -1321,33 +1382,18 @@ struct ChatView: View {
         readerModeSpacerHeight > collapsedTailSpacerHeight + 0.5
     }
 
-    private var isChildSession: Bool {
-        liveSession.parentID != nil
-    }
-
-    private var parentSession: OpenCodeSession? {
-        viewModel.parentSession(for: liveSession)
-    }
-
-    private var childSessionTitle: String {
-        viewModel.childSessionTitle(for: liveSession)
-    }
-
-    private var parentSessionTitle: String {
-        viewModel.parentSessionTitle(for: liveSession)
+    private var chatHeaderSnapshot: AppViewModel.ChatSessionHeaderSnapshot {
+        viewModel.chatSessionHeaderSnapshot(for: liveSession)
     }
 
     private var chatItemChangeAnimation: Animation? {
         if isReaderModeActive { return nil }
-        return isSendChoreographyActive ? sendChoreographyAnimation : (isSessionBusy ? nil : .snappy(duration: 0.28, extraBounce: 0.02))
+        if isSendChoreographyActive { return nil }
+        return isSessionBusy ? nil : .snappy(duration: 0.28, extraBounce: 0.02)
     }
 
     private var isSendChoreographyActive: Bool {
         pendingOutgoingSend != nil || preparingOutgoingMessageID != nil || animatingOutgoingMessageID != nil
-    }
-
-    private var sendChoreographyAnimation: Animation {
-        .spring(response: 0.42, dampingFraction: 0.86)
     }
 
     var body: some View {
@@ -1357,16 +1403,15 @@ struct ChatView: View {
 
             GeometryReader { geometry in
                 ScrollViewReader { proxy in
-                    let chatItems = displayedChatItems
-                    let chatItemIDs = chatItems.map(\.id) + (shouldShowThinking ? [ChatScrollTarget.thinkingRow] : [])
+                    let displaySnapshot = chatDisplaySnapshot
 
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            if hiddenMessageCount > 0 {
+                            if displaySnapshot.hiddenMessageCount > 0 {
                                 Button {
                                     visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
                                 } label: {
-                                    Text("View older messages (\(hiddenMessageCount))")
+                                    Text("View older messages (\(displaySnapshot.hiddenMessageCount))")
                                         .font(.subheadline.weight(.medium))
                                         .foregroundStyle(.blue)
                                         .frame(maxWidth: .infinity)
@@ -1378,11 +1423,11 @@ struct ChatView: View {
                                 .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
                             }
 
-                            ForEach(chatItems) { item in
+                            ForEach(displaySnapshot.items) { item in
                                 chatRow(for: item)
                             }
 
-                            if shouldShowThinking {
+                            if displaySnapshot.showsThinking {
                                 thinkingRowListItem
                             }
 
@@ -1392,7 +1437,7 @@ struct ChatView: View {
                         }
                     }
                     .defaultScrollAnchor(.bottom)
-                    .animation(chatItemChangeAnimation, value: chatItemIDs)
+                    .animation(chatItemChangeAnimation, value: displaySnapshot.itemIDs)
                     .chatScrollBottomTracking($isScrollGeometryAtBottom)
                     .simultaneousGesture(bottomOverscrollRefreshGesture)
                     .opencodeInteractiveKeyboardDismiss()
@@ -1410,11 +1455,6 @@ struct ChatView: View {
                         chatViewportHeight = height
                         guard isReaderModeActive else { return }
                         readerModeSpacerHeight = height * 0.5
-                    }
-                    .onChange(of: composerOverlayHeight) { oldHeight, newHeight in
-                        guard abs(newHeight - oldHeight) > 1 else { return }
-                        guard isScrollGeometryAtBottom, !isReaderModeActive else { return }
-                        scheduleComposerBottomFollow(with: proxy)
                     }
                     .onChange(of: viewModel.messages.count) { oldCount, count in
                         visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
@@ -1444,15 +1484,16 @@ struct ChatView: View {
                 }
             }
 
-            if showsDelayedLoadingIndicator {
+            if chatOverlayVisibilitySnapshot.visibleOverlay == .forkPreparation {
+                forkPreparationOverlay
+            } else if chatOverlayVisibilitySnapshot.visibleOverlay == .delayedLoading {
                 delayedLoadingOverlay
             }
         }
-        .coordinateSpace(name: "chat-view-space")
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composerOverlay
         }
-        .navigationTitle(isChildSession ? childSessionTitle : (liveSession.title ?? "Session"))
+        .navigationTitle(chatHeaderSnapshot.navigationTitle)
         .opencodeInlineNavigationTitle()
         .onAppear {
             viewModel.activeChatSessionID = sessionID
@@ -1463,14 +1504,12 @@ struct ChatView: View {
             persistComposerDraftNow()
             viewModel.setComposerStreamingFocus(false)
             taskStore.keyboardBottomSnapTask?.cancel()
-            taskStore.composerBottomFollowTask?.cancel()
             taskStore.readerModeScrollTask?.cancel()
             taskStore.mountAnimationCleanupTask?.cancel()
             taskStore.delayedLoadingIndicatorTask?.cancel()
             taskStore.composerDraftPersistenceTask?.cancel()
             pendingOutgoingSendTask?.cancel()
             outgoingEntryResetTask?.cancel()
-            thinkingRowRevealTask?.cancel()
             readerModeSpacerHeight = collapsedTailSpacerHeight
             readerModeScrollRequest = nil
             showsDelayedLoadingIndicator = false
@@ -1546,7 +1585,8 @@ struct ChatView: View {
             }
         }
         .onChange(of: accessoryPresenceSignature) { _, _ in
-            if viewModel.draftAttachments.isEmpty || viewModel.todos.allSatisfy(\.isComplete) {
+            let overlaySnapshot = composerOverlaySnapshot
+            if overlaySnapshot.attachments.isEmpty || overlaySnapshot.todos.allSatisfy(\.isComplete) {
                 composerAccessoryExpansion = .collapsed
             }
         }
@@ -1556,7 +1596,7 @@ struct ChatView: View {
         .onChange(of: viewModel.composerResetToken) { _, _ in
             syncComposerDraftFromViewModel()
         }
-        .onChange(of: viewModel.directoryState.isLoadingSelectedSession) { _, _ in
+        .onChange(of: viewModel.isLoadingSelectedSession) { _, _ in
             updateDelayedLoadingIndicator()
         }
     }
@@ -1601,12 +1641,16 @@ struct ChatView: View {
         viewModel.composerResetToken = UUID()
     }
 
+    @ViewBuilder
     private var composerStack: some View {
+        let overlaySnapshot = composerOverlaySnapshot
+        let modeSnapshot = composerOverlayModeSnapshot(overlaySnapshot: overlaySnapshot, headerSnapshot: chatHeaderSnapshot)
+
         VStack(spacing: 6) {
-            if viewModel.todos.contains(where: { !$0.isComplete }) || !viewModel.draftAttachments.isEmpty {
+            if overlaySnapshot.showsAccessoryArea {
                 ComposerAccessoryArea(
-                    todos: viewModel.todos,
-                    attachments: viewModel.draftAttachments,
+                    todos: overlaySnapshot.todos,
+                    attachments: overlaySnapshot.attachments,
                     expansion: $composerAccessoryExpansion,
                     onTapTodo: {
                         showingTodoInspector = true
@@ -1621,12 +1665,10 @@ struct ChatView: View {
                 .padding(.horizontal, 16)
             }
 
-            let permissions = viewModel.permissions(for: sessionID)
-            let questions = viewModel.questions(for: sessionID)
-
-            if !permissions.isEmpty {
+            switch modeSnapshot.mode {
+            case .permissions:
                 PermissionActionStack(
-                    permissions: permissions,
+                    permissions: overlaySnapshot.permissions,
                     onDismiss: { permission in
                         viewModel.dismissPermission(permission)
                     },
@@ -1636,9 +1678,9 @@ struct ChatView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-            } else if !questions.isEmpty {
+            case .questions:
                 QuestionPanel(
-                    requests: questions,
+                    requests: overlaySnapshot.questions,
                     answers: $questionAnswers,
                     customAnswers: $questionCustomAnswers,
                     onDismiss: { request in
@@ -1650,15 +1692,12 @@ struct ChatView: View {
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-            } else {
-                let isBusy = isComposerBusy
-                if isChildSession {
-                    childSessionComposerNotice
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                } else {
-                    activeMessageComposer(isBusy: isBusy)
-                }
+            case .childSessionNotice:
+                childSessionComposerNotice(headerSnapshot: chatHeaderSnapshot)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            case .activeComposer:
+                activeMessageComposer(isBusy: isComposerBusy)
             }
         }
         .transaction { transaction in
@@ -1666,32 +1705,40 @@ struct ChatView: View {
         }
     }
 
+    private func composerOverlayModeSnapshot(
+        overlaySnapshot: AppViewModel.ChatComposerOverlaySnapshot,
+        headerSnapshot: AppViewModel.ChatSessionHeaderSnapshot
+    ) -> ComposerOverlayModeSnapshot {
+        if !overlaySnapshot.permissions.isEmpty {
+            return ComposerOverlayModeSnapshot(mode: .permissions)
+        }
+        if !overlaySnapshot.questions.isEmpty {
+            return ComposerOverlayModeSnapshot(mode: .questions)
+        }
+        if headerSnapshot.isChildSession {
+            return ComposerOverlayModeSnapshot(mode: .childSessionNotice)
+        }
+        return ComposerOverlayModeSnapshot(mode: .activeComposer)
+    }
+
     @ViewBuilder
     private func activeMessageComposer(isBusy: Bool) -> some View {
-        let canFork = !viewModel.forkableMessages.isEmpty
-        let commands = viewModel.commands(canFork: canFork)
+        let composerSnapshot = viewModel.chatComposerSnapshot(for: liveSession, isBusy: isBusy)
+        let commands = composerSnapshot.commands
         let commandScopeKey = viewModel.currentProjectPreferenceScopeKey
         let pinnedCommands = pinnedCommandStore.pinnedCommands(from: commands, scopeKey: commandScopeKey)
         let pinnedCommandNames = Set(pinnedCommandStore.pinnedNames(for: commandScopeKey))
-        let forkableMessages = viewModel.forkableMessages
-        let forkSignature = forkableMessages
-            .map { "\($0.id):\($0.text):\($0.created ?? 0)" }
-            .joined(separator: "|")
-        let mcpServers = viewModel.mcpServers
-        let mcpSignature = mcpServers
-            .map { "\($0.name):\($0.status.status):\($0.status.error ?? "")" }
-            .joined(separator: "|") + "|loading=\(viewModel.directoryState.isLoadingMCP)|toggling=\(viewModel.directoryState.togglingMCPServerNames.sorted().joined(separator: ","))|error=\(viewModel.directoryState.mcpErrorMessage ?? "")"
         let pinnedCommandSignature = [commandScopeKey, pinnedCommands.map(\.name).joined(separator: ",")].joined(separator: "|")
         let snapshot = MessageComposerSnapshot(
             isAccessoryMenuOpenValue: isComposerMenuOpen,
             commands: commands,
-            attachmentCount: viewModel.draftAttachments.count,
-            isBusy: isBusy,
-            canFork: canFork,
-            forkSignature: forkSignature,
-            mcpSignature: mcpSignature,
+            attachmentCount: composerSnapshot.attachmentCount,
+            isBusy: composerSnapshot.isBusy,
+            canFork: composerSnapshot.canFork,
+            forkSignature: composerSnapshot.forkSignature,
+            mcpSignature: composerSnapshot.mcpSignature,
             pinnedCommandSignature: pinnedCommandSignature,
-            actionSignature: composerActionSignature
+            actionSignature: composerSnapshot.actionSignature
         )
 
         let composer = EquatableMessageComposerHost(
@@ -1702,18 +1749,15 @@ struct ChatView: View {
             pinnedCommands: pinnedCommands,
             pinnedCommandNames: pinnedCommandNames,
             attachmentCount: snapshot.attachmentCount,
-            isBusy: isBusy,
-            canFork: canFork,
-            forkableMessages: forkableMessages,
-            mcpServers: mcpServers,
-            connectedMCPServerCount: viewModel.connectedMCPServerCount,
-            isLoadingMCP: viewModel.directoryState.isLoadingMCP,
-            togglingMCPServerNames: viewModel.directoryState.togglingMCPServerNames,
-            mcpErrorMessage: viewModel.directoryState.mcpErrorMessage,
+            isBusy: composerSnapshot.isBusy,
+            canFork: composerSnapshot.canFork,
+            forkableMessages: composerSnapshot.forkableMessages,
+            mcpServers: composerSnapshot.mcp.servers,
+            connectedMCPServerCount: composerSnapshot.mcp.connectedServerCount,
+            isLoadingMCP: composerSnapshot.mcp.isLoading,
+            togglingMCPServerNames: composerSnapshot.mcp.togglingServerNames,
+            mcpErrorMessage: composerSnapshot.mcp.errorMessage,
             actionSignature: snapshot.actionSignature,
-            onInputFrameChange: { frame in
-                composerInputFrame = frame
-            },
             onFocusChange: { isFocused in
                 isComposerInputFocused = isFocused
                 viewModel.setComposerStreamingFocus(isFocused)
@@ -1784,7 +1828,7 @@ struct ChatView: View {
             .background(.clear)
     }
 
-    private var childSessionComposerNotice: some View {
+    private func childSessionComposerNotice(headerSnapshot: AppViewModel.ChatSessionHeaderSnapshot) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: "arrow.triangle.branch")
                 .font(.headline)
@@ -1802,7 +1846,7 @@ struct ChatView: View {
             Spacer(minLength: 0)
 
             Button("Back") {
-                guard let parentSession else { return }
+                guard let parentSession = headerSnapshot.parentSession else { return }
                 Task { await viewModel.selectSession(parentSession) }
             }
             .buttonStyle(.bordered)
@@ -1813,15 +1857,33 @@ struct ChatView: View {
     }
 
     private var composerOverlay: some View {
-        measuredComposerStack
+        composerStack
             .background(Color.clear)
     }
 
+    private var chatOverlayVisibilitySnapshot: ChatOverlayVisibilitySnapshot {
+        if viewModel.pendingForkSessionID == sessionID {
+            return ChatOverlayVisibilitySnapshot(visibleOverlay: .forkPreparation)
+        }
+        if showsDelayedLoadingIndicator {
+            return ChatOverlayVisibilitySnapshot(visibleOverlay: .delayedLoading)
+        }
+        return ChatOverlayVisibilitySnapshot(visibleOverlay: nil)
+    }
+
     private var delayedLoadingOverlay: some View {
+        progressOverlay(snapshot: ChatProgressOverlaySnapshot(title: "Loading chat...", accessibilityLabel: "Loading chat"))
+    }
+
+    private var forkPreparationOverlay: some View {
+        progressOverlay(snapshot: ChatProgressOverlaySnapshot(title: "Preparing fork...", accessibilityLabel: "Preparing fork"))
+    }
+
+    private func progressOverlay(snapshot: ChatProgressOverlaySnapshot) -> some View {
         VStack(spacing: 10) {
             ProgressView()
                 .controlSize(.regular)
-            Text("Loading chat...")
+            Text(snapshot.title)
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.secondary)
         }
@@ -1830,65 +1892,63 @@ struct ChatView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loading chat")
+        .accessibilityLabel(snapshot.accessibilityLabel)
     }
 
-    private var measuredComposerStack: some View {
-        composerStack
-            .background {
-                GeometryReader { geometry in
-                    Color.clear
-                        .preference(key: ComposerOverlayHeightPreferenceKey.self, value: geometry.size.height)
-                }
-            }
-            .onPreferenceChange(ComposerOverlayHeightPreferenceKey.self) { height in
-                guard abs(composerOverlayHeight - height) > 0.5 else { return }
-                composerOverlayHeight = height
-            }
-    }
-
+    @ViewBuilder
     private var bottomAnchorListItem: some View {
+        let snapshot = bottomRefreshRenderSnapshot
         VStack(spacing: 8) {
-            if shouldShowBottomRefreshIndicator {
-                bottomRefreshIndicator
+            if snapshot.showsIndicator {
+                bottomRefreshIndicator(snapshot: snapshot)
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: messageBottomPadding + bottomRefreshIndicatorHeight * bottomPullProgress)
+        .frame(height: messageBottomPadding + bottomRefreshIndicatorHeight * snapshot.progress)
     }
 
+    @ViewBuilder
     private var readerModeSpacer: some View {
+        let snapshot = readerModeSpacerSnapshot
         Color.clear
             .frame(maxWidth: .infinity)
-            .frame(height: max(collapsedTailSpacerHeight, readerModeSpacerHeight))
-            .id(ChatScrollTarget.readerModeSpacer)
+            .frame(height: snapshot.height)
+            .id(snapshot.id)
     }
 
-    private var shouldShowBottomRefreshIndicator: Bool {
-        isRefreshingChatData || bottomPullDistance > 1
+    private var readerModeSpacerSnapshot: ReaderModeSpacerSnapshot {
+        ReaderModeSpacerSnapshot(
+            height: max(collapsedTailSpacerHeight, readerModeSpacerHeight),
+            id: ChatScrollTarget.readerModeSpacer
+        )
     }
 
-    private var bottomPullProgress: CGFloat {
-        if isRefreshingChatData { return 1 }
-        return min(1, bottomPullDistance / bottomRefreshThreshold)
+    private var bottomRefreshRenderSnapshot: BottomRefreshRenderSnapshot {
+        let progress = isRefreshingChatData ? 1 : min(1, bottomPullDistance / bottomRefreshThreshold)
+        return BottomRefreshRenderSnapshot(
+            showsIndicator: isRefreshingChatData || bottomPullDistance > 1,
+            progress: progress,
+            isRefreshing: isRefreshingChatData,
+            colorIsActive: progress >= 1
+        )
     }
 
-    private var bottomRefreshIndicator: some View {
+    private func bottomRefreshIndicator(snapshot: BottomRefreshRenderSnapshot) -> some View {
         Group {
-            if isRefreshingChatData {
+            if snapshot.isRefreshing {
                 ProgressView()
                     .controlSize(.small)
             } else {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(bottomPullProgress >= 1 ? .blue : .secondary)
+                    .foregroundStyle(snapshot.colorIsActive ? .blue : .secondary)
             }
         }
         .frame(width: 28, height: 28)
-        .scaleEffect(0.55 + 0.45 * bottomPullProgress)
-        .opacity(0.25 + 0.75 * bottomPullProgress)
-        .animation(.snappy(duration: 0.18, extraBounce: 0.02), value: bottomPullProgress)
-        .animation(.easeOut(duration: 0.12), value: isRefreshingChatData)
+        .scaleEffect(0.55 + 0.45 * snapshot.progress)
+        .opacity(0.25 + 0.75 * snapshot.progress)
+        .animation(.snappy(duration: 0.18, extraBounce: 0.02), value: snapshot.progress)
+        .animation(.easeOut(duration: 0.12), value: snapshot.isRefreshing)
         .transition(.opacity.combined(with: .scale(scale: 0.86)))
     }
 
@@ -1972,27 +2032,12 @@ struct ChatView: View {
         }
     }
 
-    private func scheduleComposerBottomFollow(with proxy: ScrollViewProxy) {
-        guard taskStore.composerBottomFollowTask == nil else { return }
-        taskStore.composerBottomFollowTask = Task { @MainActor in
-            defer { taskStore.composerBottomFollowTask = nil }
-
-            for delayMS in [20, 140] {
-                try? await Task.sleep(for: .milliseconds(delayMS))
-                guard !Task.isCancelled, isScrollGeometryAtBottom, !isReaderModeActive else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(ChatScrollTarget.readerModeSpacer, anchor: .bottom)
-                }
-            }
-        }
-    }
-
     private func scrollToReaderModeMessage(_ messageID: String, with proxy: ScrollViewProxy) {
         taskStore.readerModeScrollTask?.cancel()
         taskStore.readerModeScrollTask = Task { @MainActor in
             defer { taskStore.readerModeScrollTask = nil }
 
-            for delayMS in [0, 120, 320, 560] {
+            for delayMS in [0, 80] {
                 if delayMS > 0 {
                     try? await Task.sleep(for: .milliseconds(delayMS))
                 } else {
@@ -2008,7 +2053,7 @@ struct ChatView: View {
     }
 
     private func updateDelayedLoadingIndicator() {
-        guard shouldDelayLoadingIndicator else {
+        guard delayedLoadingIndicatorSnapshot.shouldDelay else {
             taskStore.delayedLoadingIndicatorTask?.cancel()
             taskStore.delayedLoadingIndicatorTask = nil
             if showsDelayedLoadingIndicator {
@@ -2023,15 +2068,17 @@ struct ChatView: View {
         taskStore.delayedLoadingIndicatorTask = Task { @MainActor in
             defer { taskStore.delayedLoadingIndicatorTask = nil }
             try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled, shouldDelayLoadingIndicator else { return }
+            guard !Task.isCancelled, delayedLoadingIndicatorSnapshot.shouldDelay else { return }
             withAnimation(.easeOut(duration: 0.18)) {
                 showsDelayedLoadingIndicator = true
             }
         }
     }
 
-    private var shouldDelayLoadingIndicator: Bool {
-        viewModel.directoryState.isLoadingSelectedSession && viewModel.messages.isEmpty && pendingOutgoingSend == nil
+    private var delayedLoadingIndicatorSnapshot: DelayedLoadingIndicatorSnapshot {
+        DelayedLoadingIndicatorSnapshot(
+            shouldDelay: viewModel.isLoadingSelectedSession && viewModel.messages.isEmpty && pendingOutgoingSend == nil
+        )
     }
 
     private func withoutScrollAnimation(_ operation: () -> Void) {
@@ -2062,20 +2109,21 @@ struct ChatView: View {
 
     private var messageBottomPadding: CGFloat { 20 }
 
-    private var displayedMessages: ArraySlice<OpenCodeMessageEnvelope> {
-        viewModel.messages.suffix(visibleMessageCount)
+    private var chatDisplaySnapshot: ChatDisplaySnapshot {
+        let messages = Array(viewModel.messages.suffix(visibleMessageCount))
+        return ChatDisplaySnapshot(
+            messages: messages,
+            hiddenMessageCount: max(0, viewModel.messages.count - messages.count),
+            items: displayedChatItems(for: messages),
+            showsThinking: shouldShowThinking(in: messages)
+        )
     }
 
-    private var hiddenMessageCount: Int {
-        max(0, viewModel.messages.count - displayedMessages.count)
+    private var displayedMessages: [OpenCodeMessageEnvelope] {
+        Array(viewModel.messages.suffix(visibleMessageCount))
     }
 
-    private var displayedMessagesArray: [OpenCodeMessageEnvelope] {
-        Array(displayedMessages)
-    }
-
-    private var displayedChatItems: [ChatDisplayItem] {
-        let messages = displayedMessagesArray
+    private func displayedChatItems(for messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
         let messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         let key = ChatDisplayItemCacheKey(
             messages: messages.map { message in
@@ -2151,9 +2199,10 @@ struct ChatView: View {
     }
 
     private var accessoryPresenceSignature: AccessoryPresenceState {
-        AccessoryPresenceState(
-            attachmentIDs: viewModel.draftAttachments.map(\.id),
-            incompleteTodoIDs: viewModel.todos.filter { !$0.isComplete }.map(\.id)
+        let overlaySnapshot = composerOverlaySnapshot
+        return AccessoryPresenceState(
+            attachmentIDs: overlaySnapshot.attachmentIDs,
+            incompleteTodoIDs: overlaySnapshot.incompleteTodoIDs
         )
     }
 
@@ -2178,10 +2227,15 @@ struct ChatView: View {
     }
 
     private var thinkingRowListItem: some View {
-        ThinkingRow(animateEntry: pendingOutgoingSend != nil)
+        let snapshot = thinkingRowRenderSnapshot
+        return ThinkingRow(animateEntry: snapshot.animateEntry)
             .transition(.identity)
             .id(ChatScrollTarget.thinkingRow)
             .padding(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+    }
+
+    private var thinkingRowRenderSnapshot: ThinkingRowRenderSnapshot {
+        ThinkingRowRenderSnapshot(animateEntry: pendingOutgoingSend != nil)
     }
 
     @ViewBuilder
@@ -2205,13 +2259,13 @@ struct ChatView: View {
     }
 
     private func largeMessageChunkRow(for item: LargeMessageChunkDisplayItem) -> some View {
-        let isStreaming = isStreamingMessage(item.message)
+        let snapshot = largeMessageChunkRowRenderSnapshot(for: item)
 
         return LargeMessageChunkRow(
-            text: item.chunk.text,
-            allowsTextSelection: !isStreaming,
-            isStreamingTail: isStreaming && item.chunk.isTail,
-            animatesStreamingText: shouldAnimateStreamingText
+            text: snapshot.text,
+            allowsTextSelection: snapshot.allowsTextSelection,
+            isStreamingTail: snapshot.isStreamingTail,
+            animatesStreamingText: snapshot.animatesStreamingText
         )
             .equatable()
             .contextMenu {
@@ -2219,7 +2273,18 @@ struct ChatView: View {
             }
             .id(item.id)
             .transition(.identity)
-            .padding(EdgeInsets(top: 0, leading: 16, bottom: item.chunk.isTail ? 6 : 0, trailing: 16))
+            .padding(EdgeInsets(top: 0, leading: 16, bottom: snapshot.bottomPadding, trailing: 16))
+    }
+
+    private func largeMessageChunkRowRenderSnapshot(for item: LargeMessageChunkDisplayItem) -> LargeMessageChunkRowRenderSnapshot {
+        let isStreaming = isStreamingMessage(item.message)
+        return LargeMessageChunkRowRenderSnapshot(
+            text: item.chunk.text,
+            allowsTextSelection: !isStreaming,
+            isStreamingTail: isStreaming && item.chunk.isTail,
+            animatesStreamingText: shouldAnimateStreamingText,
+            bottomPadding: item.chunk.isTail ? 6 : 0
+        )
     }
 
     @ViewBuilder
@@ -2256,19 +2321,10 @@ struct ChatView: View {
     }
 
     private func messageRow(for message: OpenCodeMessageEnvelope) -> some View {
-        let snapshot = MessageBubbleSnapshot(
-            message: message,
-            detailedMessage: viewModel.toolMessageDetails[message.id],
-            currentSessionID: sessionID,
-            isStreamingMessage: isStreamingMessage(message),
-            animatesStreamingText: shouldAnimateStreamingText,
-            reserveEntryFromComposer: message.id == preparingOutgoingMessageID,
-            animateEntryFromComposer: message.id == animatingOutgoingMessageID && !outgoingEntryAnimationStartedMessageIDs.contains(message.id),
-            entrySourceFrame: outgoingEntrySourceFrame(for: message)
-        )
+        let snapshot = messageRowRenderSnapshot(for: message)
 
         return EquatableMessageBubbleHost(
-            snapshot: snapshot,
+            snapshot: snapshot.bubble,
             resolveTaskSessionID: { part, currentSessionID in
                 viewModel.resolveTaskSessionID(from: part, currentSessionID: currentSessionID)
             }
@@ -2284,15 +2340,28 @@ struct ChatView: View {
             outgoingEntryAnimationStartedMessageIDs.insert(messageID)
         }
         .equatable()
-        .transition(messageRowTransition(for: message))
+        .transition(snapshot.transition)
         .id(message.id)
         .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
     }
 
-    private func outgoingEntrySourceFrame(for message: OpenCodeMessageEnvelope) -> CGRect? {
-        guard message.id == preparingOutgoingMessageID || message.id == animatingOutgoingMessageID else { return nil }
-        guard let frame = outgoingEntrySourceFrame, frame.width > 1, frame.height > 1 else { return nil }
-        return frame
+    private func messageRowRenderSnapshot(for message: OpenCodeMessageEnvelope) -> MessageRowRenderSnapshot {
+        MessageRowRenderSnapshot(
+            bubble: messageBubbleSnapshot(for: message),
+            transition: messageRowTransition(for: message)
+        )
+    }
+
+    private func messageBubbleSnapshot(for message: OpenCodeMessageEnvelope) -> MessageBubbleSnapshot {
+        MessageBubbleSnapshot(
+            message: message,
+            detailedMessage: viewModel.toolMessageDetails[message.id],
+            currentSessionID: sessionID,
+            isStreamingMessage: isStreamingMessage(message),
+            animatesStreamingText: shouldAnimateStreamingText,
+            reserveEntryFromComposer: message.id == preparingOutgoingMessageID,
+            animateEntryFromComposer: message.id == animatingOutgoingMessageID && !outgoingEntryAnimationStartedMessageIDs.contains(message.id)
+        )
     }
 
     private func messageRowTransition(for message: OpenCodeMessageEnvelope) -> AnyTransition {
@@ -2311,17 +2380,27 @@ struct ChatView: View {
     }
 
     private func compactionRow(for compaction: CompactionDisplayItem) -> some View {
-        let isStreaming = isSessionBusy && compaction.summaryMessage?.info.time?.completed == nil
+        let snapshot = compactionRowRenderSnapshot(for: compaction)
 
         return Button {
             selectedCompactionSummary = compaction.payload
         } label: {
-            CompactionBoundaryRow(hasSummary: compaction.summaryText != nil, isStreaming: isStreaming)
+            CompactionBoundaryRow(hasSummary: snapshot.hasSummary, isStreaming: snapshot.isStreaming)
         }
         .buttonStyle(.plain)
-        .disabled(compaction.summaryText == nil || isStreaming)
+        .disabled(snapshot.isDisabled)
         .id(compaction.id)
         .padding(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+    }
+
+    private func compactionRowRenderSnapshot(for compaction: CompactionDisplayItem) -> CompactionRowRenderSnapshot {
+        let isStreaming = isSessionBusy && compaction.summaryMessage?.info.time?.completed == nil
+        let hasSummary = compaction.summaryText != nil
+        return CompactionRowRenderSnapshot(
+            hasSummary: hasSummary,
+            isStreaming: isStreaming,
+            isDisabled: !hasSummary || isStreaming
+        )
     }
 
     private func makeDisplayItems(from messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
@@ -2390,7 +2469,6 @@ struct ChatView: View {
     }
 
     private func startOutgoingBubbleAnimationAndSend() {
-        persistComposerDraftNow()
         let draftText = composerDraftStore.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let draftAttachments = viewModel.draftAttachments
         let hasAttachments = !draftAttachments.isEmpty
@@ -2421,28 +2499,29 @@ struct ChatView: View {
 
         let messageID = OpenCodeIdentifier.message()
         let partID = OpenCodeIdentifier.part()
-        dismissKeyboardForReaderMode()
-        activateReaderModeSpacer(screenHeight: max(chatViewportHeight, composerInputFrame.maxY), messageID: messageID)
 
         let pendingSend = PendingOutgoingSend(
             text: draftText,
             attachments: draftAttachments,
-            shouldAnimateBubble: true,
             messageID: messageID,
             partID: partID
         )
 
         pendingOutgoingSendTask?.cancel()
-        pendingOutgoingSend = pendingSend
-        outgoingEntrySourceFrame = composerInputFrame
+        isThinkingRowRevealAllowed = false
         preparingOutgoingMessageID = messageID
         _ = viewModel.insertOptimisticUserMessage(draftText, attachments: draftAttachments, in: liveSession, messageID: messageID, partID: partID, animated: false)
+        pendingOutgoingSend = pendingSend
         scheduleOutgoingEntryAnimation(messageID: messageID)
-        scheduleThinkingRowReveal(delayMS: 180)
         clearComposerDraft()
         viewModel.clearDraftAttachments()
+        dismissKeyboardForReaderMode()
+        activateReaderModeSpacer(screenHeight: chatViewportHeight, messageID: messageID)
 
         pendingOutgoingSendTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(outgoingRequestDelayMS))
+            guard !Task.isCancelled, pendingOutgoingSend?.messageID == pendingSend.messageID else { return }
+
             await viewModel.sendMessage(
                 pendingSend.text,
                 attachments: pendingSend.attachments,
@@ -2454,6 +2533,14 @@ struct ChatView: View {
                 meterPrompt: false
             )
             guard !Task.isCancelled, pendingOutgoingSend?.messageID == pendingSend.messageID else { return }
+            let optimisticMessageStillVisible = pendingSend.messageID.map { messageID in
+                viewModel.messages.contains { $0.id == messageID }
+            } ?? true
+            if optimisticMessageStillVisible {
+                isThinkingRowRevealAllowed = true
+                try? await Task.sleep(for: .milliseconds(thinkingRevealHoldMS))
+                guard !Task.isCancelled, pendingOutgoingSend?.messageID == pendingSend.messageID else { return }
+            }
             pendingOutgoingSend = nil
         }
     }
@@ -2463,7 +2550,7 @@ struct ChatView: View {
         animatingOutgoingMessageID = nil
 
         outgoingEntryResetTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(48))
+            try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             animatingOutgoingMessageID = messageID
 
@@ -2473,19 +2560,7 @@ struct ChatView: View {
             if preparingOutgoingMessageID == messageID {
                 preparingOutgoingMessageID = nil
             }
-            outgoingEntrySourceFrame = nil
             outgoingEntryAnimationStartedMessageIDs.remove(messageID)
-        }
-    }
-
-    private func scheduleThinkingRowReveal(delayMS: Int) {
-        thinkingRowRevealTask?.cancel()
-        isThinkingRowRevealAllowed = false
-
-        thinkingRowRevealTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(delayMS))
-            guard !Task.isCancelled else { return }
-            isThinkingRowRevealAllowed = true
         }
     }
 
@@ -2496,19 +2571,15 @@ struct ChatView: View {
             pendingOutgoingSendTask?.cancel()
             pendingOutgoingSendTask = nil
             pendingOutgoingSend = nil
-            if pendingSend.shouldAnimateBubble {
-                if let messageID = pendingSend.messageID {
-                    viewModel.removeOptimisticUserMessage(messageID: messageID, sessionID: sessionID)
-                }
-                outgoingEntryResetTask?.cancel()
-                thinkingRowRevealTask?.cancel()
-                isThinkingRowRevealAllowed = true
-                preparingOutgoingMessageID = nil
-                animatingOutgoingMessageID = nil
-                outgoingEntrySourceFrame = nil
-                if let messageID = pendingSend.messageID {
-                    outgoingEntryAnimationStartedMessageIDs.remove(messageID)
-                }
+            if let messageID = pendingSend.messageID {
+                viewModel.removeOptimisticUserMessage(messageID: messageID, sessionID: sessionID)
+            }
+            outgoingEntryResetTask?.cancel()
+            isThinkingRowRevealAllowed = true
+            preparingOutgoingMessageID = nil
+            animatingOutgoingMessageID = nil
+            if let messageID = pendingSend.messageID {
+                outgoingEntryAnimationStartedMessageIDs.remove(messageID)
             }
             restoreComposerDraft(pendingSend.text)
             viewModel.addDraftAttachments(pendingSend.attachments)
@@ -2518,19 +2589,19 @@ struct ChatView: View {
         Task { await viewModel.stopCurrentSession() }
     }
 
-    private var shouldShowThinking: Bool {
+    private func shouldShowThinking(in messages: [OpenCodeMessageEnvelope]) -> Bool {
         if pendingOutgoingSend != nil {
             return isThinkingRowRevealAllowed
         }
 
         guard isSessionBusy else { return false }
         guard isThinkingRowRevealAllowed else { return false }
-        guard let lastUserIndex = displayedMessages.lastIndex(where: { ($0.info.role ?? "").lowercased() == "user" }) else {
+        guard let lastUserIndex = messages.lastIndex(where: { ($0.info.role ?? "").lowercased() == "user" }) else {
             return false
         }
 
-        let assistantTextAfterUser = displayedMessages
-            .suffix(from: displayedMessages.index(after: lastUserIndex))
+        let assistantTextAfterUser = messages
+            .suffix(from: messages.index(after: lastUserIndex))
             .contains { message in
                 guard (message.info.role ?? "").lowercased() == "assistant" else { return false }
                 return message.parts.contains { part in
@@ -2576,9 +2647,10 @@ struct ChatView: View {
                 .accessibilityLabel("Model Instructions")
             }
         } else {
-            if isChildSession {
+            let headerSnapshot = chatHeaderSnapshot
+            if headerSnapshot.isChildSession {
                 ToolbarItem(placement: .opencodeLeading) {
-                    if let parentSession {
+                    if let parentSession = headerSnapshot.parentSession {
                         Button("Back") {
                             Task { await viewModel.selectSession(parentSession) }
                         }
@@ -2586,11 +2658,11 @@ struct ChatView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 1) {
-                        Text(parentSessionTitle)
+                        Text(headerSnapshot.parentTitle)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                        Text(childSessionTitle)
+                        Text(headerSnapshot.childTitle)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
@@ -2839,14 +2911,6 @@ private struct ChatSkeletonRow: View {
         .padding(.vertical, 12)
         .background(OpenCodePlatformColor.secondaryGroupedBackground.opacity(0.6), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .redacted(reason: .placeholder)
-    }
-}
-
-private struct ComposerOverlayHeightPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

@@ -3,18 +3,32 @@ import SwiftUI
 struct GitDiffView: View {
     @ObservedObject var viewModel: AppViewModel
 
+    var body: some View {
+        GitDiffContent(
+            hasGitProject: viewModel.hasGitProject,
+            snapshot: viewModel.projectFilesSnapshot,
+            relativeGitPath: { viewModel.relativeGitPath($0) }
+        )
+    }
+}
+
+private struct GitDiffContent: View {
+    let hasGitProject: Bool
+    let snapshot: AppViewModel.ProjectFilesSnapshot
+    let relativeGitPath: (String) -> String
+
     private var diff: OpenCodeVCSFileDiff? {
-        viewModel.selectedVCSFileDiff
+        snapshot.selectedFileDiff
     }
 
     var body: some View {
         Group {
-            if !viewModel.hasGitProject {
+            if !hasGitProject {
                 ContentUnavailableView("Git Unavailable", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
             } else if let diff {
                 OpenCodeUnifiedDiffView(
                     diff: OpenCodeUnifiedDiffData(
-                        file: viewModel.relativeGitPath(diff.file),
+                        file: relativeGitPath(diff.file),
                         patch: diff.patch,
                         additions: diff.additions,
                         deletions: diff.deletions,
@@ -23,11 +37,11 @@ struct GitDiffView: View {
                 )
                 .navigationTitle(fileTitle(for: diff.file))
                 .opencodeInlineNavigationTitle()
-            } else if let selectedFile = viewModel.selectedVCSFile {
+            } else if let selectedFile = snapshot.selectedVCSFile {
                 ContentUnavailableView(
                     "Diff Unavailable",
                     systemImage: "doc.text.magnifyingglass",
-                    description: Text(viewModel.relativeGitPath(selectedFile))
+                    description: Text(relativeGitPath(selectedFile))
                 )
             } else {
                 ContentUnavailableView("Select a Changed File", systemImage: "doc.text")
@@ -36,46 +50,66 @@ struct GitDiffView: View {
     }
 
     private func fileTitle(for path: String) -> String {
-        viewModel.relativeGitPath(path).split(separator: "/").last.map(String.init) ?? path
+        relativeGitPath(path).split(separator: "/").last.map(String.init) ?? path
     }
-
 }
 
 struct ProjectFileContentView: View {
     @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
+        ProjectFileContent(
+            hasGitProject: viewModel.hasGitProject,
+            snapshot: viewModel.projectFilesSnapshot,
+            relativeGitPath: { viewModel.relativeGitPath($0) },
+            onLoadSelectedFileContent: {
+                await viewModel.loadSelectedProjectFileContentIfNeeded()
+            }
+        )
+    }
+}
+
+private struct ProjectFileContent: View {
+    let hasGitProject: Bool
+    let snapshot: AppViewModel.ProjectFilesSnapshot
+    let relativeGitPath: (String) -> String
+    let onLoadSelectedFileContent: () async -> Void
+
+    var body: some View {
         Group {
-            if !viewModel.hasGitProject {
+            if !hasGitProject {
                 ContentUnavailableView("Files Unavailable", systemImage: "doc")
-            } else if let path = viewModel.selectedProjectFilePath,
-                      let content = viewModel.selectedProjectFileContent {
+            } else if let path = snapshot.selectedFilePath,
+                      let content = snapshot.selectedFileContent {
                 fileContent(content, path: path)
                     .navigationTitle(fileTitle(for: path))
                     .opencodeInlineNavigationTitle()
-            } else if viewModel.directoryState.isLoadingSelectedFileContent,
-                      let path = viewModel.selectedProjectFilePath {
+            } else if snapshot.isLoadingSelectedFileContent,
+                      let path = snapshot.selectedFilePath {
                 ContentUnavailableView(
                     "Loading File",
                     systemImage: "doc.text",
-                    description: Text(viewModel.relativeGitPath(path))
+                    description: Text(relativeGitPath(path))
                 )
-            } else if let error = viewModel.directoryState.fileContentErrorMessage,
-                      let path = viewModel.selectedProjectFilePath {
+            } else if let error = snapshot.fileContentErrorMessage,
+                      let path = snapshot.selectedFilePath {
                 ContentUnavailableView(
                     "Preview Unavailable",
                     systemImage: "exclamationmark.triangle",
-                    description: Text("\(viewModel.relativeGitPath(path))\n\n\(error)")
+                    description: Text("\(relativeGitPath(path))\n\n\(error)")
                 )
-            } else if let path = viewModel.selectedProjectFilePath {
+            } else if let path = snapshot.selectedFilePath {
                 ContentUnavailableView(
                     "Select a File",
                     systemImage: "doc",
-                    description: Text(viewModel.relativeGitPath(path))
+                    description: Text(relativeGitPath(path))
                 )
             } else {
                 ContentUnavailableView("Select a File", systemImage: "doc")
             }
+        }
+        .task(id: snapshot.selectedFilePath) {
+            await onLoadSelectedFileContent()
         }
     }
 
@@ -85,7 +119,7 @@ struct ProjectFileContentView: View {
             ContentUnavailableView(
                 "Binary File",
                 systemImage: "doc.fill",
-                description: Text(viewModel.relativeGitPath(path))
+                description: Text(relativeGitPath(path))
             )
         } else {
             ScrollView(.vertical) {
@@ -101,7 +135,7 @@ struct ProjectFileContentView: View {
     }
 
     private func fileTitle(for path: String) -> String {
-        viewModel.relativeGitPath(path).split(separator: "/").last.map(String.init) ?? path
+        relativeGitPath(path).split(separator: "/").last.map(String.init) ?? path
     }
 }
 
@@ -124,19 +158,23 @@ struct OpenCodeUnifiedDiffView: View {
     }
 
     var body: some View {
-        ScrollView([.vertical, .horizontal]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if showsHeader {
-                    header(diff)
-                        .padding(16)
-                }
+        GeometryReader { geometry in
+            ScrollView([.vertical, .horizontal]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if showsHeader {
+                        header(diff)
+                            .padding(16)
+                    }
 
-                ForEach(GitPatchParser.parse(diff.patch)) { line in
-                    DiffLineRow(line: line, language: language)
+                    ForEach(GitPatchParser.parse(diff.patch)) { line in
+                        DiffLineRow(line: line, language: language)
+                            .frame(minWidth: geometry.size.width, alignment: .leading)
+                    }
                 }
+                .frame(minWidth: geometry.size.width, alignment: .leading)
             }
+            .background(OpenCodePlatformColor.groupedBackground)
         }
-        .background(OpenCodePlatformColor.groupedBackground)
     }
 
     private func header(_ diff: OpenCodeUnifiedDiffData) -> some View {

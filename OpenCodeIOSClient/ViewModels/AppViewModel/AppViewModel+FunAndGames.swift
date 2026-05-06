@@ -62,10 +62,10 @@ extension AppViewModel {
             findPlaceSessionsByID[session.id] = FindPlaceGameSession(sessionID: session.id, city: city)
             withAnimation(opencodeSelectionAnimation) {
                 selectedProjectContentTab = .sessions
-                directoryState.selectedSession = session
-                directoryState.isLoadingSelectedSession = true
-                directoryState.messages = []
-                directoryState.todos = []
+                selectedSession = session
+                isLoadingSelectedSession = true
+                messages = []
+                sessionInteractionStore.replaceTodos([])
             }
             restoreMessageDraft(for: session)
             streamDirectory = session.directory
@@ -118,10 +118,10 @@ extension AppViewModel {
             pendingFindBugLanguage = nil
             withAnimation(opencodeSelectionAnimation) {
                 selectedProjectContentTab = .sessions
-                directoryState.selectedSession = session
-                directoryState.isLoadingSelectedSession = true
-                directoryState.messages = []
-                directoryState.todos = []
+                selectedSession = session
+                isLoadingSelectedSession = true
+                messages = []
+                sessionInteractionStore.replaceTodos([])
             }
             restoreMessageDraft(for: session)
             streamDirectory = session.directory
@@ -164,7 +164,7 @@ extension AppViewModel {
     }
 
     private func inferredFindPlaceGame(for sessionID: String) -> FindPlaceGameSession? {
-        for message in directoryState.messages where message.info.sessionID == sessionID || selectedSession?.id == sessionID {
+        for message in messages where message.info.sessionID == sessionID || selectedSession?.id == sessionID {
             for part in message.parts {
                 guard let text = part.text, text.contains(FindPlaceGame.setupMarker) else { continue }
                 guard let city = findPlaceCity(fromSetupPrompt: text) else { continue }
@@ -176,7 +176,7 @@ extension AppViewModel {
     }
 
     private func inferredFindBugGame(for sessionID: String) -> FindBugGameSession? {
-        for message in directoryState.messages where message.info.sessionID == sessionID || selectedSession?.id == sessionID {
+        for message in messages where message.info.sessionID == sessionID || selectedSession?.id == sessionID {
             for part in message.parts {
                 guard let text = part.text, text.contains(FindBugGame.setupMarker) else { continue }
                 guard let language = findBugLanguage(fromSetupPrompt: text) else { continue }

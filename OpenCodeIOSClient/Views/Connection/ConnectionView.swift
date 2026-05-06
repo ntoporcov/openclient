@@ -67,6 +67,26 @@ struct ConnectionView: View {
                 .listRowSpacing(0.0)
 #endif
                 .padding(.vertical,0)
+
+                if viewModel.isLoading {
+                    Section {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Connecting to OpenCode...")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                } else if let errorMessage = viewModel.errorMessage, !errorMessage.isEmpty {
+                    Section("Connection Failed") {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                    .listRowBackground(Color.clear)
+                }
             }
 
             if hasRecentServers == false {

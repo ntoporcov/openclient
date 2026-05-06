@@ -120,13 +120,13 @@ extension AppViewModel {
 
     private static func screenshotPermission() -> AppViewModel {
         let viewModel = baseConnectedScreenshotViewModel(selectedSession: OpenClientScreenshotData.releaseSession)
-        viewModel.directoryState.permissions = [OpenClientScreenshotData.permission]
+        viewModel.permissions = [OpenClientScreenshotData.permission]
         return viewModel
     }
 
     private static func screenshotQuestion() -> AppViewModel {
         let viewModel = baseConnectedScreenshotViewModel(selectedSession: OpenClientScreenshotData.releaseSession)
-        viewModel.directoryState.questions = [OpenClientScreenshotData.questionRequest]
+        viewModel.questions = [OpenClientScreenshotData.questionRequest]
         return viewModel
     }
 

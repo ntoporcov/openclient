@@ -162,9 +162,9 @@ struct ProjectContentView: View {
         case .sessions:
             return false
         case .git:
-            return viewModel.directoryState.isLoadingVCS || viewModel.directoryState.isLoadingFileTree
+            return viewModel.isLoadingVCS || viewModel.isLoadingFileTree
         case .mcp:
-            return viewModel.directoryState.isLoadingMCP
+            return viewModel.isLoadingMCP
         }
     }
 

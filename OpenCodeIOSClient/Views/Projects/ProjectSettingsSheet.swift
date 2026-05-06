@@ -280,6 +280,7 @@ private let projectActionSymbolNames = [
     "ladybug.fill", "testtube.2", "shippingbox.fill", "arrow.triangle.2.circlepath", "wand.and.sparkles", "sparkles",
     "doc.text.fill", "doc.badge.gearshape", "terminal.fill", "chevron.left.forwardslash.chevron.right", "curlybraces", "cpu.fill",
     "brain.head.profile", "magnifyingglass", "folder.fill", "tray.and.arrow.down.fill", "paperplane.fill", "flame.fill",
+    "iphone", "iphone.gen3", "ipad", "macbook", "desktopcomputer", "macmini", "display", "applewatch", "appletv", "visionpro",
     "star.fill", "flag.fill", "bookmark.fill", "pin.fill", "clock.fill", "timer",
     "bell.fill", "shield.fill", "lock.fill", "key.fill", "network", "server.rack",
     "antenna.radiowaves.left.and.right", "icloud.fill", "externaldrive.fill", "memorychip.fill", "gearshape.fill", "slider.horizontal.3",

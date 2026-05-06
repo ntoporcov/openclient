@@ -14,7 +14,6 @@ struct MessageBubble: View {
     let animatesStreamingText: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
-    let entrySourceFrame: CGRect?
     let resolveTaskSessionID: (OpenCodePart, String) -> String?
     let onSelectPart: (OpenCodePart) -> Void
     let onOpenTaskSession: (String) -> Void
@@ -24,15 +23,13 @@ struct MessageBubble: View {
 
     @State private var expandedReasoningPartIDs: Set<String> = []
     @State private var expandedContextGroupIDs: Set<String> = []
-    @State private var entryOffset: CGSize = .zero
-    @State private var entryOpacity: Double = 1
-    @State private var entryScale: CGFloat = 1
-    @State private var timelineEntryStartOffset: CGSize = .zero
     @State private var entryAnimationStartDate: Date?
     @State private var hasRunEntryAnimation = false
+    @State private var entryAnimationStartTask: Task<Void, Never>?
     @State private var entryAnimationTask: Task<Void, Never>?
-    @State private var contentFrame: CGRect = .zero
     @State private var displayEntryCache = MessageBubbleDisplayEntryCache()
+
+    private static let outgoingEntryStartOffset = CGSize(width: 0, height: 600)
 
     private var effectiveMessage: OpenCodeMessageEnvelope {
         detailedMessage ?? message
@@ -63,46 +60,23 @@ struct MessageBubble: View {
         return materializeDisplayEntryPlan(plan, parts: parts)
     }
 
-    private var entryStartOffset: CGSize {
-        guard let entrySourceFrame,
-              entrySourceFrame.width > 1,
-              entrySourceFrame.height > 1,
-              contentFrame.width > 1,
-              contentFrame.height > 1 else {
-            return CGSize(width: 0, height: 140)
-        }
-
-        return CGSize(
-            width: entrySourceFrame.maxX - contentFrame.maxX,
-            height: entrySourceFrame.midY - contentFrame.midY
-        )
-    }
-
     var body: some View {
         animatedEntryContent
-        .onPreferenceChange(MessageBubbleContentFramePreferenceKey.self) { frame in
-            guard frame != .zero, contentFrame != frame else { return }
-            contentFrame = frame
-            prepareEntryAnimationIfNeeded()
-            runEntryAnimationIfNeeded()
-        }
             .onAppear {
-                prepareEntryAnimationIfNeeded()
                 runEntryAnimationIfNeeded()
-            }
-            .onChange(of: entrySourceFrame) { _, _ in
-                prepareEntryAnimationIfNeeded()
+                scheduleReservedEntryAnimationIfNeeded()
             }
             .onChange(of: reserveEntryFromComposer) { _, _ in
-                prepareEntryAnimationIfNeeded()
+                scheduleReservedEntryAnimationIfNeeded()
+                resetEntryAnimationIfInactive()
             }
             .onChange(of: animateEntryFromComposer) { _, _ in
                 runEntryAnimationIfNeeded()
+                scheduleReservedEntryAnimationIfNeeded()
+                resetEntryAnimationIfInactive()
             }
             .onDisappear {
-                entryAnimationTask?.cancel()
-                entryAnimationTask = nil
-                entryAnimationStartDate = nil
+                finishEntryAnimation()
             }
     }
 
@@ -112,7 +86,7 @@ struct MessageBubble: View {
                 Spacer(minLength: 44)
             }
 
-            measuredMessageContent
+            messageContent
 
             if !isUser {
                 Spacer(minLength: 0)
@@ -128,37 +102,20 @@ struct MessageBubble: View {
                 let progress = entryAnimationProgress(at: timeline.date, startDate: entryAnimationStartDate)
                 baseContent
                     .offset(
-                        x: timelineEntryStartOffset.width * (1 - progress),
-                        y: timelineEntryStartOffset.height * (1 - progress)
+                        x: Self.outgoingEntryStartOffset.width * (1 - progress),
+                        y: Self.outgoingEntryStartOffset.height * (1 - progress)
                     )
                     .opacity(0.72 + 0.28 * progress)
                     .scaleEffect(0.94 + 0.06 * progress, anchor: .bottomTrailing)
             }
+        } else if isUser, reserveEntryFromComposer, !hasRunEntryAnimation {
+            baseContent
+                .offset(Self.outgoingEntryStartOffset)
+                .opacity(0.72)
+                .scaleEffect(0.94, anchor: .bottomTrailing)
         } else {
             baseContent
-                .offset(entryOffset)
-                .opacity(entryOpacity)
-                .scaleEffect(entryScale, anchor: .bottomTrailing)
         }
-    }
-
-    @ViewBuilder
-    private var measuredMessageContent: some View {
-        if shouldMeasureEntryFrame {
-            messageContent
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear
-                            .preference(key: MessageBubbleContentFramePreferenceKey.self, value: geometry.frame(in: .named("chat-view-space")))
-                    }
-                }
-        } else {
-            messageContent
-        }
-    }
-
-    private var shouldMeasureEntryFrame: Bool {
-        isUser && (reserveEntryFromComposer || animateEntryFromComposer) && !hasRunEntryAnimation
     }
 
     private var messageContent: some View {
@@ -250,28 +207,36 @@ struct MessageBubble: View {
     }
 
     private func runEntryAnimationIfNeeded() {
-        guard animateEntryFromComposer, isUser, !hasRunEntryAnimation else { return }
-        guard contentFrame.width > 1, contentFrame.height > 1 else { return }
+        guard animateEntryFromComposer else { return }
+        startEntryAnimationIfNeeded()
+    }
+
+    private func scheduleReservedEntryAnimationIfNeeded() {
+        guard reserveEntryFromComposer, isUser, !hasRunEntryAnimation else { return }
+        guard entryAnimationStartTask == nil else { return }
+
+        entryAnimationStartTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            startEntryAnimationIfNeeded()
+        }
+    }
+
+    private func startEntryAnimationIfNeeded() {
+        guard isUser, !hasRunEntryAnimation else { return }
+        guard reserveEntryFromComposer || animateEntryFromComposer else { return }
 
         hasRunEntryAnimation = true
         onEntryAnimationStarted(effectiveMessage.id)
-        let measuredOffset = entryStartOffset
-        if abs(measuredOffset.height) > 220 || abs(measuredOffset.width) > 80 {
-            timelineEntryStartOffset = measuredOffset
-        } else {
-            timelineEntryStartOffset = CGSize(width: 0, height: 620)
-        }
+        entryAnimationStartTask?.cancel()
+        entryAnimationStartTask = nil
         entryAnimationStartDate = Date()
 
         entryAnimationTask?.cancel()
         entryAnimationTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(560))
             guard !Task.isCancelled else { return }
-            entryAnimationStartDate = nil
-            entryOffset = .zero
-            entryOpacity = 1
-            entryScale = 1
-            entryAnimationTask = nil
+            finishEntryAnimation()
         }
     }
 
@@ -282,17 +247,18 @@ struct MessageBubble: View {
         return CGFloat(1 - pow(1 - linear, 3))
     }
 
-    private func prepareEntryAnimationIfNeeded() {
-        guard reserveEntryFromComposer, isUser, !hasRunEntryAnimation else { return }
+    private func resetEntryAnimationIfInactive() {
+        guard !reserveEntryFromComposer, !animateEntryFromComposer else { return }
+        guard entryAnimationStartDate == nil else { return }
+        finishEntryAnimation()
+    }
 
-        var transaction = Transaction()
-        transaction.animation = nil
-
-        withTransaction(transaction) {
-            entryOffset = entryStartOffset
-            entryOpacity = 1
-            entryScale = 0.98
-        }
+    private func finishEntryAnimation() {
+        entryAnimationStartTask?.cancel()
+        entryAnimationStartTask = nil
+        entryAnimationTask?.cancel()
+        entryAnimationTask = nil
+        entryAnimationStartDate = nil
     }
 
     @ViewBuilder
@@ -866,17 +832,6 @@ struct MessageBubble: View {
 }
 
 private let contextGroupTools: Set<String> = ["read", "glob", "grep", "list"]
-
-private struct MessageBubbleContentFramePreferenceKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        let next = nextValue()
-        if next != .zero {
-            value = next
-        }
-    }
-}
 
 private struct IndexedPart: Identifiable {
     let index: Int

@@ -6,7 +6,7 @@ struct SessionListView: View {
     let onSessionChosen: () -> Void
 
     var body: some View {
-        let snapshot = makeDisplaySnapshot()
+        let snapshot = viewModel.sessionListSnapshot
 
         SessionListContent(
             viewModel: viewModel,
@@ -17,65 +17,69 @@ struct SessionListView: View {
             renderStore.update(snapshot)
         }
         .onChange(of: snapshot) { _, snapshot in
-            renderStore.update(snapshot)
+            withAnimation(opencodeSelectionAnimation) {
+                renderStore.update(snapshot)
+            }
         }
         .sheet(isPresented: $viewModel.isShowingCreateSessionSheet) {
             CreateSessionSheet(viewModel: viewModel)
         }
     }
+}
 
-    private func makeDisplaySnapshot() -> SessionListDisplaySnapshot {
-        let sessions = viewModel.sessions
-        let pinnedIDs = viewModel.pinnedSessionIDs
+extension AppViewModel {
+    fileprivate var sessionListSnapshot: SessionListDisplaySnapshot {
+        let sessions = sessions
+        let pinnedIDs = pinnedSessionIDs
         var sessionsByID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
-        for session in viewModel.workspaceSessionsByDirectory.values.flatMap(\.rootSessions) where !viewModel.isActionSession(session) {
+        for session in workspaceSessionsByDirectory.values.flatMap(\.rootSessions) where !isActionSession(session) {
             sessionsByID[session.id] = session
         }
         let pinnedSessions = pinnedIDs.compactMap { sessionsByID[$0] }
         let pinnedIDSet = Set(pinnedIDs)
         let unpinnedSessions = sessions.filter { !pinnedIDSet.contains($0.id) }
-        let showsWorkspaces = viewModel.isProjectWorkspacesEnabled && viewModel.hasGitProject
+        let showsWorkspaces = isProjectWorkspacesEnabled && hasGitProject
         let pinnedRows = pinnedSessions.map { session in
-            rowSnapshot(for: session, showsPinnedBadge: true, workspaceOverline: showsWorkspaces ? viewModel.workspaceDisplayName(for: session.directory) : nil)
+            sessionListRowSnapshot(for: session, showsPinnedBadge: true, workspaceOverline: showsWorkspaces ? workspaceDisplayName(for: session.directory) : nil)
         }
-        let unpinnedRows = unpinnedSessions.map { rowSnapshot(for: $0) }
-        let workspaceSections = workspaceSections(excluding: pinnedIDSet)
+        let unpinnedRows = unpinnedSessions.map { sessionListRowSnapshot(for: $0) }
+        let workspaceSections = sessionListWorkspaceSections(excluding: pinnedIDSet)
 
         return SessionListDisplaySnapshot(
-            isLoadingEmpty: viewModel.directoryState.isLoadingSessions && sessions.isEmpty,
+            isLoadingEmpty: isLoadingSessions && sessions.isEmpty,
             isEmpty: sessions.isEmpty,
-            selectedSessionID: viewModel.selectedSession?.id,
+            selectedSessionID: selectedSession?.id,
             pinnedRows: pinnedRows,
             unpinnedRows: unpinnedRows,
             showsWorkspaces: showsWorkspaces,
             workspaceSections: workspaceSections,
-            errorMessage: viewModel.errorMessage,
-            hasProUnlock: viewModel.hasProUnlock,
-            currentProjectActions: viewModel.currentProjectActions.map { action in
+            errorMessage: errorMessage,
+            hasProUnlock: hasProUnlock,
+            currentProjectActions: currentProjectActions.map { action in
                 ProjectActionSnapshot(
                     action: action,
-                    command: viewModel.actionCommand(for: action),
-                    phase: viewModel.actionRunPhase(for: action)
+                    command: actionCommand(for: action),
+                    phase: actionRunPhase(for: action)
                 )
             }
         )
     }
 
-    private func workspaceSections(excluding pinnedIDSet: Set<String>) -> [WorkspaceSessionDisplaySection] {
-        viewModel.workspaceDirectories().map { directory in
-            let state = viewModel.workspaceSessionsByDirectory[directory] ?? OpenCodeWorkspaceSessionState()
-            let sessions = state.rootSessions.filter { !pinnedIDSet.contains($0.id) && !viewModel.isActionSession($0) }
+    private func sessionListWorkspaceSections(excluding pinnedIDSet: Set<String>) -> [WorkspaceSessionDisplaySection] {
+        workspaceDirectories().map { directory in
+            let state = workspaceSessionsByDirectory[directory] ?? OpenCodeWorkspaceSessionState()
+            let sessions = state.rootSessions.filter { !pinnedIDSet.contains($0.id) && !isActionSession($0) }
             return WorkspaceSessionDisplaySection(
                 directory: directory,
-                title: viewModel.workspaceDisplayName(for: directory) ?? URL(fileURLWithPath: directory).lastPathComponent,
-                rows: sessions.map { rowSnapshot(for: $0) },
+                title: workspaceDisplayName(for: directory) ?? URL(fileURLWithPath: directory).lastPathComponent,
+                rows: sessions.map { sessionListRowSnapshot(for: $0) },
                 isLoading: state.isLoading,
                 hasMore: state.hasMore
             )
         }
     }
 
-    private func rowSnapshot(
+    private func sessionListRowSnapshot(
         for session: OpenCodeSession,
         showsPinnedBadge: Bool = false,
         workspaceOverline: String? = nil,
@@ -83,15 +87,15 @@ struct SessionListView: View {
     ) -> SessionRowSnapshot {
         SessionRowSnapshot(
             session: session,
-            isSelected: viewModel.selectedSession?.id == session.id,
+            isSelected: selectedSession?.id == session.id,
             showsPinnedBadge: showsPinnedBadge,
             workspaceOverline: workspaceOverline,
             style: style,
-            preview: viewModel.sessionPreviews[session.id],
-            isBusy: viewModel.sessionStatuses[session.id] == "busy",
-            hasLiveActivity: viewModel.isLiveActivityActive(for: session),
-            hasDraft: viewModel.hasMessageDraft(for: session),
-            hasPermissionRequest: viewModel.hasPermissionRequest(for: session)
+            preview: sessionPreviews[session.id],
+            isBusy: sessionStatuses[session.id] == "busy",
+            hasLiveActivity: isLiveActivityActive(for: session),
+            hasDraft: hasMessageDraft(for: session),
+            hasPermissionRequest: hasPermissionRequest(for: session)
         )
     }
 }
@@ -210,7 +214,6 @@ private struct SessionListContent: View {
                 }
             }
         }
-        .id(snapshot.structuralID)
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(OpenCodePlatformColor.groupedBackground)
@@ -639,16 +642,6 @@ private struct SessionListDisplaySnapshot: Equatable {
         showsWorkspaces ? workspaceSections.map(\.directory).joined(separator: "|") : "off"
     }
 
-    var structuralID: String {
-        [
-            isLoadingEmpty ? "loading" : "loaded",
-            pinnedRows.map(\.id).joined(separator: ","),
-            unpinnedRows.map(\.id).joined(separator: ","),
-            showsWorkspaces ? "workspaces" : "flat",
-            workspaceSections.map { "\($0.directory):\($0.rows.map(\.id).joined(separator: ",")):\($0.hasMore)" }.joined(separator: ";"),
-            errorMessage == nil ? "no-error" : "error"
-        ].joined(separator: "|")
-    }
 }
 
 private struct SessionRowSnapshot: Identifiable, Equatable {

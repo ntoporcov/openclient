@@ -30,9 +30,10 @@ struct ForkSessionSheet: View {
                             dismiss()
                         }
                     } label: {
-                        ForkMessageRow(message: message)
+                        ForkMessageRow(message: message, isPreparing: viewModel.pendingForkMessageID == message.id)
                     }
                     .buttonStyle(.plain)
+                    .disabled(viewModel.pendingForkMessageID != nil)
                     .accessibilityIdentifier("chat.fork.message.\(message.id)")
                 }
             }
@@ -46,6 +47,7 @@ struct ForkSessionSheet: View {
                     viewModel.isShowingForkSessionSheet = false
                     dismiss()
                 }
+                .disabled(viewModel.pendingForkMessageID != nil)
             }
         }
     }
@@ -53,6 +55,7 @@ struct ForkSessionSheet: View {
 
 private struct ForkMessageRow: View {
     let message: OpenCodeForkableMessage
+    let isPreparing: Bool
 
     private var timeLabel: String {
         guard let created = message.created else { return "" }
@@ -83,10 +86,17 @@ private struct ForkMessageRow: View {
 
             Spacer(minLength: 0)
 
-            Image(systemName: "arrow.triangle.branch")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
+            if isPreparing {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.top, 2)
+                    .accessibilityLabel("Preparing fork")
+            } else {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+            }
         }
         .padding(.vertical, 4)
     }

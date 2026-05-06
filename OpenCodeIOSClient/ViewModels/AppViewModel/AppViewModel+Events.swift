@@ -6,13 +6,6 @@ extension AppViewModel {
     private static let longStreamDeltaCoalescingInterval: Duration = .milliseconds(140)
     private static let veryLongStreamDeltaCoalescingInterval: Duration = .milliseconds(220)
 
-    private struct TranscriptDeltaKey: Hashable {
-        let sessionID: String
-        let messageID: String
-        let partID: String
-        let field: String
-    }
-
     var isCapturingStreamingDiagnostics: Bool {
         isShowingDebugProbe || isRunningDebugProbe
     }
@@ -136,22 +129,24 @@ extension AppViewModel {
     }
 
     func handleManagedEvent(_ managed: OpenCodeManagedEvent) {
-        guard isConnected else { return }
+        guard eventSyncCoordinator.shouldProcessEvent(isConnected: isConnected) else { return }
 
         if shouldLogEventDetails(for: managed.envelope.type) {
             appendDebugLog(eventScopeSummary(for: managed))
             appendDebugLog(eventIdentitySummary(for: managed.envelope))
         }
 
-        if OpenCodeStateReducer.applyGlobalEvent(event: managed.typed, projects: &projects, currentProject: &currentProject) {
-            switch managed.typed {
-            case .serverConnected, .globalDisposed:
+        if let globalAction = eventSyncCoordinator.applyGlobalEvent(
+            managed,
+            projects: &projects,
+            currentProject: &currentProject
+        ) {
+            switch globalAction {
+            case .refreshProjectsAndSessions:
                 Task { [weak self] in
                     try? await self?.refreshProjects()
                     try? await self?.reloadSessions()
                 }
-            default:
-                break
             }
             return
         }
@@ -188,7 +183,7 @@ extension AppViewModel {
 
         if case let .sessionError(sessionID, message) = managed.typed {
             if let sessionID {
-                directoryState.sessionStatuses[sessionID] = "idle"
+                sessionStatuses[sessionID] = "idle"
             }
             if sessionID == nil || sessionID == selectedSession?.id {
                 errorMessage = message ?? "Session error"
@@ -200,49 +195,30 @@ extension AppViewModel {
         }
 
         let payload = managed.envelope
-        let selectedSession = directoryState.selectedSession
+        let currentSelectedSession = selectedSession
         let eventSessionID = managedEventSessionID(for: managed)
 
-        updateCachedMessagesForLiveActivityIfNeeded(payload: payload, sessionID: eventSessionID, selectedSessionID: selectedSession?.id)
+        updateCachedMessagesForLiveActivityIfNeeded(payload: payload, sessionID: eventSessionID, selectedSessionID: currentSelectedSession?.id)
 
-        var nextDirectoryState = directoryState
-        let result = OpenCodeStateReducer.applyDirectoryEvent(
-            event: managed.typed,
-            state: &nextDirectoryState
-        )
-
-        if nextDirectoryState != directoryState {
-            directoryState = nextDirectoryState
-        }
+        let application = eventSyncCoordinator.applyDirectoryEvent(managed, to: directoryEventState())
+        applyDirectoryEventState(application.state)
+        let result = application.result
 
         switch result {
         case let .message(reason):
-            if let selectedSession, shouldRefreshSessionPreview(for: selectedSession.id, eventType: payload.type) {
-                refreshSessionPreview(for: selectedSession.id, messages: directoryState.messages)
+            if let currentSelectedSession, shouldRefreshSessionPreview(for: currentSelectedSession.id, eventType: payload.type) {
+                refreshSessionPreview(for: currentSelectedSession.id, messages: messages)
             }
             scheduleLiveActivityPreviewRefreshIfNeeded(for: managedEventSessionID(for: managed))
-            if let selectedSession,
+            if let currentSelectedSession,
                payload.type == "message.updated",
                payload.properties.info?.role == "user",
-               payload.properties.info?.sessionID == selectedSession.id {
-                syncComposerSelections(for: selectedSession)
+               payload.properties.info?.sessionID == currentSelectedSession.id {
+                syncComposerSelections(for: currentSelectedSession)
             }
             debugLastEventSummary = debugSummary(for: payload)
             appendDebugLog(debugSummary(for: payload))
             appendDebugLog("apply \(payload.type): \(reason) count \(messages.count)")
-
-            if let selectedSession,
-               payload.type == "message.updated",
-               payload.properties.info?.role == "assistant" {
-                startLiveRefresh(for: selectedSession, reason: "assistant")
-            }
-
-            if let selectedSession,
-               payload.type == "message.part.updated",
-               let partType = payload.properties.part?.type,
-               ["step-start", "tool", "reasoning", "text"].contains(partType) {
-                startLiveRefresh(for: selectedSession, reason: partType)
-            }
 
             if payload.type == "message.part.updated",
                payload.properties.part?.type == "step-finish" {
@@ -265,11 +241,11 @@ extension AppViewModel {
             appendDebugLog("session idle")
             markChatBreadcrumb("session idle", sessionID: eventSessionID)
             stopFallbackRefresh()
-            if let selectedSession {
-                refreshSessionPreview(for: selectedSession.id, messages: directoryState.messages)
+            if let currentSelectedSession {
+                refreshSessionPreview(for: currentSelectedSession.id, messages: messages)
             }
-            if let selectedSession {
-                scheduleReload(for: selectedSession)
+            if let currentSelectedSession {
+                scheduleReload(for: currentSelectedSession)
             }
         case let .ignored(reason):
             if isLiveActivityMessageEvent(payload.type),
@@ -290,7 +266,7 @@ extension AppViewModel {
                 }
             }
         case let .vcsBranchUpdated(branch):
-            directoryState.vcsInfo = OpenCodeVCSInfo(branch: branch, defaultBranch: directoryState.vcsInfo?.defaultBranch)
+            projectFilesStore.applyBranchUpdate(branch)
             refreshVCSFromEvent()
         case let .fileWatcherUpdated(file):
             guard !file.hasPrefix(".git/") else { break }
@@ -299,11 +275,11 @@ extension AppViewModel {
             break
         }
 
-        if let selectedSession,
+        if let currentSelectedSession,
            payload.type == "session.diff",
-           payload.properties.sessionID == selectedSession.id {
+           payload.properties.sessionID == currentSelectedSession.id {
             Task { [weak self] in
-                await self?.loadTodos(for: selectedSession)
+                await self?.loadTodos(for: currentSelectedSession)
             }
         }
 
@@ -356,7 +332,7 @@ extension AppViewModel {
             return false
         }
 
-        pendingTranscriptEvents.append(
+        chatStore.enqueuePendingTranscriptEvent(
             OpenCodePendingTranscriptEvent(
                 typedEvent: managed.typed,
                 eventType: managed.envelope.type,
@@ -373,19 +349,15 @@ extension AppViewModel {
     }
 
     private func shouldBufferTranscriptEvent(_ managed: OpenCodeManagedEvent) -> Bool {
-        guard let selectedSessionID = selectedSession?.id else { return false }
-        guard activeChatSessionID == selectedSessionID else { return false }
-
-        switch managed.typed {
-        case let .messagePartDelta(sessionID, _, _, _, _):
-            return sessionID == selectedSessionID
-        default:
-            return false
-        }
+        ChatStore.shouldBufferTranscriptEvent(
+            managed.typed,
+            selectedSessionID: selectedSession?.id,
+            activeChatSessionID: activeChatSessionID
+        )
     }
 
     private func shouldFlushPendingTranscriptEvents(before managed: OpenCodeManagedEvent) -> Bool {
-        !pendingTranscriptEvents.isEmpty
+        chatStore.hasPendingTranscriptEvents
     }
 
     private func transcriptDeltaCharacterCount(for managed: OpenCodeManagedEvent) -> Int {
@@ -410,107 +382,69 @@ extension AppViewModel {
     }
 
     private func streamDeltaCoalescingInterval() -> Duration {
-        let pendingCharacterCount = pendingTranscriptEvents.reduce(0) { $0 + $1.deltaCharacterCount }
-        let projectedLength = currentAssistantTextLength() + pendingCharacterCount
-
-        if projectedLength >= 12_000 {
-            return Self.veryLongStreamDeltaCoalescingInterval
-        }
-        if projectedLength >= 6_000 {
-            return Self.longStreamDeltaCoalescingInterval
-        }
-        if projectedLength >= 2_500 {
-            return Self.mediumStreamDeltaCoalescingInterval
-        }
-        return Self.shortStreamDeltaCoalescingInterval
+        chatStore.streamDeltaCoalescingInterval(
+            short: Self.shortStreamDeltaCoalescingInterval,
+            medium: Self.mediumStreamDeltaCoalescingInterval,
+            long: Self.longStreamDeltaCoalescingInterval,
+            veryLong: Self.veryLongStreamDeltaCoalescingInterval
+        )
     }
 
     private func flushPendingTranscriptEvents(reason: String) {
         streamDeltaFlushTask?.cancel()
         streamDeltaFlushTask = nil
 
-        guard !pendingTranscriptEvents.isEmpty else { return }
-
         let now = Date()
-        let events = pendingTranscriptEvents
-        pendingTranscriptEvents = []
-
-        let reducerEvents = coalescedTranscriptEvents(events)
-        var nextDirectoryState = directoryState
-        var appliedCount = 0
-
-        for event in reducerEvents {
-            let result = OpenCodeStateReducer.applyDirectoryEvent(
-                event: event.typedEvent,
-                state: &nextDirectoryState
-            )
-            if case .message = result {
-                appliedCount += 1
-            }
-        }
-
-        if nextDirectoryState != directoryState {
-            directoryState = nextDirectoryState
-        }
+        guard let pending = chatStore.drainPendingTranscriptEvents() else { return }
+        let events = pending.events
+        let reducerEvents = pending.coalescedEvents
+        let application = eventSyncCoordinator.applyDirectoryEvents(reducerEvents.map(\.typedEvent), to: directoryEventState())
+        applyDirectoryEventState(application.state)
 
         for sessionID in Set(events.compactMap(\.sessionID)) {
             refreshLiveActivityIfNeeded(for: sessionID)
         }
 
-        logStreamDeltaFlush(reason: reason, events: events, appliedCount: appliedCount, coalescedCount: reducerEvents.count, flushedAt: now)
+        logStreamDeltaFlush(reason: reason, events: events, appliedCount: application.messageApplyCount, coalescedCount: reducerEvents.count, flushedAt: now)
     }
 
-    private func coalescedTranscriptEvents(_ events: [OpenCodePendingTranscriptEvent]) -> [OpenCodePendingTranscriptEvent] {
-        var result: [OpenCodePendingTranscriptEvent] = []
-        var order: [TranscriptDeltaKey] = []
-        var accumulated: [TranscriptDeltaKey: (event: OpenCodePendingTranscriptEvent, delta: String, characterCount: Int, enqueuedAt: Date)] = [:]
+    private func directoryEventState() -> EventSyncCoordinator.DirectoryEventState {
+        EventSyncCoordinator.DirectoryEventState(
+            sessions: allSessions,
+            selectedSession: selectedSession,
+            sessionStatuses: sessionStatuses,
+            messages: messages,
+            todos: todos,
+            permissions: permissions,
+            questions: questions
+        )
+    }
 
-        func flushAccumulated() {
-            for key in order {
-                guard let item = accumulated[key] else { continue }
-                result.append(
-                    OpenCodePendingTranscriptEvent(
-                        typedEvent: .messagePartDelta(
-                            sessionID: key.sessionID,
-                            messageID: key.messageID,
-                            partID: key.partID,
-                            field: key.field,
-                            delta: item.delta
-                        ),
-                        eventType: item.event.eventType,
-                        sessionID: key.sessionID,
-                        messageID: key.messageID,
-                        partID: key.partID,
-                        deltaCharacterCount: item.characterCount,
-                        enqueuedAt: item.enqueuedAt
-                    )
-                )
-            }
-            order.removeAll(keepingCapacity: true)
-            accumulated.removeAll(keepingCapacity: true)
+    private func applyDirectoryEventState(_ state: EventSyncCoordinator.DirectoryEventState) {
+        if state.sessions != allSessions {
+            allSessions = state.sessions
         }
-
-        for event in events {
-            guard case let .messagePartDelta(sessionID, messageID, partID, field, delta) = event.typedEvent else {
-                flushAccumulated()
-                result.append(event)
-                continue
-            }
-
-            let key = TranscriptDeltaKey(sessionID: sessionID, messageID: messageID, partID: partID, field: field)
-            if var item = accumulated[key] {
-                item.delta += delta
-                item.characterCount += event.deltaCharacterCount
-                item.enqueuedAt = min(item.enqueuedAt, event.enqueuedAt)
-                accumulated[key] = item
-            } else {
-                order.append(key)
-                accumulated[key] = (event, delta, event.deltaCharacterCount, event.enqueuedAt)
-            }
+        if state.selectedSession != selectedSession {
+            selectedSession = state.selectedSession
         }
-
-        flushAccumulated()
-        return result
+        if state.sessionStatuses != sessionStatuses {
+            sessionStatuses = state.sessionStatuses
+        }
+        if state.messages != messages {
+            messages = state.messages
+        }
+        if state.todos != todos {
+            objectWillChange.send()
+            sessionInteractionStore.replaceTodos(state.todos)
+        }
+        if state.permissions != permissions {
+            objectWillChange.send()
+            sessionInteractionStore.replacePermissions(state.permissions)
+        }
+        if state.questions != questions {
+            objectWillChange.send()
+            sessionInteractionStore.replaceQuestions(state.questions)
+        }
     }
 
     private func logStreamDeltaFlush(reason: String, events: [OpenCodePendingTranscriptEvent], appliedCount: Int, coalescedCount: Int, flushedAt now: Date) {
@@ -561,9 +495,10 @@ extension AppViewModel {
     private func shouldSkipInactiveLiveMessageEvent(_ managed: OpenCodeManagedEvent) -> Bool {
         let eventSessionID = managedEventSessionID(for: managed)
         let affectsSelectedTranscript = eventSessionID == nil ? eventAffectsActiveSession(managed) : false
-        return !Self.shouldProcessLiveMessageEvent(
+        return !eventSyncCoordinator.shouldProcessLiveMessageEvent(
             eventType: managed.envelope.type,
             eventSessionID: eventSessionID,
+            selectedSessionID: selectedSession?.id,
             activeChatSessionID: activeChatSessionID,
             activeLiveActivitySessionIDs: activeLiveActivitySessionIDs,
             affectsSelectedTranscript: affectsSelectedTranscript
@@ -571,16 +506,11 @@ extension AppViewModel {
     }
 
     private func isLiveActivityMessageEvent(_ type: String) -> Bool {
-        Self.isLiveActivityMessageEventType(type)
+        EventSyncCoordinator.isLiveActivityMessageEventType(type)
     }
 
     nonisolated private static func isLiveActivityMessageEventType(_ type: String) -> Bool {
-        switch type {
-        case "message.updated", "message.part.updated", "message.part.delta", "message.removed", "message.part.removed":
-            return true
-        default:
-            return false
-        }
+        EventSyncCoordinator.isLiveActivityMessageEventType(type)
     }
 
     private func updateCachedMessagesForLiveActivityIfNeeded(payload: OpenCodeEventEnvelope, sessionID: String?, selectedSessionID: String?) {
@@ -591,28 +521,7 @@ extension AppViewModel {
             return
         }
 
-        var cachedMessages = cachedMessagesBySessionID[sessionID] ?? []
-
-        switch payload.type {
-        case "message.updated", "message.part.updated", "message.part.delta":
-            let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: sessionID, messages: cachedMessages)
-            guard update.applied else { return }
-            cachedMessages = update.messages
-        case "message.removed":
-            guard let messageID = payload.properties.messageID else { return }
-            cachedMessages.removeAll { $0.info.id == messageID }
-        case "message.part.removed":
-            guard let messageID = payload.properties.messageID,
-                  let partID = payload.properties.partID,
-                  let index = cachedMessages.firstIndex(where: { $0.info.id == messageID }) else {
-                return
-            }
-            cachedMessages[index] = cachedMessages[index].removingPart(partID: partID)
-        default:
-            return
-        }
-
-        cachedMessagesBySessionID[sessionID] = cachedMessages
+        guard let cachedMessages = chatStore.updateCachedMessagesForLiveActivity(payload: payload, sessionID: sessionID) else { return }
         if sessionStatuses[sessionID] != "busy" {
             refreshSessionPreview(for: sessionID, messages: cachedMessages)
         }
@@ -622,54 +531,18 @@ extension AppViewModel {
         let eventDirectory = managed.directory
         let eventSessionID = managedEventSessionID(for: managed)
 
-        if let selectedSessionID = selectedSession?.id,
-           eventSessionID == selectedSessionID {
-            return true
-        }
-
-        if let eventSessionID,
-           activeLiveActivitySessionIDs.contains(eventSessionID) {
-            return true
-        }
-
-        let acceptedDirectories = [selectedSession?.directory, effectiveSelectedDirectory]
-            .compactMap { directory -> String? in
-                guard let directory, !directory.isEmpty else { return nil }
-                return directory
-            }
-
-        guard !acceptedDirectories.isEmpty else {
-            return eventDirectory == "global"
-        }
-
-        if acceptedDirectories.contains(eventDirectory) {
-            return true
-        }
-
-        guard eventDirectory == "global" else { return false }
-
-        return eventSessionID != nil
+        return eventSyncCoordinator.shouldApplyDirectoryEvent(
+            eventDirectory: eventDirectory,
+            eventSessionID: eventSessionID,
+            selectedSessionID: selectedSession?.id,
+            selectedSessionDirectory: selectedSession?.directory,
+            effectiveSelectedDirectory: effectiveSelectedDirectory,
+            activeLiveActivitySessionIDs: activeLiveActivitySessionIDs
+        )
     }
 
     private func managedEventSessionID(for managed: OpenCodeManagedEvent) -> String? {
-        switch managed.typed {
-        case let .sessionCreated(session), let .sessionUpdated(session), let .sessionDeleted(session):
-            return session.id
-        case let .sessionStatus(sessionID, _), let .sessionIdle(sessionID), let .sessionDiff(sessionID), let .todoUpdated(sessionID, _), let .messageRemoved(sessionID, _), let .messagePartDelta(sessionID, _, _, _, _), let .permissionReplied(sessionID, _, _), let .questionReplied(sessionID, _), let .questionRejected(sessionID, _):
-            return sessionID
-        case let .sessionError(sessionID, _):
-            return sessionID
-        case let .messageUpdated(info):
-            return info.sessionID
-        case let .messagePartUpdated(part):
-            return part.sessionID
-        case let .permissionAsked(permission):
-            return permission.sessionID
-        case let .questionAsked(question):
-            return question.sessionID
-        default:
-            return nil
-        }
+        eventSyncCoordinator.sessionID(for: managed.typed)
     }
 
     private func triggerStreamPartHapticIfNeeded(for managed: OpenCodeManagedEvent) {
@@ -683,35 +556,12 @@ extension AppViewModel {
     }
 
     private func shouldEmitStreamPartHaptic(for managed: OpenCodeManagedEvent) -> Bool {
-        guard let selectedSession else { return false }
-        guard activeChatSessionID == selectedSession.id else { return false }
-
-        switch managed.typed {
-        case let .messagePartDelta(sessionID, messageID, partID, field, delta):
-            guard sessionID == selectedSession.id,
-                  field == "text",
-                  !delta.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return false
-            }
-            return isVisibleAssistantTextPart(messageID: messageID, partID: partID, sessionID: sessionID)
-        default:
-            return false
-        }
-    }
-
-    private func isVisibleAssistantTextPart(messageID: String, partID: String, sessionID: String) -> Bool {
-        guard let message = directoryState.messages.first(where: {
-            $0.id == messageID &&
-            $0.info.sessionID == sessionID &&
-            ($0.info.role ?? "").lowercased() == "assistant" &&
-            !$0.info.isCompactionSummary
-        }) else {
-            return false
-        }
-
-        return message.parts.contains { part in
-            part.id == partID && part.type == "text"
-        }
+        ChatStore.shouldEmitStreamPartHaptic(
+            for: managed.typed,
+            selectedSessionID: selectedSession?.id,
+            activeChatSessionID: activeChatSessionID,
+            messages: messages
+        )
     }
 
     private func nextStreamPartHapticInterval() -> TimeInterval {
@@ -741,32 +591,12 @@ extension AppViewModel {
     }
 
     private func eventAffectsActiveSession(_ managed: OpenCodeManagedEvent) -> Bool {
-        guard let selectedSessionID = selectedSession?.id else {
-            return true
-        }
-
-        switch managed.typed {
-        case let .sessionCreated(session), let .sessionUpdated(session), let .sessionDeleted(session):
-            return session.id == selectedSessionID
-        case let .sessionStatus(sessionID, _), let .sessionIdle(sessionID), let .sessionDiff(sessionID), let .todoUpdated(sessionID, _), let .messageRemoved(sessionID, _), let .messagePartDelta(sessionID, _, _, _, _), let .permissionReplied(sessionID, _, _), let .questionReplied(sessionID, _), let .questionRejected(sessionID, _):
-            return sessionID == selectedSessionID
-        case let .sessionError(sessionID, _):
-            return sessionID == nil || sessionID == selectedSessionID
-        case let .messageUpdated(info):
-            return info.sessionID == selectedSessionID
-        case let .messagePartUpdated(part):
-            return part.sessionID == selectedSessionID
-        case let .permissionAsked(permission):
-            return permission.sessionID == selectedSessionID
-        case let .questionAsked(question):
-            return question.sessionID == selectedSessionID
-        case let .messagePartRemoved(messageID, _):
-            return messages.contains { $0.info.id == messageID }
-        case .vcsBranchUpdated, .fileWatcherUpdated:
-            return hasGitProject
-        default:
-            return false
-        }
+        eventSyncCoordinator.eventAffectsSelectedSession(
+            managed.typed,
+            selectedSessionID: selectedSession?.id,
+            selectedMessages: messages,
+            hasGitProject: hasGitProject
+        )
     }
 
     func scheduleReload(for session: OpenCodeSession) {
@@ -775,13 +605,12 @@ extension AppViewModel {
         reloadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
             guard let self, self.isConnected else { return }
-            self.markChatBreadcrumb("reload start", sessionID: session.id)
+            self.markChatBreadcrumb("idle reconcile start", sessionID: session.id)
             do {
                 try await self.loadMessages(for: session)
-                try await self.reloadSessions()
-                self.markChatBreadcrumb("reload finish", sessionID: session.id)
+                self.markChatBreadcrumb("idle reconcile finish", sessionID: session.id)
             } catch {
-                self.markChatBreadcrumb("reload error", sessionID: session.id)
+                self.markChatBreadcrumb("idle reconcile error", sessionID: session.id)
                 self.errorMessage = error.localizedDescription
             }
         }
@@ -790,13 +619,11 @@ extension AppViewModel {
     func startLiveRefresh(for session: OpenCodeSession, reason: String) {
         liveRefreshGeneration += 1
         let generation = liveRefreshGeneration
-        lastFallbackMessageCount = messages.count
-        lastFallbackAssistantLength = currentAssistantTextLength()
+        chatStore.beginFallbackRefreshTracking()
         liveRefreshTask?.cancel()
         liveRefreshTask = Task { [weak self] in
             let delays: [Duration] = [
-                .milliseconds(700), .seconds(1), .milliseconds(1_500), .seconds(2), .seconds(2),
-                .seconds(3), .seconds(3), .seconds(4), .seconds(4), .seconds(5), .seconds(5),
+                .milliseconds(1_500), .seconds(3), .seconds(5),
             ]
 
             for delay in delays {
@@ -807,7 +634,7 @@ extension AppViewModel {
 
                 do {
                     self.markChatBreadcrumb("fallback refresh start \(reason)", sessionID: session.id)
-                    try await self.loadMessages(for: session)
+                    try await self.loadMessages(for: session, prefetchToolDetails: false, refreshTodos: false)
                     self.debugLastEventSummary = self.fallbackRefreshSummary(reason: reason)
                     self.appendDebugLog(self.debugLastEventSummary)
                     self.markChatBreadcrumb("fallback refresh finish \(reason)", sessionID: session.id)
@@ -844,37 +671,11 @@ extension AppViewModel {
     }
 
     func fallbackRefreshSummary(reason: String) -> String {
-        let assistantText = messages
-            .last(where: { ($0.info.role ?? "").lowercased() == "assistant" })?
-            .parts
-            .compactMap(\.text)
-            .joined(separator: " ") ?? ""
-
-        let compact = assistantText
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let messageDelta = messages.count - lastFallbackMessageCount
-        let assistantLength = compact.count
-        let lengthDelta = assistantLength - lastFallbackAssistantLength
-        lastFallbackMessageCount = messages.count
-        lastFallbackAssistantLength = assistantLength
-
-        if compact.isEmpty {
-            return "fallback \(reason) m=\(messages.count) dm=\(messageDelta) len=0 dlen=\(lengthDelta) a=empty"
-        }
-
-        return "fallback \(reason) m=\(messages.count) dm=\(messageDelta) len=\(assistantLength) dlen=\(lengthDelta) a=\(String(compact.prefix(24)))"
+        chatStore.fallbackRefreshSummary(reason: reason)
     }
 
     func currentAssistantTextLength() -> Int {
-        messages
-            .last(where: { ($0.info.role ?? "").lowercased() == "assistant" })?
-            .parts
-            .compactMap(\.text)
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .count ?? 0
+        chatStore.currentAssistantTextLength
     }
 
     func appendDebugLog(_ message: String) {

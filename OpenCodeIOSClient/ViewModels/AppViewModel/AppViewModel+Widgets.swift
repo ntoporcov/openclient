@@ -11,7 +11,7 @@ extension AppViewModel {
         let server = buildWidgetServerSnapshot()
         let projects = buildWidgetProjectSnapshots(serverID: server.id)
         let sessions = buildWidgetSessionSnapshots(serverID: server.id)
-        let replacingSessionIDs = Set(directoryState.sessions.filter(\.isRootSession).map(\.id))
+        let replacingSessionIDs = Set(allSessions.filter(\.isRootSession).map(\.id))
 
         OpenCodeWidgetStore().updatingServer(
             server,
@@ -62,7 +62,7 @@ extension AppViewModel {
 
     private func buildWidgetSessionSnapshots(serverID: String) -> [OpenCodeWidgetSessionSnapshot] {
         let pinnedOrder = Dictionary(uniqueKeysWithValues: pinnedSessionIDs.enumerated().map { ($0.element, $0.offset) })
-        return directoryState.sessions.filter(\.isRootSession).map { session in
+        return allSessions.filter(\.isRootSession).map { session in
             let summary = widgetSummary(for: session)
             let lastActiveAt = widgetLastActiveDate(for: session, summaryUpdatedAt: summary.updatedAt)
             return OpenCodeWidgetSessionSnapshot(
@@ -136,7 +136,7 @@ extension AppViewModel {
             return .needsAction
         }
 
-        switch directoryState.sessionStatuses[session.id] {
+        switch sessionStatuses[session.id] {
         case "busy":
             return .working
         case "idle":

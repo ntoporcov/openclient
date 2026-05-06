@@ -27,101 +27,107 @@ enum OpenCodeStateReducer {
 
     static func applyDirectoryEvent(
         event: OpenCodeTypedEvent,
-        state: inout OpenCodeDirectoryState
+        sessions: inout [OpenCodeSession],
+        selectedSession: inout OpenCodeSession?,
+        sessionStatuses: inout [String: String],
+        messages: inout [OpenCodeMessageEnvelope],
+        todos: inout [OpenCodeTodo],
+        permissions: inout [OpenCodePermission],
+        questions: inout [OpenCodeQuestionRequest]
     ) -> SessionEventResult {
         switch event {
         case let .sessionCreated(session):
-            upsertSession(session, into: &state.sessions)
+            upsertSession(session, into: &sessions)
             return .sessionChanged
         case let .sessionUpdated(session):
-            upsertSession(session, into: &state.sessions)
-            if state.selectedSession?.id == session.id {
-                state.selectedSession = state.selectedSession?.merged(with: session)
+            upsertSession(session, into: &sessions)
+            if selectedSession?.id == session.id {
+                selectedSession = selectedSession?.merged(with: session)
             }
             return .sessionChanged
         case let .sessionDeleted(session):
-            state.sessions.removeAll { $0.id == session.id }
-            state.sessionStatuses[session.id] = nil
-            if state.selectedSession?.id == session.id {
-                state.selectedSession = nil
-                state.messages = []
-                state.todos = []
+            sessions.removeAll { $0.id == session.id }
+            sessionStatuses[session.id] = nil
+            if selectedSession?.id == session.id {
+                selectedSession = nil
+                messages = []
+                todos = []
             }
             return .sessionChanged
         case let .sessionStatus(sessionID, status):
-            state.sessionStatuses[sessionID] = status
-            return status == "idle" && state.selectedSession?.id == sessionID ? .idle : .statusChanged
+            sessionStatuses[sessionID] = status
+            return status == "idle" && selectedSession?.id == sessionID ? .idle : .statusChanged
         case let .sessionIdle(sessionID):
-            state.sessionStatuses[sessionID] = "idle"
-            return state.selectedSession?.id == sessionID ? .idle : .statusChanged
-        case let .todoUpdated(sessionID, todos):
-            guard sessionID == state.selectedSession?.id else {
+            sessionStatuses[sessionID] = "idle"
+            return selectedSession?.id == sessionID ? .idle : .statusChanged
+        case let .todoUpdated(sessionID, updatedTodos):
+            guard sessionID == selectedSession?.id else {
                 return .ignored("session mismatch")
             }
-            state.todos = todos
+            todos = updatedTodos
             return .todoChanged
         case let .messageUpdated(info):
-            guard let selectedSessionID = state.selectedSession?.id,
+            guard let selectedSessionID = selectedSession?.id,
                   info.sessionID == selectedSessionID else {
                 return .ignored("session mismatch")
             }
             let payload = OpenCodeEventEnvelope(type: "message.updated", properties: .init(sessionID: info.sessionID, info: OpenCodeEventInfo(message: info), part: nil, status: nil, todos: nil, messageID: nil, partID: nil, field: nil, delta: nil, id: nil, permissionType: nil, pattern: nil, callID: nil, title: nil, metadata: nil, permissionID: nil, response: nil, reply: nil, message: nil, error: nil, branch: nil, file: nil))
-            let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: selectedSessionID, messages: state.messages)
-            state.messages = update.messages
+            let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: selectedSessionID, messages: messages)
+            messages = update.messages
             return .message(update.reason)
         case let .messagePartUpdated(part):
-            guard let selectedSessionID = state.selectedSession?.id,
+            guard let selectedSessionID = selectedSession?.id,
                   part.sessionID == selectedSessionID else {
                 return .ignored("session mismatch")
             }
             let payload = OpenCodeEventEnvelope(type: "message.part.updated", properties: .init(sessionID: part.sessionID, info: nil, part: part, status: nil, todos: nil, messageID: nil, partID: nil, field: nil, delta: nil, id: nil, permissionType: nil, pattern: nil, callID: nil, title: nil, metadata: nil, permissionID: nil, response: nil, reply: nil, message: nil, error: nil, branch: nil, file: nil))
-            let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: selectedSessionID, messages: state.messages)
-            state.messages = update.messages
+            let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: selectedSessionID, messages: messages)
+            messages = update.messages
             return .message(update.reason)
         case let .messagePartDelta(sessionID, messageID, partID, field, delta):
-            guard let selectedSessionID = state.selectedSession?.id,
+            guard let selectedSessionID = selectedSession?.id,
                   sessionID == selectedSessionID else {
                 return .ignored("session mismatch")
             }
             let payload = OpenCodeEventEnvelope(type: "message.part.delta", properties: .init(sessionID: sessionID, info: nil, part: nil, status: nil, todos: nil, messageID: messageID, partID: partID, field: field, delta: delta, id: nil, permissionType: nil, pattern: nil, callID: nil, title: nil, metadata: nil, permissionID: nil, response: nil, reply: nil, message: nil, error: nil, branch: nil, file: nil))
-            let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: selectedSessionID, messages: state.messages)
-            state.messages = update.messages
+            let update = OpenCodeStreamReducer.apply(payload: payload, selectedSessionID: selectedSessionID, messages: messages)
+            messages = update.messages
             return .message(update.reason)
         case let .messageRemoved(sessionID, messageID):
-            guard sessionID == state.selectedSession?.id else {
+            guard sessionID == selectedSession?.id else {
                 return .ignored("session mismatch")
             }
-            state.messages.removeAll { $0.info.id == messageID }
+            messages.removeAll { $0.info.id == messageID }
             return .message("message removed")
         case let .messagePartRemoved(messageID, partID):
-            guard let index = state.messages.firstIndex(where: { $0.info.id == messageID }) else {
+            guard let index = messages.firstIndex(where: { $0.info.id == messageID }) else {
                 return .ignored("message missing")
             }
-            state.messages[index] = state.messages[index].removingPart(partID: partID)
+            messages[index] = messages[index].removingPart(partID: partID)
             return .message("part removed")
         case let .permissionAsked(permission):
-            if let index = state.permissions.firstIndex(where: { $0.id == permission.id }) {
-                state.permissions[index] = permission
+            if let index = permissions.firstIndex(where: { $0.id == permission.id }) {
+                permissions[index] = permission
             } else {
-                state.permissions.append(permission)
+                permissions.append(permission)
             }
             return .permissionChanged
         case let .permissionReplied(sessionID, requestID, _):
-            state.permissions.removeAll { $0.id == requestID }
-            if state.selectedSession?.id != sessionID {
+            permissions.removeAll { $0.id == requestID }
+            if selectedSession?.id != sessionID {
                 return .statusChanged
             }
             return .permissionChanged
         case let .questionAsked(question):
-            if let index = state.questions.firstIndex(where: { $0.id == question.id }) {
-                state.questions[index] = question
+            if let index = questions.firstIndex(where: { $0.id == question.id }) {
+                questions[index] = question
             } else {
-                state.questions.append(question)
+                questions.append(question)
             }
             return .questionChanged
         case let .questionReplied(sessionID, requestID), let .questionRejected(sessionID, requestID):
-            state.questions.removeAll { $0.id == requestID }
-            if state.selectedSession?.id != sessionID {
+            questions.removeAll { $0.id == requestID }
+            if selectedSession?.id != sessionID {
                 return .statusChanged
             }
             return .questionChanged

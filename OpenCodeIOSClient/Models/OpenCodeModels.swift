@@ -697,41 +697,6 @@ struct OpenCodeMCPServer: Identifiable, Hashable, Sendable {
     var id: String { name }
 }
 
-struct OpenCodeDirectoryState: Equatable, Sendable {
-    var isLoadingSessions = false
-    var sessions: [OpenCodeSession] = []
-    var selectedSession: OpenCodeSession?
-    var isLoadingSelectedSession = false
-    var messages: [OpenCodeMessageEnvelope] = []
-    var commands: [OpenCodeCommand] = []
-    var sessionStatuses: [String: String] = [:]
-    var todos: [OpenCodeTodo] = []
-    var permissions: [OpenCodePermission] = []
-    var questions: [OpenCodeQuestionRequest] = []
-    var mcpStatuses: [String: OpenCodeMCPStatus] = [:]
-    var isMCPReady = false
-    var isLoadingMCP = false
-    var togglingMCPServerNames: Set<String> = []
-    var mcpErrorMessage: String?
-    var vcsInfo: OpenCodeVCSInfo?
-    var vcsFileStatuses: [OpenCodeVCSFileStatus] = []
-    var vcsDiffsByMode: [OpenCodeVCSDiffMode: [OpenCodeVCSFileDiff]] = [:]
-    var selectedVCSMode: OpenCodeVCSDiffMode = .git
-    var selectedVCSFile: String?
-    var projectFilesMode: OpenCodeProjectFilesMode = .changes
-    var fileTreeRootNodes: [OpenCodeFileNode] = []
-    var fileTreeChildrenByParentPath: [String: [OpenCodeFileNode]] = [:]
-    var expandedFileTreeDirectories: Set<String> = []
-    var selectedProjectFilePath: String?
-    var fileContentsByPath: [String: OpenCodeFileContent] = [:]
-    var isLoadingFileTree = false
-    var isLoadingSelectedFileContent = false
-    var fileTreeErrorMessage: String?
-    var fileContentErrorMessage: String?
-    var isLoadingVCS = false
-    var vcsErrorMessage: String?
-}
-
 enum AppBackendMode: String, Codable, Sendable {
     case none
     case server
@@ -1982,7 +1947,17 @@ struct CreateSessionRequest: Encodable {
 }
 
 struct UpdateSessionRequest: Encodable {
-    let title: String
+    let title: String?
+    let time: UpdateSessionTimeRequest?
+
+    init(title: String? = nil, time: UpdateSessionTimeRequest? = nil) {
+        self.title = title
+        self.time = time
+    }
+}
+
+struct UpdateSessionTimeRequest: Encodable {
+    let archived: Double?
 }
 
 struct ForkSessionRequest: Encodable {

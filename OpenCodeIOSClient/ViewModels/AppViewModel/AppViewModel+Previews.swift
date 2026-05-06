@@ -30,21 +30,19 @@ extension AppViewModel {
         viewModel.projects = OpenCodePreviewData.projects
         viewModel.currentProject = currentProject
         viewModel.selectedDirectory = selectedDirectory
-        viewModel.directoryState = OpenCodeDirectoryState(
-            sessions: sessions,
-            selectedSession: selectedSession,
-            messages: messages,
-            sessionStatuses: sessionStatuses,
-            todos: todos,
-            permissions: permissions,
-            questions: questions
-        )
+        viewModel.allSessions = sessions
+        viewModel.selectedSession = selectedSession
+        viewModel.sessionStatuses = sessionStatuses
+        viewModel.messages = messages
+        viewModel.todos = todos
+        viewModel.permissions = permissions
+        viewModel.questions = questions
         viewModel.toolMessageDetails = toolMessageDetails
         viewModel.sessionPreviews = OpenCodePreviewData.sessionPreviews
         viewModel.availableAgents = OpenCodePreviewData.agents
         viewModel.availableProviders = OpenCodePreviewData.providers
         viewModel.defaultModelsByProviderID = OpenCodePreviewData.defaultModelsByProviderID
-        viewModel.directoryState.commands = OpenCodePreviewData.commands
+        viewModel.directoryCommands = OpenCodePreviewData.commands
         viewModel.errorMessage = errorMessage
         viewModel.showSavedServerPrompt = showSavedServerPrompt
         viewModel.hasSavedServer = hasSavedServer

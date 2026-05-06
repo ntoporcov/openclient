@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 
@@ -53,42 +54,366 @@ final class AppViewModel: ObservableObject {
     }
 
     @Published var config = OpenCodeServerConfig()
-    @Published var backendMode: AppBackendMode = .none
-    @Published var isConnected = false
-    @Published var serverVersion = ""
+    let connectionStore = ConnectionStore()
+    lazy var connectionCoordinator = ConnectionCoordinator(connectionStore: connectionStore)
+    let eventSyncCoordinator = EventSyncCoordinator()
+    let projectCoordinator = ProjectCoordinator()
+    let sessionCoordinator = SessionCoordinator()
+    var backendMode: AppBackendMode {
+        get { connectionStore.backendMode }
+        set {
+            objectWillChange.send()
+            connectionStore.backendMode = newValue
+        }
+    }
+    var isConnected: Bool {
+        get { connectionStore.isConnected }
+        set {
+            objectWillChange.send()
+            connectionStore.isConnected = newValue
+        }
+    }
+    var serverVersion: String {
+        get { connectionStore.serverVersion }
+        set {
+            objectWillChange.send()
+            connectionStore.serverVersion = newValue
+        }
+    }
     @Published var appleIntelligenceRecentWorkspaces: [AppleIntelligenceWorkspaceRecord] = []
     @Published var activeAppleIntelligenceWorkspaceID: String?
     @Published var isShowingAppleIntelligenceFolderPicker = false
-    @Published var projects: [OpenCodeProject] = []
-    @Published var currentProject: OpenCodeProject?
-    @Published var selectedDirectory: String?
-    @Published var selectedProjectContentTab: ProjectContentTab = .sessions
-    @Published var isShowingProjectPicker = false
-    @Published var projectSearchQuery = ""
-    @Published var projectSearchResults: [String] = []
-    @Published var isShowingCreateProjectSheet = false
-    @Published var createProjectQuery = ""
-    @Published var createProjectResults: [String] = []
-    @Published var createProjectSelectedDirectory: String?
-    @Published var directoryState = OpenCodeDirectoryState()
-    @Published var toolMessageDetails: [String: OpenCodeMessageEnvelope] = [:]
-    @Published var cachedMessagesBySessionID: [String: [OpenCodeMessageEnvelope]] = [:]
-    @Published var sessionPreviews: [String: SessionPreview] = [:]
-    @Published var pinnedSessionIDsByScope: [String: [String]] = [:]
-    @Published var liveActivityAutoStartByScope: [String: Bool] = [:]
-    @Published var projectWorkspacesEnabledByScope: [String: Bool] = [:]
-    @Published var projectActionsByScope: [String: [OpenCodeAction]] = [:]
-    @Published var pendingActionRunsBySessionID: [String: PendingOpenCodeActionRun] = [:]
-    @Published var workspaceSessionsByDirectory: [String: OpenCodeWorkspaceSessionState] = [:]
+    let mcpStore = MCPStore()
+    let projectFilesStore = ProjectFilesStore()
+    let sessionInteractionStore = SessionInteractionStore()
+    var mcpStatuses: [String: OpenCodeMCPStatus] {
+        get { mcpStore.statuses }
+        set {
+            objectWillChange.send()
+            mcpStore.statuses = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &mcpStore.statuses
+        }
+    }
+    var isMCPReady: Bool {
+        get { mcpStore.isReady }
+        set {
+            objectWillChange.send()
+            mcpStore.isReady = newValue
+        }
+    }
+    var isLoadingMCP: Bool {
+        get { mcpStore.isLoading }
+        set {
+            objectWillChange.send()
+            mcpStore.isLoading = newValue
+        }
+    }
+    var togglingMCPServerNames: Set<String> {
+        get { mcpStore.togglingServerNames }
+        set {
+            objectWillChange.send()
+            mcpStore.togglingServerNames = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &mcpStore.togglingServerNames
+        }
+    }
+    var mcpErrorMessage: String? {
+        get { mcpStore.errorMessage }
+        set {
+            objectWillChange.send()
+            mcpStore.errorMessage = newValue
+        }
+    }
+    let projectStore = ProjectStore()
+    var projects: [OpenCodeProject] {
+        get { projectStore.projects }
+        set {
+            objectWillChange.send()
+            projectStore.projects = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectStore.projects
+        }
+    }
+    var currentProject: OpenCodeProject? {
+        get { projectStore.currentProject }
+        set {
+            objectWillChange.send()
+            projectStore.currentProject = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectStore.currentProject
+        }
+    }
+    var selectedDirectory: String? {
+        get { projectStore.selectedDirectory }
+        set {
+            objectWillChange.send()
+            projectStore.selectedDirectory = newValue
+        }
+    }
+    var selectedProjectContentTab: ProjectContentTab {
+        get { projectStore.selectedContentTab }
+        set {
+            objectWillChange.send()
+            projectStore.selectedContentTab = newValue
+        }
+    }
+    var isShowingProjectPicker: Bool {
+        get { projectStore.isShowingProjectPicker }
+        set {
+            objectWillChange.send()
+            projectStore.isShowingProjectPicker = newValue
+        }
+    }
+    var projectSearchQuery: String {
+        get { projectStore.searchQuery }
+        set {
+            objectWillChange.send()
+            projectStore.searchQuery = newValue
+        }
+    }
+    var projectSearchResults: [String] {
+        get { projectStore.searchResults }
+        set {
+            objectWillChange.send()
+            projectStore.searchResults = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectStore.searchResults
+        }
+    }
+    var isShowingCreateProjectSheet: Bool {
+        get { projectStore.isShowingCreateProjectSheet }
+        set {
+            objectWillChange.send()
+            projectStore.isShowingCreateProjectSheet = newValue
+        }
+    }
+    var createProjectQuery: String {
+        get { projectStore.createProjectQuery }
+        set {
+            objectWillChange.send()
+            projectStore.createProjectQuery = newValue
+        }
+    }
+    var createProjectResults: [String] {
+        get { projectStore.createProjectResults }
+        set {
+            objectWillChange.send()
+            projectStore.createProjectResults = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectStore.createProjectResults
+        }
+    }
+    var createProjectSelectedDirectory: String? {
+        get { projectStore.createProjectSelectedDirectory }
+        set {
+            objectWillChange.send()
+            projectStore.createProjectSelectedDirectory = newValue
+        }
+    }
+    let directoryStore = DirectoryStore()
+    var isLoadingSessions: Bool {
+        get { directoryStore.isLoadingSessions }
+        set {
+            objectWillChange.send()
+            directoryStore.isLoadingSessions = newValue
+        }
+    }
+    var allSessions: [OpenCodeSession] {
+        get { directoryStore.sessions }
+        set {
+            objectWillChange.send()
+            directoryStore.sessions = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &directoryStore.sessions
+        }
+    }
+    var directoryCommands: [OpenCodeCommand] {
+        get { directoryStore.commands }
+        set {
+            objectWillChange.send()
+            directoryStore.commands = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &directoryStore.commands
+        }
+    }
+    var sessionStatuses: [String: String] {
+        get { directoryStore.sessionStatuses }
+        set {
+            objectWillChange.send()
+            directoryStore.sessionStatuses = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &directoryStore.sessionStatuses
+        }
+    }
+    let chatStore = ChatStore()
+    var toolMessageDetails: [String: OpenCodeMessageEnvelope] {
+        get { chatStore.toolMessageDetails }
+        set {
+            objectWillChange.send()
+            chatStore.toolMessageDetails = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &chatStore.toolMessageDetails
+        }
+    }
+    var cachedMessagesBySessionID: [String: [OpenCodeMessageEnvelope]] {
+        get { chatStore.cachedMessagesBySessionID }
+        set {
+            objectWillChange.send()
+            chatStore.cachedMessagesBySessionID = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &chatStore.cachedMessagesBySessionID
+        }
+    }
+    let sessionListStore = SessionListStore()
+    var sessionPreviews: [String: SessionPreview] {
+        get { sessionListStore.previews }
+        set {
+            objectWillChange.send()
+            sessionListStore.previews = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &sessionListStore.previews
+        }
+    }
+    var pinnedSessionIDsByScope: [String: [String]] {
+        get { sessionListStore.pinnedSessionIDsByScope }
+        set {
+            objectWillChange.send()
+            sessionListStore.pinnedSessionIDsByScope = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &sessionListStore.pinnedSessionIDsByScope
+        }
+    }
+    let projectPreferencesStore = ProjectPreferencesStore()
+    var liveActivityAutoStartByScope: [String: Bool] {
+        get { projectPreferencesStore.liveActivityAutoStartByScope }
+        set {
+            objectWillChange.send()
+            projectPreferencesStore.liveActivityAutoStartByScope = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectPreferencesStore.liveActivityAutoStartByScope
+        }
+    }
+    var projectWorkspacesEnabledByScope: [String: Bool] {
+        get { projectPreferencesStore.projectWorkspacesEnabledByScope }
+        set {
+            objectWillChange.send()
+            projectPreferencesStore.projectWorkspacesEnabledByScope = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectPreferencesStore.projectWorkspacesEnabledByScope
+        }
+    }
+    var projectActionsByScope: [String: [OpenCodeAction]] {
+        get { projectPreferencesStore.projectActionsByScope }
+        set {
+            objectWillChange.send()
+            projectPreferencesStore.projectActionsByScope = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectPreferencesStore.projectActionsByScope
+        }
+    }
+    var pendingActionRunsBySessionID: [String: PendingOpenCodeActionRun] {
+        get { sessionListStore.pendingActionRunsBySessionID }
+        set {
+            objectWillChange.send()
+            sessionListStore.pendingActionRunsBySessionID = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &sessionListStore.pendingActionRunsBySessionID
+        }
+    }
+    var workspaceSessionsByDirectory: [String: OpenCodeWorkspaceSessionState] {
+        get { sessionListStore.workspaceSessionsByDirectory }
+        set {
+            objectWillChange.send()
+            sessionListStore.workspaceSessionsByDirectory = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &sessionListStore.workspaceSessionsByDirectory
+        }
+    }
     @Published var draftTitle = ""
     @Published var newSessionWorkspaceSelection: NewSessionWorkspaceSelection = .main
     @Published var newWorkspaceName = ""
     @Published var selectedFilesWorkspaceDirectory: String?
-    @Published var draftMessage = ""
-    @Published var draftAttachments: [OpenCodeComposerAttachment] = []
-    @Published var messageDraftsByChatKey: [String: OpenCodeMessageDraft] = [:]
-    @Published var composerResetToken = UUID()
-    @Published var errorMessage: String?
+    let composerStore = ComposerStore()
+    var draftMessage: String {
+        get { composerStore.draftMessage }
+        set {
+            objectWillChange.send()
+            composerStore.draftMessage = newValue
+        }
+    }
+    var draftAttachments: [OpenCodeComposerAttachment] {
+        get { composerStore.draftAttachments }
+        set {
+            objectWillChange.send()
+            composerStore.draftAttachments = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &composerStore.draftAttachments
+        }
+    }
+    var messageDraftsByChatKey: [String: OpenCodeMessageDraft] {
+        get { composerStore.draftsByChatKey }
+        set {
+            objectWillChange.send()
+            composerStore.draftsByChatKey = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &composerStore.draftsByChatKey
+        }
+    }
+    var composerResetToken: UUID {
+        get { composerStore.resetToken }
+        set {
+            objectWillChange.send()
+            composerStore.resetToken = newValue
+        }
+    }
+    var errorMessage: String? {
+        get { connectionStore.errorMessage }
+        set {
+            objectWillChange.send()
+            connectionStore.errorMessage = newValue
+        }
+    }
     @Published var appleIntelligenceDebugPickedPath = ""
     @Published var appleIntelligenceDebugActivePath = ""
     @Published var appleIntelligenceDebugResolvedPath = ""
@@ -96,12 +421,46 @@ final class AppViewModel: ObservableObject {
     @Published var isShowingAppleIntelligenceInstructionsSheet = false
     @Published var appleIntelligenceUserInstructions = ""
     @Published var appleIntelligenceSystemInstructions = ""
-    @Published var isLoading = false
-    @Published var recentServerConfigs: [OpenCodeServerConfig] = []
-    @Published var hasSavedServer = false
-    @Published var showSavedServerPrompt = false
+    var isLoading: Bool {
+        get { connectionStore.isLoading }
+        set {
+            objectWillChange.send()
+            connectionStore.isLoading = newValue
+        }
+    }
+    var recentServerConfigs: [OpenCodeServerConfig] {
+        get { connectionStore.recentServerConfigs }
+        set {
+            objectWillChange.send()
+            connectionStore.recentServerConfigs = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &connectionStore.recentServerConfigs
+        }
+    }
+    var hasSavedServer: Bool {
+        get { connectionStore.hasSavedServer }
+        set {
+            objectWillChange.send()
+            connectionStore.hasSavedServer = newValue
+        }
+    }
+    var showSavedServerPrompt: Bool {
+        get { connectionStore.showSavedServerPrompt }
+        set {
+            objectWillChange.send()
+            connectionStore.showSavedServerPrompt = newValue
+        }
+    }
     @Published var isShowingAddServerSheet = false
-    @Published var savedServerEditorMode: SavedServerEditorMode = .add
+    var savedServerEditorMode: SavedServerEditorMode {
+        get { connectionStore.savedServerEditorMode }
+        set {
+            objectWillChange.send()
+            connectionStore.savedServerEditorMode = newValue
+        }
+    }
     @Published var isShowingCreateSessionSheet = false
     @Published var isShowingProjectSettingsSheet = false
     @Published var isShowingConfigurationsSheet = false
@@ -109,25 +468,152 @@ final class AppViewModel: ObservableObject {
     @Published var isShowingFindBugLanguageSheet = false
     @Published var isShowingFindBugModelSheet = false
     @Published var isShowingForkSessionSheet = false
+    @Published var pendingForkSessionID: String?
+    @Published var pendingForkMessageID: String?
     var debugLastEventSummary = ""
     @Published var debugProbeLog: [String] = []
     @Published var chatBreadcrumbs: [OpenCodeChatBreadcrumb] = []
     @Published var isShowingDebugProbe = false
     @Published var isRunningDebugProbe = false
     @Published var debugLastControlSummary = ""
-    @Published var availableAgents: [OpenCodeAgent] = []
-    @Published var availableProviders: [OpenCodeProvider] = []
-    @Published var defaultModelsByProviderID: [String: String] = [:]
-    @Published var selectedAgentNamesBySessionID: [String: String] = [:]
-    @Published var selectedModelsBySessionID: [String: OpenCodeModelReference] = [:]
-    @Published var selectedVariantsBySessionID: [String: String] = [:]
-    @Published var newSessionDefaults = NewSessionDefaults()
-    @Published var funAndGamesPreferences = FunAndGamesPreferences()
-    @Published var findPlaceSessionsByID: [String: FindPlaceGameSession] = [:]
-    @Published var findBugSessionsByID: [String: FindBugGameSession] = [:]
-    @Published var pendingFindBugLanguage: FindBugGameLanguage?
-    @Published var activeLiveActivitySessionIDs: Set<String> = []
-    @Published var activeChatSessionID: String?
+    let modelConfigurationStore = ModelConfigurationStore()
+    var availableAgents: [OpenCodeAgent] {
+        get { modelConfigurationStore.availableAgents }
+        set {
+            objectWillChange.send()
+            modelConfigurationStore.availableAgents = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &modelConfigurationStore.availableAgents
+        }
+    }
+    var availableProviders: [OpenCodeProvider] {
+        get { modelConfigurationStore.availableProviders }
+        set {
+            objectWillChange.send()
+            modelConfigurationStore.availableProviders = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &modelConfigurationStore.availableProviders
+        }
+    }
+    var defaultModelsByProviderID: [String: String] {
+        get { modelConfigurationStore.defaultModelsByProviderID }
+        set {
+            objectWillChange.send()
+            modelConfigurationStore.defaultModelsByProviderID = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &modelConfigurationStore.defaultModelsByProviderID
+        }
+    }
+    var selectedAgentNamesBySessionID: [String: String] {
+        get { modelConfigurationStore.selectedAgentNamesBySessionID }
+        set {
+            objectWillChange.send()
+            modelConfigurationStore.selectedAgentNamesBySessionID = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &modelConfigurationStore.selectedAgentNamesBySessionID
+        }
+    }
+    var selectedModelsBySessionID: [String: OpenCodeModelReference] {
+        get { modelConfigurationStore.selectedModelsBySessionID }
+        set {
+            objectWillChange.send()
+            modelConfigurationStore.selectedModelsBySessionID = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &modelConfigurationStore.selectedModelsBySessionID
+        }
+    }
+    var selectedVariantsBySessionID: [String: String] {
+        get { modelConfigurationStore.selectedVariantsBySessionID }
+        set {
+            objectWillChange.send()
+            modelConfigurationStore.selectedVariantsBySessionID = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &modelConfigurationStore.selectedVariantsBySessionID
+        }
+    }
+    var newSessionDefaults: NewSessionDefaults {
+        get { modelConfigurationStore.newSessionDefaults }
+        set {
+            objectWillChange.send()
+            modelConfigurationStore.newSessionDefaults = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &modelConfigurationStore.newSessionDefaults
+        }
+    }
+    let funAndGamesStore = FunAndGamesStore()
+    var funAndGamesPreferences: FunAndGamesPreferences {
+        get { funAndGamesStore.preferences }
+        set {
+            objectWillChange.send()
+            funAndGamesStore.preferences = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &funAndGamesStore.preferences
+        }
+    }
+    var findPlaceSessionsByID: [String: FindPlaceGameSession] {
+        get { funAndGamesStore.findPlaceSessionsByID }
+        set {
+            objectWillChange.send()
+            funAndGamesStore.findPlaceSessionsByID = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &funAndGamesStore.findPlaceSessionsByID
+        }
+    }
+    var findBugSessionsByID: [String: FindBugGameSession] {
+        get { funAndGamesStore.findBugSessionsByID }
+        set {
+            objectWillChange.send()
+            funAndGamesStore.findBugSessionsByID = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &funAndGamesStore.findBugSessionsByID
+        }
+    }
+    var pendingFindBugLanguage: FindBugGameLanguage? {
+        get { funAndGamesStore.pendingFindBugLanguage }
+        set {
+            objectWillChange.send()
+            funAndGamesStore.pendingFindBugLanguage = newValue
+        }
+    }
+    let liveActivityStore = LiveActivityStore()
+    var activeLiveActivitySessionIDs: Set<String> {
+        get { liveActivityStore.activeSessionIDs }
+        set {
+            objectWillChange.send()
+            liveActivityStore.activeSessionIDs = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &liveActivityStore.activeSessionIDs
+        }
+    }
+    var activeChatSessionID: String? {
+        get { liveActivityStore.activeChatSessionID }
+        set {
+            objectWillChange.send()
+            liveActivityStore.activeChatSessionID = newValue
+        }
+    }
     @Published var usageMeter = OpenClientUsageMeter.empty
     @Published var paywallReason: OpenClientPaywallReason?
 #if DEBUG
@@ -141,7 +627,6 @@ final class AppViewModel: ObservableObject {
     let eventManager = OpenCodeEventManager()
     var eventStreamRestartTask: Task<Void, Never>?
     var reloadTask: Task<Void, Never>?
-    var liveRefreshTask: Task<Void, Never>?
     var appleIntelligenceResponseTask: Task<Void, Never>?
     var activeAppleIntelligenceWorkspaceURL: URL?
     var currentAppleIntelligenceWorkspace: AppleIntelligenceWorkspaceRecord?
@@ -152,15 +637,45 @@ final class AppViewModel: ObservableObject {
     var uiTestDirectory: String?
     var lastStreamEventAt = Date.distantPast
     var streamDirectory: String?
-    var liveRefreshGeneration = 0
-    var lastFallbackMessageCount = 0
-    var lastFallbackAssistantLength = 0
-    var nextStreamPartHapticAllowedAt = Date.distantPast
+    var liveRefreshTask: Task<Void, Never>? {
+        get { chatStore.liveRefreshTask }
+        set { chatStore.liveRefreshTask = newValue }
+    }
+    var liveRefreshGeneration: Int {
+        get { chatStore.liveRefreshGeneration }
+        set { chatStore.liveRefreshGeneration = newValue }
+    }
+    var lastFallbackMessageCount: Int {
+        get { chatStore.lastFallbackMessageCount }
+        set { chatStore.lastFallbackMessageCount = newValue }
+    }
+    var lastFallbackAssistantLength: Int {
+        get { chatStore.lastFallbackAssistantLength }
+        set { chatStore.lastFallbackAssistantLength = newValue }
+    }
+    var nextStreamPartHapticAllowedAt: Date {
+        get { chatStore.nextStreamPartHapticAllowedAt }
+        set { chatStore.nextStreamPartHapticAllowedAt = newValue }
+    }
     var liveActivityPreviewRefreshTasksBySessionID: [String: Task<Void, Never>] = [:]
-    var pendingTranscriptEvents: [OpenCodePendingTranscriptEvent] = []
-    var streamDeltaFlushTask: Task<Void, Never>?
-    var streamDeltaLastFlushAt: Date?
-    var isComposerStreamingFocused = false
+    var pendingTranscriptEvents: [OpenCodePendingTranscriptEvent] {
+        get { chatStore.pendingTranscriptEvents }
+        set { chatStore.pendingTranscriptEvents = newValue }
+        _modify { yield &chatStore.pendingTranscriptEvents }
+    }
+    var streamDeltaFlushTask: Task<Void, Never>? {
+        get { chatStore.streamDeltaFlushTask }
+        set { chatStore.streamDeltaFlushTask = newValue }
+    }
+    var streamDeltaLastFlushAt: Date? {
+        get { chatStore.streamDeltaLastFlushAt }
+        set { chatStore.streamDeltaLastFlushAt = newValue }
+    }
+    var storeObservationCancellables: Set<AnyCancellable> = []
+    var isComposerStreamingFocused: Bool {
+        get { composerStore.isStreamingFocused }
+        set { composerStore.isStreamingFocused = newValue }
+    }
     #if canImport(ActivityKit) && os(iOS)
     var liveActivityRefreshTasksBySessionID: [String: Task<Void, Never>] = [:]
     var lastLiveActivityStatesBySessionID: [String: OpenCodeChatActivityAttributes.ContentState] = [:]
@@ -171,6 +686,8 @@ final class AppViewModel: ObservableObject {
     static let actionSessionTitlePrefix = "__openclient_action__:"
 
     init() {
+        observeStores()
+
         if configureUITestEnvironmentIfNeeded() {
             return
         }
@@ -201,6 +718,24 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private func observeStores() {
+        [
+            // Most store-backed AppViewModel facades send objectWillChange explicitly.
+            // Observing all stores here doubles invalidations during hot paths like send.
+            // ConnectionStore changes are low-frequency and are mostly routed through helpers.
+            connectionStore.objectWillChange.eraseToAnyPublisher(),
+            // ProjectFilesStore still has a few direct dictionary/set mutations during tree loading.
+            projectFilesStore.objectWillChange.eraseToAnyPublisher(),
+        ]
+        .forEach { publisher in
+            publisher
+                .sink { [weak self] _ in
+                    self?.objectWillChange.send()
+                }
+                .store(in: &storeObservationCancellables)
+        }
+    }
+
     var client: OpenCodeAPIClient {
         OpenCodeAPIClient(config: config)
     }
@@ -222,7 +757,7 @@ final class AppViewModel: ObservableObject {
         return appleIntelligenceRecentWorkspaces.first { $0.id == activeAppleIntelligenceWorkspaceID }
     }
 
-    var sessions: [OpenCodeSession] { directoryState.sessions.filter { $0.isRootSession && !isActionSession($0) } }
+    var sessions: [OpenCodeSession] { allSessions.filter { $0.isRootSession && !isActionSession($0) } }
 
     var isProjectWorkspacesEnabled: Bool {
         projectWorkspacesEnabledByScope[currentProjectPreferenceScopeKey] ?? false
@@ -243,17 +778,37 @@ final class AppViewModel: ObservableObject {
     }
 
     var selectedSession: OpenCodeSession? {
-        get { directoryState.selectedSession }
-        set { directoryState.selectedSession = newValue }
+        get { directoryStore.selectedSession }
+        set {
+            objectWillChange.send()
+            directoryStore.selectedSession = newValue
+        }
     }
 
-    var messages: [OpenCodeMessageEnvelope] { directoryState.messages }
+    var isLoadingSelectedSession: Bool {
+        get { chatStore.isLoadingSelectedSession }
+        set {
+            objectWillChange.send()
+            chatStore.isLoadingSelectedSession = newValue
+        }
+    }
+    var messages: [OpenCodeMessageEnvelope] {
+        get { chatStore.messages }
+        set {
+            objectWillChange.send()
+            chatStore.messages = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &chatStore.messages
+        }
+    }
     var commands: [OpenCodeCommand] {
         commands(canFork: selectedSession != nil && !forkableMessages.isEmpty)
     }
 
     func commands(canFork: Bool) -> [OpenCodeCommand] {
-        var result = directoryState.commands
+        var result = directoryCommands
         if selectedSession != nil, !result.contains(where: { $0.name == "compact" }) {
             result.append(Self.compactClientCommand)
         }
@@ -262,28 +817,95 @@ final class AppViewModel: ObservableObject {
         }
         return result
     }
-    var sessionStatuses: [String: String] { directoryState.sessionStatuses }
-    var todos: [OpenCodeTodo] { directoryState.todos }
-    var permissions: [OpenCodePermission] { directoryState.permissions }
-    var questions: [OpenCodeQuestionRequest] { directoryState.questions }
-    var vcsInfo: OpenCodeVCSInfo? { directoryState.vcsInfo }
-    var vcsFileStatuses: [OpenCodeVCSFileStatus] { directoryState.vcsFileStatuses }
-    var projectFilesMode: OpenCodeProjectFilesMode {
-        get { directoryState.projectFilesMode }
-        set { directoryState.projectFilesMode = newValue }
+    var todos: [OpenCodeTodo] {
+        get { sessionInteractionStore.todos }
+        set {
+            objectWillChange.send()
+            sessionInteractionStore.todos = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &sessionInteractionStore.todos
+        }
     }
-    var fileTreeRootNodes: [OpenCodeFileNode] { directoryState.fileTreeRootNodes }
+    var permissions: [OpenCodePermission] {
+        get { sessionInteractionStore.permissions }
+        set {
+            objectWillChange.send()
+            sessionInteractionStore.permissions = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &sessionInteractionStore.permissions
+        }
+    }
+    var questions: [OpenCodeQuestionRequest] {
+        get { sessionInteractionStore.questions }
+        set {
+            objectWillChange.send()
+            sessionInteractionStore.questions = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &sessionInteractionStore.questions
+        }
+    }
+    var vcsInfo: OpenCodeVCSInfo? {
+        get { projectFilesStore.vcsInfo }
+        set {
+            objectWillChange.send()
+            projectFilesStore.vcsInfo = newValue
+        }
+    }
+    var vcsFileStatuses: [OpenCodeVCSFileStatus] {
+        get { projectFilesStore.vcsFileStatuses }
+        set {
+            objectWillChange.send()
+            projectFilesStore.vcsFileStatuses = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectFilesStore.vcsFileStatuses
+        }
+    }
+    var projectFilesMode: OpenCodeProjectFilesMode {
+        get { projectFilesStore.mode }
+        set {
+            objectWillChange.send()
+            projectFilesStore.mode = newValue
+        }
+    }
+    var fileTreeRootNodes: [OpenCodeFileNode] {
+        get { projectFilesStore.fileTreeRootNodes }
+        set {
+            objectWillChange.send()
+            projectFilesStore.fileTreeRootNodes = newValue
+        }
+        _modify {
+            objectWillChange.send()
+            yield &projectFilesStore.fileTreeRootNodes
+        }
+    }
     var selectedProjectFilePath: String? {
-        get { directoryState.selectedProjectFilePath }
-        set { directoryState.selectedProjectFilePath = newValue }
+        get { projectFilesStore.selectedFilePath }
+        set {
+            objectWillChange.send()
+            projectFilesStore.selectedFilePath = newValue
+        }
     }
     var selectedVCSDiffMode: OpenCodeVCSDiffMode {
-        get { directoryState.selectedVCSMode }
-        set { directoryState.selectedVCSMode = newValue }
+        get { projectFilesStore.selectedVCSMode }
+        set {
+            objectWillChange.send()
+            projectFilesStore.selectedVCSMode = newValue
+        }
     }
     var selectedVCSFile: String? {
-        get { directoryState.selectedVCSFile }
-        set { directoryState.selectedVCSFile = newValue }
+        get { projectFilesStore.selectedVCSFile }
+        set {
+            objectWillChange.send()
+            projectFilesStore.selectedVCSFile = newValue
+        }
     }
 
     static let forkClientCommand = OpenCodeCommand(
@@ -308,10 +930,10 @@ final class AppViewModel: ObservableObject {
         hints: []
     )
     var hasGitProject: Bool { currentProject?.vcs == "git" && effectiveSelectedDirectory != nil }
-    var currentVCSDiffs: [OpenCodeVCSFileDiff] { directoryState.vcsDiffsByMode[selectedVCSDiffMode] ?? [] }
+    var currentVCSDiffs: [OpenCodeVCSFileDiff] { projectFilesStore.vcsDiffsByMode[selectedVCSDiffMode] ?? [] }
     var selectedProjectFileContent: OpenCodeFileContent? {
         guard let selectedProjectFilePath else { return nil }
-        return directoryState.fileContentsByPath[selectedProjectFilePath]
+        return projectFilesStore.fileContentsByPath[selectedProjectFilePath]
     }
     var selectedVCSFileDiff: OpenCodeVCSFileDiff? {
         let path = selectedProjectFilePath ?? selectedVCSFile
@@ -321,5 +943,47 @@ final class AppViewModel: ObservableObject {
     var selectedProjectFileIsChanged: Bool {
         guard let selectedProjectFilePath else { return false }
         return vcsFileStatuses.contains { $0.path == selectedProjectFilePath }
+    }
+    var isLoadingVCS: Bool {
+        get { projectFilesStore.isLoadingVCS }
+        set {
+            objectWillChange.send()
+            projectFilesStore.isLoadingVCS = newValue
+        }
+    }
+    var isLoadingFileTree: Bool {
+        get { projectFilesStore.isLoadingFileTree }
+        set {
+            objectWillChange.send()
+            projectFilesStore.isLoadingFileTree = newValue
+        }
+    }
+    var isLoadingSelectedFileContent: Bool {
+        get { projectFilesStore.isLoadingSelectedFileContent }
+        set {
+            objectWillChange.send()
+            projectFilesStore.isLoadingSelectedFileContent = newValue
+        }
+    }
+    var vcsErrorMessage: String? {
+        get { projectFilesStore.vcsErrorMessage }
+        set {
+            objectWillChange.send()
+            projectFilesStore.vcsErrorMessage = newValue
+        }
+    }
+    var fileTreeErrorMessage: String? {
+        get { projectFilesStore.fileTreeErrorMessage }
+        set {
+            objectWillChange.send()
+            projectFilesStore.fileTreeErrorMessage = newValue
+        }
+    }
+    var fileContentErrorMessage: String? {
+        get { projectFilesStore.fileContentErrorMessage }
+        set {
+            objectWillChange.send()
+            projectFilesStore.fileContentErrorMessage = newValue
+        }
     }
 }

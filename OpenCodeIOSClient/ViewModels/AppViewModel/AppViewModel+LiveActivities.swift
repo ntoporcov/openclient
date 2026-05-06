@@ -92,7 +92,7 @@ extension AppViewModel {
 
             do {
                 let messages = try await self.client.listMessages(sessionID: session.id, directory: session.directory)
-                self.cachedMessagesBySessionID[session.id] = messages
+                self.chatStore.cacheMessages(messages, forSessionID: session.id)
                 self.refreshSessionPreview(for: session.id, messages: messages)
                 self.refreshLiveActivityIfNeeded(for: session.id)
             } catch {
@@ -174,7 +174,7 @@ extension AppViewModel {
                 }
 
                 let state = self.liveActivityState(for: session)
-                if endIfIdle && self.directoryState.sessionStatuses[targetSessionID] == "idle" {
+                if endIfIdle && self.sessionStatuses[targetSessionID] == "idle" {
                     await Task.detached(priority: .utility) {
                         guard let activity = Activity<OpenCodeChatActivityAttributes>.activities.first(where: { $0.attributes.sessionID == targetSessionID }) else { return }
                         await activity.end(
@@ -347,7 +347,7 @@ extension AppViewModel {
             return "Action"
         }
 
-        switch directoryState.sessionStatuses[session.id] {
+        switch sessionStatuses[session.id] {
         case "busy":
             return "Live"
         case "idle":
@@ -370,7 +370,7 @@ extension AppViewModel {
             let text = liveActivityText(for: latestAssistant, limit: 180) else {
             return []
         }
-        let isSessionBusy = directoryState.sessionStatuses[session.id] == "busy"
+        let isSessionBusy = sessionStatuses[session.id] == "busy"
 
         return [
             OpenCodeChatActivityLine(

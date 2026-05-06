@@ -4,10 +4,30 @@ struct MCPListView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var searchText = ""
 
+    var body: some View {
+        MCPListContent(
+            snapshot: viewModel.mcpSnapshot,
+            searchText: $searchText,
+            onLoad: {
+                await viewModel.loadMCPStatusIfNeeded()
+            },
+            onToggle: { name in
+                await viewModel.toggleMCPServer(name: name)
+            }
+        )
+    }
+}
+
+private struct MCPListContent: View {
+    let snapshot: AppViewModel.MCPSnapshot
+    @Binding var searchText: String
+    let onLoad: () async -> Void
+    let onToggle: (String) async -> Void
+
     private var filteredServers: [OpenCodeMCPServer] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return viewModel.mcpServers }
-        return viewModel.mcpServers.filter { server in
+        guard !query.isEmpty else { return snapshot.servers }
+        return snapshot.servers.filter { server in
             server.name.localizedCaseInsensitiveContains(query) || server.status.displayStatus.localizedCaseInsensitiveContains(query)
         }
     }
@@ -24,21 +44,21 @@ struct MCPListView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("MCP Servers")
                             .font(.headline)
-                        Text("\(viewModel.connectedMCPServerCount) of \(viewModel.mcpServers.count) enabled")
+                        Text("\(snapshot.connectedServerCount) of \(snapshot.servers.count) enabled")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer(minLength: 0)
 
-                    if viewModel.directoryState.isLoadingMCP {
+                    if snapshot.isLoading {
                         ProgressView()
                     }
                 }
                 .padding(.vertical, 4)
             }
 
-            if let errorMessage = viewModel.directoryState.mcpErrorMessage {
+            if let errorMessage = snapshot.errorMessage {
                 Section("Error") {
                     Text(errorMessage)
                         .foregroundStyle(.red)
@@ -46,19 +66,19 @@ struct MCPListView: View {
             }
 
             Section("Servers") {
-                if viewModel.directoryState.isLoadingMCP && viewModel.mcpServers.isEmpty {
+                if snapshot.isLoading && snapshot.servers.isEmpty {
                     ProgressView("Loading MCP servers")
                 } else if filteredServers.isEmpty {
-                    Text(viewModel.mcpServers.isEmpty ? "No configured MCP servers." : "No MCP servers match your search.")
+                    Text(snapshot.servers.isEmpty ? "No configured MCP servers." : "No MCP servers match your search.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(filteredServers) { server in
                         MCPServerRow(
                             server: server,
-                            isToggling: viewModel.directoryState.togglingMCPServerNames.contains(server.name),
+                            isToggling: snapshot.togglingServerNames.contains(server.name),
                             onToggle: {
                                 Task {
-                                    await viewModel.toggleMCPServer(name: server.name)
+                                    await onToggle(server.name)
                                 }
                             }
                         )
@@ -69,10 +89,10 @@ struct MCPListView: View {
         .opencodeGroupedListStyle()
         .searchable(text: $searchText, prompt: "Search MCP servers")
         .task {
-            await viewModel.loadMCPStatusIfNeeded()
+            await onLoad()
         }
-        .animation(opencodeSelectionAnimation, value: viewModel.mcpServers.map(\.id).joined(separator: "|"))
-        .animation(opencodeSelectionAnimation, value: viewModel.directoryState.togglingMCPServerNames)
+        .animation(opencodeSelectionAnimation, value: snapshot.servers.map(\.id).joined(separator: "|"))
+        .animation(opencodeSelectionAnimation, value: snapshot.togglingServerNames)
     }
 }
 

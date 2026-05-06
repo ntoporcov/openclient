@@ -5,33 +5,33 @@ struct ThinkingRow: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var entryOffset: CGFloat = 0
-    @State private var entryOpacity: Double = 1
-    @State private var entryScale: CGFloat = 1
     @State private var entryAnimationStartDate: Date?
     @State private var hasRunEntryAnimation = false
+    @State private var entryAnimationStartTask: Task<Void, Never>?
     @State private var entryAnimationTask: Task<Void, Never>?
 
+    private static let entryStartOffset: CGFloat = 600
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
-            thinkingRow(phase: pulsePhase(at: context.date))
+            thinkingRow(phase: pulsePhase(at: context.date), date: context.date)
         }
         .onAppear {
-            runEntryAnimationIfNeeded()
+            scheduleEntryAnimationIfNeeded()
         }
         .onChange(of: animateEntry) { _, _ in
-            runEntryAnimationIfNeeded()
+            scheduleEntryAnimationIfNeeded()
         }
         .onDisappear {
-            entryAnimationTask?.cancel()
-            entryAnimationTask = nil
+            finishEntryAnimation()
+            hasRunEntryAnimation = false
         }
     }
 
-    private func thinkingRow(phase: Double) -> some View {
-        let entryProgress = entryAnimationStartDate.map { entryAnimationProgress(at: Date(), startDate: $0) } ?? 1
+    private func thinkingRow(phase: Double, date: Date) -> some View {
+        let entryProgress = entryAnimationStartDate.map { entryAnimationProgress(at: date, startDate: $0) }
+        let isWaitingForEntryAnimation = animateEntry && !hasRunEntryAnimation
 
         return HStack {
             VStack(alignment: .leading, spacing: 8) {
@@ -58,9 +58,9 @@ struct ThinkingRow: View {
             Spacer(minLength: 44)
         }
         .frame(maxWidth: .infinity)
-        .offset(y: entryAnimationStartDate == nil ? entryOffset : 560 * (1 - entryProgress))
-        .opacity(entryAnimationStartDate == nil ? entryOpacity : 0.72 + 0.28 * entryProgress)
-        .scaleEffect(entryAnimationStartDate == nil ? entryScale : 0.94 + 0.06 * entryProgress, anchor: .bottomLeading)
+        .offset(y: entryProgress.map { Self.entryStartOffset * (1 - $0) } ?? (isWaitingForEntryAnimation ? Self.entryStartOffset : 0))
+        .opacity(entryProgress.map { 0.72 + 0.28 * $0 } ?? (isWaitingForEntryAnimation ? 0.72 : 1))
+        .scaleEffect(entryProgress.map { 0.94 + 0.06 * $0 } ?? (isWaitingForEntryAnimation ? 0.94 : 1), anchor: .bottomLeading)
     }
 
     private func breathingGlassGlow(phase: Double) -> some View {
@@ -92,28 +92,46 @@ struct ThinkingRow: View {
         return (1 - cos(progress * 2 * .pi)) / 2
     }
 
-    private func runEntryAnimationIfNeeded() {
+    private func scheduleEntryAnimationIfNeeded() {
+        guard animateEntry, !hasRunEntryAnimation else { return }
+        guard entryAnimationStartTask == nil else { return }
+
+        entryAnimationStartTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            startEntryAnimationIfNeeded()
+        }
+    }
+
+    private func startEntryAnimationIfNeeded() {
         guard animateEntry, !hasRunEntryAnimation else { return }
 
         hasRunEntryAnimation = true
+        entryAnimationStartTask?.cancel()
+        entryAnimationStartTask = nil
         entryAnimationStartDate = Date()
 
         entryAnimationTask?.cancel()
         entryAnimationTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(560))
             guard !Task.isCancelled else { return }
-            entryAnimationStartDate = nil
-            entryOffset = 0
-            entryOpacity = 1
-            entryScale = 1
-            entryAnimationTask = nil
+            finishEntryAnimation()
         }
     }
 
     private func entryAnimationProgress(at date: Date, startDate: Date) -> CGFloat {
+        guard !reduceMotion else { return 1 }
         let elapsed = max(0, date.timeIntervalSince(startDate))
         let duration = 0.48
         let linear = min(1, elapsed / duration)
         return CGFloat(1 - pow(1 - linear, 3))
+    }
+
+    private func finishEntryAnimation() {
+        entryAnimationStartTask?.cancel()
+        entryAnimationStartTask = nil
+        entryAnimationTask?.cancel()
+        entryAnimationTask = nil
+        entryAnimationStartDate = nil
     }
 }

@@ -4,17 +4,57 @@ struct GitStatusView: View {
     @ObservedObject var viewModel: AppViewModel
     let onFileChosen: () -> Void
 
-    private var statusIDs: String {
-        viewModel.vcsFileStatuses.map(\.id).joined(separator: "|")
+    var body: some View {
+        GitStatusContent(
+            snapshot: viewModel.projectFilesSnapshot,
+            workspaceDirectories: viewModel.workspaceDirectories(),
+            workspaceDisplayName: { viewModel.workspaceDisplayName(for: $0) },
+            relativeGitPath: { viewModel.relativeGitPath($0) },
+            isExpandedDirectory: { viewModel.isExpandedDirectory($0) },
+            aggregateStatus: { viewModel.aggregateStatus(for: $0) },
+            onSelectWorkspace: { viewModel.selectFilesWorkspaceDirectory($0) },
+            onSelectMode: { viewModel.selectProjectFilesMode($0) },
+            onSelectVCSFile: { path in
+                viewModel.selectVCSFile(path)
+                withAnimation(opencodeSelectionAnimation) {
+                    onFileChosen()
+                }
+            },
+            onToggleDirectory: { viewModel.toggleFileTreeDirectory($0) },
+            onSelectProjectFile: { node in
+                viewModel.selectProjectFile(node)
+                withAnimation(opencodeSelectionAnimation) {
+                    onFileChosen()
+                }
+            },
+            onLoadGitData: { await viewModel.loadGitViewDataIfNeeded() },
+            onLoadFileTree: { await viewModel.loadFileTreeIfNeeded() }
+        )
     }
+}
 
-    private var workspaceDirectories: [String] {
-        viewModel.workspaceDirectories()
+private struct GitStatusContent: View {
+    let snapshot: AppViewModel.ProjectFilesSnapshot
+    let workspaceDirectories: [String]
+    let workspaceDisplayName: (String?) -> String?
+    let relativeGitPath: (String) -> String
+    let isExpandedDirectory: (String) -> Bool
+    let aggregateStatus: (OpenCodeFileNode) -> OpenCodeVCSAggregateStatus?
+    let onSelectWorkspace: (String) -> Void
+    let onSelectMode: (OpenCodeProjectFilesMode) -> Void
+    let onSelectVCSFile: (String) -> Void
+    let onToggleDirectory: (OpenCodeFileNode) -> Void
+    let onSelectProjectFile: (OpenCodeFileNode) -> Void
+    let onLoadGitData: () async -> Void
+    let onLoadFileTree: () async -> Void
+
+    private var statusIDs: String {
+        snapshot.fileStatuses.map(\.id).joined(separator: "|")
     }
 
     var body: some View {
         List {
-            if let info = viewModel.vcsInfo {
+            if let info = snapshot.vcsInfo {
                 Section("Repository") {
                     HStack(spacing: 12) {
                         Label(info.branch ?? "Unknown", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
@@ -31,24 +71,19 @@ struct GitStatusView: View {
                 }
             }
 
-            if !viewModel.vcsIntensityFiles.isEmpty {
+            if !snapshot.intensityFiles.isEmpty {
                 Section {
                     GitSummaryCard(
-                        summary: viewModel.vcsSummary,
-                        branch: viewModel.vcsInfo?.branch,
-                        modeTitle: viewModel.selectedVCSDiffMode.title
+                        summary: snapshot.summary,
+                        branch: snapshot.vcsInfo?.branch,
+                        modeTitle: snapshot.selectedMode.title
                     )
                     .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
 
                     GitIntensityStrip(
-                        files: viewModel.vcsIntensityFiles,
-                        selectedPath: viewModel.selectedVCSFile,
-                        onSelect: { path in
-                            viewModel.selectVCSFile(path)
-                            withAnimation(opencodeSelectionAnimation) {
-                                onFileChosen()
-                            }
-                        }
+                        files: snapshot.intensityFiles,
+                        selectedPath: snapshot.selectedVCSFile,
+                        onSelect: onSelectVCSFile
                     )
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                 }
@@ -57,11 +92,11 @@ struct GitStatusView: View {
             if !workspaceDirectories.isEmpty {
                 Section {
                     Picker("Workspace", selection: Binding(
-                        get: { viewModel.effectiveFilesDirectory ?? workspaceDirectories.first ?? "" },
-                        set: { viewModel.selectFilesWorkspaceDirectory($0) }
+                        get: { snapshot.effectiveDirectory ?? workspaceDirectories.first ?? "" },
+                        set: { directory in onSelectWorkspace(directory) }
                     )) {
                         ForEach(workspaceDirectories, id: \.self) { directory in
-                            Text(viewModel.workspaceDisplayName(for: directory) ?? URL(fileURLWithPath: directory).lastPathComponent)
+                            Text(workspaceDisplayName(directory) ?? URL(fileURLWithPath: directory).lastPathComponent)
                                 .tag(directory)
                         }
                     }
@@ -70,8 +105,8 @@ struct GitStatusView: View {
 
             Section {
                 Picker("Files Mode", selection: Binding(
-                    get: { viewModel.projectFilesMode },
-                    set: { viewModel.selectProjectFilesMode($0) }
+                    get: { snapshot.filesMode },
+                    set: { mode in onSelectMode(mode) }
                 )) {
                     ForEach(OpenCodeProjectFilesMode.allCases, id: \.self) { mode in
                         Text(mode.title).tag(mode)
@@ -80,23 +115,23 @@ struct GitStatusView: View {
                 .pickerStyle(.segmented)
             }
 
-            if let errorMessage = viewModel.directoryState.vcsErrorMessage {
+            if let errorMessage = snapshot.vcsErrorMessage {
                 Section("Error") {
                     Text(errorMessage)
                         .foregroundStyle(.red)
                 }
             }
 
-            if viewModel.projectFilesMode == .tree,
-               let treeError = viewModel.directoryState.fileTreeErrorMessage {
+            if snapshot.filesMode == .tree,
+               let treeError = snapshot.fileTreeErrorMessage {
                 Section("File Tree Error") {
                     Text(treeError)
                         .foregroundStyle(.red)
                 }
             }
 
-            if viewModel.projectFilesMode == .changes {
-                Section(viewModel.workspaceDisplayName(for: viewModel.effectiveFilesDirectory) ?? "Working Tree") {
+            if snapshot.filesMode == .changes {
+                Section(workspaceDisplayName(snapshot.effectiveDirectory) ?? "Working Tree") {
                     changesSectionContent
                 }
             } else {
@@ -107,30 +142,30 @@ struct GitStatusView: View {
         }
         .listStyle(.plain)
         .task {
-            await viewModel.loadGitViewDataIfNeeded()
+            await onLoadGitData()
         }
-        .task(id: viewModel.projectFilesMode) {
-            if viewModel.projectFilesMode == .tree {
-                await viewModel.loadFileTreeIfNeeded()
+        .task(id: snapshot.filesMode) {
+            if snapshot.filesMode == .tree {
+                await onLoadFileTree()
             }
         }
-        .task(id: viewModel.effectiveFilesDirectory ?? "") {
-            await viewModel.loadGitViewDataIfNeeded()
-            if viewModel.projectFilesMode == .tree {
-                await viewModel.loadFileTreeIfNeeded()
+        .task(id: snapshot.effectiveDirectory ?? "") {
+            await onLoadGitData()
+            if snapshot.filesMode == .tree {
+                await onLoadFileTree()
             }
         }
         .animation(opencodeSelectionAnimation, value: statusIDs)
-        .animation(opencodeSelectionAnimation, value: viewModel.selectedVCSFile ?? "")
+        .animation(opencodeSelectionAnimation, value: snapshot.selectedVCSFile ?? "")
     }
 
     private func relativeTitle(for path: String) -> String {
-        let relative = viewModel.relativeGitPath(path)
+        let relative = relativeGitPath(path)
         return relative.split(separator: "/").last.map(String.init) ?? relative
     }
 
     private func relativeSubtitle(for path: String) -> String? {
-        let relative = viewModel.relativeGitPath(path)
+        let relative = relativeGitPath(path)
         let components = relative.split(separator: "/")
         guard components.count > 1 else { return nil }
         return components.dropLast().joined(separator: "/")
@@ -138,18 +173,15 @@ struct GitStatusView: View {
 
     @ViewBuilder
     private var changesSectionContent: some View {
-        if viewModel.directoryState.isLoadingVCS && viewModel.vcsFileStatuses.isEmpty {
+        if snapshot.isLoadingVCS && snapshot.fileStatuses.isEmpty {
             ProgressView("Loading changes")
-        } else if viewModel.vcsFileStatuses.isEmpty {
+        } else if snapshot.fileStatuses.isEmpty {
             Text("No changes")
                 .foregroundStyle(.secondary)
         } else {
-            ForEach(viewModel.vcsFileStatuses) { file in
+            ForEach(snapshot.fileStatuses) { file in
                 Button {
-                    viewModel.selectVCSFile(file.path)
-                    withAnimation(opencodeSelectionAnimation) {
-                        onFileChosen()
-                    }
+                    onSelectVCSFile(file.path)
                 } label: {
                     GitStatusRow(
                         title: relativeTitle(for: file.path),
@@ -157,11 +189,11 @@ struct GitStatusView: View {
                         status: file.status,
                         additions: file.added,
                         deletions: file.removed,
-                        selected: viewModel.selectedProjectFilePath == file.path
+                        selected: snapshot.selectedFilePath == file.path
                     )
                 }
                 .buttonStyle(.plain)
-                .listRowBackground(viewModel.selectedProjectFilePath == file.path ? Color.blue.opacity(0.10) : Color.clear)
+                .listRowBackground(snapshot.selectedFilePath == file.path ? Color.blue.opacity(0.10) : Color.clear)
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
             }
         }
@@ -169,29 +201,26 @@ struct GitStatusView: View {
 
     @ViewBuilder
     private var treeSectionContent: some View {
-        if viewModel.directoryState.isLoadingFileTree && viewModel.visibleFileTreeRows.isEmpty {
+        if snapshot.isLoadingFileTree && snapshot.visibleRows.isEmpty {
             ProgressView("Loading files")
-        } else if viewModel.visibleFileTreeRows.isEmpty {
+        } else if snapshot.visibleRows.isEmpty {
             Text("No files")
                 .foregroundStyle(.secondary)
         } else {
-            ForEach(viewModel.visibleFileTreeRows) { row in
+            ForEach(snapshot.visibleRows) { row in
                 GitFileTreeRow(
                     row: row,
-                    isExpanded: viewModel.isExpandedDirectory(row.node.absolute),
-                    isSelected: viewModel.selectedProjectFilePath == row.node.absolute,
-                    aggregateStatus: viewModel.aggregateStatus(for: row.node),
+                    isExpanded: isExpandedDirectory(row.node.absolute),
+                    isSelected: snapshot.selectedFilePath == row.node.absolute,
+                    aggregateStatus: aggregateStatus(row.node),
                     onToggleDirectory: {
-                        viewModel.toggleFileTreeDirectory(row.node)
+                        onToggleDirectory(row.node)
                     },
                     onSelectFile: {
-                        viewModel.selectProjectFile(row.node)
-                        withAnimation(opencodeSelectionAnimation) {
-                            onFileChosen()
-                        }
+                        onSelectProjectFile(row.node)
                     }
                 )
-                .listRowBackground(viewModel.selectedProjectFilePath == row.node.absolute ? Color.blue.opacity(0.10) : Color.clear)
+                .listRowBackground(snapshot.selectedFilePath == row.node.absolute ? Color.blue.opacity(0.10) : Color.clear)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             }
         }

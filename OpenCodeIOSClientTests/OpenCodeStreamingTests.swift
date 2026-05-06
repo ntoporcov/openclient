@@ -186,24 +186,31 @@ final class OpenCodeStreamingTests: XCTestCase {
             projectID: nil,
             parentID: nil
         )
-        var state = OpenCodeDirectoryState(
-            sessions: [existingSession],
-            selectedSession: existingSession,
-            messages: [],
-            sessionStatuses: [:],
-            todos: [],
-            permissions: [],
-            questions: []
-        )
+        var sessions = [existingSession]
+        var selectedSession: OpenCodeSession? = existingSession
+        var sessionStatuses: [String: String] = [:]
+        var messages: [OpenCodeMessageEnvelope] = []
+        var todos: [OpenCodeTodo] = []
+        var permissions: [OpenCodePermission] = []
+        var questions: [OpenCodeQuestionRequest] = []
 
-        let result = OpenCodeStateReducer.applyDirectoryEvent(event: .sessionUpdated(partialUpdate), state: &state)
+        let result = OpenCodeStateReducer.applyDirectoryEvent(
+            event: .sessionUpdated(partialUpdate),
+            sessions: &sessions,
+            selectedSession: &selectedSession,
+            sessionStatuses: &sessionStatuses,
+            messages: &messages,
+            todos: &todos,
+            permissions: &permissions,
+            questions: &questions
+        )
 
         guard case .sessionChanged = result else {
             return XCTFail("Expected sessionChanged, got \(result)")
         }
-        XCTAssertEqual(state.sessions.first?.title, "Renamed")
-        XCTAssertEqual(state.sessions.first?.directory, "/tmp/project")
-        XCTAssertEqual(state.selectedSession?.directory, "/tmp/project")
+        XCTAssertEqual(sessions.first?.title, "Renamed")
+        XCTAssertEqual(sessions.first?.directory, "/tmp/project")
+        XCTAssertEqual(selectedSession?.directory, "/tmp/project")
     }
 
     func testQuestionAskedDecodesWithUpstreamOptionalDefaults() throws {
@@ -231,23 +238,29 @@ final class OpenCodeStreamingTests: XCTestCase {
             return XCTFail("Expected questionAsked typed event")
         }
 
-        var state = OpenCodeDirectoryState(
-            sessions: [],
-            selectedSession: OpenCodeSession(id: "ses_test", title: "Test", workspaceID: nil, directory: "/tmp/project", projectID: nil, parentID: nil),
-            messages: [],
-            commands: [],
-            sessionStatuses: [:],
-            todos: [],
-            permissions: [],
-            questions: []
-        )
+        var sessions: [OpenCodeSession] = []
+        var selectedSession: OpenCodeSession? = OpenCodeSession(id: "ses_test", title: "Test", workspaceID: nil, directory: "/tmp/project", projectID: nil, parentID: nil)
+        var sessionStatuses: [String: String] = [:]
+        var messages: [OpenCodeMessageEnvelope] = []
+        var todos: [OpenCodeTodo] = []
+        var permissions: [OpenCodePermission] = []
+        var questions: [OpenCodeQuestionRequest] = []
 
-        let result = OpenCodeStateReducer.applyDirectoryEvent(event: typed, state: &state)
+        let result = OpenCodeStateReducer.applyDirectoryEvent(
+            event: typed,
+            sessions: &sessions,
+            selectedSession: &selectedSession,
+            sessionStatuses: &sessionStatuses,
+            messages: &messages,
+            todos: &todos,
+            permissions: &permissions,
+            questions: &questions
+        )
 
         guard case .questionChanged = result else {
             return XCTFail("Expected questionChanged, got \(result)")
         }
-        XCTAssertEqual(state.questions.map(\.id), ["q_1"])
+        XCTAssertEqual(questions.map(\.id), ["q_1"])
     }
 
     func testManagedEventDecodeReportsDroppedQuestionPayloads() {
@@ -356,6 +369,246 @@ final class OpenCodeStreamingTests: XCTestCase {
         ))
     }
 
+    func testChatStoreBuffersOnlySelectedActiveTranscriptDeltas() {
+        let event = OpenCodeTypedEvent.messagePartDelta(
+            sessionID: "ses_current",
+            messageID: "msg_assistant",
+            partID: "part_msg_assistant",
+            field: "text",
+            delta: "Hello"
+        )
+
+        XCTAssertTrue(ChatStore.shouldBufferTranscriptEvent(
+            event,
+            selectedSessionID: "ses_current",
+            activeChatSessionID: "ses_current"
+        ))
+
+        XCTAssertFalse(ChatStore.shouldBufferTranscriptEvent(
+            event,
+            selectedSessionID: "ses_current",
+            activeChatSessionID: "ses_other"
+        ))
+
+        XCTAssertFalse(ChatStore.shouldBufferTranscriptEvent(
+            event,
+            selectedSessionID: "ses_other",
+            activeChatSessionID: "ses_other"
+        ))
+    }
+
+    func testChatStoreDoesNotBufferNonDeltaTranscriptEvents() {
+        let event = OpenCodeTypedEvent.messageUpdated(
+            OpenCodeMessage(id: "msg_assistant", role: "assistant", sessionID: "ses_current", time: nil, agent: nil, model: nil)
+        )
+
+        XCTAssertFalse(ChatStore.shouldBufferTranscriptEvent(
+            event,
+            selectedSessionID: "ses_current",
+            activeChatSessionID: "ses_current"
+        ))
+    }
+
+    func testChatStoreAllowsHapticForVisibleSelectedAssistantTextDelta() {
+        let event = OpenCodeTypedEvent.messagePartDelta(
+            sessionID: "ses_current",
+            messageID: "msg_assistant",
+            partID: "part_msg_assistant",
+            field: "text",
+            delta: "Hello"
+        )
+        let messages = [message(id: "msg_assistant", role: "assistant", text: "", sessionID: "ses_current")]
+
+        XCTAssertTrue(ChatStore.shouldEmitStreamPartHaptic(
+            for: event,
+            selectedSessionID: "ses_current",
+            activeChatSessionID: "ses_current",
+            messages: messages
+        ))
+    }
+
+    func testChatStoreSuppressesHapticForNonVisibleOrWhitespaceDeltas() {
+        let messages = [message(id: "msg_assistant", role: "assistant", text: "", sessionID: "ses_current")]
+        let whitespace = OpenCodeTypedEvent.messagePartDelta(
+            sessionID: "ses_current",
+            messageID: "msg_assistant",
+            partID: "part_msg_assistant",
+            field: "text",
+            delta: "   "
+        )
+        let missingPart = OpenCodeTypedEvent.messagePartDelta(
+            sessionID: "ses_current",
+            messageID: "msg_assistant",
+            partID: "missing_part",
+            field: "text",
+            delta: "Hello"
+        )
+        let inactiveChat = OpenCodeTypedEvent.messagePartDelta(
+            sessionID: "ses_current",
+            messageID: "msg_assistant",
+            partID: "part_msg_assistant",
+            field: "text",
+            delta: "Hello"
+        )
+
+        XCTAssertFalse(ChatStore.shouldEmitStreamPartHaptic(for: whitespace, selectedSessionID: "ses_current", activeChatSessionID: "ses_current", messages: messages))
+        XCTAssertFalse(ChatStore.shouldEmitStreamPartHaptic(for: missingPart, selectedSessionID: "ses_current", activeChatSessionID: "ses_current", messages: messages))
+        XCTAssertFalse(ChatStore.shouldEmitStreamPartHaptic(for: inactiveChat, selectedSessionID: "ses_current", activeChatSessionID: "ses_other", messages: messages))
+    }
+
+    func testChatStoreSuppressesHapticForUserMessages() {
+        let event = OpenCodeTypedEvent.messagePartDelta(
+            sessionID: "ses_current",
+            messageID: "msg_user",
+            partID: "part_msg_user",
+            field: "text",
+            delta: "Hello"
+        )
+        let userMessages = [message(id: "msg_user", role: "user", text: "", sessionID: "ses_current")]
+
+        XCTAssertFalse(ChatStore.shouldEmitStreamPartHaptic(
+            for: event,
+            selectedSessionID: "ses_current",
+            activeChatSessionID: "ses_current",
+            messages: userMessages
+        ))
+    }
+
+    func testChatStoreAssistantTextLengthUsesLatestAssistantMessage() {
+        let messages = [
+            message(id: "msg_old_assistant", role: "assistant", text: "old assistant text"),
+            message(id: "msg_user", role: "user", text: "user text"),
+            message(id: "msg_new_assistant", role: "assistant", text: "  new assistant text  "),
+        ]
+
+        XCTAssertEqual(ChatStore.assistantTextLength(in: messages), "new assistant text".count)
+    }
+
+    func testChatStoreStreamDeltaCoalescingIntervalUsesProjectedLengthThresholds() {
+        let short: Duration = .milliseconds(50)
+        let medium: Duration = .milliseconds(90)
+        let long: Duration = .milliseconds(140)
+        let veryLong: Duration = .milliseconds(220)
+
+        XCTAssertEqual(ChatStore.streamDeltaCoalescingInterval(currentAssistantTextLength: 100, pendingTranscriptCharacterCount: 100, short: short, medium: medium, long: long, veryLong: veryLong), short)
+        XCTAssertEqual(ChatStore.streamDeltaCoalescingInterval(currentAssistantTextLength: 2_499, pendingTranscriptCharacterCount: 1, short: short, medium: medium, long: long, veryLong: veryLong), medium)
+        XCTAssertEqual(ChatStore.streamDeltaCoalescingInterval(currentAssistantTextLength: 5_999, pendingTranscriptCharacterCount: 1, short: short, medium: medium, long: long, veryLong: veryLong), long)
+        XCTAssertEqual(ChatStore.streamDeltaCoalescingInterval(currentAssistantTextLength: 11_999, pendingTranscriptCharacterCount: 1, short: short, medium: medium, long: long, veryLong: veryLong), veryLong)
+    }
+
+    @MainActor
+    func testChatStoreFallbackRefreshSummaryReportsAndAdvancesDeltas() {
+        let store = ChatStore(messages: [message(id: "msg_user", role: "user", text: "hello")])
+        store.beginFallbackRefreshTracking()
+
+        store.messages.append(message(id: "msg_assistant", role: "assistant", text: "First line\nSecond line"))
+        let first = store.fallbackRefreshSummary(reason: "send")
+
+        XCTAssertEqual(first, "fallback send m=2 dm=1 len=22 dlen=22 a=First line Second line")
+        XCTAssertEqual(store.lastFallbackMessageCount, 2)
+        XCTAssertEqual(store.lastFallbackAssistantLength, 22)
+
+        store.messages[1] = message(id: "msg_assistant", role: "assistant", text: "First line\nSecond line plus more")
+        let second = store.fallbackRefreshSummary(reason: "send")
+
+        XCTAssertEqual(second, "fallback send m=2 dm=0 len=32 dlen=10 a=First line Second line p")
+        XCTAssertEqual(store.lastFallbackMessageCount, 2)
+        XCTAssertEqual(store.lastFallbackAssistantLength, 32)
+    }
+
+    @MainActor
+    func testChatStoreFallbackRefreshSummaryHandlesEmptyAssistantText() {
+        let store = ChatStore(messages: [])
+        store.beginFallbackRefreshTracking()
+
+        let summary = store.fallbackRefreshSummary(reason: "assistant")
+
+        XCTAssertEqual(summary, "fallback assistant m=0 dm=0 len=0 dlen=0 a=empty")
+    }
+
+    func testTranscriptCoalescingCombinesConsecutiveDeltasForSamePart() {
+        let events = [
+            pendingDelta(delta: "Hello", enqueuedAt: Date(timeIntervalSince1970: 2)),
+            pendingDelta(delta: " ", enqueuedAt: Date(timeIntervalSince1970: 3)),
+            pendingDelta(delta: "world", enqueuedAt: Date(timeIntervalSince1970: 4)),
+        ]
+
+        let coalesced = ChatStore.coalescedTranscriptEvents(events)
+
+        XCTAssertEqual(coalesced.count, 1)
+        XCTAssertEqual(deltaText(coalesced[0]), "Hello world")
+        XCTAssertEqual(coalesced[0].deltaCharacterCount, 11)
+        XCTAssertEqual(coalesced[0].enqueuedAt, Date(timeIntervalSince1970: 2))
+    }
+
+    func testTranscriptCoalescingPreservesSeparateTargetsInFirstSeenOrder() {
+        let events = [
+            pendingDelta(messageID: "msg_a", partID: "part_a", delta: "A1"),
+            pendingDelta(messageID: "msg_b", partID: "part_b", delta: "B1"),
+            pendingDelta(messageID: "msg_a", partID: "part_a", delta: "A2"),
+        ]
+
+        let coalesced = ChatStore.coalescedTranscriptEvents(events)
+
+        XCTAssertEqual(coalesced.count, 2)
+        XCTAssertEqual(coalesced[0].messageID, "msg_a")
+        XCTAssertEqual(deltaText(coalesced[0]), "A1A2")
+        XCTAssertEqual(coalesced[1].messageID, "msg_b")
+        XCTAssertEqual(deltaText(coalesced[1]), "B1")
+    }
+
+    func testTranscriptCoalescingFlushesBeforeNonDeltaEvents() {
+        let sessionID = "ses_test"
+        let messageEvent = OpenCodePendingTranscriptEvent(
+            typedEvent: .messageUpdated(OpenCodeMessage(id: "msg_shell", role: "assistant", sessionID: sessionID, time: nil, agent: nil, model: nil)),
+            eventType: "message.updated",
+            sessionID: sessionID,
+            messageID: "msg_shell",
+            partID: nil,
+            deltaCharacterCount: 0,
+            enqueuedAt: Date(timeIntervalSince1970: 2)
+        )
+        let events = [
+            pendingDelta(messageID: "msg_a", partID: "part_a", delta: "A1"),
+            messageEvent,
+            pendingDelta(messageID: "msg_a", partID: "part_a", delta: "A2"),
+        ]
+
+        let coalesced = ChatStore.coalescedTranscriptEvents(events)
+
+        XCTAssertEqual(coalesced.count, 3)
+        XCTAssertEqual(deltaText(coalesced[0]), "A1")
+        XCTAssertEqual(coalesced[1].eventType, "message.updated")
+        XCTAssertEqual(deltaText(coalesced[2]), "A2")
+    }
+
+    @MainActor
+    func testChatStorePendingTranscriptQueueTracksCharacters() {
+        let store = ChatStore()
+
+        store.enqueuePendingTranscriptEvent(pendingDelta(delta: "Hello"))
+        store.enqueuePendingTranscriptEvent(pendingDelta(delta: " world"))
+
+        XCTAssertTrue(store.hasPendingTranscriptEvents)
+        XCTAssertEqual(store.pendingTranscriptCharacterCount, 11)
+    }
+
+    @MainActor
+    func testChatStoreDrainPendingTranscriptEventsCoalescesAndClearsQueue() {
+        let store = ChatStore()
+        store.enqueuePendingTranscriptEvent(pendingDelta(delta: "Hello"))
+        store.enqueuePendingTranscriptEvent(pendingDelta(delta: " world"))
+
+        let drained = store.drainPendingTranscriptEvents()
+
+        XCTAssertEqual(drained?.events.count, 2)
+        XCTAssertEqual(drained?.coalescedEvents.count, 1)
+        XCTAssertEqual(drained?.coalescedEvents.first.flatMap(deltaText), "Hello world")
+        XCTAssertFalse(store.hasPendingTranscriptEvents)
+        XCTAssertEqual(store.pendingTranscriptCharacterCount, 0)
+        XCTAssertNil(store.drainPendingTranscriptEvents())
+    }
+
     func testLiveActivityRefreshSchedulingThrottlesInsteadOfDebouncing() {
         XCTAssertTrue(AppViewModel.shouldScheduleLiveActivityRefresh(
             pendingRefreshExists: false,
@@ -405,25 +658,31 @@ final class OpenCodeStreamingTests: XCTestCase {
 
     func testPartRemovedForMissingMessageDoesNotMutateSelectedChat() {
         let selected = OpenCodeSession(id: "ses_test", title: "Test", workspaceID: nil, directory: nil, projectID: nil, parentID: nil)
-        var state = OpenCodeDirectoryState(
-            sessions: [],
-            selectedSession: selected,
-            messages: [.local(role: "assistant", text: "Keep me", messageID: "msg_keep", sessionID: selected.id, partID: "prt_keep")],
-            commands: [],
-            sessionStatuses: [:],
-            todos: [],
-            permissions: [],
-            questions: []
-        )
+        var sessions: [OpenCodeSession] = []
+        var selectedSession: OpenCodeSession? = selected
+        var sessionStatuses: [String: String] = [:]
+        var messages: [OpenCodeMessageEnvelope] = [.local(role: "assistant", text: "Keep me", messageID: "msg_keep", sessionID: selected.id, partID: "prt_keep")]
+        var todos: [OpenCodeTodo] = []
+        var permissions: [OpenCodePermission] = []
+        var questions: [OpenCodeQuestionRequest] = []
 
-        let result = OpenCodeStateReducer.applyDirectoryEvent(event: .messagePartRemoved(messageID: "msg_other", partID: "prt_other"), state: &state)
+        let result = OpenCodeStateReducer.applyDirectoryEvent(
+            event: .messagePartRemoved(messageID: "msg_other", partID: "prt_other"),
+            sessions: &sessions,
+            selectedSession: &selectedSession,
+            sessionStatuses: &sessionStatuses,
+            messages: &messages,
+            todos: &todos,
+            permissions: &permissions,
+            questions: &questions
+        )
 
         guard case .ignored = result else {
             return XCTFail("Expected ignored result, got \(result)")
         }
-        XCTAssertEqual(state.messages.count, 1)
-        XCTAssertEqual(state.messages.first?.id, "msg_keep")
-        XCTAssertEqual(state.messages.first?.parts.count, 1)
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages.first?.id, "msg_keep")
+        XCTAssertEqual(messages.first?.parts.count, 1)
     }
 
     func testLargeMessageChunkerSplitsCapturedPerformanceSessionShape() throws {
@@ -604,6 +863,45 @@ This appended section simulates more streamed text arriving after some chunks ha
 
     private func decodeEvent(_ json: String) throws -> OpenCodeEventEnvelope {
         try JSONDecoder().decode(OpenCodeEventEnvelope.self, from: Data(json.utf8))
+    }
+
+    private func pendingDelta(
+        sessionID: String = "ses_test",
+        messageID: String = "msg_assistant",
+        partID: String = "part_text",
+        field: String = "text",
+        delta: String,
+        enqueuedAt: Date = Date(timeIntervalSince1970: 1)
+    ) -> OpenCodePendingTranscriptEvent {
+        OpenCodePendingTranscriptEvent(
+            typedEvent: .messagePartDelta(
+                sessionID: sessionID,
+                messageID: messageID,
+                partID: partID,
+                field: field,
+                delta: delta
+            ),
+            eventType: "message.part.delta",
+            sessionID: sessionID,
+            messageID: messageID,
+            partID: partID,
+            deltaCharacterCount: delta.count,
+            enqueuedAt: enqueuedAt
+        )
+    }
+
+    private func deltaText(_ event: OpenCodePendingTranscriptEvent) -> String? {
+        guard case let .messagePartDelta(_, _, _, _, delta) = event.typedEvent else { return nil }
+        return delta
+    }
+
+    private func message(id: String, role: String, text: String, sessionID: String = "ses_test") -> OpenCodeMessageEnvelope {
+        OpenCodeMessageEnvelope(
+            info: OpenCodeMessage(id: id, role: role, sessionID: sessionID, time: nil, agent: nil, model: nil),
+            parts: [
+                OpenCodePart(id: "part_\(id)", messageID: id, sessionID: sessionID, type: "text", mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil, text: text),
+            ]
+        )
     }
 
     private static func performanceSessionMessage(text: String) -> OpenCodeMessageEnvelope {
