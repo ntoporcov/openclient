@@ -14,7 +14,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    CURRENT_PROJECT_VERSION: 48
+    CURRENT_PROJECT_VERSION: 54
     MARKETING_VERSION: 0.1.0
   configs:
     Debug:
@@ -68,6 +68,13 @@ targets:
           if [ "$PRODUCT_BUNDLE_IDENTIFIER" != "com.ntoporcov.openclient" ]; then
             echo "error: Unexpected app bundle identifier '$PRODUCT_BUNDLE_IDENTIFIER'. Regenerate the project from project.yml before building."
             exit 1
+          fi
+    postBuildScripts:
+      - name: Remove unsupported web fonts
+        script: |
+          EXCALIDRAW_FONT_DIR="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ExcalidrawWeb/excalidraw-assets/fonts"
+          if [ -d "$EXCALIDRAW_FONT_DIR" ]; then
+            rm -rf "$EXCALIDRAW_FONT_DIR"
           fi
     info:
       path: OpenCodeIOSClient/Generated-Info.plist
