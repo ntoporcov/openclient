@@ -16,6 +16,14 @@ final class MessageComposerDraftStore: ObservableObject {
     }
 }
 
+private struct MessageComposerHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct MessageComposer: View {
     private enum AccessoryDestination: Hashable {
         case fork
@@ -41,6 +49,7 @@ struct MessageComposer: View {
     let mcpErrorMessage: String?
     let onFocusChange: (Bool) -> Void
     let onTextChange: (String) -> Void
+    let onHeightChange: (CGFloat) -> Void
     let onSend: () -> Void
     let onStop: () -> Void
     let onSelectCommand: (OpenCodeCommand) -> Void
@@ -194,6 +203,14 @@ struct MessageComposer: View {
             #else
             iosComposer
             #endif
+        }
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: MessageComposerHeightPreferenceKey.self, value: geometry.size.height)
+            }
+        }
+        .onPreferenceChange(MessageComposerHeightPreferenceKey.self) { height in
+            onHeightChange(height)
         }
         .onAppear {
             syncSelectedCommand()

@@ -80,6 +80,13 @@ final class AppViewModel: ObservableObject {
             connectionStore.serverVersion = newValue
         }
     }
+    var connectionPhase: OpenClientConnectionPhase {
+        get { connectionStore.connectionPhase }
+        set {
+            objectWillChange.send()
+            connectionStore.connectionPhase = newValue
+        }
+    }
     @Published var appleIntelligenceRecentWorkspaces: [AppleIntelligenceWorkspaceRecord] = []
     @Published var activeAppleIntelligenceWorkspaceID: String?
     @Published var isShowingAppleIntelligenceFolderPicker = false
@@ -627,6 +634,7 @@ final class AppViewModel: ObservableObject {
     let eventManager = OpenCodeEventManager()
     var eventStreamRestartTask: Task<Void, Never>?
     var reloadTask: Task<Void, Never>?
+    var connectionAttemptTask: Task<Void, Never>?
     var appleIntelligenceResponseTask: Task<Void, Never>?
     var activeAppleIntelligenceWorkspaceURL: URL?
     var currentAppleIntelligenceWorkspace: AppleIntelligenceWorkspaceRecord?

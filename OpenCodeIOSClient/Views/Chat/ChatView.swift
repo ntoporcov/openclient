@@ -787,7 +787,6 @@ private enum ChatScrollTarget {
     static let olderMessagesButton = "chat-older-messages-button"
     static let thinkingRow = "chat-thinking-row"
     static let bottomAnchor = "chat-bottom-anchor"
-    static let readerModeSpacer = "chat-reader-mode-spacer"
 }
 
 private struct PendingOutgoingSend {
@@ -1100,11 +1099,6 @@ private struct ChatProgressOverlaySnapshot {
     let accessibilityLabel: String
 }
 
-private struct ReaderModeSpacerSnapshot {
-    let height: CGFloat
-    let id: String
-}
-
 private enum ChatOverlayKind {
     case forkPreparation
     case delayedLoading
@@ -1196,6 +1190,7 @@ private struct EquatableMessageComposerHost: View, Equatable {
     let actionSignature: String
     let onFocusChange: (Bool) -> Void
     let onTextChange: (String) -> Void
+    let onHeightChange: (CGFloat) -> Void
     let onSend: () -> Void
     let onStop: () -> Void
     let onSelectCommand: (OpenCodeCommand) -> Void
@@ -1229,6 +1224,7 @@ private struct EquatableMessageComposerHost: View, Equatable {
             mcpErrorMessage: mcpErrorMessage,
             onFocusChange: onFocusChange,
             onTextChange: onTextChange,
+            onHeightChange: onHeightChange,
             onSend: onSend,
             onStop: onStop,
             onSelectCommand: onSelectCommand,
@@ -1280,7 +1276,7 @@ struct ChatView: View {
     @State private var bottomPullIsTracking = false
     @State private var hasFiredBottomPullHaptic = false
     @State private var chatViewportHeight: CGFloat = 0
-    @State private var readerModeSpacerHeight: CGFloat = 0
+    @State private var composerMeasuredHeight: CGFloat = 0
     @State private var bottomReadjustmentToken = 0
     @State private var largeMessageChunkCache = OpenCodeLargeMessageChunkCache()
     @State private var chatDisplayItemCache = ChatDisplayItemCache()
@@ -1290,7 +1286,6 @@ struct ChatView: View {
     private let messageWindowSize = 80
     private let bottomRefreshThreshold: CGFloat = 72
     private let bottomRefreshIndicatorHeight: CGFloat = 34
-    private let collapsedTailSpacerHeight: CGFloat = 1
     private let outgoingRequestDelayMS = 720
     private let thinkingRevealHoldMS = 140
     private var composerOverlaySnapshot: AppViewModel.ChatComposerOverlaySnapshot {
@@ -1336,17 +1331,12 @@ struct ChatView: View {
         true
     }
 
-    private var isReaderModeActive: Bool {
-        readerModeSpacerHeight > collapsedTailSpacerHeight + 0.5
-    }
-
     private var chatHeaderSnapshot: AppViewModel.ChatSessionHeaderSnapshot {
         viewModel.chatSessionHeaderSnapshot(for: liveSession)
     }
 
     private var chatItemChangeAnimation: Animation? {
         if !hasCompletedInitialHydrationSnap { return nil }
-        if isReaderModeActive { return nil }
         if isSendChoreographyActive { return nil }
         return isSessionBusy ? nil : .snappy(duration: 0.28, extraBounce: 0.02)
     }
@@ -1390,8 +1380,6 @@ struct ChatView: View {
                         }
 
                         bottomAnchorListItem
-
-                        readerModeSpacer
                     }
                 }
                 .chatDefaultScrollAnchors()
@@ -1410,8 +1398,6 @@ struct ChatView: View {
                 }
                 .onChange(of: geometry.size.height) { _, height in
                     chatViewportHeight = height
-                    guard isReaderModeActive else { return }
-                    readerModeSpacerHeight = height * 0.5
                 }
                 .onChange(of: viewModel.messages.count) { oldCount, count in
                     visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
@@ -1427,7 +1413,6 @@ struct ChatView: View {
 #if canImport(UIKit)
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
                     guard keyboardWillShow(from: notification) else { return }
-                    resetReaderModeSpacer(animated: true)
                     requestBottomReadjustmentIfPinned()
                 }
 #endif
@@ -1456,7 +1441,6 @@ struct ChatView: View {
             taskStore.composerDraftPersistenceTask?.cancel()
             pendingOutgoingSendTask?.cancel()
             outgoingEntryResetTask?.cancel()
-            readerModeSpacerHeight = collapsedTailSpacerHeight
             showsDelayedLoadingIndicator = false
             if viewModel.activeChatSessionID == sessionID {
                 viewModel.activeChatSessionID = nil
@@ -1706,13 +1690,12 @@ struct ChatView: View {
             onFocusChange: { isFocused in
                 isComposerInputFocused = isFocused
                 viewModel.setComposerStreamingFocus(isFocused)
-                if isFocused {
-                    resetReaderModeSpacer(animated: true)
-                }
             },
             onTextChange: { text in
                 scheduleComposerDraftPersistence(text)
-                requestBottomReadjustmentIfPinned()
+            },
+            onHeightChange: { height in
+                handleComposerHeightChange(height)
             },
             onSend: {
                 startOutgoingBubbleAnimationAndSend()
@@ -1857,22 +1840,6 @@ struct ChatView: View {
         .id(ChatScrollTarget.bottomAnchor)
     }
 
-    @ViewBuilder
-    private var readerModeSpacer: some View {
-        let snapshot = readerModeSpacerSnapshot
-        Color.clear
-            .frame(maxWidth: .infinity)
-            .frame(height: snapshot.height)
-            .id(snapshot.id)
-    }
-
-    private var readerModeSpacerSnapshot: ReaderModeSpacerSnapshot {
-        ReaderModeSpacerSnapshot(
-            height: max(collapsedTailSpacerHeight, readerModeSpacerHeight),
-            id: ChatScrollTarget.readerModeSpacer
-        )
-    }
-
     private var bottomRefreshRenderSnapshot: BottomRefreshRenderSnapshot {
         let progress = isRefreshingChatData ? 1 : min(1, bottomPullDistance / bottomRefreshThreshold)
         return BottomRefreshRenderSnapshot(
@@ -1957,20 +1924,6 @@ struct ChatView: View {
         await viewModel.refreshChatData(for: sessionID)
     }
 
-    private func resetReaderModeSpacer(animated: Bool) {
-        guard isReaderModeActive || readerModeSpacerHeight != collapsedTailSpacerHeight else { return }
-
-        let update = {
-            readerModeSpacerHeight = collapsedTailSpacerHeight
-        }
-
-        if animated {
-            withAnimation(.easeOut(duration: 0.18), update)
-        } else {
-            update()
-        }
-    }
-
     private func requestBottomReadjustmentIfPinned() {
         guard isScrollGeometryAtBottom else { return }
         requestBottomReadjustment()
@@ -1978,6 +1931,13 @@ struct ChatView: View {
 
     private func requestBottomReadjustment() {
         bottomReadjustmentToken &+= 1
+    }
+
+    private func handleComposerHeightChange(_ height: CGFloat) {
+        guard height > 0 else { return }
+        guard abs(height - composerMeasuredHeight) > 0.5 else { return }
+        composerMeasuredHeight = height
+        requestBottomReadjustmentIfPinned()
     }
 
     private func updateDelayedLoadingIndicator() {
@@ -2412,7 +2372,6 @@ struct ChatView: View {
         scheduleOutgoingEntryAnimation(messageID: messageID)
         clearComposerDraft()
         viewModel.clearDraftAttachments()
-        resetReaderModeSpacer(animated: false)
         requestBottomReadjustment()
 
         pendingOutgoingSendTask = Task { @MainActor in

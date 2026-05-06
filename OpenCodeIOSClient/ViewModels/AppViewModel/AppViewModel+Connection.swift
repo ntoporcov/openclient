@@ -56,7 +56,10 @@ extension AppViewModel {
                 directoryStore.reset()
                 streamDirectory = nil
                 reconcileLiveActivities()
+                connectionCoordinator.updateConnectionPhase(.preparingInterface)
                 await loadComposerOptions()
+                try? Task.checkCancellation()
+                connectionCoordinator.updateConnectionPhase(.startingLiveUpdates)
                 startEventStream()
                 await runUITestBootstrapIfNeeded()
             },
@@ -67,9 +70,33 @@ extension AppViewModel {
         )
     }
 
+    func startConnection() {
+        connectionAttemptTask?.cancel()
+        isShowingAddServerSheet = false
+        connectionAttemptTask = Task { [weak self] in
+            await self?.connect()
+            await MainActor.run { [weak self] in
+                self?.connectionAttemptTask = nil
+            }
+        }
+    }
+
     func connect(to serverConfig: OpenCodeServerConfig) async {
         config = hydratedServerConfig(from: serverConfig)
         await connect()
+    }
+
+    func startConnection(to serverConfig: OpenCodeServerConfig) {
+        config = hydratedServerConfig(from: serverConfig)
+        startConnection()
+    }
+
+    func cancelConnectionAttempt() {
+        connectionAttemptTask?.cancel()
+        connectionAttemptTask = nil
+        stopEventStream()
+        directoryStore.reset()
+        connectionStore.applyConnectionCancellation()
     }
 
     func presentAddServerSheet() {
@@ -109,6 +136,8 @@ extension AppViewModel {
     }
 
     func disconnect() {
+        connectionAttemptTask?.cancel()
+        connectionAttemptTask = nil
         appleIntelligenceResponseTask?.cancel()
         connectionCoordinator.disconnect(
             hasSavedServer: hasSavedServer,

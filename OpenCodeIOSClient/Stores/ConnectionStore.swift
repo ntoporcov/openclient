@@ -1,6 +1,44 @@
 import Combine
 import Foundation
 
+enum OpenClientConnectionPhase: String, Equatable, Sendable {
+    case idle
+    case checkingServer
+    case loadingWorkspace
+    case preparingInterface
+    case startingLiveUpdates
+
+    var title: String {
+        switch self {
+        case .idle:
+            return "Ready"
+        case .checkingServer:
+            return "Checking server"
+        case .loadingWorkspace:
+            return "Loading workspace"
+        case .preparingInterface:
+            return "Preparing interface"
+        case .startingLiveUpdates:
+            return "Starting live updates"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .idle:
+            return "Waiting for coordinates."
+        case .checkingServer:
+            return "Tuning the antenna and looking for the OpenCode signal."
+        case .loadingWorkspace:
+            return "Negotiating with the tiny AI gremlins about projects and sessions."
+        case .preparingInterface:
+            return "Warming up models, agents, and other cockpit switches."
+        case .startingLiveUpdates:
+            return "Opening the event stream so tokens can arrive at warp speed."
+        }
+    }
+}
+
 @MainActor
 final class ConnectionStore: ObservableObject {
     @Published var backendMode: AppBackendMode
@@ -8,6 +46,7 @@ final class ConnectionStore: ObservableObject {
     @Published var serverVersion: String
     @Published var errorMessage: String?
     @Published var isLoading: Bool
+    @Published var connectionPhase: OpenClientConnectionPhase
     @Published var recentServerConfigs: [OpenCodeServerConfig]
     @Published var hasSavedServer: Bool
     @Published var showSavedServerPrompt: Bool
@@ -19,6 +58,7 @@ final class ConnectionStore: ObservableObject {
         serverVersion: String = "",
         errorMessage: String? = nil,
         isLoading: Bool = false,
+        connectionPhase: OpenClientConnectionPhase = .idle,
         recentServerConfigs: [OpenCodeServerConfig] = [],
         hasSavedServer: Bool = false,
         showSavedServerPrompt: Bool = false,
@@ -29,6 +69,7 @@ final class ConnectionStore: ObservableObject {
         self.serverVersion = serverVersion
         self.errorMessage = errorMessage
         self.isLoading = isLoading
+        self.connectionPhase = connectionPhase
         self.recentServerConfigs = recentServerConfigs
         self.hasSavedServer = hasSavedServer
         self.showSavedServerPrompt = showSavedServerPrompt
@@ -38,6 +79,11 @@ final class ConnectionStore: ObservableObject {
     func beginConnecting() {
         isLoading = true
         errorMessage = nil
+        connectionPhase = .checkingServer
+    }
+
+    func updateConnectionPhase(_ phase: OpenClientConnectionPhase) {
+        connectionPhase = phase
     }
 
     func clearError() {
@@ -50,6 +96,9 @@ final class ConnectionStore: ObservableObject {
 
     func finishConnecting() {
         isLoading = false
+        if isConnected == false {
+            connectionPhase = .idle
+        }
     }
 
     func applySuccessfulServerConnection(version: String, healthy: Bool) {
@@ -57,12 +106,22 @@ final class ConnectionStore: ObservableObject {
         serverVersion = version
         errorMessage = nil
         isConnected = healthy
+        connectionPhase = .idle
     }
 
     func applyConnectionFailure(_ error: Error) {
         backendMode = .none
         isConnected = false
         errorMessage = error.localizedDescription
+        connectionPhase = .idle
+    }
+
+    func applyConnectionCancellation() {
+        backendMode = .none
+        isConnected = false
+        isLoading = false
+        errorMessage = nil
+        connectionPhase = .idle
     }
 
     func resetToDisconnected(showPrompt: Bool? = nil) {
@@ -70,6 +129,7 @@ final class ConnectionStore: ObservableObject {
         isConnected = false
         serverVersion = ""
         errorMessage = nil
+        connectionPhase = .idle
         if let showPrompt {
             showSavedServerPrompt = showPrompt
         }

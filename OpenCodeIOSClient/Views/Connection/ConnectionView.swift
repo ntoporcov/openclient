@@ -20,120 +20,19 @@ struct ConnectionView: View {
     }
 
     var body: some View {
-        List {
-            if hasRecentServers {
-                Section("Recent") {
-                    ForEach(viewModel.recentServerConfigs, id: \.recentServerID) { serverConfig in
-                        ZStack(alignment: .topTrailing) {
-                            Button {
-                                Task { await viewModel.connect(to: serverConfig) }
-                            } label: {
-                                RecentServerCard(serverConfig: serverConfig)
-                            }
-                            .buttonStyle(.plain)
-                            .allowsHitTesting(!viewModel.isLoading)
-                            .contextMenu {
-                                Button {
-                                    viewModel.prepareToEditRecentServer(serverConfig)
-                                } label: {
-                                    Label("Edit", systemImage: "square.and.pencil")
-                                }
-
-                                Button(role: .destructive) {
-                                    viewModel.removeRecentServer(serverConfig)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button {
-                                viewModel.prepareToEditRecentServer(serverConfig)
-                            } label: {
-                                Label("Edit", systemImage: "square.and.pencil")
-                            }
-                            .tint(.indigo)
-
-                            Button("Remove", role: .destructive) {
-                                viewModel.removeRecentServer(serverConfig)
-                            }
-                        }
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                    }
-                }
-                .listRowSeparator(.hidden)
-#if !os(macOS)
-                .listRowSpacing(0.0)
-#endif
-                .padding(.vertical,0)
-
-                if viewModel.isLoading {
-                    Section {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Connecting to OpenCode...")
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                } else if let errorMessage = viewModel.errorMessage, !errorMessage.isEmpty {
-                    Section("Connection Failed") {
-                        Text(errorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-                    .listRowBackground(Color.clear)
-                }
+        Group {
+            if viewModel.isLoading {
+                ConnectingServerView(
+                    config: viewModel.config,
+                    phase: viewModel.connectionPhase,
+                    cancel: { viewModel.cancelConnectionAttempt() },
+                    retry: { viewModel.startConnection() },
+                    edit: { viewModel.cancelConnectionAttempt() }
+                )
+            } else {
+                connectionList
             }
-
-            if hasRecentServers == false {
-                ServerConnectionSections(viewModel: viewModel)
-            }
-
-#if DEBUG
-            if !isScreenshotScene {
-                DebugEntitlementSection(viewModel: viewModel)
-            }
-#endif
-
-            Section("Apple Intelligence") {
-                Button {
-                    viewModel.presentAppleIntelligenceFolderPicker()
-                } label: {
-                    AppleIntelligenceConnectionCard()
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canTryAppleIntelligence)
-                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-
-                if let summary = viewModel.appleIntelligenceAvailabilitySummary, !viewModel.canTryAppleIntelligence {
-                    Text(summary)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-            }
-
-            Section("Help") {
-                NavigationLink {
-                    HelpView()
-                } label: {
-                    HelpNavigationRow()
-                }
-                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            }
-
         }
-        .connectionListStyle(hasRecentServers: hasRecentServers)
         .navigationTitle("OpenClient")
         .opencodeLargeNavigationTitle()
         .toolbar {
@@ -186,6 +85,265 @@ struct ConnectionView: View {
             Text("Folder picking is unavailable on this platform.")
                 .presentationDetents([.medium])
 #endif
+        }
+    }
+
+    private var connectionList: some View {
+        List {
+            if hasRecentServers {
+                recentServersSection
+
+                if let errorMessage = viewModel.errorMessage, !errorMessage.isEmpty {
+                    Section("Connection Failed") {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                    .listRowBackground(Color.clear)
+                }
+            }
+
+            if hasRecentServers == false {
+                ServerConnectionSections(viewModel: viewModel)
+            }
+
+#if DEBUG
+            if !isScreenshotScene {
+                DebugEntitlementSection(viewModel: viewModel)
+            }
+#endif
+
+            appleIntelligenceSection
+            helpSection
+        }
+        .connectionListStyle(hasRecentServers: hasRecentServers)
+    }
+
+    private var recentServersSection: some View {
+        Section("Recent") {
+            ForEach(viewModel.recentServerConfigs, id: \.recentServerID) { serverConfig in
+                ZStack(alignment: .topTrailing) {
+                    Button {
+                        viewModel.startConnection(to: serverConfig)
+                    } label: {
+                        RecentServerCard(serverConfig: serverConfig)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            viewModel.prepareToEditRecentServer(serverConfig)
+                        } label: {
+                            Label("Edit", systemImage: "square.and.pencil")
+                        }
+
+                        Button(role: .destructive) {
+                            viewModel.removeRecentServer(serverConfig)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button {
+                        viewModel.prepareToEditRecentServer(serverConfig)
+                    } label: {
+                        Label("Edit", systemImage: "square.and.pencil")
+                    }
+                    .tint(.indigo)
+
+                    Button("Remove", role: .destructive) {
+                        viewModel.removeRecentServer(serverConfig)
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .listRowBackground(Color.clear)
+            }
+        }
+        .listRowSeparator(.hidden)
+#if !os(macOS)
+        .listRowSpacing(0.0)
+#endif
+        .padding(.vertical, 0)
+    }
+
+    private var appleIntelligenceSection: some View {
+        Section("Apple Intelligence") {
+            Button {
+                viewModel.presentAppleIntelligenceFolderPicker()
+            } label: {
+                AppleIntelligenceConnectionCard()
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.canTryAppleIntelligence)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            if let summary = viewModel.appleIntelligenceAvailabilitySummary, !viewModel.canTryAppleIntelligence {
+                Text(summary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    private var helpSection: some View {
+        Section("Help") {
+            NavigationLink {
+                HelpView()
+            } label: {
+                HelpNavigationRow()
+            }
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+}
+
+private struct ConnectingServerView: View {
+    let config: OpenCodeServerConfig
+    let phase: OpenClientConnectionPhase
+    let cancel: () -> Void
+    let retry: () -> Void
+    let edit: () -> Void
+
+    @State private var isAnimating = false
+    @State private var elapsedSeconds = 0
+
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var isTakingLongerThanUsual: Bool {
+        elapsedSeconds >= 8
+    }
+
+    var body: some View {
+        VStack(spacing: 28) {
+            Spacer(minLength: 24)
+
+            ZStack {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .stroke(Color.accentColor.opacity(0.16), lineWidth: 1.5)
+                        .frame(width: 138 + CGFloat(index * 34), height: 138 + CGFloat(index * 34))
+                        .scaleEffect(isAnimating ? 1.08 : 0.92)
+                        .opacity(isAnimating ? 0.35 : 0.78)
+                        .animation(
+                            .easeInOut(duration: 1.6)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(index) * 0.18),
+                            value: isAnimating
+                        )
+                }
+
+                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.accentColor.opacity(0.26), Color.purple.opacity(0.14), Color.blue.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 112, height: 112)
+                    .rotationEffect(.degrees(isAnimating ? 3 : -3))
+                    .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: isAnimating)
+
+                Image(systemName: config.displayIconName)
+                    .font(.system(size: 42, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(height: 230)
+
+            VStack(spacing: 10) {
+                Text("Dialing the AI mothership")
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text(config.displayName)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(config.trimmedBaseURL)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 24)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(phase.title)
+                        .font(.headline)
+                }
+
+                Text(phase.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if isTakingLongerThanUsual {
+                    Divider()
+
+                    Text("This is taking longer than usual. The server might be waking up, blocked by a network, or quietly contemplating existence.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: 420, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(OpenCodePlatformColor.secondaryGroupedBackground)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+            .padding(.horizontal, 24)
+
+            VStack(spacing: 12) {
+                Button(role: .cancel) {
+                    cancel()
+                } label: {
+                    Text("Cancel")
+                        .frame(maxWidth: 420)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                if isTakingLongerThanUsual {
+                    HStack(spacing: 12) {
+                        Button("Try Again") {
+                            retry()
+                            elapsedSeconds = 0
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Edit Server") {
+                            edit()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .controlSize(.large)
+                }
+            }
+            .padding(.horizontal, 24)
+
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(OpenCodePlatformColor.groupedBackground.ignoresSafeArea())
+        .onAppear {
+            isAnimating = true
+        }
+        .onReceive(timer) { _ in
+            elapsedSeconds += 1
         }
     }
 }
@@ -303,7 +461,7 @@ private struct ServerConnectionSections: View {
 
             Section {
                 Button(viewModel.isLoading ? "Connecting..." : "Connect to OpenCode") {
-                    Task { await viewModel.connect() }
+                    viewModel.startConnection()
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .disabled(!canConnect)

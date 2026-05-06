@@ -51,7 +51,7 @@ private extension String {
     }
 }
 
-struct HealthResponse: Codable {
+struct HealthResponse: Codable, Sendable {
     let healthy: Bool
     let version: String
 }
@@ -117,11 +117,11 @@ struct PendingOpenCodeActionRun: Identifiable, Equatable, Sendable {
 }
 
 struct OpenCodeProject: Codable, Identifiable, Hashable, Sendable {
-    struct Icon: Codable, Hashable {
+    struct Icon: Codable, Hashable, Sendable {
         let color: String?
     }
 
-    struct Time: Codable, Hashable {
+    struct Time: Codable, Hashable, Sendable {
         let created: Double?
         let updated: Double?
     }
@@ -1987,6 +1987,7 @@ enum OpenCodeAPIError: LocalizedError {
     case invalidURL
     case invalidResponse
     case httpError(Int, String)
+    case timedOut
 
     var errorDescription: String? {
         switch self {
@@ -1994,6 +1995,8 @@ enum OpenCodeAPIError: LocalizedError {
             return "The server URL is invalid."
         case .invalidResponse:
             return "The server returned an invalid response."
+        case .timedOut:
+            return "The server took too long to respond. Check that the URL is reachable, then try again."
         case let .httpError(code, body):
             if body.isEmpty {
                 return "The server request failed with status \(code)."
