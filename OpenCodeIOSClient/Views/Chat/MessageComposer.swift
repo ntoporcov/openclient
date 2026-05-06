@@ -324,6 +324,8 @@ struct MessageComposer: View {
                     text: textBinding,
                     placeholder: "Message",
                     maxLines: 6,
+                    canSubmit: canSend,
+                    onSubmit: onSend,
                     onFocusChange: onFocusChange
                 )
                     .frame(minHeight: ComposerTextViewMetrics.minimumHeight)
@@ -1018,6 +1020,8 @@ private struct ComposerTextView: UIViewRepresentable {
     @Binding var text: String
     let placeholder: String
     let maxLines: Int
+    let canSubmit: Bool
+    let onSubmit: () -> Void
     let onFocusChange: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -1042,6 +1046,8 @@ private struct ComposerTextView: UIViewRepresentable {
         textView.returnKeyType = .default
         textView.keyboardDismissMode = .interactive
         textView.placeholder = placeholder
+        textView.canSubmit = canSubmit
+        textView.onSubmit = onSubmit
         textView.text = text
         textView.updatePlaceholderVisibility()
         textView.isEditable = true
@@ -1075,6 +1081,9 @@ private struct ComposerTextView: UIViewRepresentable {
             textView.maximumLineCount = maxLines
             needsLayoutUpdate = true
         }
+
+        textView.canSubmit = canSubmit
+        textView.onSubmit = onSubmit
 
         guard needsLayoutUpdate else { return }
 
@@ -1120,6 +1129,8 @@ private struct ComposerTextView: UIViewRepresentable {
 private final class ComposerPlaceholderTextView: UITextView {
     private let placeholderLabel = UILabel()
     var maximumLineCount = ComposerTextViewMetrics.maxLines
+    var canSubmit = false
+    var onSubmit: (() -> Void)?
 
     var placeholder: String = "" {
         didSet {
@@ -1175,6 +1186,24 @@ private final class ComposerPlaceholderTextView: UITextView {
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         bounds.insetBy(dx: -8, dy: -8).contains(point)
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard
+            presses.contains(where: { press in
+                guard let key = press.key else { return false }
+                let characters = key.charactersIgnoringModifiers
+                let isReturn = key.keyCode == .keyboardReturnOrEnter || characters == "\r" || characters == "\n"
+                return isReturn && !key.modifierFlags.contains(.shift)
+            })
+        else {
+            super.pressesBegan(presses, with: event)
+            return
+        }
+
+        if canSubmit {
+            onSubmit?()
+        }
     }
 
     private func setupPlaceholder() {
