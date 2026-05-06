@@ -786,6 +786,7 @@ private extension ChatDisplayItem {
 private enum ChatScrollTarget {
     static let olderMessagesButton = "chat-older-messages-button"
     static let thinkingRow = "chat-thinking-row"
+    static let bottomAnchor = "chat-bottom-anchor"
     static let readerModeSpacer = "chat-reader-mode-spacer"
 }
 
@@ -1045,42 +1046,8 @@ private struct FallbackMedalView: View {
 private final class ChatViewTaskStore {
     var keyboardBottomSnapTask: Task<Void, Never>?
     var readerModeScrollTask: Task<Void, Never>?
-    var mountAnimationCleanupTask: Task<Void, Never>?
     var delayedLoadingIndicatorTask: Task<Void, Never>?
     var composerDraftPersistenceTask: Task<Void, Never>?
-}
-
-private struct ChatMountTimelineModifier: ViewModifier {
-    let startDate: Date?
-
-    private let duration: TimeInterval = 0.22
-    private let initialOffset: CGFloat = 10
-
-    func body(content: Content) -> some View {
-        if let startDate {
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
-                let progress = progress(at: timeline.date, startDate: startDate)
-
-                content
-                    .opacity(progress)
-                    .offset(y: initialOffset * (1 - progress))
-            }
-        } else {
-            content
-        }
-    }
-
-    private func progress(at date: Date, startDate: Date) -> Double {
-        let elapsed = max(0, date.timeIntervalSince(startDate))
-        let linear = min(1, elapsed / duration)
-        return linear * linear * (3 - 2 * linear)
-    }
-}
-
-private extension View {
-    func chatMountTimeline(startDate: Date?) -> some View {
-        modifier(ChatMountTimelineModifier(startDate: startDate))
-    }
 }
 
 private struct MessageComposerSnapshot: Equatable {
@@ -1312,7 +1279,6 @@ struct ChatView: View {
     @State private var animatingOutgoingMessageID: String?
     @State private var outgoingEntryAnimationStartedMessageIDs: Set<String> = []
     @State private var hasCompletedInitialHydrationSnap = false
-    @State private var chatMountAnimationStartDate: Date?
     @State private var isScrollGeometryAtBottom = true
     @State private var isRefreshingChatData = false
     @State private var showsDelayedLoadingIndicator = false
@@ -1387,6 +1353,7 @@ struct ChatView: View {
     }
 
     private var chatItemChangeAnimation: Animation? {
+        if !hasCompletedInitialHydrationSnap { return nil }
         if isReaderModeActive { return nil }
         if isSendChoreographyActive { return nil }
         return isSessionBusy ? nil : .snappy(duration: 0.28, extraBounce: 0.02)
@@ -1443,11 +1410,9 @@ struct ChatView: View {
                     .opencodeInteractiveKeyboardDismiss()
                     .background(OpenCodePlatformColor.groupedBackground)
                     .accessibilityIdentifier("chat.scroll")
-                    .chatMountTimeline(startDate: chatMountAnimationStartDate)
                     .onAppear {
                         viewModel.activeChatSessionID = sessionID
                         hasCompletedInitialHydrationSnap = !viewModel.messages.isEmpty
-                        chatMountAnimationStartDate = nil
                         chatViewportHeight = geometry.size.height
                         updateDelayedLoadingIndicator()
                     }
@@ -1460,14 +1425,10 @@ struct ChatView: View {
                         visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
                         if count == 0 {
                             visibleMessageCount = messageWindowSize
-                            chatMountAnimationStartDate = nil
                         }
 
                         if count > 0, !hasCompletedInitialHydrationSnap {
                             hasCompletedInitialHydrationSnap = true
-                            if oldCount == 0, pendingOutgoingSend == nil {
-                                startChatMountAnimation()
-                            }
                         }
                         updateDelayedLoadingIndicator()
                     }
@@ -1477,7 +1438,9 @@ struct ChatView: View {
                     }
 #if canImport(UIKit)
                     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                        guard keyboardWillShow(from: notification), isScrollGeometryAtBottom, !isReaderModeActive else { return }
+                        guard keyboardWillShow(from: notification) else { return }
+                        resetReaderModeSpacer(animated: true)
+                        guard isScrollGeometryAtBottom else { return }
                         scheduleKeyboardBottomSnap(with: proxy, animation: keyboardAnimation(from: notification))
                     }
 #endif
@@ -1505,7 +1468,6 @@ struct ChatView: View {
             viewModel.setComposerStreamingFocus(false)
             taskStore.keyboardBottomSnapTask?.cancel()
             taskStore.readerModeScrollTask?.cancel()
-            taskStore.mountAnimationCleanupTask?.cancel()
             taskStore.delayedLoadingIndicatorTask?.cancel()
             taskStore.composerDraftPersistenceTask?.cancel()
             pendingOutgoingSendTask?.cancel()
@@ -1761,6 +1723,9 @@ struct ChatView: View {
             onFocusChange: { isFocused in
                 isComposerInputFocused = isFocused
                 viewModel.setComposerStreamingFocus(isFocused)
+                if isFocused {
+                    resetReaderModeSpacer(animated: true)
+                }
             },
             onTextChange: { text in
                 scheduleComposerDraftPersistence(text)
@@ -1905,6 +1870,7 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: messageBottomPadding + bottomRefreshIndicatorHeight * snapshot.progress)
+        .id(ChatScrollTarget.bottomAnchor)
     }
 
     @ViewBuilder
@@ -2008,8 +1974,30 @@ struct ChatView: View {
     }
 
     private func activateReaderModeSpacer(screenHeight: CGFloat, messageID: String) {
-        readerModeSpacerHeight = screenHeight * 0.5
+        guard screenHeight >= 280 else {
+            resetReaderModeSpacer(animated: false)
+            return
+        }
+
+        readerModeSpacerHeight = min(240, max(96, screenHeight * 0.28))
         readerModeScrollRequest = ReaderModeScrollRequest(messageID: messageID)
+    }
+
+    private func resetReaderModeSpacer(animated: Bool) {
+        taskStore.readerModeScrollTask?.cancel()
+        readerModeScrollRequest = nil
+
+        guard isReaderModeActive || readerModeSpacerHeight != collapsedTailSpacerHeight else { return }
+
+        let update = {
+            readerModeSpacerHeight = collapsedTailSpacerHeight
+        }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.18), update)
+        } else {
+            update()
+        }
     }
 
     private func scheduleKeyboardBottomSnap(with proxy: ScrollViewProxy, animation: Animation) {
@@ -2026,7 +2014,7 @@ struct ChatView: View {
 
                 guard !Task.isCancelled, isScrollGeometryAtBottom, !isReaderModeActive else { return }
                 withAnimation(animation) {
-                    proxy.scrollTo(ChatScrollTarget.readerModeSpacer, anchor: .bottom)
+                    proxy.scrollTo(ChatScrollTarget.bottomAnchor, anchor: .bottom)
                 }
             }
         }
@@ -2204,19 +2192,6 @@ struct ChatView: View {
             attachmentIDs: overlaySnapshot.attachmentIDs,
             incompleteTodoIDs: overlaySnapshot.incompleteTodoIDs
         )
-    }
-
-    private func startChatMountAnimation() {
-        let startDate = Date().addingTimeInterval(0.04)
-        chatMountAnimationStartDate = startDate
-
-        taskStore.mountAnimationCleanupTask?.cancel()
-        taskStore.mountAnimationCleanupTask = Task { @MainActor in
-            defer { taskStore.mountAnimationCleanupTask = nil }
-            try? await Task.sleep(for: .milliseconds(320))
-            guard !Task.isCancelled, chatMountAnimationStartDate == startDate else { return }
-            chatMountAnimationStartDate = nil
-        }
     }
 
     private func dismissComposerOverlays() {
