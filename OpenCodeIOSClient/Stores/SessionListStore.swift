@@ -147,6 +147,17 @@ final class SessionListStore: ObservableObject {
         upsertWorkspaceSession(session)
     }
 
+    func sessions(_ sessions: [OpenCodeSession], scopedTo directory: String?) -> [OpenCodeSession] {
+        guard let directory, !directory.isEmpty else {
+            return sessions.filter { session in
+                guard let sessionDirectory = session.directory else { return true }
+                return sessionDirectory.isEmpty
+            }
+        }
+
+        return sessions.filter { $0.directory == directory }
+    }
+
     func mergeSessions(_ sessions: [OpenCodeSession], into visibleSessions: inout [OpenCodeSession]) {
         for session in sessions {
             if let index = visibleSessions.firstIndex(where: { $0.id == session.id }) {

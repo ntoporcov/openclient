@@ -10,7 +10,7 @@ struct ThinkingRow: View {
     @State private var entryAnimationStartTask: Task<Void, Never>?
     @State private var entryAnimationTask: Task<Void, Never>?
 
-    private static let entryStartOffset: CGFloat = 600
+    private static let entryStartOffset: CGFloat = -96
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
     var body: some View {
@@ -58,9 +58,9 @@ struct ThinkingRow: View {
             Spacer(minLength: 44)
         }
         .frame(maxWidth: .infinity)
-        .offset(y: entryProgress.map { Self.entryStartOffset * (1 - $0) } ?? (isWaitingForEntryAnimation ? Self.entryStartOffset : 0))
+        .offset(x: entryProgress.map { Self.entryStartOffset * (1 - $0) } ?? (isWaitingForEntryAnimation ? Self.entryStartOffset : 0))
         .opacity(entryProgress.map { 0.72 + 0.28 * $0 } ?? (isWaitingForEntryAnimation ? 0.72 : 1))
-        .scaleEffect(entryProgress.map { 0.94 + 0.06 * $0 } ?? (isWaitingForEntryAnimation ? 0.94 : 1), anchor: .bottomLeading)
+        .scaleEffect(entryProgress.map { 0.94 + 0.06 * $0 } ?? (isWaitingForEntryAnimation ? 0.94 : 1), anchor: .leading)
     }
 
     private func breathingGlassGlow(phase: Double) -> some View {

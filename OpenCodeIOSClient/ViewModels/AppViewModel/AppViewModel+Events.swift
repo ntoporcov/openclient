@@ -421,8 +421,9 @@ extension AppViewModel {
     }
 
     private func applyDirectoryEventState(_ state: EventSyncCoordinator.DirectoryEventState) {
-        if state.sessions != allSessions {
-            allSessions = state.sessions
+        let scopedSessions = sessionListStore.sessions(state.sessions, scopedTo: effectiveSelectedDirectory)
+        if scopedSessions != allSessions {
+            allSessions = scopedSessions
         }
         if state.selectedSession != selectedSession {
             selectedSession = state.selectedSession

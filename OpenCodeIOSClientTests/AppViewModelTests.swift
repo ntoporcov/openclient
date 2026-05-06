@@ -393,6 +393,26 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(store.questions.isEmpty)
     }
 
+    func testSessionListStoreFiltersVisibleSessionsToActiveDirectory() {
+        let store = SessionListStore()
+        let current = OpenCodeSession(id: "ses_current", title: "Current", workspaceID: nil, directory: "/tmp/current", projectID: "proj_current", parentID: nil)
+        let previous = OpenCodeSession(id: "ses_previous", title: "Previous", workspaceID: nil, directory: "/tmp/previous", projectID: "proj_previous", parentID: nil)
+
+        let scoped = store.sessions([current, previous], scopedTo: "/tmp/current")
+
+        XCTAssertEqual(scoped.map(\.id), ["ses_current"])
+    }
+
+    func testSessionListStoreFiltersGlobalSessionsWhenNoDirectoryIsActive() {
+        let store = SessionListStore()
+        let global = OpenCodeSession(id: "ses_global", title: "Global", workspaceID: nil, directory: nil, projectID: nil, parentID: nil)
+        let project = OpenCodeSession(id: "ses_project", title: "Project", workspaceID: nil, directory: "/tmp/project", projectID: "proj_test", parentID: nil)
+
+        let scoped = store.sessions([global, project], scopedTo: nil)
+
+        XCTAssertEqual(scoped.map(\.id), ["ses_global"])
+    }
+
     func testProjectFilesStoreSortsTreeNodesAndTracksExpansionLoadNeed() {
         let store = ProjectFilesStore()
         let file = makeFileNode(name: "z.swift", path: "z.swift", absolute: "/tmp/project/z.swift")

@@ -790,11 +790,6 @@ private enum ChatScrollTarget {
     static let readerModeSpacer = "chat-reader-mode-spacer"
 }
 
-private struct ReaderModeScrollRequest: Equatable {
-    let id = UUID()
-    let messageID: String
-}
-
 private struct PendingOutgoingSend {
     let text: String
     let attachments: [OpenCodeComposerAttachment]
@@ -1044,8 +1039,6 @@ private struct FallbackMedalView: View {
 }
 
 private final class ChatViewTaskStore {
-    var keyboardBottomSnapTask: Task<Void, Never>?
-    var readerModeScrollTask: Task<Void, Never>?
     var delayedLoadingIndicatorTask: Task<Void, Never>?
     var composerDraftPersistenceTask: Task<Void, Never>?
 }
@@ -1288,7 +1281,7 @@ struct ChatView: View {
     @State private var hasFiredBottomPullHaptic = false
     @State private var chatViewportHeight: CGFloat = 0
     @State private var readerModeSpacerHeight: CGFloat = 0
-    @State private var readerModeScrollRequest: ReaderModeScrollRequest?
+    @State private var bottomReadjustmentToken = 0
     @State private var largeMessageChunkCache = OpenCodeLargeMessageChunkCache()
     @State private var chatDisplayItemCache = ChatDisplayItemCache()
 
@@ -1300,7 +1293,6 @@ struct ChatView: View {
     private let collapsedTailSpacerHeight: CGFloat = 1
     private let outgoingRequestDelayMS = 720
     private let thinkingRevealHoldMS = 140
-    private let readerModeSentMessageAnchor = UnitPoint(x: 0.5, y: 0.14)
     private var composerOverlaySnapshot: AppViewModel.ChatComposerOverlaySnapshot {
         viewModel.chatComposerOverlaySnapshot(forSessionID: sessionID)
     }
@@ -1369,82 +1361,76 @@ struct ChatView: View {
                 .ignoresSafeArea()
 
             GeometryReader { geometry in
-                ScrollViewReader { proxy in
-                    let displaySnapshot = chatDisplaySnapshot
+                let displaySnapshot = chatDisplaySnapshot
 
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            if displaySnapshot.hiddenMessageCount > 0 {
-                                Button {
-                                    visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
-                                } label: {
-                                    Text("View older messages (\(displaySnapshot.hiddenMessageCount))")
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(.blue)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 10)
-                                        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .id(ChatScrollTarget.olderMessagesButton)
-                                .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if displaySnapshot.hiddenMessageCount > 0 {
+                            Button {
+                                visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
+                            } label: {
+                                Text("View older messages (\(displaySnapshot.hiddenMessageCount))")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.blue)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
                             }
-
-                            ForEach(displaySnapshot.items) { item in
-                                chatRow(for: item)
-                            }
-
-                            if displaySnapshot.showsThinking {
-                                thinkingRowListItem
-                            }
-
-                            bottomAnchorListItem
-
-                            readerModeSpacer
-                        }
-                    }
-                    .defaultScrollAnchor(.bottom)
-                    .animation(chatItemChangeAnimation, value: displaySnapshot.itemIDs)
-                    .chatScrollBottomTracking($isScrollGeometryAtBottom)
-                    .simultaneousGesture(bottomOverscrollRefreshGesture)
-                    .opencodeInteractiveKeyboardDismiss()
-                    .background(OpenCodePlatformColor.groupedBackground)
-                    .accessibilityIdentifier("chat.scroll")
-                    .onAppear {
-                        viewModel.activeChatSessionID = sessionID
-                        hasCompletedInitialHydrationSnap = !viewModel.messages.isEmpty
-                        chatViewportHeight = geometry.size.height
-                        updateDelayedLoadingIndicator()
-                    }
-                    .onChange(of: geometry.size.height) { _, height in
-                        chatViewportHeight = height
-                        guard isReaderModeActive else { return }
-                        readerModeSpacerHeight = height * 0.5
-                    }
-                    .onChange(of: viewModel.messages.count) { oldCount, count in
-                        visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
-                        if count == 0 {
-                            visibleMessageCount = messageWindowSize
+                            .buttonStyle(.plain)
+                            .id(ChatScrollTarget.olderMessagesButton)
+                            .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
                         }
 
-                        if count > 0, !hasCompletedInitialHydrationSnap {
-                            hasCompletedInitialHydrationSnap = true
+                        ForEach(displaySnapshot.items) { item in
+                            chatRow(for: item)
                         }
-                        updateDelayedLoadingIndicator()
+
+                        if displaySnapshot.showsThinking {
+                            thinkingRowListItem
+                        }
+
+                        bottomAnchorListItem
+
+                        readerModeSpacer
                     }
-                    .onChange(of: readerModeScrollRequest) { _, _ in
-                        guard let request = readerModeScrollRequest else { return }
-                        scrollToReaderModeMessage(request.messageID, with: proxy)
-                    }
-#if canImport(UIKit)
-                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                        guard keyboardWillShow(from: notification) else { return }
-                        resetReaderModeSpacer(animated: true)
-                        guard isScrollGeometryAtBottom else { return }
-                        scheduleKeyboardBottomSnap(with: proxy, animation: keyboardAnimation(from: notification))
-                    }
-#endif
                 }
+                .chatDefaultScrollAnchors()
+                .chatBottomReadjustment(token: bottomReadjustmentToken)
+                .animation(chatItemChangeAnimation, value: displaySnapshot.itemIDs)
+                .chatScrollBottomTracking($isScrollGeometryAtBottom)
+                .simultaneousGesture(bottomOverscrollRefreshGesture)
+                .opencodeInteractiveKeyboardDismiss()
+                .background(OpenCodePlatformColor.groupedBackground)
+                .accessibilityIdentifier("chat.scroll")
+                .onAppear {
+                    viewModel.activeChatSessionID = sessionID
+                    hasCompletedInitialHydrationSnap = !viewModel.messages.isEmpty
+                    chatViewportHeight = geometry.size.height
+                    updateDelayedLoadingIndicator()
+                }
+                .onChange(of: geometry.size.height) { _, height in
+                    chatViewportHeight = height
+                    guard isReaderModeActive else { return }
+                    readerModeSpacerHeight = height * 0.5
+                }
+                .onChange(of: viewModel.messages.count) { oldCount, count in
+                    visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
+                    if count == 0 {
+                        visibleMessageCount = messageWindowSize
+                    }
+
+                    if count > 0, !hasCompletedInitialHydrationSnap {
+                        hasCompletedInitialHydrationSnap = true
+                    }
+                    updateDelayedLoadingIndicator()
+                }
+#if canImport(UIKit)
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                    guard keyboardWillShow(from: notification) else { return }
+                    resetReaderModeSpacer(animated: true)
+                    requestBottomReadjustmentIfPinned()
+                }
+#endif
             }
 
             if chatOverlayVisibilitySnapshot.visibleOverlay == .forkPreparation {
@@ -1466,14 +1452,11 @@ struct ChatView: View {
         .onDisappear {
             persistComposerDraftNow()
             viewModel.setComposerStreamingFocus(false)
-            taskStore.keyboardBottomSnapTask?.cancel()
-            taskStore.readerModeScrollTask?.cancel()
             taskStore.delayedLoadingIndicatorTask?.cancel()
             taskStore.composerDraftPersistenceTask?.cancel()
             pendingOutgoingSendTask?.cancel()
             outgoingEntryResetTask?.cancel()
             readerModeSpacerHeight = collapsedTailSpacerHeight
-            readerModeScrollRequest = nil
             showsDelayedLoadingIndicator = false
             if viewModel.activeChatSessionID == sessionID {
                 viewModel.activeChatSessionID = nil
@@ -1729,6 +1712,7 @@ struct ChatView: View {
             },
             onTextChange: { text in
                 scheduleComposerDraftPersistence(text)
+                requestBottomReadjustmentIfPinned()
             },
             onSend: {
                 startOutgoingBubbleAnimationAndSend()
@@ -1973,20 +1957,7 @@ struct ChatView: View {
         await viewModel.refreshChatData(for: sessionID)
     }
 
-    private func activateReaderModeSpacer(screenHeight: CGFloat, messageID: String) {
-        guard screenHeight >= 280 else {
-            resetReaderModeSpacer(animated: false)
-            return
-        }
-
-        readerModeSpacerHeight = min(240, max(96, screenHeight * 0.28))
-        readerModeScrollRequest = ReaderModeScrollRequest(messageID: messageID)
-    }
-
     private func resetReaderModeSpacer(animated: Bool) {
-        taskStore.readerModeScrollTask?.cancel()
-        readerModeScrollRequest = nil
-
         guard isReaderModeActive || readerModeSpacerHeight != collapsedTailSpacerHeight else { return }
 
         let update = {
@@ -2000,44 +1971,13 @@ struct ChatView: View {
         }
     }
 
-    private func scheduleKeyboardBottomSnap(with proxy: ScrollViewProxy, animation: Animation) {
-        taskStore.keyboardBottomSnapTask?.cancel()
-        taskStore.keyboardBottomSnapTask = Task { @MainActor in
-            defer { taskStore.keyboardBottomSnapTask = nil }
-
-            for delayMS in [0, 80, 220] {
-                if delayMS > 0 {
-                    try? await Task.sleep(for: .milliseconds(delayMS))
-                } else {
-                    await Task.yield()
-                }
-
-                guard !Task.isCancelled, isScrollGeometryAtBottom, !isReaderModeActive else { return }
-                withAnimation(animation) {
-                    proxy.scrollTo(ChatScrollTarget.bottomAnchor, anchor: .bottom)
-                }
-            }
-        }
+    private func requestBottomReadjustmentIfPinned() {
+        guard isScrollGeometryAtBottom else { return }
+        requestBottomReadjustment()
     }
 
-    private func scrollToReaderModeMessage(_ messageID: String, with proxy: ScrollViewProxy) {
-        taskStore.readerModeScrollTask?.cancel()
-        taskStore.readerModeScrollTask = Task { @MainActor in
-            defer { taskStore.readerModeScrollTask = nil }
-
-            for delayMS in [0, 80] {
-                if delayMS > 0 {
-                    try? await Task.sleep(for: .milliseconds(delayMS))
-                } else {
-                    await Task.yield()
-                }
-
-                guard !Task.isCancelled, isReaderModeActive else { return }
-                withoutScrollAnimation {
-                    proxy.scrollTo(messageID, anchor: readerModeSentMessageAnchor)
-                }
-            }
-        }
+    private func requestBottomReadjustment() {
+        bottomReadjustmentToken &+= 1
     }
 
     private func updateDelayedLoadingIndicator() {
@@ -2069,30 +2009,12 @@ struct ChatView: View {
         )
     }
 
-    private func withoutScrollAnimation(_ operation: () -> Void) {
-        var transaction = Transaction()
-        transaction.animation = nil
-        withTransaction(transaction, operation)
-    }
-
-    private func dismissKeyboardForReaderMode() {
-#if canImport(UIKit)
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-#endif
-        isComposerInputFocused = false
-        viewModel.setComposerStreamingFocus(false)
-    }
-
 #if canImport(UIKit)
     private func keyboardWillShow(from notification: Notification) -> Bool {
         guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return false }
         return frame.minY < UIScreen.main.bounds.height
     }
 
-    private func keyboardAnimation(from notification: Notification) -> Animation {
-        let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
-        return .easeOut(duration: max(0.12, duration))
-    }
 #endif
 
     private var messageBottomPadding: CGFloat { 20 }
@@ -2490,8 +2412,8 @@ struct ChatView: View {
         scheduleOutgoingEntryAnimation(messageID: messageID)
         clearComposerDraft()
         viewModel.clearDraftAttachments()
-        dismissKeyboardForReaderMode()
-        activateReaderModeSpacer(screenHeight: chatViewportHeight, messageID: messageID)
+        resetReaderModeSpacer(animated: false)
+        requestBottomReadjustment()
 
         pendingOutgoingSendTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(outgoingRequestDelayMS))
@@ -2891,6 +2813,21 @@ private struct ChatSkeletonRow: View {
 
 private extension View {
     @ViewBuilder
+    func chatDefaultScrollAnchors() -> some View {
+#if os(iOS) || targetEnvironment(macCatalyst)
+        if #available(iOS 18.0, *) {
+            self
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            self.defaultScrollAnchor(.bottom)
+        }
+#else
+        self.defaultScrollAnchor(.bottom)
+#endif
+    }
+
+    @ViewBuilder
     func chatScrollBottomTracking(_ isAtBottom: Binding<Bool>) -> some View {
 #if os(iOS) || targetEnvironment(macCatalyst)
         if #available(iOS 18.0, *) {
@@ -2912,4 +2849,57 @@ private extension View {
         self
 #endif
     }
+
+    @ViewBuilder
+    func chatBottomReadjustment(token: Int) -> some View {
+#if os(iOS) || targetEnvironment(macCatalyst)
+        if #available(iOS 18.0, *) {
+            self.modifier(ChatBottomReadjustmentModifier(token: token))
+        } else {
+            self
+        }
+#else
+        self
+#endif
+    }
 }
+
+#if os(iOS) || targetEnvironment(macCatalyst)
+@available(iOS 18.0, *)
+private struct ChatBottomReadjustmentModifier: ViewModifier {
+    let token: Int
+
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
+    @State private var readjustmentTask: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($scrollPosition)
+            .onChange(of: token) { _, _ in
+                scheduleBottomReadjustment()
+            }
+            .onDisappear {
+                readjustmentTask?.cancel()
+                readjustmentTask = nil
+            }
+    }
+
+    private func scheduleBottomReadjustment() {
+        readjustmentTask?.cancel()
+        readjustmentTask = Task { @MainActor in
+            for delayMS in [0, 80, 220] {
+                if delayMS > 0 {
+                    try? await Task.sleep(for: .milliseconds(delayMS))
+                } else {
+                    await Task.yield()
+                }
+
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.16)) {
+                    scrollPosition.scrollTo(edge: .bottom)
+                }
+            }
+        }
+    }
+}
+#endif
