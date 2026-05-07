@@ -6,6 +6,7 @@ import FoundationModels
 
 extension AppViewModel {
     private static let maxRecentServerCount = 4
+    private static let minimumConnectionOverlayDuration: TimeInterval = 2.0
 
     var canTryAppleIntelligence: Bool {
 #if canImport(FoundationModels)
@@ -73,11 +74,32 @@ extension AppViewModel {
     func startConnection() {
         connectionAttemptTask?.cancel()
         isShowingAddServerSheet = false
+        connectionOverlayStartedAt = Date()
+        isShowingConnectionOverlay = true
         connectionAttemptTask = Task { [weak self] in
             await self?.connect()
             await MainActor.run { [weak self] in
-                self?.connectionAttemptTask = nil
+                guard let self else { return }
+                self.connectionAttemptTask = nil
             }
+            await self?.finishConnectionOverlayAfterAttempt()
+        }
+    }
+
+    private func finishConnectionOverlayAfterAttempt() async {
+        if isConnected {
+            let elapsed = connectionOverlayStartedAt.map { Date().timeIntervalSince($0) } ?? Self.minimumConnectionOverlayDuration
+            let remaining = max(0, Self.minimumConnectionOverlayDuration - elapsed)
+            if remaining > 0 {
+                try? await Task.sleep(for: .milliseconds(Int(remaining * 1_000)))
+            }
+        }
+
+        await MainActor.run { [weak self] in
+            guard let self else { return }
+            guard self.connectionAttemptTask == nil else { return }
+            self.connectionOverlayStartedAt = nil
+            self.isShowingConnectionOverlay = false
         }
     }
 
@@ -94,6 +116,8 @@ extension AppViewModel {
     func cancelConnectionAttempt() {
         connectionAttemptTask?.cancel()
         connectionAttemptTask = nil
+        connectionOverlayStartedAt = nil
+        isShowingConnectionOverlay = false
         stopEventStream()
         directoryStore.reset()
         connectionStore.applyConnectionCancellation()

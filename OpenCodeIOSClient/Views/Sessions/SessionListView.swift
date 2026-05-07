@@ -218,6 +218,9 @@ private struct SessionListContent: View {
         .scrollContentBackground(.hidden)
         .background(OpenCodePlatformColor.groupedBackground)
         .opencodeInteractiveKeyboardDismiss()
+        .refreshable {
+            await viewModel.refreshSessionList()
+        }
         .transaction { transaction in
             if snapshot.hasBusySession {
                 transaction.animation = nil

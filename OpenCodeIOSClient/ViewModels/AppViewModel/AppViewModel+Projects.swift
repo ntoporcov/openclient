@@ -200,6 +200,15 @@ extension AppViewModel {
         currentProject = result.currentProject
     }
 
+    func refreshProjectList() async {
+        do {
+            try await refreshProjects()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func loadSessionPreviews() -> [String: SessionPreview] {
         guard let data = UserDefaults.standard.data(forKey: StorageKey.sessionPreviews),
               let decoded = try? JSONDecoder().decode([String: SessionPreview].self, from: data) else {

@@ -58,6 +58,9 @@ struct ProjectListView: View {
 
         }
         .listStyle(.sidebar)
+        .refreshable {
+            await viewModel.refreshProjectList()
+        }
         .navigationTitle("Projects")
         .toolbar {
             ToolbarItem(placement: .opencodeLeading) {

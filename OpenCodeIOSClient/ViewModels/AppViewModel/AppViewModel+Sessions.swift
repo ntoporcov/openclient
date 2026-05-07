@@ -163,6 +163,16 @@ extension AppViewModel {
         await loadWorkspaceSessionsIfNeeded()
     }
 
+    func refreshSessionList() async {
+        do {
+            try await reloadSessions()
+            errorMessage = nil
+        } catch {
+            isLoadingSessions = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func loadWorkspaceSessionsIfNeeded() async {
         guard isProjectWorkspacesEnabled else { return }
         await loadWorkspaceSessions()

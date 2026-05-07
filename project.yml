@@ -14,7 +14,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    CURRENT_PROJECT_VERSION: 58
+    CURRENT_PROJECT_VERSION: 59
     MARKETING_VERSION: 0.1.0
   configs:
     Debug:

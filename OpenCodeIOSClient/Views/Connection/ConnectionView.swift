@@ -20,19 +20,7 @@ struct ConnectionView: View {
     }
 
     var body: some View {
-        Group {
-            if viewModel.isLoading {
-                ConnectingServerView(
-                    config: viewModel.config,
-                    phase: viewModel.connectionPhase,
-                    cancel: { viewModel.cancelConnectionAttempt() },
-                    retry: { viewModel.startConnection() },
-                    edit: { viewModel.cancelConnectionAttempt() }
-                )
-            } else {
-                connectionList
-            }
-        }
+        connectionList
         .navigationTitle("OpenClient")
         .opencodeLargeNavigationTitle()
         .toolbar {
@@ -204,7 +192,7 @@ struct ConnectionView: View {
     }
 }
 
-private struct ConnectingServerView: View {
+struct ConnectingServerView: View {
     let config: OpenCodeServerConfig
     let phase: OpenClientConnectionPhase
     let cancel: () -> Void
@@ -213,137 +201,195 @@ private struct ConnectingServerView: View {
 
     @State private var isAnimating = false
     @State private var elapsedSeconds = 0
+    @State private var loadingWordIndex = 0
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let loadingWords = [
+        "Cogitating",
+        "Musing",
+        "Mulling",
+        "Pondering",
+        "Ruminating",
+        "Contemplating",
+        "Cerebrating",
+        "Crafting",
+        "Creating",
+        "Hatching",
+        "Forging",
+        "Conjuring",
+        "Concocting",
+        "Crunching",
+        "Computing",
+        "Processing",
+        "Inferring",
+        "Generating",
+        "Propagating",
+        "Marinating",
+        "Schlepping",
+        "Booping",
+        "Smooshing",
+        "Honking",
+        "Flibbertigibbeting",
+        "Spelunking",
+        "Zesting",
+        "Discombobulating",
+    ]
 
     private var isTakingLongerThanUsual: Bool {
         elapsedSeconds >= 8
     }
 
     var body: some View {
-        VStack(spacing: 28) {
+        VStack(spacing: 22) {
             Spacer(minLength: 24)
 
-            ZStack {
-                ForEach(0..<3, id: \.self) { index in
-                    Circle()
-                        .stroke(Color.accentColor.opacity(0.16), lineWidth: 1.5)
-                        .frame(width: 138 + CGFloat(index * 34), height: 138 + CGFloat(index * 34))
-                        .scaleEffect(isAnimating ? 1.08 : 0.92)
-                        .opacity(isAnimating ? 0.35 : 0.78)
-                        .animation(
-                            .easeInOut(duration: 1.6)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(index) * 0.18),
-                            value: isAnimating
-                        )
-                }
-
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.accentColor.opacity(0.26), Color.purple.opacity(0.14), Color.blue.opacity(0.08)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 112, height: 112)
-                    .rotationEffect(.degrees(isAnimating ? 3 : -3))
-                    .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: isAnimating)
-
-                Image(systemName: config.displayIconName)
-                    .font(.system(size: 42, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
+            VStack(spacing: 16) {
+                serverCard
+                statusBlock
             }
-            .frame(height: 230)
-
-            VStack(spacing: 10) {
-                Text("Dialing the AI mothership")
-                    .font(.title2.weight(.bold))
-                    .multilineTextAlignment(.center)
-
-                Text(config.displayName)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Text(config.trimmedBaseURL)
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 24)
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text(phase.title)
-                        .font(.headline)
-                }
-
-                Text(phase.detail)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if isTakingLongerThanUsual {
-                    Divider()
-
-                    Text("This is taking longer than usual. The server might be waking up, blocked by a network, or quietly contemplating existence.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: 420, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(OpenCodePlatformColor.secondaryGroupedBackground)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            }
-            .padding(.horizontal, 24)
-
-            VStack(spacing: 12) {
-                Button(role: .cancel) {
-                    cancel()
-                } label: {
-                    Text("Cancel")
-                        .frame(maxWidth: 420)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                if isTakingLongerThanUsual {
-                    HStack(spacing: 12) {
-                        Button("Try Again") {
-                            retry()
-                            elapsedSeconds = 0
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button("Edit Server") {
-                            edit()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .controlSize(.large)
-                }
-            }
-            .padding(.horizontal, 24)
+            .frame(maxWidth: 420)
+            .padding(.horizontal, 22)
 
             Spacer(minLength: 24)
+
+            actionButtons
+                .frame(maxWidth: 420)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(OpenCodePlatformColor.groupedBackground.ignoresSafeArea())
+        .opencodeGlassSurface(in: Rectangle())
+        .background(Color.black.opacity(0.04).ignoresSafeArea())
+        .ignoresSafeArea()
         .onAppear {
             isAnimating = true
         }
         .onReceive(timer) { _ in
             elapsedSeconds += 1
+            guard loadingWords.count > 1 else { return }
+            var nextIndex = Int.random(in: 0..<loadingWords.count)
+            if nextIndex == loadingWordIndex {
+                nextIndex = (nextIndex + 1) % loadingWords.count
+            }
+            loadingWordIndex = nextIndex
+        }
+    }
+
+    private var loadingWord: String {
+        loadingWords[loadingWordIndex]
+    }
+
+    private var serverCard: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.accentColor.opacity(isAnimating ? 0.28 : 0.18),
+                                Color.purple.opacity(0.14),
+                                Color.blue.opacity(0.08),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .scaleEffect(isAnimating ? 1.04 : 0.98)
+                    .animation(.easeInOut(duration: 1.25).repeatForever(autoreverses: true), value: isAnimating)
+
+                Image(systemName: config.displayIconName)
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(width: 96, height: 96)
+
+            VStack(spacing: 6) {
+                Text(config.displayName)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(config.trimmedBaseURL)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(loadingWord)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 22)
+        .background {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.10), Color.accentColor.opacity(0.05), Color.clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+    }
+
+    private var statusBlock: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text(phase.title)
+                    .font(.headline)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            Text(phase.detail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isTakingLongerThanUsual {
+                Text("This is taking longer than usual. The server might be waking up, blocked by a network, or quietly contemplating existence.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var actionButtons: some View {
+        VStack(spacing: 12) {
+            Button(role: .cancel) {
+                cancel()
+            } label: {
+                Text("Cancel")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            if isTakingLongerThanUsual {
+                HStack(spacing: 12) {
+                    Button("Try Again") {
+                        retry()
+                        elapsedSeconds = 0
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Edit Server") {
+                        edit()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .controlSize(.large)
+            }
         }
     }
 }

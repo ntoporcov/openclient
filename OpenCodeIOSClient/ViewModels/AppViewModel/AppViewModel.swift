@@ -87,6 +87,8 @@ final class AppViewModel: ObservableObject {
             connectionStore.connectionPhase = newValue
         }
     }
+    @Published var isShowingConnectionOverlay = false
+    var connectionOverlayStartedAt: Date?
     @Published var appleIntelligenceRecentWorkspaces: [AppleIntelligenceWorkspaceRecord] = []
     @Published var activeAppleIntelligenceWorkspaceID: String?
     @Published var isShowingAppleIntelligenceFolderPicker = false
