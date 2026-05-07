@@ -1087,6 +1087,11 @@ private struct ThinkingRowRenderSnapshot {
     let animateEntry: Bool
 }
 
+private struct ChatScrollSpacingSample {
+    let offsetY: CGFloat
+    let timestamp: TimeInterval
+}
+
 private struct BottomRefreshRenderSnapshot {
     let showsIndicator: Bool
     let progress: CGFloat
@@ -1278,6 +1283,8 @@ struct ChatView: View {
     @State private var chatViewportHeight: CGFloat = 0
     @State private var composerMeasuredHeight: CGFloat = 0
     @State private var bottomReadjustmentToken = 0
+    @State private var scrollVelocitySpacingExtra: CGFloat = 0
+    @State private var scrollVelocitySpacingSample: ChatScrollSpacingSample?
     @State private var largeMessageChunkCache = OpenCodeLargeMessageChunkCache()
     @State private var chatDisplayItemCache = ChatDisplayItemCache()
 
@@ -1386,6 +1393,7 @@ struct ChatView: View {
                 .chatBottomReadjustment(token: bottomReadjustmentToken)
                 .animation(chatItemChangeAnimation, value: displaySnapshot.itemIDs)
                 .chatScrollBottomTracking($isScrollGeometryAtBottom)
+                .chatScrollVelocitySpacing(extraSpacing: $scrollVelocitySpacingExtra, sample: $scrollVelocitySpacingSample)
                 .simultaneousGesture(bottomOverscrollRefreshGesture)
                 .opencodeInteractiveKeyboardDismiss()
                 .background(OpenCodePlatformColor.groupedBackground)
@@ -1441,6 +1449,8 @@ struct ChatView: View {
             taskStore.composerDraftPersistenceTask?.cancel()
             pendingOutgoingSendTask?.cancel()
             outgoingEntryResetTask?.cancel()
+            scrollVelocitySpacingExtra = 0
+            scrollVelocitySpacingSample = nil
             showsDelayedLoadingIndicator = false
             if viewModel.activeChatSessionID == sessionID {
                 viewModel.activeChatSessionID = nil
@@ -2199,7 +2209,7 @@ struct ChatView: View {
         .equatable()
         .transition(snapshot.transition)
         .id(message.id)
-        .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .padding(EdgeInsets(top: 6 + scrollVelocitySpacingExtra * 0.5, leading: 16, bottom: 6 + scrollVelocitySpacingExtra * 0.5, trailing: 16))
     }
 
     private func messageRowRenderSnapshot(for message: OpenCodeMessageEnvelope) -> MessageRowRenderSnapshot {
@@ -2810,6 +2820,19 @@ private extension View {
     }
 
     @ViewBuilder
+    func chatScrollVelocitySpacing(extraSpacing: Binding<CGFloat>, sample: Binding<ChatScrollSpacingSample?>) -> some View {
+#if os(iOS) || targetEnvironment(macCatalyst)
+        if #available(iOS 18.0, *) {
+            self.modifier(ChatScrollVelocitySpacingModifier(extraSpacing: extraSpacing, sample: sample))
+        } else {
+            self
+        }
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
     func chatBottomReadjustment(token: Int) -> some View {
 #if os(iOS) || targetEnvironment(macCatalyst)
         if #available(iOS 18.0, *) {
@@ -2824,6 +2847,50 @@ private extension View {
 }
 
 #if os(iOS) || targetEnvironment(macCatalyst)
+@available(iOS 18.0, *)
+private struct ChatScrollVelocitySpacingModifier: ViewModifier {
+    @Binding var extraSpacing: CGFloat
+    @Binding var sample: ChatScrollSpacingSample?
+
+    private let activationVelocity: CGFloat = 450
+    private let fullEffectVelocity: CGFloat = 2_200
+    private let maximumExtraSpacing: CGFloat = 12
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y
+            } action: { _, offsetY in
+                updateSpacing(offsetY: offsetY)
+            }
+            .onScrollPhaseChange { _, phase in
+                guard !phase.isScrolling else { return }
+                sample = nil
+                withAnimation(.snappy(duration: 0.24, extraBounce: 0.02)) {
+                    extraSpacing = 0
+                }
+            }
+    }
+
+    private func updateSpacing(offsetY: CGFloat) {
+        let now = Date.timeIntervalSinceReferenceDate
+        defer {
+            sample = ChatScrollSpacingSample(offsetY: offsetY, timestamp: now)
+        }
+
+        guard let sample else { return }
+        let elapsed = max(1.0 / 120.0, now - sample.timestamp)
+        let velocity = abs((offsetY - sample.offsetY) / elapsed)
+        let progress = min(1, max(0, (velocity - activationVelocity) / (fullEffectVelocity - activationVelocity)))
+        let target = (progress * maximumExtraSpacing * 2).rounded() / 2
+
+        guard abs(extraSpacing - target) >= 0.5 else { return }
+        withAnimation(.linear(duration: 0.08)) {
+            extraSpacing = target
+        }
+    }
+}
+
 @available(iOS 18.0, *)
 private struct ChatBottomReadjustmentModifier: ViewModifier {
     let token: Int

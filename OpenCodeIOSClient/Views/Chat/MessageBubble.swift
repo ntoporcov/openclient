@@ -43,8 +43,8 @@ struct MessageBubble: View {
         isUser ? .blue : .clear
     }
 
-    private var bubbleShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: isUser ? 22 : 18, style: .continuous)
+    private var bubbleShape: MessageBubbleShape {
+        MessageBubbleShape(isOutgoing: isUser, cornerRadius: isUser ? 22 : 18)
     }
 
     private var displayEntries: [DisplayEntry] {
@@ -354,10 +354,11 @@ struct MessageBubble: View {
 
     private func bubbleWrapped<Content: View>(_ content: Content) -> some View {
         content
-            .padding(.horizontal, 14)
+            .padding(.leading, 14)
+            .padding(.trailing, isUser ? 22 : 14)
             .padding(.vertical, 10)
             .background {
-                bubbleColor.clipShape(bubbleShape)
+                bubbleShape.fill(bubbleColor)
             }
             .frame(maxWidth: 320, alignment: .trailing)
     }
@@ -851,6 +852,59 @@ private struct ContextSummary {
     var reads = 0
     var searches = 0
     var lists = 0
+}
+
+private struct MessageBubbleShape: Shape {
+    let isOutgoing: Bool
+    let cornerRadius: CGFloat
+
+    private let tailWidth: CGFloat = 11
+    private let tailHeight: CGFloat = 13
+
+    func path(in rect: CGRect) -> Path {
+        guard isOutgoing else {
+            return Path(roundedRect: rect, cornerRadius: cornerRadius)
+        }
+
+        let bubbleMaxX = rect.maxX - tailWidth
+        let minX = rect.minX
+        let maxY = rect.maxY
+        let radius = min(cornerRadius, rect.height / 2, (rect.width - tailWidth) / 2)
+        let tailStartY = maxY - tailHeight - 3
+        let tailTip = CGPoint(x: rect.maxX - 1, y: maxY - 1)
+        let tailReturn = CGPoint(x: bubbleMaxX - 14, y: maxY)
+
+        var path = Path()
+        path.move(to: CGPoint(x: minX + radius, y: rect.minY))
+        path.addLine(to: CGPoint(x: bubbleMaxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: bubbleMaxX, y: rect.minY + radius),
+            control: CGPoint(x: bubbleMaxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: bubbleMaxX, y: tailStartY))
+        path.addCurve(
+            to: tailTip,
+            control1: CGPoint(x: bubbleMaxX + 0.5, y: maxY - 11),
+            control2: CGPoint(x: bubbleMaxX + 8.5, y: maxY - 5.5)
+        )
+        path.addCurve(
+            to: tailReturn,
+            control1: CGPoint(x: bubbleMaxX + 5, y: maxY + 1),
+            control2: CGPoint(x: bubbleMaxX - 4, y: maxY + 1)
+        )
+        path.addLine(to: CGPoint(x: minX + radius, y: maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: minX, y: maxY - radius),
+            control: CGPoint(x: minX, y: maxY)
+        )
+        path.addLine(to: CGPoint(x: minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: minX + radius, y: rect.minY),
+            control: CGPoint(x: minX, y: rect.minY)
+        )
+        path.closeSubpath()
+        return path
+    }
 }
 
 private struct MessageBubbleDisplayEntryCacheKey: Equatable {
