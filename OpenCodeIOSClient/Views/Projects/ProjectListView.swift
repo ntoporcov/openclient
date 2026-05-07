@@ -67,8 +67,7 @@ struct ProjectListView: View {
                 Button {
                     viewModel.disconnect()
                 } label: {
-                    Label("Servers", systemImage: "chevron.left")
-                        .labelStyle(.titleAndIcon)
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
                 }
                 .accessibilityLabel("Disconnect")
                 .accessibilityIdentifier("projects.disconnect")

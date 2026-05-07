@@ -8,8 +8,125 @@ import UniformTypeIdentifiers
 import UIKit
 #endif
 
+enum ConnectionSheetRoute: Hashable {
+    case addServer
+    case editServer(String)
+    case help
+    case appleIntelligenceChat(String)
+}
+
+struct ConnectionSheetView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private static let homeDetent: PresentationDetent = .fraction(0.98)
+
+    @State private var path: [ConnectionSheetRoute] = []
+    @State private var selectedDetent: PresentationDetent = Self.homeDetent
+
+    private var currentRoute: ConnectionSheetRoute? {
+        path.last
+    }
+
+    var body: some View {
+        ZStack {
+            NavigationStack(path: $path) {
+                ConnectionView(viewModel: viewModel) { route in
+                    path.append(route)
+                }
+                .navigationDestination(for: ConnectionSheetRoute.self) { route in
+                    destination(for: route)
+                }
+            }
+
+            if viewModel.isShowingConnectionOverlay {
+                ConnectingServerView(
+                    config: viewModel.config,
+                    phase: viewModel.connectionPhase,
+                    cancel: { viewModel.cancelConnectionAttempt() },
+                    retry: { viewModel.startConnection() },
+                    edit: { viewModel.cancelConnectionAttempt() }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(10)
+            }
+        }
+        .presentationDetents(detents, selection: $selectedDetent)
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(true)
+        .animation(.snappy(duration: 0.34, extraBounce: 0.02), value: viewModel.isShowingConnectionOverlay)
+        .onAppear {
+            updateDetent(for: currentRoute)
+            syncAppleIntelligenceRoute()
+        }
+        .onChange(of: path) { oldPath, newPath in
+            if case .appleIntelligenceChat = oldPath.last,
+               case .appleIntelligenceChat = newPath.last {
+                updateDetent(for: currentRoute)
+                return
+            }
+
+            if case .appleIntelligenceChat = oldPath.last,
+               viewModel.isUsingAppleIntelligence {
+                viewModel.leaveAppleIntelligenceSession()
+            }
+
+            updateDetent(for: currentRoute)
+        }
+        .onChange(of: viewModel.selectedSession?.id) { _, _ in
+            syncAppleIntelligenceRoute()
+        }
+        .onChange(of: viewModel.isUsingAppleIntelligence) { _, _ in
+            syncAppleIntelligenceRoute()
+        }
+    }
+
+    private var detents: Set<PresentationDetent> {
+        switch currentRoute {
+        case .addServer, .editServer, .none:
+            [Self.homeDetent]
+        case .help, .appleIntelligenceChat:
+            [.large]
+        }
+    }
+
+    @ViewBuilder
+    private func destination(for route: ConnectionSheetRoute) -> some View {
+        switch route {
+        case .addServer, .editServer:
+            ServerConnectionEditorView(viewModel: viewModel)
+        case .help:
+            HelpView()
+        case let .appleIntelligenceChat(sessionID):
+            ChatView(viewModel: viewModel, sessionID: sessionID)
+                .id(sessionID)
+        }
+    }
+
+    private func updateDetent(for route: ConnectionSheetRoute?) {
+        switch route {
+        case .help, .appleIntelligenceChat:
+            selectedDetent = .large
+        case .addServer, .editServer, .none:
+            selectedDetent = Self.homeDetent
+        }
+    }
+
+    private func syncAppleIntelligenceRoute() {
+        guard viewModel.isUsingAppleIntelligence, let sessionID = viewModel.selectedSession?.id else {
+            if case .appleIntelligenceChat = currentRoute {
+                path.removeLast()
+            }
+            return
+        }
+
+        guard currentRoute != .appleIntelligenceChat(sessionID) else { return }
+        path = [.appleIntelligenceChat(sessionID)]
+    }
+}
+
 struct ConnectionView: View {
     @ObservedObject var viewModel: AppViewModel
+    var navigate: ((ConnectionSheetRoute) -> Void)? = nil
 
     private var hasRecentServers: Bool {
         viewModel.recentServerConfigs.isEmpty == false
@@ -28,39 +145,13 @@ struct ConnectionView: View {
                 ToolbarItem(placement: .opencodeTrailing) {
                     Button {
                         viewModel.presentAddServerSheet()
+                        navigate?(.addServer)
                     } label: {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel("Add Server")
                 }
             }
-        }
-        .sheet(isPresented: $viewModel.isShowingAddServerSheet) {
-            NavigationStack {
-                List {
-                    ServerConnectionSections(viewModel: viewModel)
-                }
-                .opencodeGroupedListStyle()
-                .navigationTitle(viewModel.isEditingSavedServer ? "Edit Server" : "Server")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") {
-                            viewModel.dismissAddServerSheet()
-                        }
-                    }
-
-                    if viewModel.isEditingSavedServer {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") {
-                                viewModel.saveEditedServer()
-                            }
-                            .disabled(!viewModel.canSaveEditedServer)
-                        }
-                    }
-                }
-            }
-            .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $viewModel.isShowingAppleIntelligenceFolderPicker) {
 #if canImport(UIKit) && canImport(UniformTypeIdentifiers)
@@ -74,6 +165,8 @@ struct ConnectionView: View {
                 .presentationDetents([.medium])
 #endif
         }
+        .scrollContentBackground(.hidden)
+        .background(.clear)
     }
 
     private var connectionList: some View {
@@ -120,6 +213,7 @@ struct ConnectionView: View {
                     .contextMenu {
                         Button {
                             viewModel.prepareToEditRecentServer(serverConfig)
+                            navigate?(.editServer(serverConfig.recentServerID))
                         } label: {
                             Label("Edit", systemImage: "square.and.pencil")
                         }
@@ -134,6 +228,7 @@ struct ConnectionView: View {
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button {
                         viewModel.prepareToEditRecentServer(serverConfig)
+                        navigate?(.editServer(serverConfig.recentServerID))
                     } label: {
                         Label("Edit", systemImage: "square.and.pencil")
                     }
@@ -180,14 +275,42 @@ struct ConnectionView: View {
 
     private var helpSection: some View {
         Section("Help") {
-            NavigationLink {
-                HelpView()
+            Button {
+                navigate?(.help)
             } label: {
                 HelpNavigationRow()
             }
+            .buttonStyle(.plain)
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+        }
+    }
+}
+
+private struct ServerConnectionEditorView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ServerConnectionSections(viewModel: viewModel)
+        }
+        .opencodeGroupedListStyle()
+        .scrollContentBackground(.hidden)
+        .background(.clear)
+        .navigationTitle(viewModel.isEditingSavedServer ? "Edit Server" : "Server")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if viewModel.isEditingSavedServer {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        viewModel.saveEditedServer()
+                        dismiss()
+                    }
+                    .disabled(!viewModel.canSaveEditedServer)
+                }
+            }
         }
     }
 }
@@ -281,27 +404,10 @@ struct ConnectingServerView: View {
 
     private var serverCard: some View {
         VStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.accentColor.opacity(isAnimating ? 0.28 : 0.18),
-                                Color.purple.opacity(0.14),
-                                Color.blue.opacity(0.08),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .scaleEffect(isAnimating ? 1.04 : 0.98)
-                    .animation(.easeInOut(duration: 1.25).repeatForever(autoreverses: true), value: isAnimating)
-
-                Image(systemName: config.displayIconName)
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
-            .frame(width: 96, height: 96)
+            Image(systemName: config.displayIconName)
+                .font(.system(size: 46, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .symbolEffect(.pulse, options: .repeating, value: isAnimating)
 
             VStack(spacing: 6) {
                 Text(config.displayName)
@@ -321,19 +427,6 @@ struct ConnectingServerView: View {
             }
             .multilineTextAlignment(.center)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 22)
-        .background {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.10), Color.accentColor.opacity(0.05), Color.clear],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        }
-        .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
 
     private var statusBlock: some View {
@@ -573,9 +666,12 @@ private struct ConnectionListStyleModifier: ViewModifier {
             content
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                .background(OpenCodePlatformColor.groupedBackground)
+                .background(.clear)
         } else {
-            content.listStyle(.insetGrouped)
+            content
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(.clear)
         }
 #endif
     }
