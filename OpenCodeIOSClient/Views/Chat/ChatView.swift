@@ -791,6 +791,7 @@ private enum ChatScrollTarget {
 
 private struct PendingOutgoingSend {
     let text: String
+    let agentMentions: [OpenCodeAgentMention]
     let attachments: [OpenCodeComposerAttachment]
     let messageID: String?
     let partID: String?
@@ -1051,6 +1052,7 @@ private struct MessageComposerSnapshot: Equatable {
     let forkSignature: String
     let mcpSignature: String
     let pinnedCommandSignature: String
+    let mentionableAgentSignature: String
     let actionSignature: String
 }
 
@@ -1181,6 +1183,7 @@ private struct EquatableMessageComposerHost: View, Equatable {
     let isAccessoryMenuOpen: Binding<Bool>
     let snapshot: MessageComposerSnapshot
     let commands: [OpenCodeCommand]
+    let mentionableAgents: [OpenCodeAgent]
     let pinnedCommands: [OpenCodeCommand]
     let pinnedCommandNames: Set<String>
     let attachmentCount: Int
@@ -1195,6 +1198,7 @@ private struct EquatableMessageComposerHost: View, Equatable {
     let actionSignature: String
     let onFocusChange: (Bool) -> Void
     let onTextChange: (String) -> Void
+    let onAgentMentionsChange: ([OpenCodeAgentMention]) -> Void
     let onHeightChange: (CGFloat) -> Void
     let onSend: () -> Void
     let onStop: () -> Void
@@ -1216,6 +1220,7 @@ private struct EquatableMessageComposerHost: View, Equatable {
             draftStore: draftStore,
             isAccessoryMenuOpen: isAccessoryMenuOpen,
             commands: commands,
+            mentionableAgents: mentionableAgents,
             pinnedCommands: pinnedCommands,
             pinnedCommandNames: pinnedCommandNames,
             attachmentCount: attachmentCount,
@@ -1229,6 +1234,7 @@ private struct EquatableMessageComposerHost: View, Equatable {
             mcpErrorMessage: mcpErrorMessage,
             onFocusChange: onFocusChange,
             onTextChange: onTextChange,
+            onAgentMentionsChange: onAgentMentionsChange,
             onHeightChange: onHeightChange,
             onSend: onSend,
             onStop: onStop,
@@ -1546,6 +1552,9 @@ struct ChatView: View {
         if composerDraftStore.text != viewModel.draftMessage {
             composerDraftStore.text = viewModel.draftMessage
         }
+        if composerDraftStore.agentMentions != viewModel.draftAgentMentions {
+            composerDraftStore.agentMentions = viewModel.draftAgentMentions
+        }
     }
 
     private func scheduleComposerDraftPersistence(_ text: String) {
@@ -1553,13 +1562,13 @@ struct ChatView: View {
         taskStore.composerDraftPersistenceTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(750))
             guard !Task.isCancelled else { return }
-            viewModel.saveMessageDraft(text, forSessionID: sessionID, updateActiveDraft: false)
+            viewModel.saveMessageDraft(text, agentMentions: composerDraftStore.agentMentions, forSessionID: sessionID, updateActiveDraft: false)
         }
     }
 
     private func persistComposerDraftNow(removesEmpty: Bool = true) {
         taskStore.composerDraftPersistenceTask?.cancel()
-        viewModel.saveMessageDraft(composerDraftStore.text, forSessionID: sessionID, removesEmpty: removesEmpty)
+        viewModel.saveMessageDraft(composerDraftStore.text, agentMentions: composerDraftStore.agentMentions, forSessionID: sessionID, removesEmpty: removesEmpty)
     }
 
     private func clearComposerDraft() {
@@ -1567,7 +1576,10 @@ struct ChatView: View {
         if !composerDraftStore.text.isEmpty {
             composerDraftStore.text = ""
         }
-        viewModel.saveMessageDraft("", forSessionID: sessionID)
+        if !composerDraftStore.agentMentions.isEmpty {
+            composerDraftStore.agentMentions = []
+        }
+        viewModel.saveMessageDraft("", agentMentions: [], forSessionID: sessionID)
         viewModel.composerResetToken = UUID()
     }
 
@@ -1576,7 +1588,8 @@ struct ChatView: View {
         if composerDraftStore.text != text {
             composerDraftStore.text = text
         }
-        viewModel.saveMessageDraft(text, forSessionID: sessionID)
+        composerDraftStore.agentMentions = []
+        viewModel.saveMessageDraft(text, agentMentions: [], forSessionID: sessionID)
         viewModel.composerResetToken = UUID()
     }
 
@@ -1664,10 +1677,12 @@ struct ChatView: View {
     private func activeMessageComposer(isBusy: Bool) -> some View {
         let composerSnapshot = viewModel.chatComposerSnapshot(for: liveSession, isBusy: isBusy)
         let commands = composerSnapshot.commands
+        let mentionableAgents = viewModel.mentionableAgents
         let commandScopeKey = viewModel.currentProjectPreferenceScopeKey
         let pinnedCommands = pinnedCommandStore.pinnedCommands(from: commands, scopeKey: commandScopeKey)
         let pinnedCommandNames = Set(pinnedCommandStore.pinnedNames(for: commandScopeKey))
         let pinnedCommandSignature = [commandScopeKey, pinnedCommands.map(\.name).joined(separator: ",")].joined(separator: "|")
+        let mentionableAgentSignature = mentionableAgents.map { "\($0.name):\($0.description ?? "")" }.joined(separator: "|")
         let snapshot = MessageComposerSnapshot(
             isAccessoryMenuOpenValue: isComposerMenuOpen,
             commands: commands,
@@ -1677,6 +1692,7 @@ struct ChatView: View {
             forkSignature: composerSnapshot.forkSignature,
             mcpSignature: composerSnapshot.mcpSignature,
             pinnedCommandSignature: pinnedCommandSignature,
+            mentionableAgentSignature: mentionableAgentSignature,
             actionSignature: composerSnapshot.actionSignature
         )
 
@@ -1685,6 +1701,7 @@ struct ChatView: View {
             isAccessoryMenuOpen: $isComposerMenuOpen,
             snapshot: snapshot,
             commands: commands,
+            mentionableAgents: mentionableAgents,
             pinnedCommands: pinnedCommands,
             pinnedCommandNames: pinnedCommandNames,
             attachmentCount: snapshot.attachmentCount,
@@ -1703,6 +1720,9 @@ struct ChatView: View {
             },
             onTextChange: { text in
                 scheduleComposerDraftPersistence(text)
+            },
+            onAgentMentionsChange: { mentions in
+                viewModel.setDraftAgentMentions(mentions, forSessionID: sessionID)
             },
             onHeightChange: { height in
                 handleComposerHeightChange(height)
@@ -2336,7 +2356,9 @@ struct ChatView: View {
     }
 
     private func startOutgoingBubbleAnimationAndSend() {
-        let draftText = composerDraftStore.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawDraftText = composerDraftStore.text
+        let draftText = rawDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draftAgentMentions = composerDraftStore.agentMentions
         let draftAttachments = viewModel.draftAttachments
         let hasAttachments = !draftAttachments.isEmpty
 
@@ -2368,7 +2390,8 @@ struct ChatView: View {
         let partID = OpenCodeIdentifier.part()
 
         let pendingSend = PendingOutgoingSend(
-            text: draftText,
+            text: rawDraftText,
+            agentMentions: draftAgentMentions,
             attachments: draftAttachments,
             messageID: messageID,
             partID: partID
@@ -2377,7 +2400,8 @@ struct ChatView: View {
         pendingOutgoingSendTask?.cancel()
         isThinkingRowRevealAllowed = false
         preparingOutgoingMessageID = messageID
-        _ = viewModel.insertOptimisticUserMessage(draftText, attachments: draftAttachments, in: liveSession, messageID: messageID, partID: partID, animated: false)
+        let optimisticPrompt = OpenCodeAgentMention.trimmingTextAndMentions(text: rawDraftText, mentions: draftAgentMentions)
+        _ = viewModel.insertOptimisticUserMessage(optimisticPrompt.text, agentMentions: optimisticPrompt.mentions, attachments: draftAttachments, in: liveSession, messageID: messageID, partID: partID, animated: false)
         pendingOutgoingSend = pendingSend
         scheduleOutgoingEntryAnimation(messageID: messageID)
         clearComposerDraft()
@@ -2390,6 +2414,7 @@ struct ChatView: View {
 
             await viewModel.sendMessage(
                 pendingSend.text,
+                agentMentions: pendingSend.agentMentions,
                 attachments: pendingSend.attachments,
                 in: liveSession,
                 userVisible: true,

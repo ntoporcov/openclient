@@ -555,7 +555,7 @@ private struct ServerConnectionSections: View {
                 TextField("Name", text: $viewModel.config.name)
                     .accessibilityIdentifier("connection.name")
 
-                TextField("Base URL", text: $viewModel.config.baseURL)
+                TextField("Server URL", text: $viewModel.config.baseURL)
                     .opencodeDisableTextAutocapitalization()
                     .autocorrectionDisabled()
                     .opencodeURLKeyboardType()
@@ -584,6 +584,13 @@ private struct ServerConnectionSections: View {
                 }
             }
 
+            if let errorMessage = viewModel.errorMessage {
+                Section("Error") {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                }
+            }
+
             Section("Icon") {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
@@ -600,18 +607,11 @@ private struct ServerConnectionSections: View {
 
             Section {
                 Button(viewModel.isLoading ? "Connecting..." : "Connect to OpenCode") {
-                    viewModel.startConnection()
+                    viewModel.startConnectionFromEditor()
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .disabled(!canConnect)
                 .accessibilityIdentifier("connection.connect")
-            }
-
-            if let errorMessage = viewModel.errorMessage {
-                Section("Error") {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                }
             }
         }
         .onChange(of: viewModel.config.trimmedBaseURL) { _, _ in

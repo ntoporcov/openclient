@@ -47,6 +47,12 @@ final class ModelConfigurationStore: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    var mentionableAgents: [OpenCodeAgent] {
+        availableAgents
+            .filter { ($0.hidden ?? false) == false && $0.mode != "primary" }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     var sortedProviders: [OpenCodeProvider] {
         availableProviders.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }

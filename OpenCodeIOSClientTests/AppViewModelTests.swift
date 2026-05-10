@@ -1150,12 +1150,14 @@ final class AppViewModelTests: XCTestCase {
                 OpenCodeAgent(name: "build", description: nil, mode: "primary", hidden: nil, model: nil, variant: nil),
                 OpenCodeAgent(name: "hidden", description: nil, mode: "primary", hidden: true, model: nil, variant: nil),
                 OpenCodeAgent(name: "sub", description: nil, mode: "subagent", hidden: nil, model: nil, variant: nil),
+                OpenCodeAgent(name: "all", description: nil, mode: "all", hidden: nil, model: nil, variant: nil),
             ],
             availableProviders: [makeProvider(id: "openai", name: "OpenAI", modelID: "gpt-5.4-mini", modelName: "GPT-5.4 mini")],
             defaultModelsByProviderID: ["openai": "gpt-5.4-mini"]
         )
 
-        XCTAssertEqual(store.selectableAgents.map(\.name), ["build"])
+        XCTAssertEqual(store.selectableAgents.map(\.name), ["all", "build"])
+        XCTAssertEqual(store.mentionableAgents.map(\.name), ["all", "sub"])
         XCTAssertEqual(store.defaultModelReference(), OpenCodeModelReference(providerID: "openai", modelID: "gpt-5.4-mini"))
     }
 

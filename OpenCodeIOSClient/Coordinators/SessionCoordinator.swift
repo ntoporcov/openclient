@@ -10,6 +10,7 @@ final class SessionCoordinator {
     struct PromptSubmission {
         let sessionID: String
         let text: String
+        let agentMentions: [OpenCodeAgentMention]
         let attachments: [OpenCodeComposerAttachment]
         let directory: String?
         let messageID: String
@@ -30,6 +31,7 @@ final class SessionCoordinator {
         let messageID: String
         let partID: String
         let draftText: String
+        let agentMentions: [OpenCodeAgentMention]
         let attachments: [OpenCodeComposerAttachment]
         let previousStatus: String?
     }
@@ -441,6 +443,7 @@ final class SessionCoordinator {
 
     func preparePromptSubmission(
         text: String,
+        agentMentions: [OpenCodeAgentMention] = [],
         attachments: [OpenCodeComposerAttachment],
         session: OpenCodeSession,
         selectedDirectory: String?,
@@ -451,7 +454,8 @@ final class SessionCoordinator {
         agent: String?,
         variant: String?
     ) -> PromptPreparation? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPrompt = OpenCodeAgentMention.trimmingTextAndMentions(text: text, mentions: agentMentions)
+        let trimmed = normalizedPrompt.text
         guard !trimmed.isEmpty || !attachments.isEmpty else { return nil }
 
         let resolvedMessageID = messageID ?? OpenCodeIdentifier.message()
@@ -469,6 +473,7 @@ final class SessionCoordinator {
             submission: PromptSubmission(
                 sessionID: session.id,
                 text: trimmed,
+                agentMentions: normalizedPrompt.mentions,
                 attachments: attachments,
                 directory: requestDirectory,
                 messageID: resolvedMessageID,
@@ -529,6 +534,7 @@ final class SessionCoordinator {
         return OpenCodeMessageEnvelope.local(
             role: "user",
             text: submission.text,
+            agentMentions: submission.agentMentions,
             attachments: submission.attachments,
             messageID: submission.messageID,
             sessionID: submission.sessionID,
@@ -633,6 +639,7 @@ final class SessionCoordinator {
             messageID: submission.messageID,
             partID: submission.partID,
             draftText: submission.text,
+            agentMentions: submission.agentMentions,
             attachments: submission.attachments,
             previousStatus: previousStatus
         )
@@ -652,6 +659,7 @@ final class SessionCoordinator {
         try await client.sendMessageAsync(
             sessionID: submission.sessionID,
             text: submission.text,
+            agentMentions: submission.agentMentions,
             attachments: submission.attachments,
             directory: submission.directory,
             messageID: submission.messageID,

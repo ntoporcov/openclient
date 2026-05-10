@@ -46,8 +46,8 @@ struct OpenCodeLiveActivityActionClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(try basicAuthHeader(), forHTTPHeaderField: "Authorization")
 
-        if let directory, !directory.isEmpty {
-            request.setValue(directory, forHTTPHeaderField: "x-opencode-directory")
+        if let directoryHeader = encodedDirectoryHeader(directory) {
+            request.setValue(directoryHeader, forHTTPHeaderField: "x-opencode-directory")
         }
 
         request.httpBody = try JSONEncoder().encode(body)
@@ -59,11 +59,14 @@ struct OpenCodeLiveActivityActionClient {
     }
 
     private func requestURL(path: String, directory: String?, workspaceID: String?) -> URL? {
-        guard var components = URLComponents(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        guard let base = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             return nil
         }
 
-        components.path = components.path.appending(path)
+        let url = base.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
 
         var queryItems: [URLQueryItem] = []
         if let directory, !directory.isEmpty {
@@ -74,6 +77,14 @@ struct OpenCodeLiveActivityActionClient {
         }
         components.queryItems = queryItems.isEmpty ? nil : queryItems
         return components.url
+    }
+
+    private func encodedDirectoryHeader(_ directory: String?) -> String? {
+        guard let directory,
+              !directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return directory.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? directory
     }
 
     private func basicAuthHeader() throws -> String {

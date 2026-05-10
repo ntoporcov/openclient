@@ -676,6 +676,7 @@ final class CoordinatorTests: XCTestCase {
             submission: SessionCoordinator.PromptSubmission(
                 sessionID: "ses_prompt",
                 text: "Hello from coordinator",
+                agentMentions: [],
                 attachments: [attachment],
                 directory: "/tmp/project",
                 messageID: "msg_prompt",
@@ -819,6 +820,62 @@ final class CoordinatorTests: XCTestCase {
         XCTAssertEqual(preparation.optimisticModel?.providerID, "anthropic")
         XCTAssertEqual(preparation.optimisticModel?.modelID, "sonnet")
         XCTAssertEqual(preparation.optimisticModel?.variant, "plan")
+    }
+
+    func testSessionCoordinatorPreparePromptPropagatesAgentMentions() throws {
+        let coordinator = SessionCoordinator()
+        let session = makeSession(id: "ses_mentions", directory: nil)
+        let mention = OpenCodeAgentMention(name: "explore", content: "@explore", start: 4, end: 12)
+
+        let preparation = try XCTUnwrap(coordinator.preparePromptSubmission(
+            text: "Ask @explore now",
+            agentMentions: [mention],
+            attachments: [],
+            session: session,
+            selectedDirectory: "/tmp/project",
+            currentProjectID: "proj_1",
+            messageID: "msg_mentions",
+            partID: "part_mentions",
+            model: nil,
+            agent: "build",
+            variant: nil
+        ))
+
+        XCTAssertEqual(preparation.submission.agentMentions, [mention])
+        let optimistic = coordinator.optimisticUserMessage(for: preparation)
+        XCTAssertEqual(optimistic.parts.first(where: { $0.type == "agent" })?.name, "explore")
+    }
+
+    func testSessionCoordinatorPreparePromptAdjustsMentionRangesAfterTrimming() throws {
+        let coordinator = SessionCoordinator()
+        let session = makeSession(id: "ses_trim_mentions", directory: nil)
+
+        let preparation = try XCTUnwrap(coordinator.preparePromptSubmission(
+            text: "  Ask @explore now  ",
+            agentMentions: [OpenCodeAgentMention(name: "explore", content: "@explore", start: 6, end: 14)],
+            attachments: [],
+            session: session,
+            selectedDirectory: "/tmp/project",
+            currentProjectID: "proj_1",
+            messageID: "msg_trim_mentions",
+            partID: "part_trim_mentions",
+            model: nil,
+            agent: "build",
+            variant: nil
+        ))
+
+        XCTAssertEqual(preparation.submission.text, "Ask @explore now")
+        XCTAssertEqual(preparation.submission.agentMentions, [OpenCodeAgentMention(name: "explore", content: "@explore", start: 4, end: 12)])
+    }
+
+    func testAgentMentionReconcileUsesUTF16Offsets() {
+        let text = "Ask 🧠 @explore now"
+        let mention = OpenCodeAgentMention.reconciled(
+            [OpenCodeAgentMention(name: "explore", content: "@explore", start: 0, end: 0)],
+            in: text
+        ).first
+
+        XCTAssertEqual(mention, OpenCodeAgentMention(name: "explore", content: "@explore", start: 7, end: 15))
     }
 
     func testSessionCoordinatorPreparePromptUsesSessionDirectoryForWorkspaceSession() throws {

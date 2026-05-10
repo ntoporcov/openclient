@@ -514,7 +514,8 @@ extension AppViewModel {
         }
 
         guard let selectedSessionID = selectedSession?.id else { return }
-        let text = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawText = draftMessage
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = draftAttachments
         guard !text.isEmpty || !attachments.isEmpty else { return }
 
@@ -540,7 +541,7 @@ extension AppViewModel {
             return
         }
 
-        await sendMessage(text, attachments: attachments, sessionID: selectedSessionID, userVisible: true, meterPrompt: meterPrompt)
+        await sendMessage(rawText, agentMentions: draftAgentMentions, attachments: attachments, sessionID: selectedSessionID, userVisible: true, meterPrompt: meterPrompt)
     }
 
     func sendCommand(_ command: OpenCodeCommand, sessionID: String, userVisible: Bool, meterPrompt: Bool = true, restoreDraftOnFailure: Bool = true) async {
@@ -591,6 +592,7 @@ extension AppViewModel {
         if userVisible {
             objectWillChange.send()
             composerStore.draftMessage = ""
+            composerStore.draftAgentMentions = []
             clearDraftAttachments()
             clearPersistedMessageDraft(forSessionID: selectedSession.id)
             composerStore.resetToken = UUID()
@@ -628,6 +630,7 @@ extension AppViewModel {
                 )
                 objectWillChange.send()
                 composerStore.draftMessage = rollback.draftText
+                composerStore.draftAgentMentions = []
                 addDraftAttachments(rollback.attachments)
                 persistCurrentMessageDraft(forSessionID: rollback.sessionID)
                 composerStore.resetToken = UUID()
@@ -679,7 +682,7 @@ extension AppViewModel {
         }
     }
 
-    func sendMessage(_ text: String, attachments: [OpenCodeComposerAttachment] = [], sessionID: String, userVisible: Bool, meterPrompt: Bool = true) async {
+    func sendMessage(_ text: String, agentMentions: [OpenCodeAgentMention] = [], attachments: [OpenCodeComposerAttachment] = [], sessionID: String, userVisible: Bool, meterPrompt: Bool = true) async {
         if isUsingAppleIntelligence {
             guard let session = session(matching: sessionID) else { return }
             await sendAppleIntelligenceMessage(text, attachments: attachments, in: session, userVisible: userVisible)
@@ -687,12 +690,13 @@ extension AppViewModel {
         }
 
         guard let session = session(matching: sessionID) else { return }
-        await sendMessage(text, attachments: attachments, in: session, userVisible: userVisible, meterPrompt: meterPrompt)
+        await sendMessage(text, agentMentions: agentMentions, attachments: attachments, in: session, userVisible: userVisible, meterPrompt: meterPrompt)
     }
 
     @discardableResult
     func insertOptimisticUserMessage(
         _ text: String,
+        agentMentions: [OpenCodeAgentMention] = [],
         attachments: [OpenCodeComposerAttachment] = [],
         in selectedSession: OpenCodeSession,
         messageID: String? = nil,
@@ -709,6 +713,7 @@ extension AppViewModel {
         let localUserMessage = OpenCodeMessageEnvelope.local(
             role: "user",
             text: text,
+            agentMentions: agentMentions,
             attachments: attachments,
             messageID: resolvedMessageID,
             sessionID: selectedSession.id,
@@ -730,6 +735,7 @@ extension AppViewModel {
 
     func sendMessage(
         _ text: String,
+        agentMentions: [OpenCodeAgentMention] = [],
         attachments: [OpenCodeComposerAttachment] = [],
         in selectedSession: OpenCodeSession,
         userVisible: Bool,
@@ -756,6 +762,7 @@ extension AppViewModel {
         let variant = selectedVariant(for: selectedSession)
         guard let promptPreparation = sessionCoordinator.preparePromptSubmission(
             text: text,
+            agentMentions: agentMentions,
             attachments: attachments,
             session: selectedSession,
             selectedDirectory: effectiveSelectedDirectory,
@@ -782,6 +789,7 @@ extension AppViewModel {
         if userVisible, appendOptimisticMessage {
             objectWillChange.send()
             composerStore.draftMessage = ""
+            composerStore.draftAgentMentions = []
             clearDraftAttachments()
             clearPersistedMessageDraft(forSessionID: selectedSession.id)
             composerStore.resetToken = UUID()
@@ -840,6 +848,7 @@ extension AppViewModel {
                 markChatBreadcrumb("send rollback", sessionID: rollback.sessionID, messageID: rollback.messageID, partID: rollback.partID)
                 objectWillChange.send()
                 composerStore.draftMessage = rollback.draftText
+                composerStore.draftAgentMentions = rollback.agentMentions
                 addDraftAttachments(rollback.attachments)
                 persistCurrentMessageDraft(forSessionID: rollback.sessionID)
                 composerStore.resetToken = UUID()
@@ -947,6 +956,7 @@ extension AppViewModel {
         if userVisible {
             objectWillChange.send()
             composerStore.draftMessage = ""
+            composerStore.draftAgentMentions = []
             clearDraftAttachments()
             clearPersistedMessageDraft(forSessionID: selectedSession.id)
             composerStore.resetToken = UUID()
@@ -985,6 +995,7 @@ extension AppViewModel {
                 )
                 objectWillChange.send()
                 composerStore.draftMessage = rollback.draftText
+                composerStore.draftAgentMentions = []
                 persistCurrentMessageDraft(forSessionID: rollback.sessionID)
                 composerStore.resetToken = UUID()
             }
@@ -1612,6 +1623,7 @@ extension AppViewModel {
         if userVisible {
             objectWillChange.send()
             composerStore.draftMessage = ""
+            composerStore.draftAgentMentions = []
             clearDraftAttachments()
             clearPersistedMessageDraft(forSessionID: session.id)
             composerStore.resetToken = UUID()

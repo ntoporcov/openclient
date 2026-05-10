@@ -191,6 +191,7 @@ struct OpenCodeMessageEnvelope: Codable, Identifiable, Hashable, Sendable {
     static func local(
         role: String,
         text: String,
+        agentMentions: [OpenCodeAgentMention] = [],
         attachments: [OpenCodeComposerAttachment] = [],
         messageID: String = OpenCodeIdentifier.message(),
         sessionID: String? = nil,
@@ -218,6 +219,25 @@ struct OpenCodeMessageEnvelope: Codable, Identifiable, Hashable, Sendable {
                 )
             )
         }
+
+        parts.append(contentsOf: agentMentions.map { mention in
+            OpenCodePart(
+                id: OpenCodeIdentifier.part(),
+                messageID: messageID,
+                sessionID: sessionID,
+                type: "agent",
+                mime: nil,
+                filename: nil,
+                name: mention.name,
+                url: nil,
+                source: OpenCodePartSource(value: mention.content, start: mention.start, end: mention.end, type: nil, text: nil, path: nil),
+                reason: nil,
+                tool: nil,
+                callID: nil,
+                state: nil,
+                text: nil
+            )
+        })
 
         parts.append(contentsOf: attachments.map { attachment in
             OpenCodePart(
@@ -612,9 +632,26 @@ struct OpenCodeComposerAttachment: Identifiable, Hashable, Sendable {
 
 struct OpenCodeMessageDraft: Codable, Equatable, Sendable {
     var text: String
+    var agentMentions: [OpenCodeAgentMention]
+
+    init(text: String, agentMentions: [OpenCodeAgentMention] = []) {
+        self.text = text
+        self.agentMentions = agentMentions
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case agentMentions
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        agentMentions = try container.decodeIfPresent([OpenCodeAgentMention].self, forKey: .agentMentions) ?? []
+    }
 
     var isEmpty: Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && agentMentions.isEmpty
     }
 }
 
@@ -1082,7 +1119,9 @@ struct OpenCodePart: Codable, Hashable, Sendable {
     let type: String
     let mime: String?
     let filename: String?
+    let name: String?
     let url: String?
+    let source: OpenCodePartSource?
     let reason: String?
     let tool: String?
     let callID: String?
@@ -1099,7 +1138,9 @@ struct OpenCodePart: Codable, Hashable, Sendable {
         case type
         case mime
         case filename
+        case name
         case url
+        case source
         case reason
         case tool
         case callID
@@ -1117,7 +1158,9 @@ struct OpenCodePart: Codable, Hashable, Sendable {
         type: String,
         mime: String?,
         filename: String?,
+        name: String? = nil,
         url: String?,
+        source: OpenCodePartSource? = nil,
         reason: String?,
         tool: String?,
         callID: String?,
@@ -1133,7 +1176,9 @@ struct OpenCodePart: Codable, Hashable, Sendable {
         self.type = type
         self.mime = mime
         self.filename = filename
+        self.name = name
         self.url = url
+        self.source = source
         self.reason = reason
         self.tool = tool
         self.callID = callID
@@ -1146,6 +1191,80 @@ struct OpenCodePart: Codable, Hashable, Sendable {
 
     var isCompaction: Bool {
         type == "compaction"
+    }
+}
+
+struct OpenCodePartSource: Codable, Hashable, Sendable {
+    let value: String?
+    let start: Int?
+    let end: Int?
+    let type: String?
+    let text: OpenCodePartSourceText?
+    let path: String?
+}
+
+struct OpenCodePartSourceText: Codable, Hashable, Sendable {
+    let value: String
+    let start: Int
+    let end: Int
+}
+
+struct OpenCodeAgentMention: Codable, Hashable, Sendable, Identifiable {
+    let name: String
+    let content: String
+    let start: Int
+    let end: Int
+
+    var id: String { "\(name):\(start):\(end):\(content)" }
+
+    func shifted(by offset: Int) -> OpenCodeAgentMention? {
+        let nextStart = start + offset
+        let nextEnd = end + offset
+        guard nextStart >= 0, nextEnd >= nextStart else { return nil }
+        return OpenCodeAgentMention(name: name, content: content, start: nextStart, end: nextEnd)
+    }
+
+    static func reconciled(_ mentions: [OpenCodeAgentMention], in text: String) -> [OpenCodeAgentMention] {
+        var searchStart = text.startIndex
+        var result: [OpenCodeAgentMention] = []
+        for mention in mentions.sorted(by: { $0.start < $1.start }) {
+            guard let range = text.range(of: mention.content, range: searchStart ..< text.endIndex) else { continue }
+            let start = text.utf16Offset(of: range.lowerBound)
+            let end = text.utf16Offset(of: range.upperBound)
+            result.append(OpenCodeAgentMention(name: mention.name, content: mention.content, start: start, end: end))
+            searchStart = range.upperBound
+        }
+        return result
+    }
+
+    static func trimmingTextAndMentions(
+        text: String,
+        mentions: [OpenCodeAgentMention]
+    ) -> (text: String, mentions: [OpenCodeAgentMention]) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return (trimmed, []) }
+
+        let firstContentIndex = text.firstIndex { !$0.isWhitespace } ?? text.startIndex
+        let leadingOffset = text.utf16Offset(of: firstContentIndex)
+        let shifted = mentions.compactMap { $0.shifted(by: -leadingOffset) }
+        return (trimmed, reconciled(shifted, in: trimmed))
+    }
+}
+
+extension String {
+    func utf16Offset(of index: String.Index) -> Int {
+        utf16.distance(from: utf16.startIndex, to: index.samePosition(in: utf16) ?? utf16.endIndex)
+    }
+
+    func rangeFromUTF16Offsets(start: Int, end: Int) -> Range<String.Index>? {
+        guard start >= 0, end >= start,
+              let utf16Start = utf16.index(utf16.startIndex, offsetBy: start, limitedBy: utf16.endIndex),
+              let utf16End = utf16.index(utf16.startIndex, offsetBy: end, limitedBy: utf16.endIndex),
+              let stringStart = String.Index(utf16Start, within: self),
+              let stringEnd = String.Index(utf16End, within: self) else {
+            return nil
+        }
+        return stringStart ..< stringEnd
     }
 }
 
@@ -1976,11 +2095,19 @@ struct SendMessagePart: Encodable {
     let id: String?
     let type: String
     let text: String?
+    let name: String?
     let mime: String?
     let filename: String?
     let url: String?
+    let source: SendMessagePartSource?
     let synthetic: Bool?
     let metadata: [String: OpenCodeJSONValue]?
+}
+
+struct SendMessagePartSource: Encodable {
+    let value: String
+    let start: Int
+    let end: Int
 }
 
 enum OpenCodeAPIError: LocalizedError {

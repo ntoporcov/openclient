@@ -119,6 +119,13 @@ extension AppViewModel {
         saveMessageDraft(text, forSessionID: sessionID)
     }
 
+    func setDraftAgentMentions(_ mentions: [OpenCodeAgentMention], forSessionID sessionID: String) {
+        guard selectedSession?.id == sessionID else { return }
+        objectWillChange.send()
+        composerStore.draftAgentMentions = mentions
+        saveMessageDraft(draftMessage, agentMentions: mentions, forSessionID: sessionID)
+    }
+
     func hasMessageDraft(for session: OpenCodeSession) -> Bool {
         if selectedSession?.id == session.id,
            !draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -137,11 +144,12 @@ extension AppViewModel {
     func persistCurrentMessageDraft(forSessionID sessionID: String? = nil, removesEmpty: Bool = true) {
         guard let sessionID = sessionID ?? selectedSession?.id else { return }
 
-        saveMessageDraft(draftMessage, forSessionID: sessionID, removesEmpty: removesEmpty, updateActiveDraft: false)
+        saveMessageDraft(draftMessage, agentMentions: draftAgentMentions, forSessionID: sessionID, removesEmpty: removesEmpty, updateActiveDraft: false)
     }
 
     func saveMessageDraft(
         _ text: String,
+        agentMentions: [OpenCodeAgentMention]? = nil,
         forSessionID sessionID: String,
         removesEmpty: Bool = true,
         updateActiveDraft: Bool = true
@@ -153,6 +161,7 @@ extension AppViewModel {
         let key = messageDraftStorageKey(forSessionID: sessionID)
         composerStore.saveDraft(
             text,
+            agentMentions: agentMentions ?? (selectedSession?.id == sessionID ? draftAgentMentions : composerStore.draftsByChatKey[key]?.agentMentions ?? []),
             forKey: key,
             removesEmpty: removesEmpty,
             updateActiveDraft: updateActiveDraft && selectedSession?.id == sessionID
@@ -191,6 +200,10 @@ extension AppViewModel {
 
     var selectableAgents: [OpenCodeAgent] {
         modelConfigurationStore.selectableAgents
+    }
+
+    var mentionableAgents: [OpenCodeAgent] {
+        modelConfigurationStore.mentionableAgents
     }
 
     var sortedProviders: [OpenCodeProvider] {

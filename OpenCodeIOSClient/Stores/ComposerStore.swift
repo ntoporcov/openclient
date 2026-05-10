@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class ComposerStore: ObservableObject {
     @Published var draftMessage: String
+    @Published var draftAgentMentions: [OpenCodeAgentMention]
     @Published var draftAttachments: [OpenCodeComposerAttachment]
     @Published var draftsByChatKey: [String: OpenCodeMessageDraft]
     @Published var resetToken: UUID
@@ -11,12 +12,14 @@ final class ComposerStore: ObservableObject {
 
     init(
         draftMessage: String = "",
+        draftAgentMentions: [OpenCodeAgentMention] = [],
         draftAttachments: [OpenCodeComposerAttachment] = [],
         draftsByChatKey: [String: OpenCodeMessageDraft] = [:],
         resetToken: UUID = UUID(),
         isStreamingFocused: Bool = false
     ) {
         self.draftMessage = draftMessage
+        self.draftAgentMentions = draftAgentMentions
         self.draftAttachments = draftAttachments
         self.draftsByChatKey = draftsByChatKey
         self.resetToken = resetToken
@@ -45,8 +48,9 @@ final class ComposerStore: ObservableObject {
         draftAttachments.removeAll()
     }
 
-    func resetActiveDraft(text: String = "", attachments: [OpenCodeComposerAttachment] = []) {
+    func resetActiveDraft(text: String = "", agentMentions: [OpenCodeAgentMention] = [], attachments: [OpenCodeComposerAttachment] = []) {
         draftMessage = text
+        draftAgentMentions = agentMentions
         draftAttachments = attachments
         resetToken = UUID()
     }
@@ -60,28 +64,31 @@ final class ComposerStore: ObservableObject {
     }
 
     func restoreDraft(forKey key: String) {
-        resetActiveDraft(text: draftsByChatKey[key]?.text ?? "")
+        let draft = draftsByChatKey[key]
+        resetActiveDraft(text: draft?.text ?? "", agentMentions: draft?.agentMentions ?? [])
     }
 
     func restoreDraftIfActiveIsEmpty(forKey key: String) -> Bool {
         guard draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard let draft = draftsByChatKey[key], !draft.isEmpty else { return false }
 
-        resetActiveDraft(text: draft.text)
+        resetActiveDraft(text: draft.text, agentMentions: draft.agentMentions)
         return true
     }
 
     func saveDraft(
         _ text: String,
+        agentMentions: [OpenCodeAgentMention] = [],
         forKey key: String,
         removesEmpty: Bool = true,
         updateActiveDraft: Bool = true
     ) {
         if updateActiveDraft {
             draftMessage = text
+            draftAgentMentions = agentMentions
         }
 
-        let draft = OpenCodeMessageDraft(text: text)
+        let draft = OpenCodeMessageDraft(text: text, agentMentions: agentMentions)
         if draft.isEmpty {
             guard removesEmpty else { return }
             draftsByChatKey.removeValue(forKey: key)
@@ -93,6 +100,7 @@ final class ComposerStore: ObservableObject {
     func clearDraft(forKey key: String, clearActive: Bool) {
         if clearActive {
             draftMessage = ""
+            draftAgentMentions = []
             draftAttachments = []
         }
         draftsByChatKey.removeValue(forKey: key)

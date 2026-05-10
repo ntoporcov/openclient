@@ -387,6 +387,13 @@ final class AppViewModel: ObservableObject {
             composerStore.draftMessage = newValue
         }
     }
+    var draftAgentMentions: [OpenCodeAgentMention] {
+        get { composerStore.draftAgentMentions }
+        set {
+            objectWillChange.send()
+            composerStore.draftAgentMentions = newValue
+        }
+    }
     var draftAttachments: [OpenCodeComposerAttachment] {
         get { composerStore.draftAttachments }
         set {

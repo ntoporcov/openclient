@@ -7,8 +7,8 @@ enum OpenCodeInsecureConnectionKind: Sendable {
 
 struct OpenCodeServerConfig: Equatable, Codable, Sendable {
     var name: String = ""
-    var iconName: String = ""
-    var baseURL: String = "http://127.0.0.1:4096"
+    var iconName: String = "server.rack"
+    var baseURL: String = ""
     var username: String = "opencode"
     var password: String = ""
 
@@ -71,6 +71,34 @@ struct OpenCodeServerConfig: Equatable, Codable, Sendable {
 
     var hasCredentials: Bool {
         !trimmedBaseURL.isEmpty && !trimmedUsername.isEmpty
+    }
+
+    var hasRequiredConnectionFields: Bool {
+        !trimmedName.isEmpty && !trimmedBaseURL.isEmpty && !trimmedIconName.isEmpty
+    }
+
+    var connectionValidationMessage: String? {
+        var missingFields: [String] = []
+        if trimmedName.isEmpty {
+            missingFields.append("name")
+        }
+        if trimmedBaseURL.isEmpty {
+            missingFields.append("server URL")
+        }
+        if trimmedIconName.isEmpty {
+            missingFields.append("icon")
+        }
+
+        guard missingFields.isEmpty == false else { return nil }
+        let fieldList: String
+        if missingFields.count == 1 {
+            fieldList = missingFields[0]
+        } else if missingFields.count == 2 {
+            fieldList = missingFields.joined(separator: " and ")
+        } else {
+            fieldList = "\(missingFields.dropLast().joined(separator: ", ")), and \(missingFields.last ?? "")"
+        }
+        return "Add a \(fieldList) before connecting."
     }
 }
 

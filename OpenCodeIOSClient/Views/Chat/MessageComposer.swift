@@ -10,9 +10,11 @@ import UniformTypeIdentifiers
 
 final class MessageComposerDraftStore: ObservableObject {
     @Published var text: String
+    @Published var agentMentions: [OpenCodeAgentMention]
 
-    init(text: String = "") {
+    init(text: String = "", agentMentions: [OpenCodeAgentMention] = []) {
         self.text = text
+        self.agentMentions = agentMentions
     }
 }
 
@@ -36,6 +38,7 @@ struct MessageComposer: View {
     @ObservedObject var draftStore: MessageComposerDraftStore
     @Binding var isAccessoryMenuOpen: Bool
     let commands: [OpenCodeCommand]
+    let mentionableAgents: [OpenCodeAgent]
     let pinnedCommands: [OpenCodeCommand]
     let pinnedCommandNames: Set<String>
     let attachmentCount: Int
@@ -49,6 +52,7 @@ struct MessageComposer: View {
     let mcpErrorMessage: String?
     let onFocusChange: (Bool) -> Void
     let onTextChange: (String) -> Void
+    let onAgentMentionsChange: ([OpenCodeAgentMention]) -> Void
     let onHeightChange: (CGFloat) -> Void
     let onSend: () -> Void
     let onStop: () -> Void
@@ -116,6 +120,10 @@ struct MessageComposer: View {
         text.isEmpty && attachmentCount == 0 && !isBusy
     }
 
+    private var canInsertAgentMentionShortcut: Bool {
+        !isBusy && !mentionableAgents.isEmpty
+    }
+
     private var showsPinnedCommands: Bool {
         text.isEmpty && attachmentCount == 0 && !isBusy && !pinnedCommands.isEmpty
     }
@@ -140,6 +148,27 @@ struct MessageComposer: View {
                     (command.description?.localizedCaseInsensitiveContains(query) ?? false)
             }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var agentMentionQuery: String? {
+        guard let match = currentAgentMentionMatch() else { return nil }
+        return match.query
+    }
+
+    private var filteredMentionableAgents: [OpenCodeAgent] {
+        guard let query = agentMentionQuery else { return [] }
+        if query.isEmpty { return Array(mentionableAgents.prefix(10)) }
+        return mentionableAgents
+            .filter { agent in
+                agent.name.localizedCaseInsensitiveContains(query) ||
+                    (agent.description?.localizedCaseInsensitiveContains(query) ?? false)
+            }
+            .prefix(10)
+            .map { $0 }
+    }
+
+    private var showsAgentMentionPicker: Bool {
+        agentMentionQuery != nil && !isBusy && !mentionableAgents.isEmpty
     }
 
     private var selectedCommand: OpenCodeCommand? {
@@ -189,6 +218,18 @@ struct MessageComposer: View {
                 )
             }
 
+            if showsAgentMentionPicker {
+                AgentMentionPicker(
+                    agents: filteredMentionableAgents,
+                    onSelect: insertAgentMention
+                )
+                .transition(
+                    .move(edge: .bottom)
+                        .combined(with: .opacity)
+                        .combined(with: .scale(scale: 0.98, anchor: .bottom))
+                )
+            }
+
             if showsPinnedCommands {
                 PinnedCommandStrip(
                     commands: pinnedCommands,
@@ -217,6 +258,7 @@ struct MessageComposer: View {
         }
         .onChange(of: draftStore.text) { _, _ in
             syncSelectedCommand()
+            reconcileAgentMentions()
             if !text.isEmpty {
                 isAccessoryMenuOpen = false
             }
@@ -272,6 +314,8 @@ struct MessageComposer: View {
         }
 #endif
         .animation(opencodeSelectionAnimation, value: filteredCommands.map(\.name).joined(separator: "|"))
+        .animation(opencodeSelectionAnimation, value: filteredMentionableAgents.map(\.name).joined(separator: "|"))
+        .animation(opencodeSelectionAnimation, value: showsAgentMentionPicker)
         .animation(opencodeSelectionAnimation, value: showsPinnedCommands)
         .animation(opencodeSelectionAnimation, value: pinnedCommands.map(\.name).joined(separator: "|"))
         .animation(opencodeSelectionAnimation, value: isAccessoryMenuOpen)
@@ -339,6 +383,7 @@ struct MessageComposer: View {
                 #if canImport(UIKit)
                 ComposerTextView(
                     text: textBinding,
+                    agentMentions: draftStore.agentMentions,
                     placeholder: "Message",
                     maxLines: 6,
                     canSubmit: canSend,
@@ -546,6 +591,15 @@ struct MessageComposer: View {
                 )
 
                 AccessoryMenuAction(
+                    title: "Agent Mention",
+                    subtitle: "Mention a sub agent",
+                    systemImage: "brain.head.profile",
+                    tint: .purple,
+                    isDisabled: !canInsertAgentMentionShortcut,
+                    action: insertAgentMentionShortcut
+                )
+
+                AccessoryMenuAction(
                     title: "Compact",
                     subtitle: "Summarize context",
                     systemImage: "rectangle.compress.vertical",
@@ -647,6 +701,61 @@ struct MessageComposer: View {
         guard canInsertCommandShortcut else { return }
         setText("/")
         isAccessoryMenuOpen = false
+    }
+
+    private func insertAgentMentionShortcut() {
+        guard canInsertAgentMentionShortcut else { return }
+        let nextText: String
+        if text.isEmpty || text.last?.isWhitespace == true {
+            nextText = text + "@"
+        } else {
+            nextText = text + " @"
+        }
+        setText(nextText)
+        isAccessoryMenuOpen = false
+    }
+
+    private func currentAgentMentionMatch() -> (range: Range<String.Index>, query: String)? {
+        let prefix = text
+        guard let atIndex = prefix.lastIndex(of: "@") else { return nil }
+        let beforeAt = atIndex == prefix.startIndex ? nil : prefix[prefix.index(before: atIndex)]
+        if let beforeAt, !beforeAt.isWhitespace { return nil }
+
+        let queryStart = prefix.index(after: atIndex)
+        let query = String(prefix[queryStart...])
+        if query.contains(where: { $0.isWhitespace }) { return nil }
+        return (atIndex ..< prefix.endIndex, query)
+    }
+
+    private func insertAgentMention(_ agent: OpenCodeAgent) {
+        guard let match = currentAgentMentionMatch() else { return }
+        let content = "@\(agent.name)"
+        let start = text.utf16Offset(of: match.range.lowerBound)
+        let end = start + content.utf16.count
+        var next = text
+        next.replaceSubrange(match.range, with: content + " ")
+        setText(next)
+
+        let mention = OpenCodeAgentMention(name: agent.name, content: content, start: start, end: end)
+        var mentions = draftStore.agentMentions.filter { existing in
+            existing.start != mention.start || existing.name != mention.name
+        }
+        mentions.append(mention)
+        mentions.sort { $0.start < $1.start }
+        setAgentMentions(OpenCodeAgentMention.reconciled(mentions, in: next))
+        OpenCodeHaptics.impact(.soft)
+    }
+
+    private func reconcileAgentMentions() {
+        let reconciled = OpenCodeAgentMention.reconciled(draftStore.agentMentions, in: text)
+        guard reconciled != draftStore.agentMentions else { return }
+        setAgentMentions(reconciled)
+    }
+
+    private func setAgentMentions(_ mentions: [OpenCodeAgentMention]) {
+        guard draftStore.agentMentions != mentions else { return }
+        draftStore.agentMentions = mentions
+        onAgentMentionsChange(mentions)
     }
 
     private func setText(_ newValue: String) {
@@ -1035,6 +1144,7 @@ private enum ComposerTextViewMetrics {
 
 private struct ComposerTextView: UIViewRepresentable {
     @Binding var text: String
+    let agentMentions: [OpenCodeAgentMention]
     let placeholder: String
     let maxLines: Int
     let canSubmit: Bool
@@ -1065,7 +1175,7 @@ private struct ComposerTextView: UIViewRepresentable {
         textView.placeholder = placeholder
         textView.canSubmit = canSubmit
         textView.onSubmit = onSubmit
-        textView.text = text
+        textView.applyText(text, agentMentions: agentMentions)
         textView.updatePlaceholderVisibility()
         textView.isEditable = true
         textView.isSelectable = true
@@ -1077,9 +1187,11 @@ private struct ComposerTextView: UIViewRepresentable {
         var needsLayoutUpdate = false
 
         if textView.text != text {
-            textView.text = text
+            textView.applyText(text, agentMentions: agentMentions)
             textView.updatePlaceholderVisibility()
             needsLayoutUpdate = true
+        } else {
+            textView.applyMentionHighlighting(agentMentions: agentMentions)
         }
 
         if textView.placeholder != placeholder {
@@ -1136,6 +1248,7 @@ private struct ComposerTextView: UIViewRepresentable {
             }
 
             guard let textView = textView as? ComposerPlaceholderTextView else { return }
+            textView.applyMentionHighlighting(agentMentions: parent.agentMentions)
             textView.updatePlaceholderVisibility()
             textView.updateScrolling(maxLines: parent.maxLines)
             textView.invalidateIntrinsicContentSize()
@@ -1201,6 +1314,47 @@ private final class ComposerPlaceholderTextView: UITextView {
         isScrollEnabled = measuredHeight > maxHeight + 0.5
     }
 
+    func applyText(_ text: String, agentMentions: [OpenCodeAgentMention]) {
+        self.text = text
+        applyMentionHighlighting(agentMentions: agentMentions)
+    }
+
+    func applyMentionHighlighting(agentMentions: [OpenCodeAgentMention]) {
+        guard markedTextRange == nil else { return }
+        let previousSelectedRange = selectedRange
+        let currentText = text ?? ""
+        let font = font ?? UIFont.preferredFont(forTextStyle: .body)
+        let attributed = NSMutableAttributedString(
+            string: currentText,
+            attributes: [
+                .font: font,
+                .foregroundColor: UIColor.label,
+            ]
+        )
+
+        for mention in OpenCodeAgentMention.reconciled(agentMentions, in: currentText) {
+            guard let range = currentText.rangeFromUTF16Offsets(start: mention.start, end: mention.end) else { continue }
+            let nsRange = NSRange(range, in: currentText)
+            attributed.addAttributes(
+                [
+                    .foregroundColor: UIColor.systemIndigo,
+                    .backgroundColor: UIColor.systemIndigo.withAlphaComponent(0.14),
+                    .font: UIFont.preferredFont(forTextStyle: .body).bold(),
+                ],
+                range: nsRange
+            )
+        }
+
+        if attributedText.string != currentText || !attributedText.isEqual(to: attributed) {
+            attributedText = attributed
+        }
+        self.selectedRange = previousSelectedRange
+        typingAttributes = [
+            .font: font,
+            .foregroundColor: UIColor.label,
+        ]
+    }
+
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         bounds.insetBy(dx: -8, dy: -8).contains(point)
     }
@@ -1229,6 +1383,13 @@ private final class ComposerPlaceholderTextView: UITextView {
         placeholderLabel.numberOfLines = 1
         placeholderLabel.isUserInteractionEnabled = false
         addSubview(placeholderLabel)
+    }
+}
+
+private extension UIFont {
+    func bold() -> UIFont {
+        guard let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) else { return self }
+        return UIFont(descriptor: descriptor, size: pointSize)
     }
 }
 
@@ -1313,6 +1474,69 @@ private struct CommandPicker: View {
                                 }
                             }
                             .accessibilityIdentifier("chat.command.\(command.name)")
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(maxHeight: 220)
+            }
+        }
+        .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+private struct AgentMentionPicker: View {
+    let agents: [OpenCodeAgent]
+    let onSelect: (OpenCodeAgent) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label("Sub agents", systemImage: "brain.head.profile")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, agents.isEmpty ? 0 : 4)
+
+            if agents.isEmpty {
+                Text("No matching agents")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(agents) { agent in
+                            Button {
+                                onSelect(agent)
+                            } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Text("@\(agent.name)")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+
+                                    if let description = agent.description, !description.isEmpty {
+                                        Text(description)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .lineLimit(1)
+                                    } else {
+                                        Spacer(minLength: 0)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(Color.primary.opacity(0.05))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("chat.agentMention.\(agent.name)")
                         }
                     }
                     .padding(8)

@@ -37,6 +37,90 @@ final class OpenCodeAPIClientTests: XCTestCase {
         await fulfillment(of: [expectation], timeout: 1)
     }
 
+    func testSendMessageAsyncEncodesAgentMentionParts() async throws {
+        let expectation = expectation(description: "request captured")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = OpenCodeAPIClient(
+            config: OpenCodeServerConfig(baseURL: "http://127.0.0.1:4096", username: "opencode", password: "pw"),
+            session: session
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let body = try XCTUnwrap(Self.requestBodyData(request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let parts = try XCTUnwrap(json["parts"] as? [[String: Any]])
+            XCTAssertEqual(parts.count, 2)
+            XCTAssertEqual(parts[0]["type"] as? String, "text")
+            XCTAssertEqual(parts[0]["text"] as? String, "ask @explore about this")
+            XCTAssertEqual(parts[1]["type"] as? String, "agent")
+            XCTAssertEqual(parts[1]["name"] as? String, "explore")
+            let source = try XCTUnwrap(parts[1]["source"] as? [String: Any])
+            XCTAssertEqual(source["value"] as? String, "@explore")
+            XCTAssertEqual(source["start"] as? Int, 4)
+            XCTAssertEqual(source["end"] as? Int, 12)
+            expectation.fulfill()
+
+            return (
+                HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 204, httpVersion: nil, headerFields: nil)!,
+                Data()
+            )
+        }
+
+        try await client.sendMessageAsync(
+            sessionID: "ses_test",
+            text: "ask @explore about this",
+            agentMentions: [OpenCodeAgentMention(name: "explore", content: "@explore", start: 4, end: 12)]
+        )
+        await fulfillment(of: [expectation], timeout: 1)
+    }
+
+    func testDecodesAgentPartSource() throws {
+        let data = """
+        {
+          "info": { "id": "msg_1", "role": "user", "sessionID": "ses_1" },
+          "parts": [
+            {
+              "id": "prt_agent",
+              "sessionID": "ses_1",
+              "messageID": "msg_1",
+              "type": "agent",
+              "name": "explore",
+              "source": { "value": "@explore", "start": 4, "end": 12 }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let message = try JSONDecoder().decode(OpenCodeMessageEnvelope.self, from: data)
+        let part = try XCTUnwrap(message.parts.first)
+        XCTAssertEqual(part.type, "agent")
+        XCTAssertEqual(part.name, "explore")
+        XCTAssertEqual(part.source?.value, "@explore")
+        XCTAssertEqual(part.source?.start, 4)
+        XCTAssertEqual(part.source?.end, 12)
+    }
+
+    private static func requestBodyData(_ request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 1_024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count <= 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data.isEmpty ? nil : data
+    }
+
     func testAbortSessionUsesAbortEndpoint() async throws {
         let expectation = expectation(description: "request captured")
         let configuration = URLSessionConfiguration.ephemeral

@@ -149,14 +149,26 @@ extension AppViewModel {
     }
 
     var canSaveEditedServer: Bool {
-        !isLoading && config.hasCredentials
+        !isLoading && config.hasCredentials && config.hasRequiredConnectionFields
     }
 
     func saveEditedServer() {
         guard case let .edit(originalServerID) = savedServerEditorMode else { return }
+        if let validationMessage = config.connectionValidationMessage {
+            connectionStore.applyErrorMessage(validationMessage)
+            return
+        }
         connectionStore.clearError()
         upsertSavedServer(config: config, replacingServerID: originalServerID)
         dismissAddServerSheet()
+    }
+
+    func startConnectionFromEditor() {
+        if let validationMessage = config.connectionValidationMessage {
+            connectionStore.applyErrorMessage(validationMessage)
+            return
+        }
+        startConnection()
     }
 
     func disconnect() {
