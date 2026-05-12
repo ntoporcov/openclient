@@ -18,17 +18,43 @@ struct FindPlaceGameCity: Codable, Hashable, Identifiable, Sendable {
 struct FindPlaceGameSession: Codable, Hashable, Sendable {
     let sessionID: String
     let city: FindPlaceGameCity
+    var weather: FindPlaceWeatherSummary?
     var didReveal: Bool = false
 }
 
-struct FindPlaceWeatherSummary: Sendable {
+struct FindPlaceWeatherSummary: Codable, Hashable, Sendable {
     let text: String
+    let provider: String
+    let requestedAt: Date
+    let errorDomain: String?
+    let errorCode: Int?
     let errorDescription: String?
+
+    init(
+        text: String,
+        provider: String = "Fallback",
+        requestedAt: Date = Date(),
+        errorDomain: String? = nil,
+        errorCode: Int? = nil,
+        errorDescription: String?
+    ) {
+        self.text = text
+        self.provider = provider
+        self.requestedAt = requestedAt
+        self.errorDomain = errorDomain
+        self.errorCode = errorCode
+        self.errorDescription = errorDescription
+    }
+
+    var didUseWeatherKit: Bool {
+        provider == "WeatherKit" && errorDescription == nil
+    }
 }
 
 enum FindPlaceGame {
     static let setupMarker = "[[OPENCLIENT_FIND_PLACE_SETUP]]"
     static let winMarker = "[[OPENCLIENT_FIND_PLACE_CORRECT]]"
+    static let weatherAttribution = "Weather data provided by  Weather. Legal source: https://weatherkit.apple.com/legal-attribution.html"
 
     static func randomCity() -> FindPlaceGameCity {
         cities.randomElement() ?? cities[0]
@@ -46,11 +72,13 @@ enum FindPlaceGame {
         Secret city: \(city.name), \(city.country)
         Coordinates: \(city.latitude), \(city.longitude)
         Current clue: \(weather.text)
+        Weather attribution: \(weatherAttribution)
 
         Rules you must follow exactly:
         - Do not reveal the secret city or country until the user guesses it.
         - Start by briefly explaining that you are thinking of a city and that the user should guess it from weather/location clues.
         - You may give the weather clue and broad non-identifying hints.
+        - If you share weather data with the user, include this attribution once: \(weatherAttribution)
         - Until the user guesses correctly, answer direct guesses with only "Yes" or "No" plus at most one short clue sentence.
         - Accept minor typos, missing accents, and close spellings as correct.
         - When the user guesses correctly, reply with exactly this marker and no other text: \(winMarker)
@@ -103,6 +131,7 @@ enum FindPlaceGame {
 
 enum FindPlaceWeatherProvider {
     static func summary(for city: FindPlaceGameCity) async -> FindPlaceWeatherSummary {
+        let requestedAt = Date()
 #if canImport(WeatherKit)
         if #available(iOS 16.0, *) {
             do {
@@ -120,16 +149,35 @@ enum FindPlaceWeatherProvider {
                     humidity,
                     windKPH
                 )
-                return FindPlaceWeatherSummary(text: text, errorDescription: nil)
+                return FindPlaceWeatherSummary(text: text, provider: "WeatherKit", requestedAt: requestedAt, errorDescription: nil)
             } catch {
-                return fallbackSummary(for: city, error: error)
+                return fallbackSummary(for: city, requestedAt: requestedAt, error: error)
             }
         }
+        return fallbackSummary(for: city, requestedAt: requestedAt, reason: "WeatherKit requires iOS 16.0 or newer.")
+#else
+        return fallbackSummary(for: city, requestedAt: requestedAt, reason: "WeatherKit is not available in this build target.")
 #endif
-        return fallbackSummary(for: city, error: nil)
     }
 
-    private static func fallbackSummary(for city: FindPlaceGameCity, error: Error?) -> FindPlaceWeatherSummary {
+    private static func fallbackSummary(for city: FindPlaceGameCity, requestedAt: Date, error: Error) -> FindPlaceWeatherSummary {
+        let nsError = error as NSError
+        return fallbackSummary(
+            for: city,
+            requestedAt: requestedAt,
+            reason: "WeatherKit request failed: \(error)",
+            errorDomain: nsError.domain,
+            errorCode: nsError.code
+        )
+    }
+
+    private static func fallbackSummary(
+        for city: FindPlaceGameCity,
+        requestedAt: Date,
+        reason: String,
+        errorDomain: String? = nil,
+        errorCode: Int? = nil
+    ) -> FindPlaceWeatherSummary {
         let hemisphere = city.latitude >= 0 ? "Northern Hemisphere" : "Southern Hemisphere"
         let zone: String
         switch abs(city.latitude) {
@@ -140,7 +188,13 @@ enum FindPlaceWeatherProvider {
         default:
             zone = "cooler high-latitude region"
         }
-        let description = error.map { String(describing: $0) }
-        return FindPlaceWeatherSummary(text: "Location clue: \(zone) in the \(hemisphere).", errorDescription: description)
+        return FindPlaceWeatherSummary(
+            text: "Location clue: \(zone) in the \(hemisphere).",
+            provider: "Fallback",
+            requestedAt: requestedAt,
+            errorDomain: errorDomain,
+            errorCode: errorCode,
+            errorDescription: reason
+        )
     }
 }

@@ -146,7 +146,8 @@ extension AppViewModel {
         viewModel.findPlaceSessionsByID = [
             OpenClientScreenshotData.findPlaceSession.id: FindPlaceGameSession(
                 sessionID: OpenClientScreenshotData.findPlaceSession.id,
-                city: OpenClientScreenshotData.findPlaceCity
+                city: OpenClientScreenshotData.findPlaceCity,
+                weather: FindPlaceWeatherSummary(text: "2°C / 36°F, cloudy, humidity 82%, wind 31 km/h", provider: "WeatherKit", errorDescription: nil)
             )
         ]
         viewModel.sessionPreviews = OpenClientScreenshotData.gameSessionPreviews

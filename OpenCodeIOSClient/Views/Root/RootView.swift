@@ -55,7 +55,7 @@ struct RootView: View {
 
                 withAnimation(opencodeSelectionAnimation) {
                     columnVisibility = .doubleColumn
-                    preferredCompactColumn = .content
+                    preferredCompactColumn = viewModel.selectedSession == nil ? .content : .detail
                 }
             }
         } content: {

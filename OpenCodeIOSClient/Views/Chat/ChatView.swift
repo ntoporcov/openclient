@@ -864,6 +864,31 @@ private struct FindPlaceRevealRow: View {
     }
 }
 
+private struct WeatherAttributionRow: View {
+    private let legalAttributionURL = URL(string: "https://weatherkit.apple.com/legal-attribution.html")!
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(" Weather")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text("weather data")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+
+            Link("weatherkit.apple.com/legal-attribution.html", destination: legalAttributionURL)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
 private struct FindBugSolvedRow: View {
     var body: some View {
         VStack(spacing: 12) {
@@ -1062,6 +1087,7 @@ private struct MessageBubbleSnapshot: Equatable {
     let currentSessionID: String?
     let isStreamingMessage: Bool
     let animatesStreamingText: Bool
+    let hidesReasoningBlocks: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
 }
@@ -1161,6 +1187,7 @@ private struct EquatableMessageBubbleHost: View, Equatable {
             currentSessionID: snapshot.currentSessionID,
             isStreamingMessage: snapshot.isStreamingMessage,
             animatesStreamingText: snapshot.animatesStreamingText,
+            hidesReasoningBlocks: snapshot.hidesReasoningBlocks,
             reserveEntryFromComposer: snapshot.reserveEntryFromComposer,
             animateEntryFromComposer: snapshot.animateEntryFromComposer,
             resolveTaskSessionID: resolveTaskSessionID,
@@ -1348,6 +1375,10 @@ struct ChatView: View {
         viewModel.chatSessionHeaderSnapshot(for: liveSession)
     }
 
+    private var isFindPlaceSession: Bool {
+        viewModel.findPlaceGame(for: sessionID) != nil
+    }
+
     private var chatItemChangeAnimation: Animation? {
         if !hasCompletedInitialHydrationSnap { return nil }
         if isSendChoreographyActive { return nil }
@@ -1368,6 +1399,11 @@ struct ChatView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
+                        if isFindPlaceSession {
+                            WeatherAttributionRow()
+                                .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+                        }
+
                         if displaySnapshot.hiddenMessageCount > 0 {
                             Button {
                                 visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
@@ -2246,6 +2282,7 @@ struct ChatView: View {
             currentSessionID: sessionID,
             isStreamingMessage: isStreamingMessage(message),
             animatesStreamingText: shouldAnimateStreamingText,
+            hidesReasoningBlocks: viewModel.isFunAndGamesSession(sessionID),
             reserveEntryFromComposer: message.id == preparingOutgoingMessageID,
             animateEntryFromComposer: message.id == animatingOutgoingMessageID && !outgoingEntryAnimationStartedMessageIDs.contains(message.id)
         )
@@ -2671,6 +2708,98 @@ private struct CompactionSummarySheet: View {
                 }
             }
         }
+    }
+}
+
+private struct FindPlaceWeatherDebugSheet: View {
+    let game: FindPlaceGameSession?
+
+    @State private var copiedDebugText = false
+
+    var body: some View {
+        Form {
+            if let game {
+                Section("City") {
+                    labeledValue("Name", "\(game.city.name), \(game.city.country)")
+                    labeledValue("Latitude", String(format: "%.4f", game.city.latitude))
+                    labeledValue("Longitude", String(format: "%.4f", game.city.longitude))
+                }
+
+                if let weather = game.weather {
+                    Section("WeatherKit Pull") {
+                        labeledValue("Status", weather.didUseWeatherKit ? "Success" : "Fallback")
+                        labeledValue("Provider", weather.provider)
+                        labeledValue("Requested", weather.requestedAt.formatted(date: .abbreviated, time: .standard))
+                        if let errorDomain = weather.errorDomain {
+                            labeledValue("Error Domain", errorDomain)
+                        }
+                        if let errorCode = weather.errorCode {
+                            labeledValue("Error Code", String(errorCode))
+                        }
+                    }
+
+                    Section("Returned Clue") {
+                        Text(weather.text)
+                            .textSelection(.enabled)
+                    }
+
+                    Section("Diagnostic") {
+                        Text(weather.errorDescription ?? "WeatherKit request succeeded.")
+                            .font(.system(.footnote, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                } else {
+                    Section("WeatherKit Pull") {
+                        Text("No weather diagnostic is attached to this session. This can happen for older Find the Place sessions created before diagnostics were recorded.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Section("Find the Place") {
+                    Text("This chat is not currently recognized as a Find the Place session.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Weather Debug")
+        .opencodeInlineNavigationTitle()
+        .toolbar {
+            ToolbarItem(placement: .opencodeTrailing) {
+                Button(copiedDebugText ? "Copied" : "Copy") {
+                    OpenCodeClipboard.copy(debugText)
+                    copiedDebugText = true
+                }
+                .disabled(debugText.isEmpty)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func labeledValue(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var debugText: String {
+        guard let game else { return "" }
+        let weather = game.weather
+        return [
+            "City: \(game.city.name), \(game.city.country)",
+            "Coordinates: \(game.city.latitude), \(game.city.longitude)",
+            "Status: \(weather?.didUseWeatherKit == true ? "Success" : "Fallback/Unavailable")",
+            "Provider: \(weather?.provider ?? "unknown")",
+            "Requested: \(weather?.requestedAt.formatted(date: .abbreviated, time: .standard) ?? "unknown")",
+            "Error Domain: \(weather?.errorDomain ?? "none")",
+            "Error Code: \(weather?.errorCode.map(String.init) ?? "none")",
+            "Clue: \(weather?.text ?? "unknown")",
+            "Diagnostic: \(weather?.errorDescription ?? "WeatherKit request succeeded.")"
+        ].joined(separator: "\n")
     }
 }
 

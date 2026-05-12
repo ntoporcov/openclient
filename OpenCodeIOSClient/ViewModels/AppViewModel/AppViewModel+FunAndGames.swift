@@ -59,7 +59,7 @@ extension AppViewModel {
             upsertVisibleSession(session)
 
             selectedModelsBySessionID[session.id] = reference
-            findPlaceSessionsByID[session.id] = FindPlaceGameSession(sessionID: session.id, city: city)
+            findPlaceSessionsByID[session.id] = FindPlaceGameSession(sessionID: session.id, city: city, weather: weather)
             withAnimation(opencodeSelectionAnimation) {
                 selectedProjectContentTab = .sessions
                 selectedSession = session
@@ -168,7 +168,7 @@ extension AppViewModel {
             for part in message.parts {
                 guard let text = part.text, text.contains(FindPlaceGame.setupMarker) else { continue }
                 guard let city = findPlaceCity(fromSetupPrompt: text) else { continue }
-                return FindPlaceGameSession(sessionID: sessionID, city: city)
+                return FindPlaceGameSession(sessionID: sessionID, city: city, weather: findPlaceWeather(fromSetupPrompt: text))
             }
         }
 
@@ -222,5 +222,25 @@ extension AppViewModel {
         }
 
         return FindPlaceGameCity(name: cityParts[0], country: cityParts[1], latitude: latitude, longitude: longitude)
+    }
+
+    private func findPlaceWeather(fromSetupPrompt text: String) -> FindPlaceWeatherSummary? {
+        let lines = text.components(separatedBy: .newlines)
+        guard let clueLine = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("Current clue:") }) else {
+            return nil
+        }
+
+        let clue = clueLine
+            .replacingOccurrences(of: "Current clue:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let diagnosticLine = lines.first { $0.contains("WeatherKit diagnostic:") }
+        let diagnostic = diagnosticLine?
+            .replacingOccurrences(of: "<!--", with: "")
+            .replacingOccurrences(of: "-->", with: "")
+            .replacingOccurrences(of: "WeatherKit diagnostic:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let errorDescription = diagnostic == "success" ? nil : diagnostic
+        let provider = errorDescription == nil && !clue.hasPrefix("Location clue:") ? "WeatherKit" : "Fallback"
+        return FindPlaceWeatherSummary(text: clue, provider: provider, errorDescription: errorDescription)
     }
 }

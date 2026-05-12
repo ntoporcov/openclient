@@ -523,11 +523,16 @@ extension HelpArticle {
             id: "license-notices",
             category: "Open Source",
             title: "Licenses And Notices",
-            headline: "OpenClient includes open source software whose licenses require attribution in distributed builds.",
-            heroLabel: "Third-party notices for bundled code.",
+            headline: "OpenClient includes software and services whose licenses or terms require attribution in distributed builds.",
+            heroLabel: "Third-party notices and attributions.",
             symbolName: "doc.text.fill",
             gradient: [Color(red: 0.16, green: 0.25, blue: 0.34), Color(red: 0.31, green: 0.48, blue: 0.64)],
             content: .sections([
+                Section(
+                    id: "weatherkit",
+                    title: "WeatherKit",
+                    body: "Find the Place uses WeatherKit for live weather clues when available. Weather data is provided by  Weather. Legal source: https://weatherkit.apple.com/legal-attribution.html"
+                ),
                 Section(
                     id: "highlighterswift",
                     title: "HighlighterSwift",

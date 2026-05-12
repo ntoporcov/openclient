@@ -149,10 +149,7 @@ final class SessionListStore: ObservableObject {
 
     func sessions(_ sessions: [OpenCodeSession], scopedTo directory: String?) -> [OpenCodeSession] {
         guard let directory, !directory.isEmpty else {
-            return sessions.filter { session in
-                guard let sessionDirectory = session.directory else { return true }
-                return sessionDirectory.isEmpty
-            }
+            return sessions
         }
 
         return sessions.filter { $0.directory == directory }

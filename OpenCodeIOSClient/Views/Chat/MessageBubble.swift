@@ -12,6 +12,7 @@ struct MessageBubble: View {
     let currentSessionID: String?
     let isStreamingMessage: Bool
     let animatesStreamingText: Bool
+    let hidesReasoningBlocks: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
     let resolveTaskSessionID: (OpenCodePart, String) -> String?
@@ -263,7 +264,9 @@ struct MessageBubble: View {
 
     @ViewBuilder
     private func partView(_ part: OpenCodePart, index: Int) -> some View {
-        if let attachment = attachment(for: part) {
+        if hidesReasoningBlocks, textStyle(for: part) == .reasoning {
+            EmptyView()
+        } else if let attachment = attachment(for: part) {
             AttachmentBubblePart(attachment: attachment, isUser: isUser)
         } else if let text = renderableText(for: part) {
             if textStyle(for: part) == .reasoning {
