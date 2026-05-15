@@ -1339,6 +1339,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
 }
 
 struct ChatView: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     @ObservedObject var viewModel: AppViewModel
     let sessionID: String
 
@@ -1363,6 +1365,8 @@ struct ChatView: View {
     @State private var pendingOutgoingSendTask: Task<Void, Never>?
     @State private var outgoingEntryResetTask: Task<Void, Never>?
     @State private var initialBottomScrollTask: Task<Void, Never>?
+    @State private var eagerRefreshTask: Task<Void, Never>?
+    @State private var lastEagerRefreshAt: Date?
     @State private var isThinkingRowRevealAllowed = true
     @State private var preparingOutgoingMessageID: String?
     @State private var animatingOutgoingMessageID: String?
@@ -1389,6 +1393,7 @@ struct ChatView: View {
     private let bottomRefreshIndicatorHeight: CGFloat = 34
     private let outgoingRequestDelayMS = 720
     private let thinkingRevealHoldMS = 140
+    private let eagerRefreshMinimumInterval: TimeInterval = 4
 
     private var composerOverlaySnapshot: AppViewModel.ChatComposerOverlaySnapshot {
         viewModel.chatComposerOverlaySnapshot(forSessionID: sessionID)
@@ -1547,6 +1552,15 @@ struct ChatView: View {
             syncComposerDraftFromViewModel()
             updateDelayedLoadingIndicator()
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            scheduleEagerChatRefresh(reason: "scene active")
+        }
+#if canImport(UIKit)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            scheduleEagerChatRefresh(reason: "did become active")
+        }
+#endif
         .onDisappear {
             persistComposerDraftNow()
             viewModel.setComposerStreamingFocus(false)
@@ -1555,6 +1569,7 @@ struct ChatView: View {
             pendingOutgoingSendTask?.cancel()
             outgoingEntryResetTask?.cancel()
             initialBottomScrollTask?.cancel()
+            eagerRefreshTask?.cancel()
             keyboardMeasuredHeight = 0
             showsDelayedLoadingIndicator = false
             if viewModel.activeChatSessionID == sessionID {
@@ -2090,6 +2105,30 @@ struct ChatView: View {
 
     private func requestBottomReadjustment() {
         bottomReadjustmentToken &+= 1
+    }
+
+    private func scheduleEagerChatRefresh(reason: String) {
+        guard viewModel.isConnected else { return }
+        guard viewModel.activeChatSessionID == sessionID || viewModel.selectedSession?.id == sessionID else { return }
+        guard shouldRunEagerChatRefresh else { return }
+
+        eagerRefreshTask?.cancel()
+        eagerRefreshTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            guard viewModel.isConnected else { return }
+            guard viewModel.activeChatSessionID == sessionID || viewModel.selectedSession?.id == sessionID else { return }
+
+            lastEagerRefreshAt = Date()
+            viewModel.appendDebugLog("eager chat refresh session=\(sessionID) reason=\(reason)")
+            await viewModel.refreshChatData(for: sessionID)
+            requestBottomReadjustmentIfPinned()
+        }
+    }
+
+    private var shouldRunEagerChatRefresh: Bool {
+        guard let lastEagerRefreshAt else { return true }
+        return Date().timeIntervalSince(lastEagerRefreshAt) >= eagerRefreshMinimumInterval
     }
 
     private func scheduleInitialBottomScroll(with proxy: ScrollViewProxy) {
