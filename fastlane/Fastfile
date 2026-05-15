@@ -50,7 +50,6 @@ platform :ios do
     FileUtils.rm_rf(temp)
     FileUtils.mkdir_p(temp)
     FileUtils.cp_r(Dir.glob(File.join(source, "*")), temp)
-    FileUtils.rm_rf(File.join(temp, "review_information"))
     temp
   end
 

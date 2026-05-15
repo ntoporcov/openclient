@@ -1,1 +1,28 @@
+OpenClient connects to a hosted OpenCode review server for App Review.
 
+Server URL:
+https://openclient-review.fly.dev
+
+Username:
+opencode
+
+Password:
+Provided in the App Review demo password field.
+
+Suggested validation steps:
+1. Open OpenClient.
+2. Connect to the review server using the URL and credentials above.
+3. Open the seeded review workspace/project.
+4. Open or create a session.
+5. Send a request such as: "Change the headline in index.html to 'OpenClient Review Demo' and adjust the subtitle text."
+6. Verify that the assistant responds and the workspace files can be edited through the app.
+
+Notes:
+- This review environment is preconfigured for testing.
+- No separate self-hosted setup is required for App Review.
+
+WeatherKit usage:
+WeatherKit is used only in the optional "Find the Place" game. OpenClient requests current weather for the secret city's coordinates to generate a live weather clue when WeatherKit is available, and falls back to a non-WeatherKit clue if the request is unavailable or fails.
+
+Weather attribution:
+Weather attribution is shown in two places: in the chat transcript as a WeatherKit attribution row with "Weather data provided by Apple Weather" and the legal attribution link, and in Help > Licenses And Notices under the WeatherKit section.

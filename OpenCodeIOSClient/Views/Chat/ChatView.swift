@@ -2804,8 +2804,10 @@ struct ChatView: View {
                 }
             }
 
-            ToolbarItem(placement: .opencodeTrailing) {
-                AgentToolbarMenu(viewModel: viewModel, session: liveSession, glassNamespace: toolbarGlassNamespace)
+            if !viewModel.isFunAndGamesSession(liveSession.id) {
+                ToolbarItem(placement: .opencodeTrailing) {
+                    AgentToolbarMenu(viewModel: viewModel, session: liveSession, glassNamespace: toolbarGlassNamespace)
+                }
             }
 
             #if !os(macOS)

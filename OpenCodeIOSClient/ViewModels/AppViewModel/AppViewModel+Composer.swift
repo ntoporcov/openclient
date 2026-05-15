@@ -335,7 +335,11 @@ extension AppViewModel {
     }
 
     func effectiveAgentName(for session: OpenCodeSession) -> String? {
-        modelConfigurationStore.effectiveAgentName(for: session.id)
+        if isFunAndGamesSession(session.id) {
+            return "plan"
+        }
+
+        return modelConfigurationStore.effectiveAgentName(for: session.id)
     }
 
     func defaultModelReference() -> OpenCodeModelReference? {

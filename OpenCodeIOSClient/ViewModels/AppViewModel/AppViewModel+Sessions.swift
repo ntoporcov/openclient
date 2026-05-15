@@ -1107,6 +1107,60 @@ extension AppViewModel {
         }
     }
 
+    func scheduleForegroundChatCatchUp(reason: String) {
+        guard !isUsingAppleIntelligence else { return }
+        guard selectedSession != nil || activeChatSessionID != nil else { return }
+
+        let now = Date.now
+        guard now.timeIntervalSince(lastForegroundChatCatchUpScheduledAt) >= 2 else { return }
+        lastForegroundChatCatchUpScheduledAt = now
+
+        let initialSessionID = activeChatSessionID ?? selectedSession?.id
+        foregroundChatCatchUpTask?.cancel()
+        foregroundChatCatchUpTask = Task { [weak self] in
+            for (index, delay) in [Duration.milliseconds(250), .milliseconds(1_500), .seconds(4)].enumerated() {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                await self?.runForegroundChatCatchUp(
+                    initialSessionID: initialSessionID,
+                    reason: reason,
+                    attempt: index + 1
+                )
+            }
+        }
+    }
+
+    private func runForegroundChatCatchUp(initialSessionID: String?, reason: String, attempt: Int) async {
+        guard !isUsingAppleIntelligence else { return }
+        guard isConnected else {
+            appendDebugLog("foreground catch-up waiting for connection attempt=\(attempt) reason=\(reason)")
+            return
+        }
+
+        guard let sessionID = activeChatSessionID ?? selectedSession?.id ?? initialSessionID,
+              let session = session(matching: sessionID) else {
+            appendDebugLog("foreground catch-up skipped missing session attempt=\(attempt) reason=\(reason)")
+            return
+        }
+
+        appendDebugLog("foreground catch-up start attempt=\(attempt) session=\(debugSessionLabel(session)) reason=\(reason)")
+
+        do {
+            async let statuses: Void = reloadSessionStatuses()
+            async let loadedMessages: Void = loadMessages(
+                for: session,
+                prefetchToolDetails: attempt == 1,
+                refreshTodos: attempt == 1
+            )
+            _ = try await (statuses, loadedMessages)
+            appendDebugLog("foreground catch-up finish attempt=\(attempt) session=\(debugSessionLabel(session))")
+            errorMessage = nil
+        } catch {
+            appendDebugLog("foreground catch-up error attempt=\(attempt) session=\(debugSessionLabel(session)) error=\(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func fetchMessageDetails(sessionID: String, messageID: String) async throws -> OpenCodeMessageEnvelope {
         if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1",
            let detail = toolMessageDetails[messageID] {

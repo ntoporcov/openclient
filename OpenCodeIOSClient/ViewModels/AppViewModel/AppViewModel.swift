@@ -642,6 +642,8 @@ final class AppViewModel: ObservableObject {
 
     let eventManager = OpenCodeEventManager()
     var eventStreamRestartTask: Task<Void, Never>?
+    var foregroundChatCatchUpTask: Task<Void, Never>?
+    var lastForegroundChatCatchUpScheduledAt = Date.distantPast
     var reloadTask: Task<Void, Never>?
     var connectionAttemptTask: Task<Void, Never>?
     var appleIntelligenceResponseTask: Task<Void, Never>?

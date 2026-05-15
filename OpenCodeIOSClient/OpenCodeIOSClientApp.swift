@@ -1,7 +1,12 @@
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 @main
 struct OpenCodeIOSClientApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: AppViewModel
 #if DEBUG
     private let screenshotScene: OpenClientScreenshotScene?
@@ -37,6 +42,15 @@ struct OpenCodeIOSClientApp: App {
             .onOpenURL { url in
                 Task { await viewModel.handleLiveActivityURL(url) }
             }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                viewModel.scheduleForegroundChatCatchUp(reason: "app scene active")
+            }
+#if canImport(UIKit)
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                viewModel.scheduleForegroundChatCatchUp(reason: "application did become active")
+            }
+#endif
         }
     }
 }
