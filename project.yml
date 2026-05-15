@@ -80,6 +80,8 @@ targets:
       path: OpenCodeIOSClient/Generated-Info.plist
       properties:
         CFBundleDisplayName: OpenClient
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIApplicationSupportsIndirectInputEvents: true
         NSSupportsLiveActivities: true
         OpenCodeSharedKeychainAccessGroup: $(AppIdentifierPrefix)com.ntoporcov.openclient.shared
@@ -141,6 +143,8 @@ targets:
       path: OpenCodeChatActivityExtension/Info.plist
       properties:
         CFBundleDisplayName: OpenClient Live
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         OpenCodeSharedKeychainAccessGroup: $(AppIdentifierPrefix)com.ntoporcov.openclient.shared
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
