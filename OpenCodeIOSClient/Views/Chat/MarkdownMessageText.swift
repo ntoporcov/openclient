@@ -34,6 +34,9 @@ struct MarkdownMessageText: View {
     var isStreaming = false
     var animatesStreamingText = true
 
+    @State private var hasRenderedStreaming = false
+    @State private var richContentOpacity = 1.0
+
     var body: some View {
         switch style {
         case .standard:
@@ -47,46 +50,80 @@ struct MarkdownMessageText: View {
     private var content: some View {
         Group {
             if isStreaming {
-                if shouldUseStreamingTextFade {
-                    StreamingTextFade(
-                        text: text,
-                        font: textFont,
-                        foregroundColor: textForegroundStyle,
-                        lineSpacing: textLineSpacing
-                    )
-                } else {
-                    StreamingPlainText(
-                        text: text,
-                        font: textFont,
-                        foregroundColor: textForegroundStyle,
-                        lineSpacing: textLineSpacing
-                    )
-                }
+                streamingTextView
             } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(blocks) { block in
-                        switch block {
-                        case let .text(_, value):
-                            styledText(markdownText(value))
-                                .padding(.bottom, textBlockBottomPadding(for: value))
-                        case let .heading(_, level, value):
-                            styledHeading(markdownText(value), level: level)
-                        case let .blockQuote(_, value):
-                            styledBlockQuote(markdownText(value))
-                        case let .listItem(_, marker, value):
-                            styledListItem(markdownText(value), marker: marker)
-                        case let .table(_, headers, rows):
-                            styledTable(headers: headers, rows: rows)
-                        case let .codeBlock(_, language, value):
-                            HighlightedCodeBlock(code: value, language: language)
-                                .padding(.vertical, codeBlockOuterPadding)
-                        }
-                    }
-                }
+                richMarkdownContent
+                    .opacity(richContentOpacity)
             }
         }
         .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
         .modifier(ConditionalTextSelectionModifier(isEnabled: !isStreaming))
+        .onAppear {
+            hasRenderedStreaming = isStreaming
+        }
+        .onChange(of: isStreaming) { oldValue, newValue in
+            if newValue {
+                hasRenderedStreaming = true
+                richContentOpacity = 1
+            } else if oldValue || hasRenderedStreaming {
+                richContentOpacity = 0
+                withAnimation(.easeOut(duration: 0.22)) {
+                    richContentOpacity = 1
+                }
+                hasRenderedStreaming = false
+            }
+        }
+    }
+
+    private var richMarkdownContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(blocks) { block in
+                switch block {
+                case let .text(_, value):
+                    styledText(markdownText(value))
+                        .padding(.bottom, textBlockBottomPadding(for: value))
+                case let .heading(_, level, value):
+                    styledHeading(markdownText(value), level: level)
+                case let .blockQuote(_, value):
+                    styledBlockQuote(markdownText(value))
+                case let .listItem(_, marker, value):
+                    styledListItem(markdownText(value), marker: marker)
+                case let .table(_, headers, rows):
+                    styledTable(headers: headers, rows: rows)
+                case let .codeBlock(_, language, value):
+                    HighlightedCodeBlock(code: value, language: language)
+                        .padding(.vertical, codeBlockOuterPadding)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var streamingTextView: some View {
+#if canImport(UIKit)
+        NativeStreamingTextLabel(
+            text: text,
+            isUser: isUser,
+            style: style,
+            lineSpacing: textLineSpacing
+        )
+#else
+        if shouldUseStreamingTextFade {
+            StreamingTextFade(
+                text: text,
+                font: textFont,
+                foregroundColor: textForegroundStyle,
+                lineSpacing: textLineSpacing
+            )
+        } else {
+            StreamingPlainText(
+                text: text,
+                font: textFont,
+                foregroundColor: textForegroundStyle,
+                lineSpacing: textLineSpacing
+            )
+        }
+#endif
     }
 
     private var shouldUseStreamingTextFade: Bool {
@@ -737,6 +774,190 @@ private struct ConditionalTextSelectionModifier: ViewModifier {
         }
     }
 }
+
+#if canImport(UIKit)
+private struct NativeStreamingTextLabel: UIViewRepresentable {
+    let text: String
+    let isUser: Bool
+    let style: MarkdownMessageText.Style
+    let lineSpacing: CGFloat
+
+    func makeUIView(context: Context) -> StreamingTextUILabel {
+        let label = StreamingTextUILabel()
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.backgroundColor = .clear
+        label.setContentCompressionResistancePriority(.required, for: .vertical)
+        label.setContentHuggingPriority(.required, for: .vertical)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    func updateUIView(_ label: StreamingTextUILabel, context: Context) {
+        label.configure(
+            text: text,
+            font: uiFont,
+            textColor: uiTextColor,
+            lineSpacing: lineSpacing
+        )
+    }
+
+    static func dismantleUIView(_ label: StreamingTextUILabel, coordinator: ()) {
+        label.stopStreaming()
+    }
+
+    private var uiFont: UIFont {
+        switch style {
+        case .standard:
+            return UIFont.preferredFont(forTextStyle: .body)
+        case .reasoning:
+            return UIFont.preferredFont(forTextStyle: .caption1)
+        }
+    }
+
+    private var uiTextColor: UIColor {
+        if isUser {
+            return .white
+        }
+
+        switch style {
+        case .standard:
+            return .label
+        case .reasoning:
+            return .secondaryLabel
+        }
+    }
+}
+
+private final class StreamingTextUILabel: UILabel {
+    private var configuredText = ""
+    private var configuredFont: UIFont?
+    private var configuredTextColor: UIColor?
+    private var configuredLineSpacing: CGFloat = 0
+    private var displayLink: CADisplayLink?
+    private var displayedCharacterCount: Double = 0
+    private var lastFrameTime = Date.timeIntervalSinceReferenceDate
+
+    private let revealCharactersPerSecond: Double = 96
+    private let fadeWindowCharacterCount = 18
+
+    func configure(text: String, font: UIFont, textColor: UIColor, lineSpacing: CGFloat) {
+        guard configuredText != text || configuredFont != font || configuredTextColor != textColor || configuredLineSpacing != lineSpacing else {
+            return
+        }
+
+        let isAppend = text.hasPrefix(configuredText)
+        let shouldReveal = isAppend && text.count > configuredText.count
+        configuredText = text
+        configuredFont = font
+        configuredTextColor = textColor
+        configuredLineSpacing = lineSpacing
+
+        if shouldReveal {
+            displayedCharacterCount = min(displayedCharacterCount, Double(text.count))
+            renderDisplayedText()
+            startDisplayLink()
+        } else {
+            displayedCharacterCount = Double(text.count)
+            renderDisplayedText()
+            stopDisplayLink()
+        }
+    }
+
+    func stopStreaming() {
+        stopDisplayLink()
+    }
+
+    private func renderDisplayedText() {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = configuredLineSpacing
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let characters = Array(configuredText)
+        let solidCount = min(characters.count, max(0, Int(floor(displayedCharacterCount))))
+        let attributed = NSMutableAttributedString(
+            string: String(characters.prefix(solidCount)),
+            attributes: [
+                .font: configuredFont ?? UIFont.preferredFont(forTextStyle: .body),
+                .foregroundColor: configuredTextColor ?? UIColor.label,
+                .paragraphStyle: paragraph
+            ]
+        )
+
+        let fadeEnd = min(characters.count, solidCount + fadeWindowCharacterCount)
+        if solidCount < fadeEnd {
+            for index in solidCount ..< fadeEnd {
+                let opacity = opacity(forCharacterAt: index)
+                attributed.append(NSAttributedString(
+                    string: String(characters[index]),
+                    attributes: [
+                        .font: configuredFont ?? UIFont.preferredFont(forTextStyle: .body),
+                        .foregroundColor: (configuredTextColor ?? UIColor.label).withAlphaComponent(opacity),
+                        .paragraphStyle: paragraph
+                    ]
+                ))
+            }
+        }
+
+        attributedText = attributed
+    }
+
+    private func opacity(forCharacterAt index: Int) -> CGFloat {
+        let distance = Double(index + 1) - displayedCharacterCount
+        let opacity = 1 - (distance / Double(fadeWindowCharacterCount))
+        return CGFloat(min(1, max(0.12, opacity)))
+    }
+
+    private func startDisplayLink() {
+        guard displayLink == nil else { return }
+        lastFrameTime = Date.timeIntervalSinceReferenceDate
+        let link = CADisplayLink(target: self, selector: #selector(displayLinkDidTick))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 30)
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func displayLinkDidTick() {
+        let now = Date.timeIntervalSinceReferenceDate
+        let elapsed = max(0, now - lastFrameTime)
+        lastFrameTime = now
+
+        let targetCount = Double(configuredText.count)
+        guard displayedCharacterCount < targetCount else {
+            displayedCharacterCount = targetCount
+            renderDisplayedText()
+            stopDisplayLink()
+            return
+        }
+
+        displayedCharacterCount = min(targetCount, displayedCharacterCount + elapsed * revealCharactersPerSecond)
+        renderDisplayedText()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let width = bounds.width
+        if preferredMaxLayoutWidth != width {
+            preferredMaxLayoutWidth = width
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            stopDisplayLink()
+        } else if displayedCharacterCount < Double(configuredText.count) {
+            startDisplayLink()
+        }
+    }
+}
+#endif
 
 private struct StreamingPlainText: View {
     private struct Chunk: Identifiable {

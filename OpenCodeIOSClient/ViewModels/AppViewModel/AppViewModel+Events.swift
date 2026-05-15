@@ -1,10 +1,10 @@
 import Foundation
 
 extension AppViewModel {
-    private static let shortStreamDeltaCoalescingInterval: Duration = .milliseconds(50)
-    private static let mediumStreamDeltaCoalescingInterval: Duration = .milliseconds(90)
-    private static let longStreamDeltaCoalescingInterval: Duration = .milliseconds(140)
-    private static let veryLongStreamDeltaCoalescingInterval: Duration = .milliseconds(220)
+    private static let shortStreamDeltaCoalescingInterval: Duration = .milliseconds(140)
+    private static let mediumStreamDeltaCoalescingInterval: Duration = .milliseconds(220)
+    private static let longStreamDeltaCoalescingInterval: Duration = .milliseconds(340)
+    private static let veryLongStreamDeltaCoalescingInterval: Duration = .milliseconds(480)
 
     var isCapturingStreamingDiagnostics: Bool {
         isShowingDebugProbe || isRunningDebugProbe
@@ -460,7 +460,7 @@ extension AppViewModel {
             .map { "\(Int(now.timeIntervalSince($0) * 1000))ms" } ?? "first"
         let chars = events.reduce(0) { $0 + $1.deltaCharacterCount }
         let types = Set(events.map(\.eventType)).sorted().joined(separator: ",")
-        let target = "50ms"
+        let target = "140ms+"
         streamDeltaLastFlushAt = now
 
         appendDebugLog(

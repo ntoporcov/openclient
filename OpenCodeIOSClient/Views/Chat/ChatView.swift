@@ -700,6 +700,69 @@ private enum ChatDisplayItem: Identifiable {
     }
 }
 
+private enum ChatTranscriptRow: Identifiable {
+    case weatherAttribution
+    case olderMessages(count: Int)
+    case displayItem(ChatDisplayItem)
+    case thinking(isVisible: Bool)
+    case bottomAnchor
+
+    var id: String {
+        switch self {
+        case .weatherAttribution:
+            return "chat-weather-attribution"
+        case .olderMessages:
+            return ChatScrollTarget.olderMessagesButton
+        case let .displayItem(item):
+            return item.id
+        case .thinking:
+            return ChatScrollTarget.thinkingRow
+        case .bottomAnchor:
+            return ChatScrollTarget.bottomAnchor
+        }
+    }
+}
+
+private extension ChatTranscriptRow {
+    var renderSignature: String {
+        switch self {
+        case .weatherAttribution:
+            return id
+        case let .olderMessages(count):
+            return "\(id):\(count)"
+        case let .thinking(isVisible):
+            return "\(id):\(isVisible)"
+        case .bottomAnchor:
+            return id
+        case let .displayItem(item):
+            return item.renderSignature
+        }
+    }
+}
+
+private extension ChatDisplayItem {
+    var renderSignature: String {
+        switch self {
+        case let .message(message):
+            return message.renderSignature
+        case let .largeMessageChunk(item):
+            return [item.id, item.chunk.text.count.description, item.chunk.text.hashValue.description, item.chunk.isTail.description, item.message.renderSignature].joined(separator: ":")
+        case let .compaction(item):
+            return [item.id, item.boundaryMessage.renderSignature, item.summaryMessage?.renderSignature ?? "nil"].joined(separator: ":")
+        case let .findPlaceReveal(city):
+            return "\(id):\(city.name):\(city.country)"
+        case .findBugSolved:
+            return id
+        }
+    }
+}
+
+private extension OpenCodeMessageEnvelope {
+    var renderSignature: String {
+        "\(id)#\(hashValue)"
+    }
+}
+
 private struct ChatDisplayItemCacheKey: Equatable {
     struct MessageKey: Equatable {
         let id: String
@@ -1090,6 +1153,7 @@ private struct MessageBubbleSnapshot: Equatable {
     let hidesReasoningBlocks: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
+    let streamingReservePadding: CGFloat
 }
 
 private struct MessageRowRenderSnapshot {
@@ -1109,15 +1173,11 @@ private struct LargeMessageChunkRowRenderSnapshot {
     let isStreamingTail: Bool
     let animatesStreamingText: Bool
     let bottomPadding: CGFloat
+    let streamingReservePadding: CGFloat
 }
 
 private struct ThinkingRowRenderSnapshot {
     let animateEntry: Bool
-}
-
-private struct ChatScrollSpacingSample {
-    let offsetY: CGFloat
-    let timestamp: TimeInterval
 }
 
 private struct BottomRefreshRenderSnapshot {
@@ -1197,6 +1257,7 @@ private struct EquatableMessageBubbleHost: View, Equatable {
             onInspectDebugMessage: onInspectDebugMessage,
             onEntryAnimationStarted: onEntryAnimationStarted
         )
+        .padding(.bottom, snapshot.streamingReservePadding)
     }
 }
 
@@ -1287,7 +1348,7 @@ struct ChatView: View {
     @State private var selectedCompactionSummary: CompactionSummaryPayload?
     @State private var selectedActivityDetail: ActivityDetail?
     @State private var showingTodoInspector = false
-    @State private var visibleMessageCount = 80
+    @State private var visibleMessageCount = 50
     @State private var questionAnswers: [String: Set<String>] = [:]
     @State private var questionCustomAnswers: [String: String] = [:]
     @State private var taskStore = ChatViewTaskStore()
@@ -1301,6 +1362,7 @@ struct ChatView: View {
     @State private var pendingOutgoingSend: PendingOutgoingSend?
     @State private var pendingOutgoingSendTask: Task<Void, Never>?
     @State private var outgoingEntryResetTask: Task<Void, Never>?
+    @State private var initialBottomScrollTask: Task<Void, Never>?
     @State private var isThinkingRowRevealAllowed = true
     @State private var preparingOutgoingMessageID: String?
     @State private var animatingOutgoingMessageID: String?
@@ -1315,19 +1377,19 @@ struct ChatView: View {
     @State private var hasFiredBottomPullHaptic = false
     @State private var chatViewportHeight: CGFloat = 0
     @State private var composerMeasuredHeight: CGFloat = 0
+    @State private var keyboardMeasuredHeight: CGFloat = 0
     @State private var bottomReadjustmentToken = 0
-    @State private var scrollVelocitySpacingExtra: CGFloat = 0
-    @State private var scrollVelocitySpacingSample: ChatScrollSpacingSample?
     @State private var largeMessageChunkCache = OpenCodeLargeMessageChunkCache()
     @State private var chatDisplayItemCache = ChatDisplayItemCache()
 
     @State private var selectedInstructionTab: AppleIntelligenceInstructionTab = .user
 
-    private let messageWindowSize = 80
+    private let messageWindowSize = 50
     private let bottomRefreshThreshold: CGFloat = 72
     private let bottomRefreshIndicatorHeight: CGFloat = 34
     private let outgoingRequestDelayMS = 720
     private let thinkingRevealHoldMS = 140
+
     private var composerOverlaySnapshot: AppViewModel.ChatComposerOverlaySnapshot {
         viewModel.chatComposerOverlaySnapshot(forSessionID: sessionID)
     }
@@ -1397,59 +1459,57 @@ struct ChatView: View {
             GeometryReader { geometry in
                 let displaySnapshot = chatDisplaySnapshot
 
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        if isFindPlaceSession {
-                            WeatherAttributionRow()
-                                .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+                ChatTranscriptCollectionView(
+                    rows: transcriptRows(for: displaySnapshot),
+                    isAtBottom: $isScrollGeometryAtBottom,
+                    bottomScrollToken: bottomReadjustmentToken,
+                    bottomContentInset: composerMeasuredHeight + keyboardMeasuredHeight + messageBottomPadding,
+                    bottomRefreshThreshold: bottomRefreshThreshold,
+                    bottomRefreshProgress: bottomRefreshRenderSnapshot.progress,
+                    showsBottomRefreshIndicator: bottomRefreshRenderSnapshot.showsIndicator,
+                    bottomRefreshColorIsActive: bottomRefreshRenderSnapshot.colorIsActive,
+                    bottomRefreshHeight: messageBottomPadding + bottomRefreshIndicatorHeight * bottomRefreshRenderSnapshot.progress,
+                    isRefreshing: isRefreshingChatData,
+                    animatedRowIDs: animatedTranscriptRowIDs(for: displaySnapshot),
+                    onBottomPullChanged: { distance in
+                        bottomPullDistance = distance
+                        if distance >= bottomRefreshThreshold, !hasFiredBottomPullHaptic {
+                            hasFiredBottomPullHaptic = true
+                            OpenCodeHaptics.impact(.crisp)
+                        } else if distance < bottomRefreshThreshold * 0.65 {
+                            hasFiredBottomPullHaptic = false
                         }
-
-                        if displaySnapshot.hiddenMessageCount > 0 {
-                            Button {
-                                visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
-                            } label: {
-                                Text("View older messages (\(displaySnapshot.hiddenMessageCount))")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.blue)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
+                    },
+                    onBottomPullEnded: { shouldRefresh in
+                        hasFiredBottomPullHaptic = false
+                        if shouldRefresh {
+                            Task { @MainActor in
+                                await refreshChatDataFromBottomOverscroll()
                             }
-                            .buttonStyle(.plain)
-                            .id(ChatScrollTarget.olderMessagesButton)
-                            .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+                        } else {
+                            withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
+                                bottomPullDistance = 0
+                            }
                         }
-
-                        ForEach(displaySnapshot.items) { item in
-                            chatRow(for: item)
-                        }
-
-                        if displaySnapshot.showsThinking {
-                            thinkingRowListItem
-                        }
-
-                        bottomAnchorListItem
                     }
+                ) { row in
+                    transcriptRowContent(for: row)
                 }
-                .chatDefaultScrollAnchors()
-                .chatBottomReadjustment(token: bottomReadjustmentToken)
-                .animation(chatItemChangeAnimation, value: displaySnapshot.itemIDs)
-                .chatScrollBottomTracking($isScrollGeometryAtBottom)
-                .chatScrollVelocitySpacing(extraSpacing: $scrollVelocitySpacingExtra, sample: $scrollVelocitySpacingSample)
-                .simultaneousGesture(bottomOverscrollRefreshGesture)
-                .opencodeInteractiveKeyboardDismiss()
                 .background(OpenCodePlatformColor.groupedBackground)
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
+                .ignoresSafeArea(.keyboard, edges: .bottom)
                 .accessibilityIdentifier("chat.scroll")
                 .onAppear {
                     viewModel.activeChatSessionID = sessionID
                     hasCompletedInitialHydrationSnap = !viewModel.messages.isEmpty
                     chatViewportHeight = geometry.size.height
                     updateDelayedLoadingIndicator()
+                    requestBottomReadjustment()
                 }
                 .onChange(of: geometry.size.height) { _, height in
                     chatViewportHeight = height
                 }
-                .onChange(of: viewModel.messages.count) { oldCount, count in
+                .onChange(of: viewModel.messages.count) { _, count in
                     visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
                     if count == 0 {
                         visibleMessageCount = messageWindowSize
@@ -1457,12 +1517,14 @@ struct ChatView: View {
 
                     if count > 0, !hasCompletedInitialHydrationSnap {
                         hasCompletedInitialHydrationSnap = true
+                        requestBottomReadjustment()
                     }
                     updateDelayedLoadingIndicator()
                 }
 #if canImport(UIKit)
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                    guard keyboardWillShow(from: notification) else { return }
+                    keyboardMeasuredHeight = keyboardHeight(from: notification)
+                    guard keyboardMeasuredHeight > 0 else { return }
                     requestBottomReadjustmentIfPinned()
                 }
 #endif
@@ -1473,8 +1535,9 @@ struct ChatView: View {
             } else if chatOverlayVisibilitySnapshot.visibleOverlay == .delayedLoading {
                 delayedLoadingOverlay
             }
+            bottomRefreshFloatingIndicator
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .overlay(alignment: .bottom) {
             composerOverlay
         }
         .navigationTitle(chatHeaderSnapshot.navigationTitle)
@@ -1491,8 +1554,8 @@ struct ChatView: View {
             taskStore.composerDraftPersistenceTask?.cancel()
             pendingOutgoingSendTask?.cancel()
             outgoingEntryResetTask?.cancel()
-            scrollVelocitySpacingExtra = 0
-            scrollVelocitySpacingSample = nil
+            initialBottomScrollTask?.cancel()
+            keyboardMeasuredHeight = 0
             showsDelayedLoadingIndicator = false
             if viewModel.activeChatSessionID == sessionID {
                 viewModel.activeChatSessionID = nil
@@ -1857,6 +1920,17 @@ struct ChatView: View {
     private var composerOverlay: some View {
         composerStack
             .background(Color.clear)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear {
+                            handleComposerHeightChange(proxy.size.height)
+                        }
+                        .onChange(of: proxy.size.height) { _, height in
+                            handleComposerHeightChange(height)
+                        }
+                }
+            }
     }
 
     private var chatOverlayVisibilitySnapshot: ChatOverlayVisibilitySnapshot {
@@ -1894,6 +1968,30 @@ struct ChatView: View {
     }
 
     @ViewBuilder
+    private var bottomRefreshFloatingIndicator: some View {
+        let snapshot = bottomRefreshRenderSnapshot
+        if snapshot.showsIndicator {
+            VStack {
+                Spacer()
+                BottomRefreshSpinner(
+                    progress: snapshot.progress,
+                    isRefreshing: snapshot.isRefreshing,
+                    tint: snapshot.colorIsActive ? .blue : .secondary
+                )
+                .frame(width: 28, height: 28)
+                .scaleEffect(0.55 + 0.45 * snapshot.progress)
+                .opacity(0.25 + 0.75 * snapshot.progress)
+                .padding(.bottom, composerMeasuredHeight + 10)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .animation(.snappy(duration: 0.18, extraBounce: 0.02), value: snapshot.progress)
+            .animation(.easeOut(duration: 0.12), value: snapshot.isRefreshing)
+            .transition(.opacity.combined(with: .scale(scale: 0.86)))
+        }
+    }
+
+    @ViewBuilder
     private var bottomAnchorListItem: some View {
         let snapshot = bottomRefreshRenderSnapshot
         VStack(spacing: 8) {
@@ -1917,16 +2015,11 @@ struct ChatView: View {
     }
 
     private func bottomRefreshIndicator(snapshot: BottomRefreshRenderSnapshot) -> some View {
-        Group {
-            if snapshot.isRefreshing {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(snapshot.colorIsActive ? .blue : .secondary)
-            }
-        }
+        BottomRefreshSpinner(
+            progress: snapshot.progress,
+            isRefreshing: snapshot.isRefreshing,
+            tint: snapshot.colorIsActive ? .blue : .secondary
+        )
         .frame(width: 28, height: 28)
         .scaleEffect(0.55 + 0.45 * snapshot.progress)
         .opacity(0.25 + 0.75 * snapshot.progress)
@@ -1999,6 +2092,28 @@ struct ChatView: View {
         bottomReadjustmentToken &+= 1
     }
 
+    private func scheduleInitialBottomScroll(with proxy: ScrollViewProxy) {
+        initialBottomScrollTask?.cancel()
+        initialBottomScrollTask = Task { @MainActor in
+            for delayMS in [0, 80, 240, 520] {
+                if delayMS > 0 {
+                    try? await Task.sleep(for: .milliseconds(delayMS))
+                } else {
+                    await Task.yield()
+                }
+
+                guard !Task.isCancelled else { return }
+                proxy.scrollTo(ChatScrollTarget.bottomAnchor, anchor: .bottom)
+            }
+            isScrollGeometryAtBottom = true
+        }
+    }
+
+    private func scheduleBottomScrollIfPinned(with proxy: ScrollViewProxy) {
+        guard isScrollGeometryAtBottom else { return }
+        scheduleInitialBottomScroll(with: proxy)
+    }
+
     private func handleComposerHeightChange(_ height: CGFloat) {
         guard height > 0 else { return }
         guard abs(height - composerMeasuredHeight) > 0.5 else { return }
@@ -2036,9 +2151,9 @@ struct ChatView: View {
     }
 
 #if canImport(UIKit)
-    private func keyboardWillShow(from notification: Notification) -> Bool {
-        guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return false }
-        return frame.minY < UIScreen.main.bounds.height
+    private func keyboardHeight(from notification: Notification) -> CGFloat {
+        guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return 0 }
+        return max(0, UIScreen.main.bounds.maxY - frame.minY)
     }
 
 #endif
@@ -2149,16 +2264,70 @@ struct ChatView: View {
         }
     }
 
-    private var thinkingRowListItem: some View {
+    private func thinkingRowListItem(isVisible: Bool) -> some View {
         let snapshot = thinkingRowRenderSnapshot
-        return ThinkingRow(animateEntry: snapshot.animateEntry)
-            .transition(.identity)
-            .id(ChatScrollTarget.thinkingRow)
-            .padding(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+        return ZStack(alignment: .leading) {
+            if isVisible {
+                ThinkingRow(animateEntry: snapshot.animateEntry)
+                    .padding(.horizontal, 16)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: isVisible ? 64 : 0, alignment: .center)
+        .transition(.identity)
     }
 
     private var thinkingRowRenderSnapshot: ThinkingRowRenderSnapshot {
         ThinkingRowRenderSnapshot(animateEntry: pendingOutgoingSend != nil)
+    }
+
+    private func transcriptRows(for displaySnapshot: ChatDisplaySnapshot) -> [ChatTranscriptRow] {
+        var rows: [ChatTranscriptRow] = []
+        if isFindPlaceSession {
+            rows.append(.weatherAttribution)
+        }
+        if displaySnapshot.hiddenMessageCount > 0 {
+            rows.append(.olderMessages(count: displaySnapshot.hiddenMessageCount))
+        }
+        rows.append(contentsOf: displaySnapshot.items.map(ChatTranscriptRow.displayItem))
+        rows.append(.thinking(isVisible: displaySnapshot.showsThinking))
+        rows.append(.bottomAnchor)
+        return rows
+    }
+
+    private func animatedTranscriptRowIDs(for displaySnapshot: ChatDisplaySnapshot) -> Set<String> {
+        guard let lastItem = displaySnapshot.items.last else { return [] }
+        return [lastItem.id]
+    }
+
+    @ViewBuilder
+    private func transcriptRowContent(for row: ChatTranscriptRow) -> some View {
+        switch row {
+        case .weatherAttribution:
+            WeatherAttributionRow()
+                .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+        case let .olderMessages(count):
+            Button {
+                visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
+            } label: {
+                Text("View older messages (\(count))")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.blue)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+        case let .displayItem(item):
+            chatRow(for: item)
+        case let .thinking(isVisible):
+            thinkingRowListItem(isVisible: isVisible)
+        case .bottomAnchor:
+            bottomAnchorListItem
+        }
     }
 
     @ViewBuilder
@@ -2172,11 +2341,9 @@ struct ChatView: View {
             compactionRow(for: compaction)
         case let .findPlaceReveal(city):
             FindPlaceRevealRow(city: city)
-                .id("find-place-reveal-\(city.id)")
                 .padding(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
         case .findBugSolved:
             FindBugSolvedRow()
-                .id("find-bug-solved")
                 .padding(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
         }
     }
@@ -2194,9 +2361,8 @@ struct ChatView: View {
             .contextMenu {
                 messageChunkContextMenu(for: item.message)
             }
-            .id(item.id)
             .transition(.identity)
-            .padding(EdgeInsets(top: 0, leading: 16, bottom: snapshot.bottomPadding, trailing: 16))
+            .padding(EdgeInsets(top: 0, leading: 16, bottom: snapshot.bottomPadding + snapshot.streamingReservePadding, trailing: 16))
     }
 
     private func largeMessageChunkRowRenderSnapshot(for item: LargeMessageChunkDisplayItem) -> LargeMessageChunkRowRenderSnapshot {
@@ -2206,7 +2372,8 @@ struct ChatView: View {
             allowsTextSelection: !isStreaming,
             isStreamingTail: isStreaming && item.chunk.isTail,
             animatesStreamingText: shouldAnimateStreamingText,
-            bottomPadding: item.chunk.isTail ? 6 : 0
+            bottomPadding: item.chunk.isTail ? 6 : 0,
+            streamingReservePadding: isStreaming && item.chunk.isTail ? 44 : 0
         )
     }
 
@@ -2263,9 +2430,8 @@ struct ChatView: View {
             outgoingEntryAnimationStartedMessageIDs.insert(messageID)
         }
         .equatable()
-        .transition(snapshot.transition)
-        .id(message.id)
-        .padding(EdgeInsets(top: 6 + scrollVelocitySpacingExtra * 0.5, leading: 16, bottom: 6 + scrollVelocitySpacingExtra * 0.5, trailing: 16))
+        .transition(.identity)
+        .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
     }
 
     private func messageRowRenderSnapshot(for message: OpenCodeMessageEnvelope) -> MessageRowRenderSnapshot {
@@ -2284,7 +2450,8 @@ struct ChatView: View {
             animatesStreamingText: shouldAnimateStreamingText,
             hidesReasoningBlocks: viewModel.isFunAndGamesSession(sessionID),
             reserveEntryFromComposer: message.id == preparingOutgoingMessageID,
-            animateEntryFromComposer: message.id == animatingOutgoingMessageID && !outgoingEntryAnimationStartedMessageIDs.contains(message.id)
+            animateEntryFromComposer: message.id == animatingOutgoingMessageID && !outgoingEntryAnimationStartedMessageIDs.contains(message.id),
+            streamingReservePadding: isStreamingMessage(message) ? 44 : 0
         )
     }
 
@@ -2313,7 +2480,6 @@ struct ChatView: View {
         }
         .buttonStyle(.plain)
         .disabled(snapshot.isDisabled)
-        .id(compaction.id)
         .padding(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
     }
 
@@ -2934,6 +3100,524 @@ private struct ChatSkeletonRow: View {
     }
 }
 
+private struct BottomRefreshSpinner: View {
+    let progress: CGFloat
+    let isRefreshing: Bool
+    let tint: Color
+
+    private let tickCount = 12
+
+    var body: some View {
+        if isRefreshing {
+#if canImport(UIKit)
+            UIKitRefreshActivityIndicator(tint: tint)
+#else
+            ProgressView()
+                .controlSize(.small)
+#endif
+        } else {
+            spinner(phase: 0)
+        }
+    }
+
+    private func spinner(phase: Int) -> some View {
+        ZStack {
+            ForEach(0 ..< tickCount, id: \.self) { index in
+                Capsule(style: .continuous)
+                    .fill(tint.opacity(opacity(for: index, phase: phase)))
+                    .frame(width: 2.6, height: 7.0)
+                    .offset(y: -8.5)
+                    .rotationEffect(.degrees(Double(index) / Double(tickCount) * 360))
+            }
+        }
+    }
+
+    private func opacity(for index: Int, phase: Int) -> Double {
+        if isRefreshing {
+            let distance = (index - phase + tickCount) % tickCount
+            return 0.18 + (1 - Double(distance) / Double(tickCount - 1)) * 0.72
+        }
+
+        let visibleTicks = Int(ceil(min(1, max(0, progress)) * CGFloat(tickCount)))
+        return index < visibleTicks ? 0.92 : 0.16
+    }
+
+}
+
+#if canImport(UIKit)
+private struct UIKitRefreshActivityIndicator: UIViewRepresentable {
+    let tint: Color
+
+    func makeUIView(context: Context) -> UIActivityIndicatorView {
+        let view = UIActivityIndicatorView(style: .medium)
+        view.hidesWhenStopped = false
+        view.startAnimating()
+        return view
+    }
+
+    func updateUIView(_ view: UIActivityIndicatorView, context: Context) {
+        view.color = UIColor(tint)
+        if !view.isAnimating {
+            view.startAnimating()
+        }
+    }
+}
+#endif
+
+#if canImport(UIKit)
+private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentable {
+    let rows: [ChatTranscriptRow]
+    @Binding var isAtBottom: Bool
+    let bottomScrollToken: Int
+    let bottomContentInset: CGFloat
+    let bottomRefreshThreshold: CGFloat
+    let bottomRefreshProgress: CGFloat
+    let showsBottomRefreshIndicator: Bool
+    let bottomRefreshColorIsActive: Bool
+    let bottomRefreshHeight: CGFloat
+    let isRefreshing: Bool
+    let animatedRowIDs: Set<String>
+    let onBottomPullChanged: (CGFloat) -> Void
+    let onBottomPullEnded: (Bool) -> Void
+    let rowContent: (ChatTranscriptRow) -> RowContent
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            rows: rows,
+            isAtBottom: $isAtBottom,
+            bottomRefreshThreshold: bottomRefreshThreshold,
+            bottomRefreshProgress: bottomRefreshProgress,
+            showsBottomRefreshIndicator: showsBottomRefreshIndicator,
+            bottomRefreshColorIsActive: bottomRefreshColorIsActive,
+            bottomRefreshHeight: bottomRefreshHeight,
+            isRefreshing: isRefreshing,
+            animatedRowIDs: animatedRowIDs,
+            onBottomPullChanged: onBottomPullChanged,
+            onBottomPullEnded: onBottomPullEnded,
+            rowContent: rowContent
+        )
+    }
+
+    func makeUIView(context: Context) -> UICollectionView {
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
+        collectionView.backgroundColor = .clear
+        collectionView.alwaysBounceVertical = true
+        collectionView.contentInsetAdjustmentBehavior = .automatic
+        collectionView.keyboardDismissMode = .interactive
+        collectionView.dataSource = context.coordinator
+        collectionView.delegate = context.coordinator
+        collectionView.register(ChatTranscriptHostingCell.self, forCellWithReuseIdentifier: ChatTranscriptHostingCell.reuseIdentifier)
+        context.coordinator.collectionView = collectionView
+        return collectionView
+    }
+
+    func updateUIView(_ collectionView: UICollectionView, context: Context) {
+        context.coordinator.rowContent = rowContent
+        context.coordinator.isAtBottom = $isAtBottom
+        context.coordinator.bottomRefreshThreshold = bottomRefreshThreshold
+        context.coordinator.bottomRefreshProgress = bottomRefreshProgress
+        context.coordinator.showsBottomRefreshIndicator = showsBottomRefreshIndicator
+        context.coordinator.bottomRefreshColorIsActive = bottomRefreshColorIsActive
+        context.coordinator.bottomRefreshHeight = bottomRefreshHeight
+        context.coordinator.isRefreshing = isRefreshing
+        context.coordinator.animatedRowIDs = animatedRowIDs
+        context.coordinator.onBottomPullChanged = onBottomPullChanged
+        context.coordinator.onBottomPullEnded = onBottomPullEnded
+        context.coordinator.updateBottomContentInset(bottomContentInset, in: collectionView)
+        context.coordinator.updateRows(rows, in: collectionView)
+        context.coordinator.scrollToBottomIfNeeded(token: bottomScrollToken, in: collectionView)
+    }
+
+    private static func makeLayout() -> UICollectionViewLayout {
+        let itemSize = NSCollectionLayoutSize(
+            widthDimension: .fractionalWidth(1),
+            heightDimension: .estimated(80)
+        )
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+        let groupSize = NSCollectionLayoutSize(
+            widthDimension: .fractionalWidth(1),
+            heightDimension: .estimated(80)
+        )
+        let group = NSCollectionLayoutGroup.vertical(layoutSize: groupSize, subitems: [item])
+        let section = NSCollectionLayoutSection(group: group)
+        section.interGroupSpacing = 0
+        return UICollectionViewCompositionalLayout(section: section)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UICollectionViewDataSource, UICollectionViewDelegate {
+        var rows: [ChatTranscriptRow]
+        var isAtBottom: Binding<Bool>
+        var bottomRefreshThreshold: CGFloat
+        var bottomRefreshProgress: CGFloat
+        var showsBottomRefreshIndicator: Bool
+        var bottomRefreshColorIsActive: Bool
+        var bottomRefreshHeight: CGFloat
+        var isRefreshing: Bool
+        var animatedRowIDs: Set<String>
+        var onBottomPullChanged: (CGFloat) -> Void
+        var onBottomPullEnded: (Bool) -> Void
+        var rowContent: (ChatTranscriptRow) -> RowContent
+        weak var collectionView: UICollectionView?
+
+        private var rowIDs: [String]
+        private var rowSignaturesByID: [String: String]
+        private var pendingRows: [ChatTranscriptRow]?
+        private var isThinkingVisible = false
+        private var thinkingEntryGeneration = 0
+        private var lastBottomScrollToken: Int?
+        private var bottomContentInset: CGFloat = 0
+
+        init(
+            rows: [ChatTranscriptRow],
+            isAtBottom: Binding<Bool>,
+            bottomRefreshThreshold: CGFloat,
+            bottomRefreshProgress: CGFloat,
+            showsBottomRefreshIndicator: Bool,
+            bottomRefreshColorIsActive: Bool,
+            bottomRefreshHeight: CGFloat,
+            isRefreshing: Bool,
+            animatedRowIDs: Set<String>,
+            onBottomPullChanged: @escaping (CGFloat) -> Void,
+            onBottomPullEnded: @escaping (Bool) -> Void,
+            rowContent: @escaping (ChatTranscriptRow) -> RowContent
+        ) {
+            self.rows = rows
+            self.isAtBottom = isAtBottom
+            self.bottomRefreshThreshold = bottomRefreshThreshold
+            self.bottomRefreshProgress = bottomRefreshProgress
+            self.showsBottomRefreshIndicator = showsBottomRefreshIndicator
+            self.bottomRefreshColorIsActive = bottomRefreshColorIsActive
+            self.bottomRefreshHeight = bottomRefreshHeight
+            self.isRefreshing = isRefreshing
+            self.animatedRowIDs = animatedRowIDs
+            self.onBottomPullChanged = onBottomPullChanged
+            self.onBottomPullEnded = onBottomPullEnded
+            self.rowContent = rowContent
+            self.rowIDs = rows.map(\.id)
+            self.rowSignaturesByID = Self.signaturesByID(for: rows)
+            self.isThinkingVisible = Self.isThinkingVisible(in: rows)
+        }
+
+        func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+            rows.count
+        }
+
+        func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+            let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: ChatTranscriptHostingCell.reuseIdentifier,
+                for: indexPath
+            ) as! ChatTranscriptHostingCell
+            configure(cell, at: indexPath)
+            return cell
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            updateBottomState(for: scrollView)
+        }
+
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            updateBottomState(for: scrollView)
+            applyPendingRowsIfNeeded(in: scrollView)
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            guard !decelerate else { return }
+            updateBottomState(for: scrollView)
+            applyPendingRowsIfNeeded(in: scrollView)
+        }
+
+        func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+            updateBottomState(for: scrollView)
+            applyPendingRowsIfNeeded(in: scrollView)
+        }
+
+        func updateRows(_ newRows: [ChatTranscriptRow], in collectionView: UICollectionView) {
+            if isUserScrolling(collectionView) {
+                pendingRows = newRows
+                return
+            }
+
+            applyRows(newRows, in: collectionView)
+        }
+
+        private func applyRows(_ newRows: [ChatTranscriptRow], in collectionView: UICollectionView) {
+            let newIDs = newRows.map(\.id)
+            let newSignaturesByID = Self.signaturesByID(for: newRows)
+            let newThinkingVisible = Self.isThinkingVisible(in: newRows)
+            if !isThinkingVisible, newThinkingVisible {
+                thinkingEntryGeneration &+= 1
+            }
+            isThinkingVisible = newThinkingVisible
+            let wasAtBottom = isAtBottom.wrappedValue
+            rows = newRows
+
+            if newIDs != rowIDs {
+                rowIDs = newIDs
+                rowSignaturesByID = newSignaturesByID
+                UIView.performWithoutAnimation {
+                    collectionView.reloadData()
+                }
+                if wasAtBottom {
+                    scrollToBottom(in: collectionView, animated: false)
+                }
+                return
+            }
+
+            let changedRowIDs = Set(newSignaturesByID.compactMap { id, signature in
+                rowSignaturesByID[id] == signature ? nil : id
+            })
+            rowSignaturesByID = newSignaturesByID
+
+            guard !changedRowIDs.isEmpty else { return }
+
+            configureVisibleHostingCells(in: collectionView, changedRowIDs: changedRowIDs)
+
+            guard wasAtBottom else { return }
+            UIView.performWithoutAnimation {
+                collectionView.collectionViewLayout.invalidateLayout()
+                collectionView.layoutIfNeeded()
+            }
+            scrollToBottom(in: collectionView, animated: true)
+            DispatchQueue.main.async { [weak self, weak collectionView] in
+                guard let self, let collectionView, self.isAtBottom.wrappedValue else { return }
+                collectionView.layoutIfNeeded()
+                self.scrollToBottom(in: collectionView, animated: true)
+            }
+        }
+
+        func updateBottomContentInset(_ inset: CGFloat, in collectionView: UICollectionView) {
+            let inset = max(0, inset)
+            guard abs(inset - bottomContentInset) > 0.5 else { return }
+            bottomContentInset = inset
+            collectionView.contentInset.bottom = inset
+            collectionView.verticalScrollIndicatorInsets.bottom = inset
+        }
+
+        func scrollToBottomIfNeeded(token: Int, in collectionView: UICollectionView) {
+            guard lastBottomScrollToken != token else { return }
+            lastBottomScrollToken = token
+            guard !isUserScrolling(collectionView) else { return }
+            scrollToBottom(in: collectionView, animated: false)
+            DispatchQueue.main.async { [weak self, weak collectionView] in
+                guard let self, let collectionView else { return }
+                guard !self.isUserScrolling(collectionView) else { return }
+                self.scrollToBottom(in: collectionView, animated: false)
+            }
+        }
+
+        private func configure(_ cell: ChatTranscriptHostingCell, at indexPath: IndexPath) {
+            guard rows.indices.contains(indexPath.item) else { return }
+            let row = rows[indexPath.item]
+            let allowsAnimations = row.id == ChatScrollTarget.bottomAnchor || row.id == ChatScrollTarget.thinkingRow || animatedRowIDs.contains(row.id)
+            let thinkingEntryGeneration: Int? = {
+                if case let .thinking(isVisible) = row, isVisible {
+                    return self.thinkingEntryGeneration
+                }
+                return nil
+            }()
+            cell.configure(
+                rowID: row.id,
+                renderSignature: row.renderSignature,
+                AnyView(rowContent(row)),
+                disablesAnimations: !allowsAnimations,
+                thinkingEntryGeneration: thinkingEntryGeneration
+            )
+        }
+
+        private func configureVisibleHostingCells(in collectionView: UICollectionView, changedRowIDs: Set<String>) {
+            guard !changedRowIDs.isEmpty else { return }
+            for case let cell as ChatTranscriptHostingCell in collectionView.visibleCells {
+                guard let indexPath = collectionView.indexPath(for: cell), rows.indices.contains(indexPath.item) else { continue }
+                let row = rows[indexPath.item]
+                guard changedRowIDs.contains(row.id) else { continue }
+                if row.id == ChatScrollTarget.bottomAnchor || row.id == ChatScrollTarget.thinkingRow {
+                    configure(cell, at: indexPath)
+                } else {
+                    UIView.performWithoutAnimation {
+                        configure(cell, at: indexPath)
+                    }
+                }
+            }
+        }
+
+        private func applyPendingRowsIfNeeded(in scrollView: UIScrollView) {
+            guard let collectionView = scrollView as? UICollectionView, !isUserScrolling(collectionView), let pendingRows else { return }
+            self.pendingRows = nil
+            applyRows(pendingRows, in: collectionView)
+        }
+
+        private func scrollToBottom(in collectionView: UICollectionView, animated: Bool) {
+            guard !rows.isEmpty else { return }
+            collectionView.layoutIfNeeded()
+            let targetY = max(
+                -collectionView.adjustedContentInset.top,
+                collectionView.contentSize.height - collectionView.bounds.height + collectionView.adjustedContentInset.bottom
+            )
+            if animated {
+                UIView.animate(
+                    withDuration: 0.18,
+                    delay: 0,
+                    options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]
+                ) {
+                    collectionView.contentOffset.y = targetY
+                }
+            } else {
+                collectionView.contentOffset.y = targetY
+            }
+            isAtBottom.wrappedValue = true
+        }
+
+        private func updateBottomState(for scrollView: UIScrollView) {
+            let distanceFromBottom = distanceFromBottom(for: scrollView)
+            if isAtBottom.wrappedValue {
+                guard distanceFromBottom > 140 else { return }
+                isAtBottom.wrappedValue = false
+            } else {
+                guard distanceFromBottom < 24 else { return }
+                isAtBottom.wrappedValue = true
+            }
+        }
+
+        private func distanceFromBottom(for scrollView: UIScrollView) -> CGFloat {
+            max(0, scrollView.contentSize.height - scrollView.bounds.height - scrollView.contentOffset.y + scrollView.adjustedContentInset.bottom)
+        }
+
+        private func isUserScrolling(_ collectionView: UICollectionView) -> Bool {
+            collectionView.isTracking || collectionView.isDragging || collectionView.isDecelerating
+        }
+
+        private static func signaturesByID(for rows: [ChatTranscriptRow]) -> [String: String] {
+            var signatures: [String: String] = [:]
+            signatures.reserveCapacity(rows.count)
+            for row in rows {
+                signatures[row.id] = row.renderSignature
+            }
+            return signatures
+        }
+
+        private static func isThinkingVisible(in rows: [ChatTranscriptRow]) -> Bool {
+            rows.contains { row in
+                if case let .thinking(isVisible) = row {
+                    return isVisible
+                }
+                return false
+            }
+        }
+
+    }
+}
+
+private final class ChatTranscriptHostingCell: UICollectionViewCell {
+    static let reuseIdentifier = "ChatTranscriptHostingCell"
+
+    private var configuredRowID: String?
+    private var configuredRenderSignature: String?
+    private var configuredDisablesAnimations: Bool?
+    private var configuredThinkingEntryGeneration: Int?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(rowID: String, renderSignature: String, _ content: AnyView, disablesAnimations: Bool, thinkingEntryGeneration: Int?) {
+        let shouldRunThinkingEntry = thinkingEntryGeneration != nil && configuredThinkingEntryGeneration != thinkingEntryGeneration
+        guard configuredRowID != rowID || configuredRenderSignature != renderSignature || configuredDisablesAnimations != disablesAnimations || shouldRunThinkingEntry else {
+            return
+        }
+
+        configuredRowID = rowID
+        configuredRenderSignature = renderSignature
+        configuredDisablesAnimations = disablesAnimations
+        configuredThinkingEntryGeneration = thinkingEntryGeneration
+
+        if disablesAnimations {
+            contentConfiguration = UIHostingConfiguration {
+                content
+                    .transaction { transaction in
+                        transaction.animation = nil
+                        transaction.disablesAnimations = true
+                    }
+            }
+            .margins(.all, 0)
+        } else {
+            contentConfiguration = UIHostingConfiguration {
+                content
+            }
+            .margins(.all, 0)
+        }
+
+        if shouldRunThinkingEntry {
+            runThinkingEntryAnimation()
+        } else if thinkingEntryGeneration == nil {
+            contentView.layer.removeAllAnimations()
+            contentView.transform = .identity
+            contentView.alpha = 1
+        }
+    }
+
+    private func runThinkingEntryAnimation() {
+        contentView.layer.removeAllAnimations()
+        contentView.transform = CGAffineTransform(translationX: -96, y: 0).scaledBy(x: 0.97, y: 0.97)
+        contentView.alpha = 0.72
+
+        UIView.animate(
+            withDuration: 0.34,
+            delay: 0.04,
+            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
+        ) { [contentView] in
+            contentView.transform = .identity
+            contentView.alpha = 1
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        configuredRowID = nil
+        configuredRenderSignature = nil
+        configuredDisablesAnimations = nil
+        configuredThinkingEntryGeneration = nil
+        contentView.layer.removeAllAnimations()
+        contentView.transform = .identity
+        contentView.alpha = 1
+        contentConfiguration = nil
+    }
+}
+#else
+private struct ChatTranscriptCollectionView<RowContent: View>: View {
+    let rows: [ChatTranscriptRow]
+    @Binding var isAtBottom: Bool
+    let bottomScrollToken: Int
+    let bottomContentInset: CGFloat
+    let bottomRefreshThreshold: CGFloat
+    let bottomRefreshProgress: CGFloat
+    let showsBottomRefreshIndicator: Bool
+    let bottomRefreshColorIsActive: Bool
+    let bottomRefreshHeight: CGFloat
+    let isRefreshing: Bool
+    let animatedRowIDs: Set<String>
+    let onBottomPullChanged: (CGFloat) -> Void
+    let onBottomPullEnded: (Bool) -> Void
+    let rowContent: (ChatTranscriptRow) -> RowContent
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(rows) { row in
+                    rowContent(row)
+                }
+            }
+        }
+    }
+}
+#endif
+
 private extension View {
     @ViewBuilder
     func chatDefaultScrollAnchors() -> some View {
@@ -2942,6 +3626,19 @@ private extension View {
             self
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            self.defaultScrollAnchor(.bottom)
+        }
+#else
+        self.defaultScrollAnchor(.bottom)
+#endif
+    }
+
+    @ViewBuilder
+    func chatListDefaultScrollAnchors() -> some View {
+#if os(iOS) || targetEnvironment(macCatalyst)
+        if #available(iOS 18.0, *) {
+            self.defaultScrollAnchor(.bottom, for: .initialOffset)
         } else {
             self.defaultScrollAnchor(.bottom)
         }
@@ -2974,19 +3671,6 @@ private extension View {
     }
 
     @ViewBuilder
-    func chatScrollVelocitySpacing(extraSpacing: Binding<CGFloat>, sample: Binding<ChatScrollSpacingSample?>) -> some View {
-#if os(iOS) || targetEnvironment(macCatalyst)
-        if #available(iOS 18.0, *) {
-            self.modifier(ChatScrollVelocitySpacingModifier(extraSpacing: extraSpacing, sample: sample))
-        } else {
-            self
-        }
-#else
-        self
-#endif
-    }
-
-    @ViewBuilder
     func chatBottomReadjustment(token: Int) -> some View {
 #if os(iOS) || targetEnvironment(macCatalyst)
         if #available(iOS 18.0, *) {
@@ -2998,53 +3682,16 @@ private extension View {
         self
 #endif
     }
+
+    func chatTranscriptListRow() -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
 }
 
 #if os(iOS) || targetEnvironment(macCatalyst)
-@available(iOS 18.0, *)
-private struct ChatScrollVelocitySpacingModifier: ViewModifier {
-    @Binding var extraSpacing: CGFloat
-    @Binding var sample: ChatScrollSpacingSample?
-
-    private let activationVelocity: CGFloat = 450
-    private let fullEffectVelocity: CGFloat = 2_200
-    private let maximumExtraSpacing: CGFloat = 12
-
-    func body(content: Content) -> some View {
-        content
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.y
-            } action: { _, offsetY in
-                updateSpacing(offsetY: offsetY)
-            }
-            .onScrollPhaseChange { _, phase in
-                guard !phase.isScrolling else { return }
-                sample = nil
-                withAnimation(.snappy(duration: 0.24, extraBounce: 0.02)) {
-                    extraSpacing = 0
-                }
-            }
-    }
-
-    private func updateSpacing(offsetY: CGFloat) {
-        let now = Date.timeIntervalSinceReferenceDate
-        defer {
-            sample = ChatScrollSpacingSample(offsetY: offsetY, timestamp: now)
-        }
-
-        guard let sample else { return }
-        let elapsed = max(1.0 / 120.0, now - sample.timestamp)
-        let velocity = abs((offsetY - sample.offsetY) / elapsed)
-        let progress = min(1, max(0, (velocity - activationVelocity) / (fullEffectVelocity - activationVelocity)))
-        let target = (progress * maximumExtraSpacing * 2).rounded() / 2
-
-        guard abs(extraSpacing - target) >= 0.5 else { return }
-        withAnimation(.linear(duration: 0.08)) {
-            extraSpacing = target
-        }
-    }
-}
-
 @available(iOS 18.0, *)
 private struct ChatBottomReadjustmentModifier: ViewModifier {
     let token: Int
