@@ -17,6 +17,17 @@ struct OpenCodePendingTranscriptEvent: Sendable {
 }
 
 @MainActor
+final class ChatPresentationStore: ObservableObject {
+    @Published var isShowingAppleIntelligenceInstructionsSheet = false
+    @Published var appleIntelligenceUserInstructions = ""
+    @Published var appleIntelligenceSystemInstructions = ""
+    @Published var isShowingForkSessionSheet = false
+    @Published var pendingForkSessionID: String?
+    @Published var pendingForkMessageID: String?
+    @Published var isShowingDebugProbe = false
+}
+
+@MainActor
 final class AppViewModel: ObservableObject {
     enum SavedServerEditorMode: Equatable {
         case add
@@ -434,9 +445,28 @@ final class AppViewModel: ObservableObject {
     @Published var appleIntelligenceDebugActivePath = ""
     @Published var appleIntelligenceDebugResolvedPath = ""
     @Published var appleIntelligenceDebugToolRootPath = ""
-    @Published var isShowingAppleIntelligenceInstructionsSheet = false
-    @Published var appleIntelligenceUserInstructions = ""
-    @Published var appleIntelligenceSystemInstructions = ""
+    let chatPresentationStore = ChatPresentationStore()
+    var isShowingAppleIntelligenceInstructionsSheet: Bool {
+        get { chatPresentationStore.isShowingAppleIntelligenceInstructionsSheet }
+        set {
+            objectWillChange.send()
+            chatPresentationStore.isShowingAppleIntelligenceInstructionsSheet = newValue
+        }
+    }
+    var appleIntelligenceUserInstructions: String {
+        get { chatPresentationStore.appleIntelligenceUserInstructions }
+        set {
+            objectWillChange.send()
+            chatPresentationStore.appleIntelligenceUserInstructions = newValue
+        }
+    }
+    var appleIntelligenceSystemInstructions: String {
+        get { chatPresentationStore.appleIntelligenceSystemInstructions }
+        set {
+            objectWillChange.send()
+            chatPresentationStore.appleIntelligenceSystemInstructions = newValue
+        }
+    }
     var isLoading: Bool {
         get { connectionStore.isLoading }
         set {
@@ -483,13 +513,37 @@ final class AppViewModel: ObservableObject {
     @Published var isShowingFindPlaceModelSheet = false
     @Published var isShowingFindBugLanguageSheet = false
     @Published var isShowingFindBugModelSheet = false
-    @Published var isShowingForkSessionSheet = false
-    @Published var pendingForkSessionID: String?
-    @Published var pendingForkMessageID: String?
+    var isShowingForkSessionSheet: Bool {
+        get { chatPresentationStore.isShowingForkSessionSheet }
+        set {
+            objectWillChange.send()
+            chatPresentationStore.isShowingForkSessionSheet = newValue
+        }
+    }
+    var pendingForkSessionID: String? {
+        get { chatPresentationStore.pendingForkSessionID }
+        set {
+            objectWillChange.send()
+            chatPresentationStore.pendingForkSessionID = newValue
+        }
+    }
+    var pendingForkMessageID: String? {
+        get { chatPresentationStore.pendingForkMessageID }
+        set {
+            objectWillChange.send()
+            chatPresentationStore.pendingForkMessageID = newValue
+        }
+    }
     var debugLastEventSummary = ""
     @Published var debugProbeLog: [String] = []
     @Published var chatBreadcrumbs: [OpenCodeChatBreadcrumb] = []
-    @Published var isShowingDebugProbe = false
+    var isShowingDebugProbe: Bool {
+        get { chatPresentationStore.isShowingDebugProbe }
+        set {
+            objectWillChange.send()
+            chatPresentationStore.isShowingDebugProbe = newValue
+        }
+    }
     @Published var isRunningDebugProbe = false
     @Published var debugLastControlSummary = ""
     let modelConfigurationStore = ModelConfigurationStore()
@@ -617,9 +671,11 @@ final class AppViewModel: ObservableObject {
         set {
             objectWillChange.send()
             liveActivityStore.activeSessionIDs = newValue
+            updateEventInterestSnapshot()
         }
         _modify {
             objectWillChange.send()
+            defer { updateEventInterestSnapshot() }
             yield &liveActivityStore.activeSessionIDs
         }
     }
@@ -628,6 +684,7 @@ final class AppViewModel: ObservableObject {
         set {
             objectWillChange.send()
             liveActivityStore.activeChatSessionID = newValue
+            updateEventInterestSnapshot()
         }
     }
     @Published var usageMeter = OpenClientUsageMeter.empty
@@ -641,10 +698,13 @@ final class AppViewModel: ObservableObject {
     let purchaseManager = OpenClientPurchaseManager()
 
     let eventManager = OpenCodeEventManager()
+    let eventInterestSnapshot = OpenCodeEventInterestSnapshot()
     var eventStreamRestartTask: Task<Void, Never>?
     var foregroundChatCatchUpTask: Task<Void, Never>?
     var lastForegroundChatCatchUpScheduledAt = Date.distantPast
     var reloadTask: Task<Void, Never>?
+    var vcsEventRefreshTask: Task<Void, Never>?
+    var widgetSnapshotPublishTask: Task<Void, Never>?
     var connectionAttemptTask: Task<Void, Never>?
     var appleIntelligenceResponseTask: Task<Void, Never>?
     var activeAppleIntelligenceWorkspaceURL: URL?
@@ -801,6 +861,7 @@ final class AppViewModel: ObservableObject {
         set {
             objectWillChange.send()
             directoryStore.selectedSession = newValue
+            updateEventInterestSnapshot()
         }
     }
 

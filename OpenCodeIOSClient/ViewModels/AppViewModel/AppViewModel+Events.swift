@@ -1,5 +1,58 @@
 import Foundation
 
+final class OpenCodeEventInterestSnapshot: @unchecked Sendable {
+    private struct Snapshot {
+        var selectedSessionID: String?
+        var activeChatSessionID: String?
+    }
+
+    private let lock = NSLock()
+    private var snapshot = Snapshot()
+
+    func update(selectedSessionID: String?, activeChatSessionID: String?) {
+        lock.lock()
+        snapshot = Snapshot(selectedSessionID: selectedSessionID, activeChatSessionID: activeChatSessionID)
+        lock.unlock()
+    }
+
+    func shouldDeliverToMainActor(_ managed: OpenCodeManagedEvent) -> Bool {
+        guard EventSyncCoordinator.isLiveActivityMessageEventType(managed.envelope.type) else {
+            return true
+        }
+
+        guard let sessionID = Self.sessionID(for: managed.typed) else {
+            return true
+        }
+
+        lock.lock()
+        let current = snapshot
+        lock.unlock()
+
+        return sessionID == current.activeChatSessionID || sessionID == current.selectedSessionID
+    }
+
+    private static func sessionID(for event: OpenCodeTypedEvent) -> String? {
+        switch event {
+        case let .sessionCreated(session), let .sessionUpdated(session), let .sessionDeleted(session):
+            return session.id
+        case let .sessionStatus(sessionID, _), let .sessionIdle(sessionID), let .sessionDiff(sessionID), let .todoUpdated(sessionID, _), let .messageRemoved(sessionID, _), let .messagePartDelta(sessionID, _, _, _, _), let .permissionReplied(sessionID, _, _), let .questionReplied(sessionID, _), let .questionRejected(sessionID, _):
+            return sessionID
+        case let .sessionError(sessionID, _):
+            return sessionID
+        case let .messageUpdated(info):
+            return info.sessionID
+        case let .messagePartUpdated(part):
+            return part.sessionID
+        case let .permissionAsked(permission):
+            return permission.sessionID
+        case let .questionAsked(question):
+            return question.sessionID
+        default:
+            return nil
+        }
+    }
+}
+
 extension AppViewModel {
     private static let shortStreamDeltaCoalescingInterval: Duration = .milliseconds(140)
     private static let mediumStreamDeltaCoalescingInterval: Duration = .milliseconds(220)
@@ -17,6 +70,13 @@ extension AppViewModel {
         if !isFocused {
             flushBufferedTranscript(reason: "composer blur")
         }
+    }
+
+    func updateEventInterestSnapshot() {
+        eventInterestSnapshot.update(
+            selectedSessionID: selectedSession?.id,
+            activeChatSessionID: activeChatSessionID
+        )
     }
 
     func flushBufferedTranscript(reason: String) {
@@ -50,6 +110,7 @@ extension AppViewModel {
     func startEventStream() {
         stopEventStream()
         let client = self.client
+        updateEventInterestSnapshot()
         lastStreamEventAt = .now
         debugLastEventSummary = "stream starting"
         appendDebugLog("stream start global")
@@ -68,6 +129,7 @@ extension AppViewModel {
                 }
             },
             onEvent: { [weak self] managed in
+                guard self?.eventInterestSnapshot.shouldDeliverToMainActor(managed) != false else { return }
                 await MainActor.run {
                     guard let self else { return }
                     if self.shouldLogEventDetails(for: managed.envelope.type) {
@@ -241,6 +303,9 @@ extension AppViewModel {
             appendDebugLog("session idle")
             markChatBreadcrumb("session idle", sessionID: eventSessionID)
             stopFallbackRefresh()
+            if activeLiveActivitySessionIDs.contains(eventSessionID ?? "") {
+                scheduleLiveActivityPreviewRefreshIfNeeded(for: eventSessionID)
+            }
             if let currentSelectedSession {
                 refreshSessionPreview(for: currentSelectedSession.id, messages: messages)
             }
@@ -288,7 +353,7 @@ extension AppViewModel {
             immediate: Self.shouldRefreshLiveActivityImmediately(after: result, event: managed.typed)
         )
         if shouldPublishWidgetSnapshots(after: result) {
-            publishWidgetSnapshots()
+            scheduleWidgetSnapshotPublication()
         }
     }
 

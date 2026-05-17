@@ -7,7 +7,8 @@ struct GitDiffView: View {
         GitDiffContent(
             hasGitProject: viewModel.hasGitProject,
             snapshot: viewModel.projectFilesSnapshot,
-            relativeGitPath: { viewModel.relativeGitPath($0) }
+            relativeGitPath: { viewModel.relativeGitPath($0) },
+            onLoadDiff: { mode in await viewModel.loadVCSDiff(mode: mode) }
         )
     }
 }
@@ -16,6 +17,7 @@ private struct GitDiffContent: View {
     let hasGitProject: Bool
     let snapshot: AppViewModel.ProjectFilesSnapshot
     let relativeGitPath: (String) -> String
+    let onLoadDiff: (OpenCodeVCSDiffMode) async -> Void
 
     private var diff: OpenCodeVCSFileDiff? {
         snapshot.selectedFileDiff
@@ -47,6 +49,15 @@ private struct GitDiffContent: View {
                 ContentUnavailableView("Select a Changed File", systemImage: "doc.text")
             }
         }
+        .task(id: diffLoadTaskID) {
+            guard snapshot.selectedFilePath != nil || snapshot.selectedVCSFile != nil else { return }
+            await onLoadDiff(snapshot.selectedMode)
+        }
+    }
+
+    private var diffLoadTaskID: String {
+        [snapshot.effectiveDirectory ?? "", snapshot.selectedMode.rawValue, snapshot.selectedFilePath ?? snapshot.selectedVCSFile ?? ""]
+            .joined(separator: "|")
     }
 
     private func fileTitle(for path: String) -> String {

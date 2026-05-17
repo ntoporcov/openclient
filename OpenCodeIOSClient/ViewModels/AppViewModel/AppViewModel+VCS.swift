@@ -181,6 +181,10 @@ extension AppViewModel {
             selectedSession = nil
             projectFilesStore.selectVCSFile(path)
         }
+
+        Task {
+            await loadVCSDiff(mode: selectedVCSDiffMode)
+        }
     }
 
     func selectProjectFile(_ node: OpenCodeFileNode) {
@@ -326,8 +330,10 @@ extension AppViewModel {
             let loadedStatus = try await status
             applyLoadedVCSStatus(loadedStatus)
 
-            let loadedDiff = try await client.getVCSDiff(mode: selectedVCSDiffMode, directory: directory)
-            applyLoadedVCSDiff(loadedDiff, mode: selectedVCSDiffMode)
+            if projectFilesStore.vcsDiffsByMode[selectedVCSDiffMode] != nil {
+                let loadedDiff = try await client.getVCSDiff(mode: selectedVCSDiffMode, directory: directory)
+                applyLoadedVCSDiff(loadedDiff, mode: selectedVCSDiffMode)
+            }
             vcsErrorMessage = nil
         } catch {
             vcsErrorMessage = error.localizedDescription
@@ -357,8 +363,14 @@ extension AppViewModel {
 
     func refreshVCSFromEvent() {
         guard hasGitProject else { return }
-        Task {
-            await reloadGitViewData(force: true)
+
+        vcsEventRefreshTask?.cancel()
+        vcsEventRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard let self, !Task.isCancelled, self.hasGitProject else { return }
+            guard self.selectedProjectContentTab == .git else { return }
+            await self.reloadGitViewData(force: true)
+            self.vcsEventRefreshTask = nil
         }
     }
 

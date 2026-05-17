@@ -241,7 +241,7 @@ struct OpenCodeMessageEnvelope: Codable, Identifiable, Hashable, Sendable {
 
         parts.append(contentsOf: attachments.map { attachment in
             OpenCodePart(
-                id: OpenCodeIdentifier.part(),
+                id: attachment.id,
                 messageID: messageID,
                 sessionID: sessionID,
                 type: "file",

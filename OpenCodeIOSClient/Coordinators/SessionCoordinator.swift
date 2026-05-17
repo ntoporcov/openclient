@@ -141,9 +141,9 @@ final class SessionCoordinator {
     }
 
     func reloadDirectory(client: OpenCodeAPIClient, directory: String?) async throws -> DirectoryReloadResult {
-        let bootstrap = try await OpenCodeBootstrap.bootstrapDirectory(client: client, directory: directory)
-        let statuses = try await client.listSessionStatuses(directory: directory)
-        return DirectoryReloadResult(bootstrap: bootstrap, statuses: statuses)
+        async let bootstrap = OpenCodeBootstrap.bootstrapDirectory(client: client, directory: directory)
+        async let statuses = client.listSessionStatuses(directory: directory)
+        return try await DirectoryReloadResult(bootstrap: bootstrap, statuses: statuses)
     }
 
     func selectionAfterDirectoryReload(

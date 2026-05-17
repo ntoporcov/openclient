@@ -45,6 +45,17 @@ private enum OpenCodeActionResult {
     case failure
 }
 
+private struct WorkspaceSessionLoadRequest: Sendable {
+    let directory: String
+    let limit: Int
+    let loadingState: OpenCodeWorkspaceSessionState
+}
+
+private enum WorkspaceSessionLoadResult: Sendable {
+    case success(directory: String, sessions: [OpenCodeSession], estimatedTotal: Int, limit: Int)
+    case failure(directory: String, loadingState: OpenCodeWorkspaceSessionState)
+}
+
 extension AppViewModel {
     struct ChatSessionHeaderSnapshot {
         let session: OpenCodeSession
@@ -155,7 +166,7 @@ extension AppViewModel {
 
         sessionStatuses = reload.statuses
 
-        if hasGitProject {
+        if hasGitProject, selectedProjectContentTab == .git {
             await reloadGitViewData(force: true)
         }
 
@@ -182,8 +193,42 @@ extension AppViewModel {
         let directories = workspaceDirectories()
         guard !directories.isEmpty else { return }
 
-        for directory in directories {
-            await loadWorkspaceSessions(directory: directory, client: client)
+        let requests = directories.compactMap { directory -> WorkspaceSessionLoadRequest? in
+            let state = sessionListStore.workspaceSessionState(for: directory)
+            if state.isLoading { return nil }
+            if !state.sessions.isEmpty, state.rootSessions.count >= state.limit { return nil }
+
+            guard let loadingState = sessionListStore.markWorkspaceSessionsLoading(for: directory) else { return nil }
+            return WorkspaceSessionLoadRequest(directory: directory, limit: state.limit, loadingState: loadingState)
+        }
+        guard !requests.isEmpty else { return }
+
+        let client = client
+        await withTaskGroup(of: WorkspaceSessionLoadResult.self) { group in
+            for request in requests {
+                group.addTask {
+                    do {
+                        let requestLimit = max(request.limit, 5)
+                        let loaded = try await client.listSessions(directory: request.directory, roots: true, limit: requestLimit)
+                            .filter(\.isRootSession)
+                        let estimatedTotal = loaded.count < requestLimit ? loaded.count : loaded.count + 1
+                        return .success(directory: request.directory, sessions: loaded, estimatedTotal: estimatedTotal, limit: request.limit)
+                    } catch {
+                        return .failure(directory: request.directory, loadingState: request.loadingState)
+                    }
+                }
+            }
+
+            for await result in group {
+                switch result {
+                case let .success(directory, sessions, estimatedTotal, limit):
+                    withAnimation(opencodeSelectionAnimation) {
+                        sessionListStore.finishWorkspaceSessionsLoading(sessions, estimatedTotal: estimatedTotal, limit: limit, directory: directory)
+                    }
+                case let .failure(directory, loadingState):
+                    sessionListStore.failWorkspaceSessionsLoading(previousState: loadingState, directory: directory)
+                }
+            }
         }
     }
 

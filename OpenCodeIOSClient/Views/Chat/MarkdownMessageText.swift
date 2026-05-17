@@ -105,7 +105,8 @@ struct MarkdownMessageText: View {
             text: text,
             isUser: isUser,
             style: style,
-            lineSpacing: textLineSpacing
+            lineSpacing: textLineSpacing,
+            animatesTextReveal: shouldUseNativeStreamingTextReveal
         )
 #else
         if shouldUseStreamingTextFade {
@@ -128,6 +129,10 @@ struct MarkdownMessageText: View {
 
     private var shouldUseStreamingTextFade: Bool {
         animatesStreamingText && !isUser
+    }
+
+    private var shouldUseNativeStreamingTextReveal: Bool {
+        animatesStreamingText && !isUser && text.utf16.count <= 1_200
     }
 
     private func styledText(_ text: Text) -> some View {
@@ -781,6 +786,7 @@ private struct NativeStreamingTextLabel: UIViewRepresentable {
     let isUser: Bool
     let style: MarkdownMessageText.Style
     let lineSpacing: CGFloat
+    let animatesTextReveal: Bool
 
     func makeUIView(context: Context) -> StreamingTextUILabel {
         let label = StreamingTextUILabel()
@@ -798,7 +804,8 @@ private struct NativeStreamingTextLabel: UIViewRepresentable {
             text: text,
             font: uiFont,
             textColor: uiTextColor,
-            lineSpacing: lineSpacing
+            lineSpacing: lineSpacing,
+            animatesTextReveal: animatesTextReveal
         )
     }
 
@@ -834,6 +841,7 @@ private final class StreamingTextUILabel: UILabel {
     private var configuredFont: UIFont?
     private var configuredTextColor: UIColor?
     private var configuredLineSpacing: CGFloat = 0
+    private var configuredAnimatesTextReveal = false
     private var displayLink: CADisplayLink?
     private var displayedCharacterCount: Double = 0
     private var lastFrameTime = Date.timeIntervalSinceReferenceDate
@@ -841,24 +849,35 @@ private final class StreamingTextUILabel: UILabel {
     private let revealCharactersPerSecond: Double = 96
     private let fadeWindowCharacterCount = 18
 
-    func configure(text: String, font: UIFont, textColor: UIColor, lineSpacing: CGFloat) {
-        guard configuredText != text || configuredFont != font || configuredTextColor != textColor || configuredLineSpacing != lineSpacing else {
+    func configure(text: String, font: UIFont, textColor: UIColor, lineSpacing: CGFloat, animatesTextReveal: Bool) {
+        guard configuredText != text || configuredFont != font || configuredTextColor != textColor || configuredLineSpacing != lineSpacing || configuredAnimatesTextReveal != animatesTextReveal else {
             return
         }
 
-        let isAppend = text.hasPrefix(configuredText)
-        let shouldReveal = isAppend && text.count > configuredText.count
+        let previousCharacterCount: Int
+        let newCharacterCount: Int
+        let shouldReveal: Bool
+        if animatesTextReveal {
+            previousCharacterCount = configuredText.count
+            newCharacterCount = text.count
+            shouldReveal = text.hasPrefix(configuredText) && newCharacterCount > previousCharacterCount
+        } else {
+            previousCharacterCount = 0
+            newCharacterCount = 0
+            shouldReveal = false
+        }
         configuredText = text
         configuredFont = font
         configuredTextColor = textColor
         configuredLineSpacing = lineSpacing
+        configuredAnimatesTextReveal = animatesTextReveal
 
         if shouldReveal {
-            displayedCharacterCount = min(displayedCharacterCount, Double(text.count))
+            displayedCharacterCount = min(displayedCharacterCount, Double(newCharacterCount))
             renderDisplayedText()
             startDisplayLink()
         } else {
-            displayedCharacterCount = Double(text.count)
+            displayedCharacterCount = animatesTextReveal ? Double(newCharacterCount) : .greatestFiniteMagnitude
             renderDisplayedText()
             stopDisplayLink()
         }
@@ -872,30 +891,51 @@ private final class StreamingTextUILabel: UILabel {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = configuredLineSpacing
         paragraph.lineBreakMode = .byWordWrapping
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: configuredFont ?? UIFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: configuredTextColor ?? UIColor.label,
+            .paragraphStyle: paragraph
+        ]
 
-        let characters = Array(configuredText)
-        let solidCount = min(characters.count, max(0, Int(floor(displayedCharacterCount))))
+        guard configuredAnimatesTextReveal else {
+            attributedText = NSAttributedString(string: configuredText, attributes: attributes)
+            return
+        }
+
+        let characterCount = configuredText.count
+        let solidCount = min(characterCount, max(0, Int(floor(displayedCharacterCount))))
+        guard solidCount < characterCount else {
+            attributedText = NSAttributedString(string: configuredText, attributes: attributes)
+            return
+        }
+
+        let solidEnd = configuredText.index(
+            configuredText.startIndex,
+            offsetBy: solidCount,
+            limitedBy: configuredText.endIndex
+        ) ?? configuredText.endIndex
         let attributed = NSMutableAttributedString(
-            string: String(characters.prefix(solidCount)),
-            attributes: [
-                .font: configuredFont ?? UIFont.preferredFont(forTextStyle: .body),
-                .foregroundColor: configuredTextColor ?? UIColor.label,
-                .paragraphStyle: paragraph
-            ]
+            string: String(configuredText[..<solidEnd]),
+            attributes: attributes
         )
 
-        let fadeEnd = min(characters.count, solidCount + fadeWindowCharacterCount)
+        let fadeEnd = min(characterCount, solidCount + fadeWindowCharacterCount)
         if solidCount < fadeEnd {
-            for index in solidCount ..< fadeEnd {
-                let opacity = opacity(forCharacterAt: index)
+            var characterIndex = solidCount
+            var textIndex = solidEnd
+            while characterIndex < fadeEnd, textIndex < configuredText.endIndex {
+                let nextIndex = configuredText.index(after: textIndex)
+                let opacity = opacity(forCharacterAt: characterIndex)
                 attributed.append(NSAttributedString(
-                    string: String(characters[index]),
+                    string: String(configuredText[textIndex..<nextIndex]),
                     attributes: [
                         .font: configuredFont ?? UIFont.preferredFont(forTextStyle: .body),
                         .foregroundColor: (configuredTextColor ?? UIColor.label).withAlphaComponent(opacity),
                         .paragraphStyle: paragraph
                     ]
                 ))
+                characterIndex += 1
+                textIndex = nextIndex
             }
         }
 

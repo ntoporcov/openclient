@@ -277,7 +277,7 @@ extension AppViewModel {
     func setSessionPreview(_ preview: SessionPreview, for sessionID: String) {
         guard sessionListStore.setPreview(preview, for: sessionID) else { return }
         persistSessionPreviews()
-        publishWidgetSnapshots()
+        scheduleWidgetSnapshotPublication()
     }
 
     func removeSessionPreview(for sessionID: String) {

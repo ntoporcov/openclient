@@ -120,7 +120,7 @@ struct MessageBubble: View {
     }
 
     private var messageContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
             ForEach(displayEntries, id: \.id) { entry in
                 switch entry {
                 case let .part(indexed):

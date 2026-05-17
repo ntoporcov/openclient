@@ -395,13 +395,13 @@ extension AppViewModel {
     func loadComposerOptions() async {
         do {
             async let agents = client.listAgents(directory: effectiveSelectedDirectory)
-            async let providers = client.listProviders(directory: effectiveSelectedDirectory)
-            async let defaults = client.providerDefaults(directory: effectiveSelectedDirectory)
+            async let providerConfiguration = client.providerConfiguration(directory: effectiveSelectedDirectory)
+            let loadedProviderConfiguration = try await providerConfiguration
             objectWillChange.send()
             modelConfigurationStore.applyComposerOptions(
                 agents: try await agents,
-                providers: try await providers,
-                defaults: try await defaults
+                providers: loadedProviderConfiguration.providers,
+                defaults: loadedProviderConfiguration.default ?? [:]
             )
             loadNewSessionDefaults()
             loadFunAndGamesPreferences()

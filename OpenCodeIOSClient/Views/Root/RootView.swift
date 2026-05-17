@@ -78,8 +78,8 @@ struct RootView: View {
             } else if viewModel.selectedProjectContentTab == .mcp {
                 ContentUnavailableView("MCP Servers", systemImage: "server.rack", description: Text("Toggle servers from the MCP tab."))
             } else if let session = viewModel.selectedSession, viewModel.isUsingAppleIntelligence == false {
-                ChatView(viewModel: viewModel, sessionID: session.id)
-                    .id(session.id)
+                ChatRouteView(viewModel: viewModel, sessionID: session.id)
+                    .equatable()
             } else {
                 ContentUnavailableView("Select a Session", systemImage: "bubble.left.and.bubble.right")
             }
@@ -124,6 +124,27 @@ struct RootView: View {
 
         columnVisibility = .all
         preferredCompactColumn = .sidebar
+    }
+}
+
+private struct ChatRouteView: View, Equatable {
+    let viewModel: AppViewModel
+    let viewModelID: ObjectIdentifier
+    let sessionID: String
+
+    init(viewModel: AppViewModel, sessionID: String) {
+        self.viewModel = viewModel
+        viewModelID = ObjectIdentifier(viewModel)
+        self.sessionID = sessionID
+    }
+
+    nonisolated static func == (lhs: ChatRouteView, rhs: ChatRouteView) -> Bool {
+        lhs.viewModelID == rhs.viewModelID && lhs.sessionID == rhs.sessionID
+    }
+
+    var body: some View {
+        ChatView(viewModel: viewModel, sessionID: sessionID)
+            .id(sessionID)
     }
 }
 

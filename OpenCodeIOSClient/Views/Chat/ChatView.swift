@@ -11,11 +11,27 @@ private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
+
+    var chatRenderSampleHash: Int {
+        if utf16.count <= 512 {
+            return hashValue
+        }
+
+        return "\(prefix(160))\u{1f}\(suffix(160))".hashValue
+    }
+
+    var hasNonWhitespace: Bool {
+        contains { !$0.isWhitespace }
+    }
 }
 
 private extension OpenCodeMessageEnvelope {
     var isAssistantMessage: Bool {
         (info.role ?? "").lowercased() == "assistant"
+    }
+
+    var isUnfinishedAssistantMessage: Bool {
+        isAssistantMessage && info.time?.completed == nil
     }
 
     func containsText(_ marker: String) -> Bool {
@@ -73,8 +89,9 @@ enum OpenCodeLargeMessageChunker {
     static func chunkableText(in message: OpenCodeMessageEnvelope) -> String? {
         guard (message.info.role ?? "").lowercased() == "assistant",
               let part = chunkTextPart(in: message),
-              let text = part.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-              text.count >= minimumCharacterCount else {
+              let text = part.text,
+              text.utf16.count >= minimumCharacterCount,
+              text.hasNonWhitespace else {
             return nil
         }
 
@@ -83,14 +100,14 @@ enum OpenCodeLargeMessageChunker {
 
     static func chunkTextPart(in message: OpenCodeMessageEnvelope) -> OpenCodePart? {
         let textParts = message.parts.filter { part in
-            part.type == "text" && part.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            part.type == "text" && part.text?.hasNonWhitespace == true
         }
         guard textParts.count == 1 else { return nil }
 
         let hasRenderableNonTextPart = message.parts.contains { part in
             guard part.type != "text" else { return false }
 
-            if part.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            if part.text?.hasNonWhitespace == true {
                 return true
             }
 
@@ -746,7 +763,7 @@ private extension ChatDisplayItem {
         case let .message(message):
             return message.renderSignature
         case let .largeMessageChunk(item):
-            return [item.id, item.chunk.text.count.description, item.chunk.text.hashValue.description, item.chunk.isTail.description, item.message.renderSignature].joined(separator: ":")
+            return item.renderSignature
         case let .compaction(item):
             return [item.id, item.boundaryMessage.renderSignature, item.summaryMessage?.renderSignature ?? "nil"].joined(separator: ":")
         case let .findPlaceReveal(city):
@@ -760,6 +777,43 @@ private extension ChatDisplayItem {
 private extension OpenCodeMessageEnvelope {
     var renderSignature: String {
         "\(id)#\(hashValue)"
+    }
+
+    var metadataRenderSignature: String {
+        let completed = info.time?.completed.map { String(describing: $0) } ?? "streaming"
+        let providerID = info.model?.providerID ?? info.providerID ?? ""
+        let modelID = info.model?.modelID ?? info.modelID ?? ""
+        let variant = info.model?.variant ?? ""
+        let errorName = info.error?.name ?? ""
+        let errorMessage = info.error?.displayMessage ?? ""
+
+        return [
+            info.id,
+            info.role ?? "",
+            info.sessionID ?? "",
+            completed,
+            info.agent ?? "",
+            providerID,
+            modelID,
+            variant,
+            errorName,
+            errorMessage
+        ]
+        .joined(separator: "\u{1f}")
+    }
+}
+
+private extension LargeMessageChunkDisplayItem {
+    var renderSignature: String {
+        let shouldSampleText = chunk.isTail || !message.isUnfinishedAssistantMessage
+        return [
+            id,
+            message.metadataRenderSignature,
+            chunk.isTail.description,
+            chunk.text.utf16.count.description,
+            shouldSampleText ? chunk.text.chatRenderSampleHash.description : "frozen"
+        ]
+        .joined(separator: ":")
     }
 }
 
@@ -1341,8 +1395,36 @@ private struct EquatableMessageComposerHost: View, Equatable {
 struct ChatView: View {
     @Environment(\.scenePhase) private var scenePhase
 
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
+    @ObservedObject private var connectionStore: ConnectionStore
+    @ObservedObject private var projectStore: ProjectStore
+    @ObservedObject private var directoryStore: DirectoryStore
+    @ObservedObject private var sessionListStore: SessionListStore
+    @ObservedObject private var chatStore: ChatStore
+    @ObservedObject private var sessionInteractionStore: SessionInteractionStore
+    @ObservedObject private var composerStore: ComposerStore
+    @ObservedObject private var modelConfigurationStore: ModelConfigurationStore
+    @ObservedObject private var mcpStore: MCPStore
+    @ObservedObject private var funAndGamesStore: FunAndGamesStore
+    @ObservedObject private var chatPresentationStore: ChatPresentationStore
     let sessionID: String
+
+    @MainActor
+    init(viewModel: AppViewModel, sessionID: String) {
+        self.viewModel = viewModel
+        _connectionStore = ObservedObject(wrappedValue: viewModel.connectionStore)
+        _projectStore = ObservedObject(wrappedValue: viewModel.projectStore)
+        _directoryStore = ObservedObject(wrappedValue: viewModel.directoryStore)
+        _sessionListStore = ObservedObject(wrappedValue: viewModel.sessionListStore)
+        _chatStore = ObservedObject(wrappedValue: viewModel.chatStore)
+        _sessionInteractionStore = ObservedObject(wrappedValue: viewModel.sessionInteractionStore)
+        _composerStore = ObservedObject(wrappedValue: viewModel.composerStore)
+        _modelConfigurationStore = ObservedObject(wrappedValue: viewModel.modelConfigurationStore)
+        _mcpStore = ObservedObject(wrappedValue: viewModel.mcpStore)
+        _funAndGamesStore = ObservedObject(wrappedValue: viewModel.funAndGamesStore)
+        _chatPresentationStore = ObservedObject(wrappedValue: viewModel.chatPresentationStore)
+        self.sessionID = sessionID
+    }
 
     @Namespace private var toolbarGlassNamespace
     @State private var copiedDebugLog = false
@@ -1396,7 +1478,12 @@ struct ChatView: View {
     private let eagerRefreshMinimumInterval: TimeInterval = 4
 
     private var composerOverlaySnapshot: AppViewModel.ChatComposerOverlaySnapshot {
-        viewModel.chatComposerOverlaySnapshot(forSessionID: sessionID)
+        AppViewModel.ChatComposerOverlaySnapshot(
+            todos: sessionInteractionStore.todos,
+            attachments: composerStore.draftAttachments,
+            permissions: sessionInteractionStore.permissions(forSessionID: sessionID),
+            questions: sessionInteractionStore.questions(forSessionID: sessionID)
+        )
     }
 
     private var todoIDs: String {
@@ -1412,11 +1499,11 @@ struct ChatView: View {
     }
 
     private var liveSession: OpenCodeSession {
-        if let selected = viewModel.selectedSession, selected.id == sessionID {
+        if let selected = directoryStore.selectedSession, selected.id == sessionID {
             return selected
         }
 
-        return viewModel.session(matching: sessionID) ?? OpenCodeSession(
+        return session(matching: sessionID) ?? OpenCodeSession(
             id: sessionID,
             title: "Session",
             workspaceID: nil,
@@ -1427,7 +1514,7 @@ struct ChatView: View {
     }
 
     private var isSessionBusy: Bool {
-        viewModel.sessionStatuses[liveSession.id] == "busy"
+        directoryStore.sessionStatuses[liveSession.id] == "busy"
     }
 
     private var isComposerBusy: Bool {
@@ -1439,11 +1526,145 @@ struct ChatView: View {
     }
 
     private var chatHeaderSnapshot: AppViewModel.ChatSessionHeaderSnapshot {
-        viewModel.chatSessionHeaderSnapshot(for: liveSession)
+        let parent = parentSession(for: liveSession)
+        return AppViewModel.ChatSessionHeaderSnapshot(
+            session: liveSession,
+            isChildSession: liveSession.parentID != nil,
+            parentSession: parent,
+            parentTitle: parent?.title ?? "Session",
+            childTitle: childSessionTitle(for: liveSession)
+        )
     }
 
     private var isFindPlaceSession: Bool {
-        viewModel.findPlaceGame(for: sessionID) != nil
+        findPlaceGame(for: sessionID) != nil
+    }
+
+    private var currentProjectPreferenceScopeKey: String {
+        if connectionStore.backendMode == .appleIntelligence {
+            return [
+                "apple-intelligence",
+                viewModel.activeAppleIntelligenceWorkspaceID ?? "global",
+            ].joined(separator: "|")
+        }
+
+        let directory: String?
+        if let selectedDirectory = projectStore.selectedDirectory, !selectedDirectory.isEmpty {
+            directory = selectedDirectory
+        } else if let currentProject = projectStore.currentProject, currentProject.id != "global" {
+            directory = currentProject.worktree
+        } else {
+            directory = nil
+        }
+
+        return [
+            "server",
+            viewModel.config.recentServerID,
+            directory ?? "global",
+        ].joined(separator: "|")
+    }
+
+    private func session(matching sessionID: String) -> OpenCodeSession? {
+        sessionListStore.session(
+            matching: sessionID,
+            visibleSessions: directoryStore.sessions,
+            selectedSession: directoryStore.selectedSession
+        )
+    }
+
+    private func parentSession(for session: OpenCodeSession) -> OpenCodeSession? {
+        guard let parentID = session.parentID else { return nil }
+        return self.session(matching: parentID)
+    }
+
+    private func childSessions(for sessionID: String) -> [OpenCodeSession] {
+        sessionListStore.childSessions(for: sessionID, visibleSessions: directoryStore.sessions)
+    }
+
+    private func taskAgentDisplayName(from raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else { return nil }
+        return String(first).uppercased() + trimmed.dropFirst()
+    }
+
+    private func resolveTaskSessionID(from part: OpenCodePart, currentSessionID: String) -> String? {
+        if let sessionID = part.state?.metadata?.sessionId, !sessionID.isEmpty {
+            return sessionID
+        }
+
+        let description = part.state?.input?.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let agentName = taskAgentDisplayName(from: part.state?.input?.subagentType)?.lowercased()
+
+        return childSessions(for: currentSessionID)
+            .filter { child in
+                guard let title = child.title?.lowercased() else { return description == nil && agentName == nil }
+                let descriptionMatches = description.map { title.hasPrefix($0.lowercased()) } ?? true
+                let agentMatches = agentName.map { title.contains("@\($0)") || title.contains($0) } ?? true
+                return descriptionMatches && agentMatches
+            }
+            .sorted {
+                let lhs = $0.title ?? ""
+                let rhs = $1.title ?? ""
+                return lhs < rhs
+            }
+            .first?
+            .id
+    }
+
+    private func latestTaskDescription(for session: OpenCodeSession) -> String? {
+        guard let parentID = session.parentID else { return nil }
+
+        let parentMessages = chatStore.toolMessageDetails.values
+            .filter { $0.info.sessionID == parentID }
+            .sorted { $0.info.id < $1.info.id }
+
+        for message in parentMessages.reversed() {
+            for part in message.parts.reversed() where part.tool == "task" {
+                if resolveTaskSessionID(from: part, currentSessionID: parentID) == session.id,
+                   let description = part.state?.input?.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !description.isEmpty {
+                    return description
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func childSessionTitle(for session: OpenCodeSession) -> String {
+        if let description = latestTaskDescription(for: session), !description.isEmpty {
+            return description
+        }
+
+        if let title = session.title, !title.isEmpty {
+            return title.replacingOccurrences(of: #"\s+\(@[^)]+ subagent\)"#, with: "", options: .regularExpression)
+        }
+
+        return "New Session"
+    }
+
+    private func commands(canFork: Bool) -> [OpenCodeCommand] {
+        var result = directoryStore.commands
+        if directoryStore.selectedSession != nil, !result.contains(where: { $0.name == "compact" }) {
+            result.append(AppViewModel.compactClientCommand)
+        }
+        if directoryStore.selectedSession != nil, canFork, !result.contains(where: { $0.name == "fork" }) {
+            result.append(AppViewModel.forkClientCommand)
+        }
+        return result
+    }
+
+    private func findPlaceGame(for sessionID: String) -> FindPlaceGameSession? {
+        funAndGamesStore.findPlaceSessionsByID[sessionID] ?? viewModel.findPlaceGame(for: sessionID)
+    }
+
+    private func findBugGame(for sessionID: String) -> FindBugGameSession? {
+        funAndGamesStore.findBugSessionsByID[sessionID] ?? viewModel.findBugGame(for: sessionID)
+    }
+
+    private func isFunAndGamesSession(_ sessionID: String) -> Bool {
+        findPlaceGame(for: sessionID) != nil || findBugGame(for: sessionID) != nil
     }
 
     private var chatItemChangeAnimation: Animation? {
@@ -1475,6 +1696,7 @@ struct ChatView: View {
                     bottomRefreshColorIsActive: bottomRefreshRenderSnapshot.colorIsActive,
                     bottomRefreshHeight: messageBottomPadding + bottomRefreshIndicatorHeight * bottomRefreshRenderSnapshot.progress,
                     isRefreshing: isRefreshingChatData,
+                    isStreaming: isSessionBusy,
                     animatedRowIDs: animatedTranscriptRowIDs(for: displaySnapshot),
                     onBottomPullChanged: { distance in
                         bottomPullDistance = distance
@@ -1506,7 +1728,7 @@ struct ChatView: View {
                 .accessibilityIdentifier("chat.scroll")
                 .onAppear {
                     viewModel.activeChatSessionID = sessionID
-                    hasCompletedInitialHydrationSnap = !viewModel.messages.isEmpty
+                    hasCompletedInitialHydrationSnap = !chatStore.messages.isEmpty
                     chatViewportHeight = geometry.size.height
                     updateDelayedLoadingIndicator()
                     requestBottomReadjustment()
@@ -1514,7 +1736,7 @@ struct ChatView: View {
                 .onChange(of: geometry.size.height) { _, height in
                     chatViewportHeight = height
                 }
-                .onChange(of: viewModel.messages.count) { _, count in
+                .onChange(of: chatStore.messages.count) { _, count in
                     visibleMessageCount = min(count, max(visibleMessageCount, messageWindowSize))
                     if count == 0 {
                         visibleMessageCount = messageWindowSize
@@ -1578,7 +1800,7 @@ struct ChatView: View {
         }
         .toolbar { chatToolbar }
 #if DEBUG
-        .sheet(isPresented: $viewModel.isShowingDebugProbe) {
+        .sheet(isPresented: $chatPresentationStore.isShowingDebugProbe) {
             ChatDebugProbeSheet(viewModel: viewModel, copiedDebugLog: $copiedDebugLog)
         }
 #endif
@@ -1608,21 +1830,21 @@ struct ChatView: View {
                 AttachmentPreviewSheet(attachment: attachment)
             }
         }
-        .sheet(isPresented: $viewModel.isShowingAppleIntelligenceInstructionsSheet) {
+        .sheet(isPresented: $chatPresentationStore.isShowingAppleIntelligenceInstructionsSheet) {
             NavigationStack {
                 AppleIntelligenceInstructionsSheet(
-                    userInstructions: $viewModel.appleIntelligenceUserInstructions,
-                    systemInstructions: $viewModel.appleIntelligenceSystemInstructions,
+                    userInstructions: $chatPresentationStore.appleIntelligenceUserInstructions,
+                    systemInstructions: $chatPresentationStore.appleIntelligenceSystemInstructions,
                     selectedTab: $selectedInstructionTab,
                     defaultUserInstructions: viewModel.defaultAppleIntelligenceUserInstructions,
                     defaultSystemInstructions: viewModel.defaultAppleIntelligenceSystemInstructions,
                     onDone: {
-                        viewModel.isShowingAppleIntelligenceInstructionsSheet = false
+                        chatPresentationStore.isShowingAppleIntelligenceInstructionsSheet = false
                     }
                 )
             }
         }
-        .sheet(isPresented: $viewModel.isShowingForkSessionSheet) {
+        .sheet(isPresented: $chatPresentationStore.isShowingForkSessionSheet) {
             NavigationStack {
                 ForkSessionSheet(viewModel: viewModel, sessionID: sessionID)
             }
@@ -1649,25 +1871,25 @@ struct ChatView: View {
                 composerAccessoryExpansion = .collapsed
             }
         }
-        .onChange(of: viewModel.messages.count) { _, _ in
+        .onChange(of: chatStore.messages.count) { _, _ in
             copiedTranscript = false
         }
-        .onChange(of: viewModel.composerResetToken) { _, _ in
+        .onChange(of: composerStore.resetToken) { _, _ in
             syncComposerDraftFromViewModel()
         }
-        .onChange(of: viewModel.isLoadingSelectedSession) { _, _ in
+        .onChange(of: chatStore.isLoadingSelectedSession) { _, _ in
             updateDelayedLoadingIndicator()
         }
     }
 
     private func syncComposerDraftFromViewModel() {
-        guard viewModel.selectedSession?.id == sessionID else { return }
+        guard directoryStore.selectedSession?.id == sessionID else { return }
         taskStore.composerDraftPersistenceTask?.cancel()
-        if composerDraftStore.text != viewModel.draftMessage {
-            composerDraftStore.text = viewModel.draftMessage
+        if composerDraftStore.text != composerStore.draftMessage {
+            composerDraftStore.text = composerStore.draftMessage
         }
-        if composerDraftStore.agentMentions != viewModel.draftAgentMentions {
-            composerDraftStore.agentMentions = viewModel.draftAgentMentions
+        if composerDraftStore.agentMentions != composerStore.draftAgentMentions {
+            composerDraftStore.agentMentions = composerStore.draftAgentMentions
         }
     }
 
@@ -1789,10 +2011,10 @@ struct ChatView: View {
 
     @ViewBuilder
     private func activeMessageComposer(isBusy: Bool) -> some View {
-        let composerSnapshot = viewModel.chatComposerSnapshot(for: liveSession, isBusy: isBusy)
+        let composerSnapshot = chatComposerSnapshot(for: liveSession, isBusy: isBusy)
         let commands = composerSnapshot.commands
-        let mentionableAgents = viewModel.mentionableAgents
-        let commandScopeKey = viewModel.currentProjectPreferenceScopeKey
+        let mentionableAgents = modelConfigurationStore.mentionableAgents
+        let commandScopeKey = currentProjectPreferenceScopeKey
         let pinnedCommands = pinnedCommandStore.pinnedCommands(from: commands, scopeKey: commandScopeKey)
         let pinnedCommandNames = Set(pinnedCommandStore.pinnedNames(for: commandScopeKey))
         let pinnedCommandSignature = [commandScopeKey, pinnedCommands.map(\.name).joined(separator: ",")].joined(separator: "|")
@@ -1904,6 +2126,65 @@ struct ChatView: View {
             .background(.clear)
     }
 
+    private func chatComposerSnapshot(for session: OpenCodeSession, isBusy: Bool) -> AppViewModel.ChatComposerSnapshot {
+        let forkableMessages = self.forkableMessages
+        let canFork = !forkableMessages.isEmpty
+        let commands = commands(canFork: canFork)
+        let forkSignature = forkableMessages
+            .map { "\($0.id):\($0.text):\($0.created ?? 0)" }
+            .joined(separator: "|")
+        let mcpSnapshot = AppViewModel.MCPSnapshot(
+            servers: mcpStore.servers,
+            connectedServerCount: mcpStore.connectedServerCount,
+            isLoading: mcpStore.isLoading,
+            togglingServerNames: mcpStore.togglingServerNames,
+            errorMessage: mcpStore.errorMessage
+        )
+        let mcpSignature = mcpSnapshot.servers
+            .map { "\($0.name):\($0.status.status):\($0.status.error ?? "")" }
+            .joined(separator: "|") + "|loading=\(mcpSnapshot.isLoading)|toggling=\(mcpSnapshot.togglingServerNames.sorted().joined(separator: ","))|error=\(mcpSnapshot.errorMessage ?? "")"
+        let actionSignature = [
+            session.id,
+            session.directory ?? "",
+            session.workspaceID ?? "",
+            session.projectID ?? "",
+            session.parentID ?? ""
+        ].joined(separator: "|")
+
+        return AppViewModel.ChatComposerSnapshot(
+            commands: commands,
+            attachmentCount: composerStore.draftAttachments.count,
+            isBusy: isBusy,
+            canFork: canFork,
+            forkableMessages: forkableMessages,
+            forkSignature: forkSignature,
+            mcp: mcpSnapshot,
+            mcpSignature: mcpSignature,
+            actionSignature: actionSignature
+        )
+    }
+
+    private var forkableMessages: [OpenCodeForkableMessage] {
+        var result: [OpenCodeForkableMessage] = []
+
+        for message in chatStore.messages {
+            guard (message.info.role ?? "").lowercased() == "user" else { continue }
+            let promptText = viewModel.sessionCoordinator.forkPromptDraft(from: message).text
+            let trimmedText = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedText.isEmpty else { continue }
+
+            result.append(
+                OpenCodeForkableMessage(
+                    id: message.id,
+                    text: trimmedText.replacingOccurrences(of: "\n", with: " "),
+                    created: message.info.time?.created
+                )
+            )
+        }
+
+        return result.reversed()
+    }
+
     private func childSessionComposerNotice(headerSnapshot: AppViewModel.ChatSessionHeaderSnapshot) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: "arrow.triangle.branch")
@@ -1949,7 +2230,7 @@ struct ChatView: View {
     }
 
     private var chatOverlayVisibilitySnapshot: ChatOverlayVisibilitySnapshot {
-        if viewModel.pendingForkSessionID == sessionID {
+        if chatPresentationStore.pendingForkSessionID == sessionID {
             return ChatOverlayVisibilitySnapshot(visibleOverlay: .forkPreparation)
         }
         if showsDelayedLoadingIndicator {
@@ -2108,16 +2389,16 @@ struct ChatView: View {
     }
 
     private func scheduleEagerChatRefresh(reason: String) {
-        guard viewModel.isConnected else { return }
-        guard viewModel.activeChatSessionID == sessionID || viewModel.selectedSession?.id == sessionID else { return }
+        guard connectionStore.isConnected else { return }
+        guard viewModel.activeChatSessionID == sessionID || directoryStore.selectedSession?.id == sessionID else { return }
         guard shouldRunEagerChatRefresh else { return }
 
         eagerRefreshTask?.cancel()
         eagerRefreshTask = Task { @MainActor in
             await Task.yield()
             guard !Task.isCancelled else { return }
-            guard viewModel.isConnected else { return }
-            guard viewModel.activeChatSessionID == sessionID || viewModel.selectedSession?.id == sessionID else { return }
+            guard connectionStore.isConnected else { return }
+            guard viewModel.activeChatSessionID == sessionID || directoryStore.selectedSession?.id == sessionID else { return }
 
             lastEagerRefreshAt = Date()
             viewModel.appendDebugLog("eager chat refresh session=\(sessionID) reason=\(reason)")
@@ -2185,7 +2466,7 @@ struct ChatView: View {
 
     private var delayedLoadingIndicatorSnapshot: DelayedLoadingIndicatorSnapshot {
         DelayedLoadingIndicatorSnapshot(
-            shouldDelay: viewModel.isLoadingSelectedSession && viewModel.messages.isEmpty && pendingOutgoingSend == nil
+            shouldDelay: chatStore.isLoadingSelectedSession && chatStore.messages.isEmpty && pendingOutgoingSend == nil
         )
     }
 
@@ -2200,17 +2481,17 @@ struct ChatView: View {
     private var messageBottomPadding: CGFloat { 20 }
 
     private var chatDisplaySnapshot: ChatDisplaySnapshot {
-        let messages = Array(viewModel.messages.suffix(visibleMessageCount))
+        let messages = Array(chatStore.messages.suffix(visibleMessageCount))
         return ChatDisplaySnapshot(
             messages: messages,
-            hiddenMessageCount: max(0, viewModel.messages.count - messages.count),
+            hiddenMessageCount: max(0, chatStore.messages.count - messages.count),
             items: displayedChatItems(for: messages),
             showsThinking: shouldShowThinking(in: messages)
         )
     }
 
     private var displayedMessages: [OpenCodeMessageEnvelope] {
-        Array(viewModel.messages.suffix(visibleMessageCount))
+        Array(chatStore.messages.suffix(visibleMessageCount))
     }
 
     private func displayedChatItems(for messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
@@ -2219,8 +2500,8 @@ struct ChatView: View {
             messages: messages.map { message in
                 displayItemCacheMessageKey(for: message)
             },
-            findPlaceGameID: viewModel.findPlaceGame(for: sessionID)?.city.id,
-            findBugGameID: viewModel.findBugGame(for: sessionID)?.language.id
+            findPlaceGameID: findPlaceGame(for: sessionID)?.city.id,
+            findBugGameID: findBugGame(for: sessionID)?.language.id
         )
 
         return chatDisplayItemCache.items(for: key, messagesByID: messagesByID) {
@@ -2246,7 +2527,7 @@ struct ChatView: View {
             id: part.id,
             type: part.type,
             tool: part.tool,
-            textCount: part.text?.count ?? 0,
+            textCount: part.text?.utf16.count ?? 0,
             textSampleHash: sampledTextHash(part.text),
             reason: part.reason,
             filename: part.filename,
@@ -2254,7 +2535,7 @@ struct ChatView: View {
             stateStatus: part.state?.status,
             stateTitle: part.state?.title,
             stateInputSampleHash: sampledTextHash(part.state?.input.map { displayItemCacheInputSignature(from: $0) }),
-            stateOutputCount: part.state?.output?.count ?? 0,
+            stateOutputCount: part.state?.output?.utf16.count ?? 0,
             stateOutputSampleHash: sampledTextHash(part.state?.output),
             metadataSessionID: part.state?.metadata?.sessionId,
             metadataFileCount: part.state?.metadata?.files?.count,
@@ -2281,11 +2562,7 @@ struct ChatView: View {
 
     private func sampledTextHash(_ value: String?) -> Int {
         guard let value, !value.isEmpty else { return 0 }
-        if value.count <= 512 {
-            return value.hashValue
-        }
-
-        return "\(value.prefix(160))\u{1f}\(value.suffix(160))".hashValue
+        return value.chatRenderSampleHash
     }
 
     private var accessoryPresenceSignature: AccessoryPresenceState {
@@ -2349,7 +2626,7 @@ struct ChatView: View {
                 .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
         case let .olderMessages(count):
             Button {
-                visibleMessageCount = min(viewModel.messages.count, visibleMessageCount + messageWindowSize)
+                visibleMessageCount = min(chatStore.messages.count, visibleMessageCount + messageWindowSize)
             } label: {
                 Text("View older messages (\(count))")
                     .font(.subheadline.weight(.medium))
@@ -2483,11 +2760,11 @@ struct ChatView: View {
     private func messageBubbleSnapshot(for message: OpenCodeMessageEnvelope) -> MessageBubbleSnapshot {
         MessageBubbleSnapshot(
             message: message,
-            detailedMessage: viewModel.toolMessageDetails[message.id],
+            detailedMessage: chatStore.toolMessageDetails[message.id],
             currentSessionID: sessionID,
             isStreamingMessage: isStreamingMessage(message),
             animatesStreamingText: shouldAnimateStreamingText,
-            hidesReasoningBlocks: viewModel.isFunAndGamesSession(sessionID),
+            hidesReasoningBlocks: isFunAndGamesSession(sessionID),
             reserveEntryFromComposer: message.id == preparingOutgoingMessageID,
             animateEntryFromComposer: message.id == animatingOutgoingMessageID && !outgoingEntryAnimationStartedMessageIDs.contains(message.id),
             streamingReservePadding: isStreamingMessage(message) ? 44 : 0
@@ -2537,8 +2814,8 @@ struct ChatView: View {
         var displayedIDs: Set<String> = []
         let displayedMessageIDs = Set(messages.map(\.id))
         largeMessageChunkCache.prune(keeping: displayedMessageIDs)
-        let findPlaceGame = viewModel.findPlaceGame(for: sessionID)
-        let findBugGame = viewModel.findBugGame(for: sessionID)
+        let findPlaceGame = findPlaceGame(for: sessionID)
+        let findBugGame = findBugGame(for: sessionID)
 
         func appendUnique(_ item: ChatDisplayItem) {
             guard displayedIDs.insert(item.id).inserted else { return }
@@ -2601,7 +2878,7 @@ struct ChatView: View {
         let rawDraftText = composerDraftStore.text
         let draftText = rawDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
         let draftAgentMentions = composerDraftStore.agentMentions
-        let draftAttachments = viewModel.draftAttachments
+        let draftAttachments = composerStore.draftAttachments
         let hasAttachments = !draftAttachments.isEmpty
 
         guard !draftText.isEmpty || hasAttachments else { return }
@@ -2667,7 +2944,7 @@ struct ChatView: View {
             )
             guard !Task.isCancelled, pendingOutgoingSend?.messageID == pendingSend.messageID else { return }
             let optimisticMessageStillVisible = pendingSend.messageID.map { messageID in
-                viewModel.messages.contains { $0.id == messageID }
+                chatStore.messages.contains { $0.id == messageID }
             } ?? true
             if optimisticMessageStillVisible {
                 isThinkingRowRevealAllowed = true
@@ -2754,7 +3031,7 @@ struct ChatView: View {
 
     @ToolbarContentBuilder
     private var chatToolbar: some ToolbarContent {
-        if viewModel.isUsingAppleIntelligence {
+        if connectionStore.backendMode == .appleIntelligence {
             ToolbarItem(placement: .opencodeLeading) {
                 Button("Home") {
                     viewModel.leaveAppleIntelligenceSession()
@@ -2773,7 +3050,7 @@ struct ChatView: View {
 
             ToolbarItem(placement: .opencodeTrailing) {
                 Button {
-                    viewModel.isShowingAppleIntelligenceInstructionsSheet = true
+                    chatPresentationStore.isShowingAppleIntelligenceInstructionsSheet = true
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
@@ -2804,7 +3081,7 @@ struct ChatView: View {
                 }
             }
 
-            if !viewModel.isFunAndGamesSession(liveSession.id) {
+            if !isFunAndGamesSession(liveSession.id) {
                 ToolbarItem(placement: .opencodeTrailing) {
                     AgentToolbarMenu(viewModel: viewModel, session: liveSession, glassNamespace: toolbarGlassNamespace)
                 }
@@ -2823,7 +3100,7 @@ struct ChatView: View {
     }
 
     private func appleIntelligenceTranscript() -> String {
-        viewModel.messages.map { message in
+        chatStore.messages.map { message in
             let role = (message.info.role ?? "assistant").lowercased()
             let text = message.parts
                 .compactMap(\.text)
@@ -3217,6 +3494,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
     let bottomRefreshColorIsActive: Bool
     let bottomRefreshHeight: CGFloat
     let isRefreshing: Bool
+    let isStreaming: Bool
     let animatedRowIDs: Set<String>
     let onBottomPullChanged: (CGFloat) -> Void
     let onBottomPullEnded: (Bool) -> Void
@@ -3232,6 +3510,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             bottomRefreshColorIsActive: bottomRefreshColorIsActive,
             bottomRefreshHeight: bottomRefreshHeight,
             isRefreshing: isRefreshing,
+            isStreaming: isStreaming,
             animatedRowIDs: animatedRowIDs,
             onBottomPullChanged: onBottomPullChanged,
             onBottomPullEnded: onBottomPullEnded,
@@ -3261,6 +3540,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         context.coordinator.bottomRefreshColorIsActive = bottomRefreshColorIsActive
         context.coordinator.bottomRefreshHeight = bottomRefreshHeight
         context.coordinator.isRefreshing = isRefreshing
+        context.coordinator.isStreaming = isStreaming
         context.coordinator.animatedRowIDs = animatedRowIDs
         context.coordinator.onBottomPullChanged = onBottomPullChanged
         context.coordinator.onBottomPullEnded = onBottomPullEnded
@@ -3295,6 +3575,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         var bottomRefreshColorIsActive: Bool
         var bottomRefreshHeight: CGFloat
         var isRefreshing: Bool
+        var isStreaming: Bool
         var animatedRowIDs: Set<String>
         var onBottomPullChanged: (CGFloat) -> Void
         var onBottomPullEnded: (Bool) -> Void
@@ -3318,6 +3599,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             bottomRefreshColorIsActive: Bool,
             bottomRefreshHeight: CGFloat,
             isRefreshing: Bool,
+            isStreaming: Bool,
             animatedRowIDs: Set<String>,
             onBottomPullChanged: @escaping (CGFloat) -> Void,
             onBottomPullEnded: @escaping (Bool) -> Void,
@@ -3331,6 +3613,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             self.bottomRefreshColorIsActive = bottomRefreshColorIsActive
             self.bottomRefreshHeight = bottomRefreshHeight
             self.isRefreshing = isRefreshing
+            self.isStreaming = isStreaming
             self.animatedRowIDs = animatedRowIDs
             self.onBottomPullChanged = onBottomPullChanged
             self.onBottomPullEnded = onBottomPullEnded
@@ -3419,11 +3702,11 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 collectionView.collectionViewLayout.invalidateLayout()
                 collectionView.layoutIfNeeded()
             }
-            scrollToBottom(in: collectionView, animated: true)
+            scrollToBottom(in: collectionView, animated: !isStreaming)
             DispatchQueue.main.async { [weak self, weak collectionView] in
                 guard let self, let collectionView, self.isAtBottom.wrappedValue else { return }
                 collectionView.layoutIfNeeded()
-                self.scrollToBottom(in: collectionView, animated: true)
+                self.scrollToBottom(in: collectionView, animated: !self.isStreaming)
             }
         }
 

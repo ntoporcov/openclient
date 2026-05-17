@@ -182,15 +182,16 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     func listProviders(directory: String? = nil) async throws -> [OpenCodeProvider] {
-        let queryItems = directory.map { [URLQueryItem(name: "directory", value: $0)] } ?? []
-        let response: OpenCodeProvidersResponse = try await send(path: "/config/providers", method: "GET", queryItems: queryItems)
-        return response.providers
+        try await providerConfiguration(directory: directory).providers
     }
 
     func providerDefaults(directory: String? = nil) async throws -> [String: String] {
+        try await providerConfiguration(directory: directory).default ?? [:]
+    }
+
+    func providerConfiguration(directory: String? = nil) async throws -> OpenCodeProvidersResponse {
         let queryItems = directory.map { [URLQueryItem(name: "directory", value: $0)] } ?? []
-        let response: OpenCodeProvidersResponse = try await send(path: "/config/providers", method: "GET", queryItems: queryItems)
-        return response.default ?? [:]
+        return try await send(path: "/config/providers", method: "GET", queryItems: queryItems)
     }
 
     func listMCPStatus(directory: String? = nil, workspaceID: String? = nil) async throws -> [String: OpenCodeMCPStatus] {
@@ -687,7 +688,7 @@ struct OpenCodeAPIClient: Sendable {
 
     private func makeFilePart(_ attachment: OpenCodeComposerAttachment) -> SendMessagePart {
         SendMessagePart(
-            id: OpenCodeIdentifier.part(),
+            id: attachment.id,
             type: "file",
             text: nil,
             name: nil,

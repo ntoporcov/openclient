@@ -5,6 +5,16 @@ import WidgetKit
 #endif
 
 extension AppViewModel {
+    func scheduleWidgetSnapshotPublication() {
+        widgetSnapshotPublishTask?.cancel()
+        widgetSnapshotPublishTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard let self, !Task.isCancelled else { return }
+            self.publishWidgetSnapshots()
+            self.widgetSnapshotPublishTask = nil
+        }
+    }
+
     func publishWidgetSnapshots() {
         guard backendMode == .server, config.hasCredentials else { return }
 
