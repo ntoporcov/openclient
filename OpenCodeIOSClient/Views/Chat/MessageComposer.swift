@@ -1,8 +1,4 @@
 import SwiftUI
-#if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
-import AVFoundation
-import Speech
-#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -22,345 +18,6 @@ final class MessageComposerDraftStore: ObservableObject {
     }
 }
 
-#if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
-private final class MessageComposerAudioLevelSink: @unchecked Sendable {
-    private let handler: @MainActor @Sendable (Float) -> Void
-
-    init(handler: @escaping @MainActor @Sendable (Float) -> Void) {
-        self.handler = handler
-    }
-
-    nonisolated func report(_ level: Float) {
-        Task { @MainActor [handler] in
-            handler(level)
-        }
-    }
-}
-
-@MainActor
-private final class MessageComposerDictationController: ObservableObject {
-    enum State: Equatable {
-        case idle
-        case authorizing
-        case recording
-        case finishing
-
-        var isActive: Bool {
-            self != .idle
-        }
-    }
-
-    private enum DictationError: LocalizedError {
-        case recognizerUnavailable
-        case speechDenied
-        case microphoneDenied
-
-        var errorDescription: String? {
-            switch self {
-            case .recognizerUnavailable:
-                String(localized: "Dictation is not available right now.")
-            case .speechDenied:
-                String(localized: "Enable Speech Recognition for OpenClient in Settings to dictate messages.")
-            case .microphoneDenied:
-                String(localized: "Enable Microphone access for OpenClient in Settings to dictate messages.")
-            }
-        }
-    }
-
-    @Published private(set) var state: State = .idle
-    @Published private(set) var inputLevel: CGFloat = 0
-
-    private let speechRecognizer = SFSpeechRecognizer()
-    private var audioEngine: AVAudioEngine?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private var hasAudioTap = false
-    private var hasEndedAudio = false
-    private var activeStartID: UUID?
-    private var finishCleanupTask: Task<Void, Never>?
-    private var onTranscript: ((String) -> Void)?
-    private var onError: ((String) -> Void)?
-
-    var isRecording: Bool {
-        state == .recording
-    }
-
-    var isActive: Bool {
-        state.isActive
-    }
-
-    init() {
-        speechRecognizer?.queue = .main
-    }
-
-    func start(onTranscript: @escaping (String) -> Void, onError: @escaping (String) -> Void) async throws {
-        guard state == .idle else { return }
-        self.onTranscript = onTranscript
-        self.onError = onError
-        state = .authorizing
-        let startID = UUID()
-        activeStartID = startID
-
-        guard let speechRecognizer, speechRecognizer.isAvailable else {
-            resetAfterStartFailure()
-            throw DictationError.recognizerUnavailable
-        }
-
-        let speechStatus = await requestSpeechAuthorization()
-        guard isCurrentAuthorizingStart(startID) else { return }
-
-        guard speechStatus == .authorized else {
-            resetAfterStartFailure()
-            throw DictationError.speechDenied
-        }
-
-        let hasMicrophonePermission = await requestMicrophonePermission()
-        guard isCurrentAuthorizingStart(startID) else { return }
-
-        guard hasMicrophonePermission else {
-            resetAfterStartFailure()
-            throw DictationError.microphoneDenied
-        }
-
-        do {
-            try configureAudioSession()
-
-            let engine = AVAudioEngine()
-            audioEngine = engine
-
-            let request = SFSpeechAudioBufferRecognitionRequest()
-            request.shouldReportPartialResults = true
-            request.addsPunctuation = true
-            recognitionRequest = request
-            hasEndedAudio = false
-
-            let inputNode = engine.inputNode
-            let recordingFormat = inputNode.outputFormat(forBus: 0)
-            guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
-                throw DictationError.recognizerUnavailable
-            }
-
-            inputNode.installTap(
-                onBus: 0,
-                bufferSize: 1_024,
-                format: recordingFormat,
-                block: Self.makeAudioTapBlock(
-                    request: request,
-                    levelSink: MessageComposerAudioLevelSink { [weak self] level in
-                        self?.updateInputLevel(level)
-                    }
-                )
-            )
-            hasAudioTap = true
-
-            recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-                Task { @MainActor in
-                    self?.handleRecognition(result: result, error: error)
-                }
-            }
-
-            engine.prepare()
-            try engine.start()
-            activeStartID = nil
-            state = .recording
-        } catch {
-            cleanup(cancelTask: true, deactivatesAudioSession: true)
-            throw error
-        }
-    }
-
-    func stop() {
-        switch state {
-        case .recording:
-            finishAudioInput()
-        case .authorizing:
-            cleanup(cancelTask: true, deactivatesAudioSession: true)
-        case .idle, .finishing:
-            return
-        }
-    }
-
-    func cancel() {
-        cleanup(cancelTask: true, deactivatesAudioSession: true)
-    }
-
-    func clearError() {
-    }
-
-    private func handleRecognition(result: SFSpeechRecognitionResult?, error: Error?) {
-        if let result {
-            let transcript = result.bestTranscription.formattedString
-            if !transcript.isEmpty {
-                onTranscript?(transcript)
-            }
-
-            if result.isFinal {
-                cleanup(cancelTask: false, deactivatesAudioSession: true)
-                return
-            }
-        }
-
-        if let error, state.isActive {
-            if state != .finishing {
-                onError?(error.localizedDescription)
-            }
-            cleanup(cancelTask: true, deactivatesAudioSession: true)
-        }
-    }
-
-    private func finishAudioInput() {
-        guard state == .recording || state == .authorizing else { return }
-        state = .finishing
-        inputLevel = 0
-
-        stopEngineAndEndAudio()
-
-        finishCleanupTask?.cancel()
-        finishCleanupTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            await MainActor.run {
-                guard self?.state == .finishing else { return }
-                self?.cleanup(cancelTask: true, deactivatesAudioSession: true)
-            }
-        }
-    }
-
-    private func cleanup(cancelTask: Bool, deactivatesAudioSession: Bool) {
-        finishCleanupTask?.cancel()
-        finishCleanupTask = nil
-
-        stopEngineAndEndAudio()
-
-        if cancelTask {
-            recognitionTask?.cancel()
-        }
-
-        recognitionRequest = nil
-        recognitionTask = nil
-        audioEngine = nil
-        hasEndedAudio = false
-        activeStartID = nil
-        inputLevel = 0
-        state = .idle
-        onTranscript = nil
-        onError = nil
-
-        if deactivatesAudioSession {
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        }
-    }
-
-    private func stopEngineAndEndAudio() {
-        if audioEngine?.isRunning == true {
-            audioEngine?.stop()
-        }
-
-        if hasAudioTap {
-            audioEngine?.inputNode.removeTap(onBus: 0)
-            hasAudioTap = false
-        }
-
-        if !hasEndedAudio {
-            recognitionRequest?.endAudio()
-            hasEndedAudio = true
-        }
-    }
-
-    private func resetAfterStartFailure() {
-        state = .idle
-        hasEndedAudio = false
-        activeStartID = nil
-        inputLevel = 0
-        onTranscript = nil
-        onError = nil
-    }
-
-    private nonisolated static func makeAudioTapBlock(
-        request: SFSpeechAudioBufferRecognitionRequest,
-        levelSink: MessageComposerAudioLevelSink
-    ) -> AVAudioNodeTapBlock {
-        { [weak request, levelSink] buffer, _ in
-            request?.append(buffer)
-            levelSink.report(Self.normalizedInputLevel(from: buffer))
-        }
-    }
-
-    private nonisolated static func normalizedInputLevel(from buffer: AVAudioPCMBuffer) -> Float {
-        guard let channelData = buffer.floatChannelData else { return 0 }
-
-        let channelCount = min(Int(buffer.format.channelCount), 2)
-        let frameLength = Int(buffer.frameLength)
-        guard channelCount > 0, frameLength > 0 else { return 0 }
-
-        let sampleStride = max(frameLength / 256, 1)
-        var sum: Float = 0
-        var sampleCount = 0
-
-        for channel in 0 ..< channelCount {
-            let samples = channelData[channel]
-            var frame = 0
-            while frame < frameLength {
-                let sample = samples[frame]
-                sum += sample * sample
-                sampleCount += 1
-                frame += sampleStride
-            }
-        }
-
-        guard sampleCount > 0 else { return 0 }
-
-        let rms = sqrt(sum / Float(sampleCount))
-        return min(max((rms - 0.015) / 0.18, 0), 1)
-    }
-
-    private func updateInputLevel(_ level: Float) {
-        guard state == .recording else { return }
-        let clampedLevel = min(max(CGFloat(level), 0), 1)
-        inputLevel = inputLevel * 0.62 + clampedLevel * 0.38
-    }
-
-    private func isCurrentAuthorizingStart(_ startID: UUID) -> Bool {
-        activeStartID == startID && state == .authorizing
-    }
-
-    private func configureAudioSession() throws {
-        let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
-        try audioSession.setAllowHapticsAndSystemSoundsDuringRecording(true)
-        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-    }
-
-    private func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
-        let status = SFSpeechRecognizer.authorizationStatus()
-        guard status == .notDetermined else { return status }
-
-        return await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
-    }
-
-    private func requestMicrophonePermission() async -> Bool {
-        let audioApplication = AVAudioApplication.shared
-        switch audioApplication.recordPermission {
-        case .granted:
-            return true
-        case .denied:
-            return false
-        case .undetermined:
-            return await withCheckedContinuation { continuation in
-                AVAudioApplication.requestRecordPermission { isGranted in
-                    continuation.resume(returning: isGranted)
-                }
-            }
-        @unknown default:
-            return false
-        }
-    }
-}
-#endif
-
 private struct MessageComposerHeightPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 
@@ -371,7 +28,7 @@ private struct MessageComposerHeightPreferenceKey: PreferenceKey {
 
 #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
 private struct MessageComposerSpeechRecognitionModifier: ViewModifier {
-    @ObservedObject var recognizer: MessageComposerDictationController
+    @ObservedObject var recognizer: OpenClientSpeechRecognitionController
     @Binding var errorMessage: String?
 
     func body(content: Content) -> some View {
@@ -403,7 +60,7 @@ private struct MessageComposerSpeechRecognitionModifier: ViewModifier {
 
 private extension View {
     func messageComposerSpeechRecognition(
-        recognizer: MessageComposerDictationController,
+        recognizer: OpenClientSpeechRecognitionController,
         errorMessage: Binding<String?>
     ) -> some View {
         modifier(
@@ -502,6 +159,9 @@ struct MessageComposer: View {
     var onSelectModel: ((OpenCodeModelReference) -> Void)?
     var onSelectReasoningVariant: ((String?) -> Void)?
     var onShowContextMetrics: (() -> Void)?
+    var conversationState: ConversationModeController.State = .inactive
+    var conversationInputLevel: CGFloat = 0
+    var onToggleConversation: (() -> Void)?
 
 #if canImport(PhotosUI) && canImport(UIKit)
     private enum AttachmentImportLimits {
@@ -517,7 +177,7 @@ struct MessageComposer: View {
     @Namespace private var accessoryGlassNamespace
     @Namespace private var accessoryPresentationNamespace
 #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
-    @StateObject private var dictationController = MessageComposerDictationController()
+    @StateObject private var dictationController = OpenClientSpeechRecognitionController()
     @State private var dictationErrorMessage: String?
 #endif
 #if canImport(PhotosUI) && canImport(UIKit)
@@ -575,7 +235,7 @@ struct MessageComposer: View {
     }
 
     private var showsSendActionButton: Bool {
-        hasDraftContent && !isDictating
+        hasDraftContent && !isDictating && !isConversationModeActive
     }
 
     private var isSendActionButtonEnabled: Bool {
@@ -583,11 +243,52 @@ struct MessageComposer: View {
     }
 
     private var showsMicActionButton: Bool {
-        !hasDraftContent || isDictating
+        (!hasDraftContent || isDictating) && !isConversationModeActive
     }
 
     private var showsStopStreamButton: Bool {
         isBusy
+    }
+
+    private var supportsConversationMode: Bool {
+        onToggleConversation != nil
+    }
+
+    private var showsConversationActionButton: Bool {
+        supportsConversationMode && (!hasDraftContent || isConversationModeActive)
+    }
+
+    private var showsTrailingActionButton: Bool {
+        showsSendActionButton || showsConversationActionButton
+    }
+
+    private var isConversationModeActive: Bool {
+        conversationState.isActive
+    }
+
+    private var canToggleConversationMode: Bool {
+        isConversationModeActive || (!isBusy && attachmentCount == 0 && !isDictating)
+    }
+
+    private var conversationStatus: LocalizedStringResource {
+        switch conversationState {
+        case .inactive:
+            "Voice Conversation"
+        case .ready:
+            "Hold to Talk"
+        case .starting:
+            "Starting conversation..."
+        case .listening, .waitingToSend:
+            "Listening..."
+        case .finalizing, .submitting:
+            "Sending..."
+        case .waitingForResponse:
+            "Waiting for a response..."
+        case .speakingResponse:
+            "Speaking..."
+        case .paused:
+            "Conversation paused"
+        }
     }
 
     private var isListeningForDictation: Bool {
@@ -626,10 +327,6 @@ struct MessageComposer: View {
 
     private var composerGlassMergeSpacing: CGFloat {
         8
-    }
-
-    private var composerInputActionSpacing: CGFloat {
-        hasDraftContent ? composerGlassMergeSpacing : -composerActionButtonSize
     }
 
     private var composerActionSlotHeight: CGFloat {
@@ -916,6 +613,10 @@ struct MessageComposer: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if isConversationModeActive {
+                conversationStatusBar
+            }
+
             #if os(macOS)
             macComposer
             #else
@@ -992,6 +693,7 @@ struct MessageComposer: View {
         .animation(streamStopButtonAnimation, value: isBusy)
         .animation(.snappy(duration: 0.12), value: dictationInputLevel)
         .animation(opencodeSelectionAnimation, value: isAccessoryMenuOpen)
+        .animation(opencodeSelectionAnimation, value: conversationState)
 #if canImport(UIKit) && canImport(WebKit)
         .sheet(isPresented: $isShowingSketchSheet) {
             NavigationStack {
@@ -1069,7 +771,13 @@ struct MessageComposer: View {
                     .transition(stopStreamButtonTransition)
             }
 
-            catalystPrimaryActionSlot
+            if showsMicActionButton {
+                catalystMicActionButton
+            }
+
+            if showsTrailingActionButton {
+                catalystTrailingActionSlot
+            }
         }
         .padding(.horizontal, 8)
         .frame(height: catalystControlHitTargetSize)
@@ -1167,16 +875,16 @@ struct MessageComposer: View {
         }
     }
 
-    private var catalystPrimaryActionSlot: some View {
+    private var catalystTrailingActionSlot: some View {
         ZStack {
             if showsSendActionButton {
                 catalystSendActionButton
                     .transition(sendActionButtonTransition)
             }
 
-            if showsMicActionButton {
-                catalystMicActionButton
-                    .transition(micActionButtonTransition)
+            if showsConversationActionButton {
+                catalystConversationActionButton
+                    .transition(conversationActionButtonTransition)
             }
         }
         .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
@@ -1223,6 +931,25 @@ struct MessageComposer: View {
         .disabled(!showsMicActionButton)
         .accessibilityLabel(micActionAccessibilityLabel)
         .accessibilityIdentifier(micActionAccessibilityIdentifier)
+    }
+
+    private var catalystConversationActionButton: some View {
+        Button {
+            onToggleConversation?()
+        } label: {
+            Image(systemName: isConversationModeActive ? "xmark" : "waveform")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(canToggleConversationMode ? 1 : 0.65))
+                .frame(width: 32, height: 32)
+                .background(Color.blue.opacity(0.82), in: Circle())
+                .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .buttonBorderShape(.circle)
+        .disabled(!canToggleConversationMode)
+        .accessibilityLabel(isConversationModeActive ? LocalizedStringResource("Stop Conversation") : LocalizedStringResource("Start Conversation"))
+        .accessibilityIdentifier(isConversationModeActive ? "chat.conversation.stop" : "chat.conversation.start")
     }
 
     private var catalystStopStreamButton: some View {
@@ -1356,13 +1083,15 @@ struct MessageComposer: View {
     }
 
     private var composerInputActionRow: some View {
-        HStack(alignment: .bottom, spacing: composerInputActionSpacing) {
+        HStack(alignment: .bottom, spacing: 5) {
             composerTextFieldGlass
                 .frame(maxWidth: .infinity)
                 .layoutPriority(1)
 
-            composerBottomActionSlot
-                .zIndex(2)
+            if showsTrailingActionButton {
+                composerTrailingActionSlot
+                    .zIndex(3)
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             if showsStopStreamButton {
@@ -1379,6 +1108,14 @@ struct MessageComposer: View {
     @ViewBuilder
     private var composerTextFieldGlass: some View {
         composerTextFieldContent
+            .padding(.trailing, showsMicActionButton ? composerActionButtonSize : 0)
+            .overlay(alignment: .bottomTrailing) {
+                if showsMicActionButton {
+                    micActionButton
+                        .transition(micActionButtonTransition)
+                        .zIndex(2)
+                }
+            }
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .opencodeGlassSurface(isInteractive: true, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
@@ -1398,6 +1135,7 @@ struct MessageComposer: View {
             onFocusChange: onFocusChange
         )
         .frame(minHeight: usesCatalystComposerLayout ? ComposerTextViewMetrics.compactMinimumHeight : ComposerTextViewMetrics.minimumHeight)
+        .disabled(isConversationModeActive)
         .accessibilityIdentifier("chat.input")
         #else
         TextField("Message", text: textBinding, axis: .vertical)
@@ -1405,6 +1143,7 @@ struct MessageComposer: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .frame(minHeight: composerActionSlotHeight)
+            .disabled(isConversationModeActive)
             .accessibilityIdentifier("chat.input")
             .simultaneousGesture(TapGesture().onEnded {
                 dismissAccessoryMenu()
@@ -1412,7 +1151,7 @@ struct MessageComposer: View {
         #endif
     }
 
-    private var composerBottomActionSlot: some View {
+    private var composerTrailingActionSlot: some View {
         ZStack {
             if showsSendActionButton {
                 sendActionButton
@@ -1420,9 +1159,9 @@ struct MessageComposer: View {
                     .zIndex(2)
             }
 
-            if showsMicActionButton {
-                micActionButton
-                    .transition(micActionButtonTransition)
+            if showsConversationActionButton {
+                conversationActionButton
+                    .transition(conversationActionButtonTransition)
                     .zIndex(1)
             }
         }
@@ -1439,7 +1178,7 @@ struct MessageComposer: View {
                 .foregroundStyle(prominentActionForeground(isEnabled: isSendActionButtonEnabled))
                 .frame(width: composerActionButtonSize, height: composerActionButtonSize)
         }
-        .opencodeActionGlass(tint: Color.accentColor.opacity(0.82), size: composerActionButtonSize, in: Circle())
+        .opencodeActionGlass(clear: true, tint: Color.accentColor.opacity(0.82), size: composerActionButtonSize, in: Circle())
         .opencodeToolbarGlassID("composer-send-action", in: glassNamespace)
         .opencodeMatchedGlassTransition()
         .buttonBorderShape(.circle)
@@ -1467,14 +1206,36 @@ struct MessageComposer: View {
                     }
                 }
         }
-        .opencodeActionGlass(size: composerActionButtonSize, in: Circle())
-        .opencodeToolbarGlassID("composer-mic-action", in: glassNamespace)
-        .opencodeMatchedGlassTransition()
+        .buttonStyle(.plain)
         .buttonBorderShape(.circle)
         .contentShape(Circle())
         .disabled(!showsMicActionButton)
         .accessibilityLabel(micActionAccessibilityLabel)
         .accessibilityIdentifier(micActionAccessibilityIdentifier)
+    }
+
+    private var conversationActionButton: some View {
+        Button {
+            OpenCodeHaptics.impact(.soft)
+            onToggleConversation?()
+        } label: {
+            Image(systemName: isConversationModeActive ? "xmark" : "waveform")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white.opacity(canToggleConversationMode ? 1 : 0.68))
+                .frame(width: composerActionButtonSize, height: composerActionButtonSize)
+                .background {
+                    if conversationState == .listening {
+                        conversationListeningBackground
+                    }
+                }
+        }
+        .opencodeActionGlass(clear: true, tint: Color.accentColor.opacity(0.82), size: composerActionButtonSize, in: Circle())
+        .opencodeToolbarGlassID("composer-conversation-action", in: glassNamespace)
+        .buttonBorderShape(.circle)
+        .contentShape(Circle())
+        .disabled(!canToggleConversationMode)
+        .accessibilityLabel(isConversationModeActive ? LocalizedStringResource("Stop Conversation") : LocalizedStringResource("Start Conversation"))
+        .accessibilityIdentifier(isConversationModeActive ? "chat.conversation.stop" : "chat.conversation.start")
     }
 
     private var stopStreamButton: some View {
@@ -1525,6 +1286,11 @@ struct MessageComposer: View {
             .combined(with: AnyTransition.opacity)
     }
 
+    private var conversationActionButtonTransition: AnyTransition {
+        AnyTransition.scale(scale: 0.72, anchor: .center)
+            .combined(with: AnyTransition.opacity)
+    }
+
     private var micActionForeground: Color {
         isListeningForDictation ? .red : .primary
     }
@@ -1566,6 +1332,42 @@ struct MessageComposer: View {
         }
     }
 
+    private var conversationListeningBackground: some View {
+        Circle()
+            .fill(Color.white.opacity(0.12 + conversationInputLevel * 0.20))
+            .frame(
+                width: 20 + conversationInputLevel * 14,
+                height: 20 + conversationInputLevel * 14
+            )
+            .shadow(
+                color: Color.blue.opacity(0.32 + conversationInputLevel * 0.46),
+                radius: 5 + conversationInputLevel * 12
+            )
+    }
+
+    private var conversationStatusBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: conversationState == .listening ? "waveform" : "waveform.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.blue)
+                .symbolEffect(.variableColor.iterative, isActive: conversationState == .listening)
+
+            Text(conversationStatus)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 8)
+
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.blue.opacity(0.14), lineWidth: 1)
+        }
+    }
+
     private var collapsedAccessoryButton: some View {
         Button(action: presentAccessoryMenu) {
             Image(systemName: "plus")
@@ -1576,6 +1378,7 @@ struct MessageComposer: View {
         .composerPlusButtonStyle()
         .accessibilityLabel("Open composer menu")
         .accessibilityIdentifier("chat.composer.menu")
+        .disabled(isConversationModeActive)
         .contentShape(Circle())
         .opencodeToolbarGlassID("composer-plus-menu", in: accessoryGlassNamespace)
         .shadow(color: .black.opacity(0.12), radius: 14, y: 4)

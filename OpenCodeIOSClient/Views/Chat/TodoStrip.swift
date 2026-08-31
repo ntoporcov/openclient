@@ -9,6 +9,7 @@ import UIKit
 struct TodoStrip: View {
     let todos: [OpenCodeTodo]
     let onTapCard: () -> Void
+    var onMinimize: () -> Void = {}
 
     private var focusTodoID: String? {
         let index = todos.firstIndex(where: { $0.isInProgress })
@@ -25,12 +26,10 @@ struct TodoStrip: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(Array(todos.enumerated()), id: \.offset) { index, todo in
-                        Button {
-                            onTapCard()
-                        } label: {
-                            TodoCard(todo: todo)
-                        }
-                        .buttonStyle(.plain)
+                        TodoCard(todo: todo)
+                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .onTapGesture(perform: onTapCard)
+                        .accessibilityAddTraits(.isButton)
                         .id(todoPresentationID(index: index, todo: todo))
                     }
                 }
@@ -45,6 +44,8 @@ struct TodoStrip: View {
             }
             .animation(opencodeSelectionAnimation, value: todoIDs)
         }
+        .modifier(TodoMinimizeGestureModifier(onMinimize: onMinimize))
+        .accessibilityIdentifier("chat.todos.expanded")
     }
 
     private func scrollToFocus(with proxy: ScrollViewProxy, animated: Bool) {
@@ -89,6 +90,8 @@ struct ComposerAccessoryArea: View {
     let todos: [OpenCodeTodo]
     let attachments: [OpenCodeComposerAttachment]
     @Binding var expansion: ComposerAccessoryExpansion
+    let isTodoStripMinimized: Bool
+    let onSetTodoStripMinimized: (Bool) -> Void
     let onTapTodo: () -> Void
     let onTapAttachment: (OpenCodeComposerAttachment) -> Void
     let onRemoveAttachment: (OpenCodeComposerAttachment) -> Void
@@ -113,6 +116,8 @@ struct ComposerAccessoryArea: View {
         Group {
             if activeTodos.isEmpty && attachments.isEmpty {
                 EmptyView()
+            } else if !activeTodos.isEmpty && isTodoStripMinimized {
+                minimizedTodos
             } else if hasBothKinds {
                 if expansion.isExpanded {
                     expandedRail
@@ -120,7 +125,12 @@ struct ComposerAccessoryArea: View {
                     collapsedStacks
                 }
             } else if !activeTodos.isEmpty {
-                TodoStrip(todos: activeTodos, onTapCard: onTapTodo)
+                TodoStrip(
+                    todos: activeTodos,
+                    onTapCard: onTapTodo,
+                    onMinimize: minimizeTodos
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             } else {
                 AttachmentStrip(
                     attachments: attachments,
@@ -131,6 +141,33 @@ struct ComposerAccessoryArea: View {
             }
         }
         .animation(opencodeSelectionAnimation, value: attachmentIDs)
+        .animation(.snappy(duration: 0.32, extraBounce: 0.04), value: isTodoStripMinimized)
+    }
+
+    private var minimizedTodos: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .bottom, spacing: 10) {
+                TodoProgressPill(
+                    completedCount: todos.filter(\.isComplete).count,
+                    totalCount: todos.count,
+                    onRestore: restoreTodos
+                )
+
+                ForEach(attachments) { attachment in
+                    AttachmentCard(
+                        attachment: attachment,
+                        allowsRemoval: true,
+                        onTap: { onTapAttachment(attachment) },
+                        onRemove: { onRemoveAttachment(attachment) }
+                    )
+                    .transition(.composerAttachmentEntry)
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+        .scrollClipDisabled()
+        .padding(.horizontal, -6)
+        .transition(.scale(scale: 0.82, anchor: .bottom).combined(with: .opacity))
     }
 
     private var collapsedStacks: some View {
@@ -150,6 +187,7 @@ struct ComposerAccessoryArea: View {
                             .offset(x: CGFloat(entry.offset) * 5, y: CGFloat(entry.offset) * -2)
                     }
                 }
+                .modifier(TodoMinimizeGestureModifier(onMinimize: minimizeTodos))
                 .frame(width: stackWidth)
 
                 AccessoryStackSummary(
@@ -179,16 +217,15 @@ struct ComposerAccessoryArea: View {
                     accessorySection {
                         HStack(spacing: 10) {
                             ForEach(Array(activeTodos.enumerated()), id: \.offset) { index, todo in
-                                Button {
-                                    onTapTodo()
-                                } label: {
-                                    TodoCard(todo: todo)
-                                        .matchedGeometryEffect(id: todoCardGeometryID("\(index):\(todo.id)"), in: accessoryCardNamespace)
-                                }
-                                .buttonStyle(.plain)
+                                TodoCard(todo: todo)
+                                    .matchedGeometryEffect(id: todoCardGeometryID("\(index):\(todo.id)"), in: accessoryCardNamespace)
+                                    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    .onTapGesture(perform: onTapTodo)
+                                    .accessibilityAddTraits(.isButton)
                             }
                         }
                     }
+                    .modifier(TodoMinimizeGestureModifier(onMinimize: minimizeTodos))
                     .id(todoSectionID)
 
                     accessorySection {
@@ -253,6 +290,96 @@ struct ComposerAccessoryArea: View {
         case 1: return 2
         default: return 5
         }
+    }
+
+    private func minimizeTodos() {
+        OpenCodeHaptics.impact(.soft)
+        withAnimation(.snappy(duration: 0.3, extraBounce: 0.04)) {
+            expansion = .collapsed
+            onSetTodoStripMinimized(true)
+        }
+    }
+
+    private func restoreTodos() {
+        OpenCodeHaptics.impact(.soft)
+        withAnimation(.snappy(duration: 0.34, extraBounce: 0.05)) {
+            onSetTodoStripMinimized(false)
+        }
+    }
+}
+
+private struct TodoProgressPill: View {
+    let completedCount: Int
+    let totalCount: Int
+    let onRestore: () -> Void
+
+    var body: some View {
+        Button(action: onRestore) {
+            HStack(spacing: 7) {
+                Image(systemName: "checklist")
+                    .foregroundStyle(.blue)
+
+                Text("\(completedCount) of \(totalCount)")
+                    .monospacedDigit()
+
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .contentShape(Capsule())
+            .opencodeGlassSurface(isInteractive: true, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: 44, alignment: .bottom)
+        .contentShape(Rectangle())
+        .accessibilityLabel("Todos")
+        .accessibilityValue("\(completedCount) of \(totalCount)")
+        .accessibilityIdentifier("chat.todos.minimized")
+    }
+}
+
+private struct TodoMinimizeGestureModifier: ViewModifier {
+    let onMinimize: () -> Void
+    @GestureState private var downwardTranslation: CGFloat = 0
+
+    private var progress: CGFloat {
+        min(downwardTranslation / 72, 1)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: min(downwardTranslation, 40))
+            .scaleEffect(
+                x: 1 - progress * 0.06,
+                y: 1 - progress * 0.12,
+                anchor: .bottom
+            )
+            .opacity(1 - Double(progress) * 0.38)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12)
+                    .updating($downwardTranslation) { value, translation, _ in
+                        let distance = value.translation
+                        guard distance.height > 0,
+                              distance.height > abs(distance.width) else {
+                            return
+                        }
+                        translation = distance.height
+                    }
+                    .onEnded { value in
+                        let translation = value.translation
+                        let projected = value.predictedEndTranslation
+                        let verticalDistance = max(translation.height, projected.height)
+                        let horizontalDistance = max(abs(translation.width), abs(projected.width))
+                        guard verticalDistance >= 44,
+                              verticalDistance > horizontalDistance else {
+                            return
+                        }
+                        onMinimize()
+                    }
+            )
     }
 }
 

@@ -164,6 +164,66 @@ final class ModelConfigurationStoreTests: XCTestCase {
         withExtendedLifetime(observation) {}
     }
 
+    func testVoiceSessionUsesVoiceModelWithoutChangingNormalSessionDefault() {
+        let openAI = OpenCodeProvider(
+            id: "openai",
+            name: "OpenAI",
+            models: [
+                "gpt-5": model(id: "gpt-5", providerID: "openai"),
+                "gpt-5-mini": model(id: "gpt-5-mini", providerID: "openai"),
+            ]
+        )
+        let store = ModelConfigurationStore(
+            allProviders: [openAI],
+            availableProviders: [openAI]
+        )
+        let normalModel = OpenCodeModelReference(providerID: "openai", modelID: "gpt-5")
+        let voiceModel = OpenCodeModelReference(providerID: "openai", modelID: "gpt-5-mini")
+        store.setNewSessionDefaultModel(normalModel)
+        store.setVoiceModeModel(voiceModel)
+
+        store.seedSelectionsForNewSession(sessionID: "chat")
+        store.seedSelectionsForVoiceSession(sessionID: "voice")
+
+        XCTAssertEqual(store.selectedModelReference(for: "chat"), normalModel)
+        XCTAssertEqual(store.selectedModelReference(for: "voice"), voiceModel)
+    }
+
+    func testVoiceSessionFallsBackToNewSessionDefaultWhenUnset() {
+        let openAI = provider(id: "openai", name: "OpenAI")
+        let store = ModelConfigurationStore(
+            allProviders: [openAI],
+            availableProviders: [openAI]
+        )
+        let normalModel = OpenCodeModelReference(providerID: "openai", modelID: "gpt-5")
+        store.setNewSessionDefaultModel(normalModel)
+
+        store.seedSelectionsForVoiceSession(sessionID: "voice")
+
+        XCTAssertEqual(store.selectedModelReference(for: "voice"), normalModel)
+    }
+
+    func testSanitizeClearsUnavailableVoiceModel() {
+        let store = ModelConfigurationStore()
+        store.setVoiceModeModel(OpenCodeModelReference(providerID: "missing", modelID: "missing"))
+
+        store.sanitizeNewSessionDefaults()
+
+        XCTAssertNil(store.voiceModeModelReference())
+        XCTAssertNil(store.newSessionDefaults.voiceModeProviderID)
+        XCTAssertNil(store.newSessionDefaults.voiceModeModelID)
+    }
+
+    func testLegacyNewSessionDefaultsDecodeWithoutVoiceModel() throws {
+        let data = Data(#"{"agentName":"build","providerID":"openai","modelID":"gpt-5"}"#.utf8)
+
+        let defaults = try JSONDecoder().decode(NewSessionDefaults.self, from: data)
+
+        XCTAssertEqual(defaults.agentName, "build")
+        XCTAssertNil(defaults.voiceModeProviderID)
+        XCTAssertNil(defaults.voiceModeModelID)
+    }
+
     private func provider(id: String, name: String, releaseDate: String? = nil, source: String? = nil) -> OpenCodeProvider {
         OpenCodeProvider(id: id, name: name, models: ["gpt-5": model(id: "gpt-5", providerID: id, releaseDate: releaseDate)], source: source)
     }

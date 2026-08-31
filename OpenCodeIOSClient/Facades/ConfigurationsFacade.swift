@@ -23,6 +23,7 @@ final class ConfigurationsFacade: ObservableObject {
     var configurationAgentTitle: String { viewModel.configurationAgentTitle }
     var configurationModelTitle: String { viewModel.configurationModelTitle }
     var configurationReasoningTitle: String { viewModel.configurationReasoningTitle }
+    var configurationVoiceModeModelTitle: String { viewModel.modelConfigurationStore.configurationVoiceModeModelTitle }
     var configurationReasoningVariants: [String] { viewModel.configurationReasoningVariants }
     var isLoadingProviders: Bool { viewModel.isLoadingProviders }
     var sortedConnectedProviders: [OpenCodeProvider] { viewModel.sortedConnectedProviders }
@@ -80,7 +81,9 @@ final class ConfigurationsFacade: ObservableObject {
     func setNewSessionDefaultAgent(_ name: String?) { viewModel.setNewSessionDefaultAgent(name) }
     func setNewSessionDefaultModel(_ reference: OpenCodeModelReference?) { viewModel.setNewSessionDefaultModel(reference) }
     func setNewSessionDefaultReasoning(_ variant: String?) { viewModel.setNewSessionDefaultReasoning(variant) }
+    func setVoiceModeModel(_ reference: OpenCodeModelReference?) { viewModel.setVoiceModeModel(reference) }
     func newSessionDefaultModelReference() -> OpenCodeModelReference? { viewModel.newSessionDefaultModelReference() }
+    func voiceModeModelReference() -> OpenCodeModelReference? { viewModel.voiceModeModelReference() }
     func formattedVariantTitle(_ variant: String) -> String { viewModel.formattedVariantTitle(variant) }
     func setShowsRecentSessionsInProjectList(_ shows: Bool) { viewModel.setShowsRecentSessionsInProjectList(shows) }
     func loadRecentProjectSessionsAcrossProjects() async { await viewModel.loadRecentProjectSessionsAcrossProjects() }

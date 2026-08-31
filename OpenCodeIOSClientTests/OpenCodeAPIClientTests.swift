@@ -180,6 +180,48 @@ final class OpenCodeAPIClientTests: XCTestCase {
         await fulfillment(of: [expectation], timeout: 1)
     }
 
+    func testListMessagePageUsesCursorAndReturnsNextCursorHeader() async throws {
+        let expectation = expectation(description: "request captured")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = OpenCodeAPIClient(
+            config: OpenCodeServerConfig(baseURL: "http://127.0.0.1:4096", username: "opencode", password: "pw"),
+            session: session
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/session/ses_test/message")
+            XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems, [
+                URLQueryItem(name: "limit", value: "12"),
+                URLQueryItem(name: "before", value: "cursor-1"),
+                URLQueryItem(name: "directory", value: "/tmp/project"),
+            ])
+            expectation.fulfill()
+            let data = #"[{"info":{"id":"msg_old","role":"user","sessionID":"ses_test"},"parts":[]}]"#.data(using: .utf8)!
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["X-Next-Cursor": "cursor-2"]
+                )!,
+                data
+            )
+        }
+
+        let page = try await client.listMessagePage(
+            sessionID: "ses_test",
+            limit: 12,
+            before: "cursor-1",
+            directory: "/tmp/project"
+        )
+
+        XCTAssertEqual(page.messages.map(\.id), ["msg_old"])
+        XCTAssertEqual(page.nextCursor, "cursor-2")
+        await fulfillment(of: [expectation], timeout: 1)
+    }
+
     func testGetSessionUsesExactScopedEndpoint() async throws {
         let expectation = expectation(description: "request captured")
         let configuration = URLSessionConfiguration.ephemeral

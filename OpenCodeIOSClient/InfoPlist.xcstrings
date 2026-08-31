@@ -50,19 +50,41 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "OpenClient uses the microphone to dictate chat messages."
+            "value": "OpenClient uses the microphone for dictation and voice conversations."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O OpenClient usa o microfone para ditar mensagens no chat."
+            "value": "O OpenClient usa o microfone para ditado e conversas por voz."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "OpenClient usa il microfono per dettare i messaggi della chat."
+            "value": "OpenClient usa il microfono per la dettatura e le conversazioni vocali."
+          }
+        }
+      }
+    },
+    "NSPersonalVoiceUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenClient uses your Personal Voice to read AI responses aloud when you select it."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O OpenClient usa sua Voz Pessoal para ler as respostas da IA em voz alta quando você a seleciona."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenClient usa la tua Voce personale per leggere ad alta voce le risposte dell'IA quando la selezioni."
           }
         }
       }
@@ -94,19 +116,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "OpenClient uses speech recognition to transcribe dictated chat messages."
+            "value": "OpenClient uses speech recognition to transcribe dictation and voice conversations."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O OpenClient usa o reconhecimento de fala para transcrever mensagens ditadas no chat."
+            "value": "O OpenClient usa o reconhecimento de fala para transcrever ditados e conversas por voz."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "OpenClient usa il riconoscimento vocale per trascrivere i messaggi dettati nella chat."
+            "value": "OpenClient usa il riconoscimento vocale per trascrivere la dettatura e le conversazioni vocali."
           }
         }
       }

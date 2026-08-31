@@ -14,12 +14,19 @@ final class ChatStore: ObservableObject {
         let field: String
     }
 
+    struct MessageHistoryState: Equatable {
+        var nextCursor: String?
+        var isComplete: Bool
+        var isLoading: Bool
+    }
+
     @Published var messages: [OpenCodeMessageEnvelope]
     @Published var cachedMessagesBySessionID: [String: [OpenCodeMessageEnvelope]]
     @Published var toolMessageDetails: [String: OpenCodeMessageEnvelope]
     @Published var isLoadingSelectedSession: Bool
     @Published private(set) var preparedSessionID: String?
     @Published var activeChatSessionID: String?
+    @Published private(set) var messageHistoryBySessionID: [String: MessageHistoryState]
     var inFlightToolMessageDetailIDs: Set<String>
     var nextStreamPartHapticAllowedAt: Date
     var pendingTranscriptEvents: [OpenCodePendingTranscriptEvent]
@@ -39,6 +46,7 @@ final class ChatStore: ObservableObject {
         isLoadingSelectedSession: Bool = false,
         preparedSessionID: String? = nil,
         activeChatSessionID: String? = nil,
+        messageHistoryBySessionID: [String: MessageHistoryState] = [:],
         inFlightToolMessageDetailIDs: Set<String> = [],
         nextStreamPartHapticAllowedAt: Date = .distantPast,
         pendingTranscriptEvents: [OpenCodePendingTranscriptEvent] = [],
@@ -55,6 +63,7 @@ final class ChatStore: ObservableObject {
         self.isLoadingSelectedSession = isLoadingSelectedSession
         self.preparedSessionID = preparedSessionID
         self.activeChatSessionID = activeChatSessionID
+        self.messageHistoryBySessionID = messageHistoryBySessionID
         self.inFlightToolMessageDetailIDs = inFlightToolMessageDetailIDs
         self.nextStreamPartHapticAllowedAt = nextStreamPartHapticAllowedAt
         self.pendingTranscriptEvents = pendingTranscriptEvents
@@ -196,6 +205,39 @@ final class ChatStore: ObservableObject {
         finishLoadingSelectedSession()
     }
 
+    func applyMessageHistoryPage(nextCursor: String?, forSessionID sessionID: String) {
+        messageHistoryBySessionID[sessionID] = MessageHistoryState(
+            nextCursor: nextCursor,
+            isComplete: nextCursor == nil,
+            isLoading: false
+        )
+    }
+
+    func beginLoadingOlderMessages(forSessionID sessionID: String) -> String? {
+        guard var state = messageHistoryBySessionID[sessionID],
+              !state.isComplete,
+              !state.isLoading,
+              let cursor = state.nextCursor else { return nil }
+        state.isLoading = true
+        messageHistoryBySessionID[sessionID] = state
+        return cursor
+    }
+
+    func failLoadingOlderMessages(forSessionID sessionID: String) {
+        guard var state = messageHistoryBySessionID[sessionID], state.isLoading else { return }
+        state.isLoading = false
+        messageHistoryBySessionID[sessionID] = state
+    }
+
+    func hasOlderMessages(forSessionID sessionID: String) -> Bool {
+        guard let state = messageHistoryBySessionID[sessionID] else { return false }
+        return !state.isComplete && state.nextCursor != nil
+    }
+
+    func isLoadingOlderMessages(forSessionID sessionID: String) -> Bool {
+        messageHistoryBySessionID[sessionID]?.isLoading ?? false
+    }
+
     private func mergingCanonicalMessages(
         _ canonicalMessages: [OpenCodeMessageEnvelope],
         withExistingMessages existingMessages: [OpenCodeMessageEnvelope]
@@ -302,6 +344,7 @@ final class ChatStore: ObservableObject {
 
     func clearCachedMessages(forSessionID sessionID: String) {
         cachedMessagesBySessionID[sessionID] = nil
+        messageHistoryBySessionID[sessionID] = nil
     }
 
     func recentToolMessageIDs(in messages: [OpenCodeMessageEnvelope], limit: Int) -> [String] {

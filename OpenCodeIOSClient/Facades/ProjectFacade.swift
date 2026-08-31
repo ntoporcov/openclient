@@ -261,6 +261,10 @@ final class ProjectFacade: ObservableObject {
         guard !isReadOnly else { return }
         viewModel.presentNewProjectChatSheet()
     }
+    func presentNewTalk() {
+        guard !isReadOnly else { return }
+        viewModel.talkSessionCoordinator.presentProjectSelection()
+    }
     func dismissNewChat() { viewModel.dismissNewProjectChatSheet() }
 
     func presentSettings() {

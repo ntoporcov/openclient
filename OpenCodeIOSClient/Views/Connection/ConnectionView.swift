@@ -275,6 +275,7 @@ struct ConnectionView: View {
 
 struct RootConfigurationsView: View {
     @ObservedObject var facade: ConnectionFacade
+    @State private var isShowingVoiceSettings = false
 
     var body: some View {
         Form {
@@ -309,12 +310,21 @@ struct RootConfigurationsView: View {
                 Text("Shows an animated highlight at the top of a chat while the AI is active.")
             }
 
-            Section("Fun & Games") {
-                Toggle("Show Fun & Games", isOn: Binding(
-                    get: { facade.showsFunAndGamesSection },
-                    set: { facade.setShowsFunAndGamesSection($0) }
-                ))
-                .accessibilityIdentifier("configurations.show-fun-and-games")
+            Section("Voice") {
+                Button {
+                    isShowingVoiceSettings = true
+                } label: {
+                    HStack(spacing: 8) {
+                        LabeledContent("Conversation Voice", value: facade.speechVoiceStore.selectionSummary)
+
+                        Image(systemName: "chevron.forward")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("configurations.voice")
             }
 
             Section {
@@ -351,9 +361,31 @@ struct RootConfigurationsView: View {
                 Text("OpenClient will connect to the selected server when the app opens. Server passwords remain in Keychain.")
             }
 
+            Section("Fun & Games") {
+                Toggle("Show Fun & Games", isOn: Binding(
+                    get: { facade.showsFunAndGamesSection },
+                    set: { facade.setShowsFunAndGamesSection($0) }
+                ))
+                .accessibilityIdentifier("configurations.show-fun-and-games")
+            }
+
         }
         .navigationTitle("Configurations")
         .opencodeInlineNavigationTitle()
+        .sheet(isPresented: $isShowingVoiceSettings) {
+            NavigationStack {
+                VoiceSettingsView(store: facade.speechVoiceStore)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") {
+                                isShowingVoiceSettings = false
+                            }
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
     }
 }
 

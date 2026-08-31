@@ -3,6 +3,20 @@ import SwiftUI
 struct SessionListView: View {
     @ObservedObject var facade: SessionListFacade
     let onSessionChosen: () -> Void
+    let onNewChat: () -> Void
+    let onNewTalk: () -> Void
+
+    init(
+        facade: SessionListFacade,
+        onSessionChosen: @escaping () -> Void,
+        onNewChat: @escaping () -> Void = {},
+        onNewTalk: @escaping () -> Void = {}
+    ) {
+        self.facade = facade
+        self.onSessionChosen = onSessionChosen
+        self.onNewChat = onNewChat
+        self.onNewTalk = onNewTalk
+    }
 
     var body: some View {
         SessionListContent(
@@ -11,6 +25,61 @@ struct SessionListView: View {
             onSessionChosen: onSessionChosen
         )
         .equatable()
+        .safeAreaInset(edge: .bottom) {
+            if !facade.snapshot.isReadOnly {
+                HStack(spacing: 8) {
+                    Spacer()
+                    SessionListActionButton(
+                        title: "Talk",
+                        systemImage: "waveform",
+                        accessibilityIdentifier: "sessions.newTalk",
+                        action: onNewTalk
+                    )
+                    SessionListActionButton(
+                        title: "Chat",
+                        systemImage: "square.and.pencil",
+                        accessibilityIdentifier: "sessions.create",
+                        action: onNewChat
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+            }
+        }
+    }
+}
+
+private struct SessionListActionButton: View {
+    let title: LocalizedStringResource
+    let systemImage: String
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        button
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .opencodeConcentricGlassSurface(
+                clear: true,
+                tint: Color.accentColor.opacity(0.82),
+                isInteractive: true,
+                minimumCornerRadius: 19,
+                in: Capsule()
+            )
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
+            .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    private var button: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                .contentShape(Capsule())
+        }
     }
 }
 

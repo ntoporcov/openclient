@@ -64,6 +64,34 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertEqual(cached?.first?.parts.first?.text, "Replacement")
     }
 
+    func testMessageHistoryTracksCursorLoadingAndCompletion() {
+        let store = ChatStore()
+
+        store.applyMessageHistoryPage(nextCursor: "cursor-1", forSessionID: "ses_test")
+
+        XCTAssertTrue(store.hasOlderMessages(forSessionID: "ses_test"))
+        XCTAssertEqual(store.beginLoadingOlderMessages(forSessionID: "ses_test"), "cursor-1")
+        XCTAssertTrue(store.isLoadingOlderMessages(forSessionID: "ses_test"))
+        XCTAssertNil(store.beginLoadingOlderMessages(forSessionID: "ses_test"))
+
+        store.applyMessageHistoryPage(nextCursor: nil, forSessionID: "ses_test")
+
+        XCTAssertFalse(store.hasOlderMessages(forSessionID: "ses_test"))
+        XCTAssertFalse(store.isLoadingOlderMessages(forSessionID: "ses_test"))
+        XCTAssertNil(store.beginLoadingOlderMessages(forSessionID: "ses_test"))
+    }
+
+    func testMessageHistoryFailureAllowsCursorRetry() {
+        let store = ChatStore()
+        store.applyMessageHistoryPage(nextCursor: "cursor-1", forSessionID: "ses_test")
+        XCTAssertEqual(store.beginLoadingOlderMessages(forSessionID: "ses_test"), "cursor-1")
+
+        store.failLoadingOlderMessages(forSessionID: "ses_test")
+
+        XCTAssertFalse(store.isLoadingOlderMessages(forSessionID: "ses_test"))
+        XCTAssertEqual(store.beginLoadingOlderMessages(forSessionID: "ses_test"), "cursor-1")
+    }
+
     func testActivityBudgetKeepsProtectedContentAndNewestSettledActivity() {
         let projection = MessageBubbleActivityBudget.project(
             protectedEntries: Array(repeating: false, count: 20) + [true],

@@ -42,6 +42,41 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertFalse(request.locksProject)
     }
 
+    func testNewTalkPresentationAsksForAProject() throws {
+        let viewModel = AppViewModel()
+        viewModel.backendMode = .server
+        viewModel.isConnected = true
+
+        viewModel.activityFacade.presentNewTalk()
+
+        XCTAssertEqual(viewModel.talkSessionCoordinator.phase, .choosingProject)
+        XCTAssertNil(viewModel.newProjectChatSheetRequest)
+        XCTAssertNil(viewModel.selectedSession)
+    }
+
+    func testSelectingTalkProjectStartsListeningBeforeCreatingSession() {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "voice-project", directory: "/tmp/voice-project")
+        viewModel.projects = [project]
+        viewModel.backendMode = .server
+        viewModel.isConnected = true
+        viewModel.talkSessionCoordinator.setHoldToTalkEnabled(true)
+        viewModel.talkSessionCoordinator.presentProjectSelection()
+
+        viewModel.talkSessionCoordinator.selectProject(project)
+
+        XCTAssertEqual(viewModel.talkSessionCoordinator.phase, .listening)
+        XCTAssertEqual(viewModel.talkSessionCoordinator.selectedProjectID, project.id)
+        XCTAssertNil(viewModel.selectedSession)
+
+        viewModel.talkSessionCoordinator.applicationActivityChanged(isActive: false)
+        XCTAssertEqual(viewModel.talkSessionCoordinator.conversationController.state, .ready)
+        viewModel.talkSessionCoordinator.applicationActivityChanged(isActive: true)
+        XCTAssertEqual(viewModel.talkSessionCoordinator.conversationController.state, .ready)
+
+        viewModel.talkSessionCoordinator.stop()
+    }
+
     func testPreparationHydratesCardMetadataFromPersistentCacheBeforeServerReconciliation() async throws {
         let viewModel = AppViewModel()
         let project = makeProject(id: "project-cache", directory: "/tmp/cache")

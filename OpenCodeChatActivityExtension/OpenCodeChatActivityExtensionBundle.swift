@@ -5,6 +5,7 @@ import WidgetKit
 struct OpenCodeChatActivityExtensionBundle: WidgetBundle {
     var body: some Widget {
         OpenCodeChatActivityWidget()
+        OpenCodeTalkActivityWidget()
         OpenCodeRecentSessionsWidget()
         OpenCodePinnedSessionsWidget()
         OpenCodeActionShortcutWidget()

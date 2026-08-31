@@ -140,6 +140,7 @@ final class AppShellFacade: ObservableObject {
     let configurations: ConfigurationsFacade
     let funAndGames: FunAndGamesFacade
     let chat: ChatFacade
+    let talkSessions: TalkSessionCoordinator
     let browser: BrowserStore
 
     private unowned let viewModel: AppViewModel
@@ -161,6 +162,7 @@ final class AppShellFacade: ObservableObject {
         configurations = viewModel.configurationsFacade
         funAndGames = viewModel.funAndGamesFacade
         chat = viewModel.chatFacade
+        talkSessions = viewModel.talkSessionCoordinator
         browser = BrowserStore(projectID: viewModel.projectStore.currentProject?.id)
 
         Publishers.MergeMany([
@@ -172,6 +174,7 @@ final class AppShellFacade: ObservableObject {
             terminal.objectWillChange.eraseToAnyPublisher(),
             browser.objectWillChange.eraseToAnyPublisher(),
             viewModel.chatStore.$preparedSessionID.map { _ in () }.eraseToAnyPublisher(),
+            talkSessions.objectWillChange.eraseToAnyPublisher(),
             viewModel.$isShowingConnectionOverlay.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$newProjectChatSheetRequest.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$isShowingProjectSettingsSheet.map { _ in () }.eraseToAnyPublisher(),
@@ -435,6 +438,11 @@ final class AppShellFacade: ObservableObject {
             workspaceDirectory: viewModel.effectiveSelectedDirectory,
             locksProject: true
         )
+    }
+
+    func presentNewTalkForCurrentContext() {
+        guard !connection.isBrowsingLocalCache, let project = viewModel.currentProject else { return }
+        talkSessions.start(project: project, workspaceDirectory: viewModel.effectiveSelectedDirectory)
     }
 
     func presentPluginSetupChat() {

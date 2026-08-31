@@ -37,6 +37,13 @@ struct ConfigurationsSheet: View {
                     }
 
                     NavigationLink {
+                        VoiceModeModelSelectionView(viewModel: viewModel)
+                    } label: {
+                        configurationRow(title: "Talk Model", value: viewModel.configurationVoiceModeModelTitle)
+                    }
+                    .accessibilityIdentifier("configurations.talk-model")
+
+                    NavigationLink {
                         ReasoningDefaultSelectionView(viewModel: viewModel)
                     } label: {
                         configurationRow(title: "Reasoning", value: viewModel.configurationReasoningTitle)
@@ -1286,6 +1293,42 @@ private struct ModelDefaultSelectionView: View {
             }
         }
         .navigationTitle("Model")
+        .opencodeInlineNavigationTitle()
+    }
+}
+
+private struct VoiceModeModelSelectionView: View {
+    @ObservedObject var viewModel: ConfigurationsFacade
+
+    var body: some View {
+        List {
+            Section {
+                Button {
+                    viewModel.setVoiceModeModel(nil as OpenCodeModelReference?)
+                } label: {
+                    selectionRow(
+                        title: String(localized: "Use New Session Default"),
+                        isSelected: viewModel.voiceModeModelReference() == nil
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            ForEach(viewModel.sortedProviders) { provider in
+                Section(provider.name) {
+                    ForEach(viewModel.modelConfigurationStore.visibleModels(for: provider), id: \.id) { model in
+                        let reference = OpenCodeModelReference(providerID: provider.id, modelID: model.id)
+                        Button {
+                            viewModel.setVoiceModeModel(reference)
+                        } label: {
+                            selectionRow(title: model.name, isSelected: viewModel.voiceModeModelReference() == reference)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Talk Model")
         .opencodeInlineNavigationTitle()
     }
 }

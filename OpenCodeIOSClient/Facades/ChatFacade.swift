@@ -123,6 +123,7 @@ final class ChatFacade: ObservableObject {
 
     let connectionStore: ConnectionStore
     let appCustomizationStore: AppCustomizationStore
+    let speechVoiceStore: SpeechVoiceStore
     let projectStore: ProjectStore
     let sessionListStore: SessionListStore
     let chatStore: ChatStore
@@ -143,6 +144,7 @@ final class ChatFacade: ObservableObject {
         self.viewModel = viewModel
         connectionStore = viewModel.connectionStore
         appCustomizationStore = viewModel.appCustomizationStore
+        speechVoiceStore = viewModel.speechVoiceStore
         projectStore = viewModel.projectStore
         sessionListStore = viewModel.sessionListStore
         chatStore = viewModel.chatStore
@@ -560,6 +562,19 @@ final class ChatFacade: ObservableObject {
             prefetchToolDetails: false,
             refreshTodos: false
         )
+    }
+
+    func hasOlderMessages(forSessionID sessionID: String) -> Bool {
+        chatStore.hasOlderMessages(forSessionID: sessionID)
+    }
+
+    func isLoadingOlderMessages(forSessionID sessionID: String) -> Bool {
+        chatStore.isLoadingOlderMessages(forSessionID: sessionID)
+    }
+
+    @discardableResult
+    func loadOlderMessages(for session: OpenCodeSession, count: Int) async -> Int {
+        await viewModel.loadOlderMessages(for: session, count: count)
     }
 
     @discardableResult

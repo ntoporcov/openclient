@@ -1455,20 +1455,21 @@ extension AppViewModel {
     ) async throws {
         let targetStore = directoryStoreRegistry.ownerStore(forSessionID: session.id) ?? directoryStore
         let targetGeneration = directoryStoreRegistry.generation
+        let existingMessages = targetStore.syncState.messageEnvelopes(forSessionID: session.id)
         #if targetEnvironment(macCatalyst)
-        let messageLimit = 200
+        let messageLimit = max(200, existingMessages.count)
         #else
-        let messageLimit = 20
+        let messageLimit = max(20, existingMessages.count)
         #endif
-        let loadedPage = try await client.listMessages(sessionID: session.id, limit: messageLimit, directory: session.directory)
+        let page = try await client.listMessagePage(sessionID: session.id, limit: messageLimit, directory: session.directory)
         guard directoryStoreRegistry.generation == targetGeneration,
               directoryStoreRegistry.key(for: targetStore) != nil else { return }
-        let existingMessages = targetStore.syncState.messageEnvelopes(forSessionID: session.id)
-        let loadedMessages = ChatStore.mergingCanonicalMessagePage(loadedPage, into: existingMessages)
-        refreshSessionPreview(for: session.id, messages: loadedPage)
+        let loadedMessages = ChatStore.mergingCanonicalMessagePage(page.messages, into: existingMessages)
+        refreshSessionPreview(for: session.id, messages: page.messages)
         let isActiveSession = selectedSession?.id == session.id
         targetStore.applyCanonicalMessages(loadedMessages, forSessionID: session.id)
         chatStore.applyCanonicalMessages(loadedMessages, forSessionID: session.id, isActiveSession: isActiveSession)
+        chatStore.applyMessageHistoryPage(nextCursor: page.nextCursor, forSessionID: session.id)
         persistLoadedMessagesToLocalCache(loadedMessages, sessionID: session.id)
         inferFunAndGames(from: loadedMessages, forSessionID: session.id)
         guard isActiveSession else { return }
@@ -1482,6 +1483,44 @@ extension AppViewModel {
         refreshLiveActivityIfNeeded(for: session.id)
         if refreshTodos {
             await loadTodos(for: session)
+        }
+    }
+
+    @discardableResult
+    func loadOlderMessages(for session: OpenCodeSession, count: Int) async -> Int {
+        guard let cursor = chatStore.beginLoadingOlderMessages(forSessionID: session.id) else { return 0 }
+        let targetStore = directoryStoreRegistry.ownerStore(forSessionID: session.id) ?? directoryStore
+        let targetGeneration = directoryStoreRegistry.generation
+        let existingMessages = targetStore.syncState.messageEnvelopes(forSessionID: session.id)
+
+        do {
+            let page = try await client.listMessagePage(
+                sessionID: session.id,
+                limit: max(1, count),
+                before: cursor,
+                directory: session.directory
+            )
+            guard directoryStoreRegistry.generation == targetGeneration,
+                  directoryStoreRegistry.key(for: targetStore) != nil else {
+                chatStore.failLoadingOlderMessages(forSessionID: session.id)
+                return 0
+            }
+
+            let loadedMessages = ChatStore.mergingCanonicalMessagePage(page.messages, into: existingMessages)
+            let addedCount = max(0, loadedMessages.count - existingMessages.count)
+            let isActiveSession = selectedSession?.id == session.id
+            targetStore.applyCanonicalMessages(loadedMessages, forSessionID: session.id)
+            chatStore.applyCanonicalMessages(loadedMessages, forSessionID: session.id, isActiveSession: isActiveSession)
+            chatStore.applyMessageHistoryPage(nextCursor: page.nextCursor, forSessionID: session.id)
+            persistLoadedMessagesToLocalCache(loadedMessages, sessionID: session.id)
+            inferFunAndGames(from: loadedMessages, forSessionID: session.id)
+            errorMessage = nil
+            return addedCount
+        } catch {
+            chatStore.failLoadingOlderMessages(forSessionID: session.id)
+            appendDebugLog("older messages error session=\(debugSessionLabel(session)) error=\(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            return 0
         }
     }
 

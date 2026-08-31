@@ -40,6 +40,11 @@ struct ProjectListView: View {
     }
 
     var body: some View {
+        projectListContent
+    }
+
+    @ViewBuilder
+    private var projectListContent: some View {
         let snapshot = facade.listSnapshot
         let displayedProjects = isEditingProjects ? snapshot.allProjects : snapshot.projects
         let projectIDs = displayedProjects.map { $0.id }.joined(separator: "|")
@@ -230,19 +235,22 @@ struct ProjectListView: View {
             await facade.refreshList()
         }
         .safeAreaInset(edge: .bottom) {
-            ProjectListBottomBar(
+            OpenCodeConversationBottomBar(
                 query: Binding(
                     get: { facade.projectSessionSearchQuery },
                     set: { facade.projectSessionSearchQuery = $0 }
                 ),
                 isSearching: snapshot.isSearching,
                 allowsNewChat: !facade.isReadOnly,
+                accessibilityPrefix: "projects",
                 onNewChat: {
                     facade.presentNewChat()
+                },
+                onNewTalk: {
+                    facade.presentNewTalk()
                 }
             )
-            .padding(.leading, 16)
-            .padding(.trailing, projectListBottomBarTrailingPadding)
+            .padding(.horizontal, 20)
             .padding(.top, 8)
             .padding(.bottom, projectListBottomBarBottomPadding)
         }
@@ -333,14 +341,6 @@ struct ProjectListView: View {
         }
     }
 
-    private var projectListBottomBarTrailingPadding: CGFloat {
-        #if targetEnvironment(macCatalyst)
-        24
-        #else
-        16
-        #endif
-    }
-
     private var projectListRowInsets: EdgeInsets? {
         #if os(iOS) && !targetEnvironment(macCatalyst)
         UIDevice.current.userInterfaceIdiom == .pad ? EdgeInsets() : nil
@@ -353,7 +353,7 @@ struct ProjectListView: View {
         #if targetEnvironment(macCatalyst)
         16
         #else
-        0
+        OpenCodeConversationControlsLayout.bottomEdgeAdjustment
         #endif
     }
 
@@ -482,11 +482,13 @@ private struct ProjectSessionSearchRow: View {
     }
 }
 
-private struct ProjectListBottomBar: View {
+struct OpenCodeConversationBottomBar: View {
     @Binding var query: String
     let isSearching: Bool
     let allowsNewChat: Bool
+    let accessibilityPrefix: String
     let onNewChat: () -> Void
+    let onNewTalk: () -> Void
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -504,7 +506,7 @@ private struct ProjectListBottomBar: View {
                     .onSubmit {
                         isSearchFocused = false
                     }
-                    .accessibilityIdentifier("projects.searchChats")
+                    .accessibilityIdentifier("\(accessibilityPrefix).searchChats")
 
                 if isSearching {
                     ProgressView()
@@ -542,14 +544,20 @@ private struct ProjectListBottomBar: View {
                 .frame(width: ProjectListLayout.searchBarHeight, height: ProjectListLayout.searchBarHeight)
                 .contentShape(Circle())
                 .accessibilityLabel("Dismiss Search")
-                .accessibilityIdentifier("projects.search.dismiss")
+                .accessibilityIdentifier("\(accessibilityPrefix).search.dismiss")
                 .transition(.scale(scale: 0.92).combined(with: .opacity))
                 .zIndex(1)
             } else if allowsNewChat {
-                OpenCodeNewChatFloatingButton(
-                    accessibilityIdentifier: "projects.newChat",
-                    action: onNewChat
-                )
+                HStack(spacing: ProjectListLayout.conversationButtonSpacing) {
+                    OpenCodeNewTalkFloatingButton(
+                        accessibilityIdentifier: "\(accessibilityPrefix).newTalk",
+                        action: onNewTalk
+                    )
+                    OpenCodeNewChatFloatingButton(
+                        accessibilityIdentifier: "\(accessibilityPrefix).newChat",
+                        action: onNewChat
+                    )
+                }
                 .transition(.scale(scale: 0.92).combined(with: .opacity))
             }
         }
@@ -574,17 +582,57 @@ struct OpenCodeNewChatFloatingButton: View {
     let action: () -> Void
 
     var body: some View {
+        OpenCodeConversationFloatingButton(
+            systemImage: "square.and.pencil",
+            accessibilityLabel: "New Chat",
+            accessibilityIdentifier: accessibilityIdentifier,
+            action: action
+        )
+    }
+}
+
+struct OpenCodeNewTalkFloatingButton: View {
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        OpenCodeConversationFloatingButton(
+            systemImage: "waveform",
+            accessibilityLabel: "New Talk",
+            accessibilityIdentifier: accessibilityIdentifier,
+            action: action
+        )
+    }
+}
+
+enum OpenCodeConversationControlsLayout {
+    static let bottomEdgeAdjustment: CGFloat = -4
+}
+
+private struct OpenCodeConversationFloatingButton: View {
+    let systemImage: String
+    let accessibilityLabel: LocalizedStringResource
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
-            Image(systemName: "square.and.pencil")
+            Image(systemName: systemImage)
                 .font(.system(size: ProjectListLayout.newChatIconSize, weight: .semibold))
                 .foregroundStyle(foreground)
                 .frame(width: ProjectListLayout.newChatButtonDiameter, height: ProjectListLayout.newChatButtonDiameter)
         }
         .frame(width: ProjectListLayout.newChatButtonDiameter, height: ProjectListLayout.newChatButtonDiameter)
-        .opencodePrimaryGlassButton()
-        .buttonBorderShape(.circle)
+        .buttonStyle(.plain)
+        .opencodeConcentricGlassSurface(
+            clear: true,
+            tint: Color.accentColor.opacity(0.82),
+            isInteractive: true,
+            minimumCornerRadius: ProjectListLayout.newChatButtonDiameter / 2,
+            in: Circle()
+        )
         .contentShape(Circle())
-        .accessibilityLabel("New Chat")
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier(accessibilityIdentifier)
     }
 
@@ -704,6 +752,8 @@ struct ProjectNewChatSheet: View, Equatable {
                                 todos: [],
                                 attachments: attachments,
                                 expansion: $composerAccessoryExpansion,
+                                isTodoStripMinimized: false,
+                                onSetTodoStripMinimized: { _ in },
                                 onTapTodo: {},
                                 onTapAttachment: { attachment in
                                     selectedAttachmentPreview = attachment
@@ -1592,10 +1642,11 @@ private struct ProjectListSectionHeader: View {
 private enum ProjectListLayout {
     static let sectionTitleFont = Font.system(.footnote, design: .default).weight(.semibold)
     static let roundedSectionTitleFont = Font.system(.footnote, design: .rounded).weight(.semibold)
-    static let searchBarHeight: CGFloat = 54
+    static let searchBarHeight: CGFloat = 44
     static let newChatButtonDiameter: CGFloat = 44
     static let newChatIconSize: CGFloat = 22
-    static let bottomBarControlSpacing: CGFloat = 16
+    static let bottomBarControlSpacing: CGFloat = 12
+    static let conversationButtonSpacing: CGFloat = 8
 }
 
 private struct ProjectColorPickerSheet: View {

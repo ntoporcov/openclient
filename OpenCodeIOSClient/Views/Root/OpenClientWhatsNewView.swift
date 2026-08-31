@@ -227,6 +227,8 @@ private struct OpenClientWhatsNewHero: View {
                         OpenClientWhatsNewLanguageMark()
                     case .ipad:
                         OpenClientWhatsNewIPadMark()
+                    case .talk:
+                        OpenClientWhatsNewTalkMark()
                     }
                 }
 
@@ -251,6 +253,38 @@ private struct OpenClientWhatsNewHero: View {
         }
         .shadow(color: .black.opacity(0.14), radius: 24, y: 12)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct OpenClientWhatsNewTalkMark: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(.blue.opacity(0.24))
+                .frame(width: 84, height: 84)
+                .blur(radius: 10)
+
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [.blue, .cyan.opacity(0.78)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 62, height: 62)
+                .overlay {
+                    Circle()
+                        .strokeBorder(.white.opacity(0.48), lineWidth: 1)
+                }
+                .shadow(color: .blue.opacity(0.35), radius: 18, y: 8)
+
+            Image(systemName: "waveform")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 92, height: 72)
+        .accessibilityHidden(true)
     }
 }
 

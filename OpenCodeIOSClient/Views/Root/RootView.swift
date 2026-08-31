@@ -6,6 +6,7 @@ struct RootView<ChatDestination: View>: View {
     let bridge: OpenClientBridgeFacade?
     let chatDestination: (String, Int) -> ChatDestination
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
     @State private var didRunUITestAutoConnect = false
@@ -74,6 +75,11 @@ struct RootView<ChatDestination: View>: View {
                 RootDeepLinkProgressOverlay(message: message)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
+
+            if shell.talkSessions.isPresented {
+                TalkSessionOverlay(coordinator: shell.talkSessions)
+                    .zIndex(20)
+            }
         }
         .sheet(item: primarySheet) { sheet in
             switch sheet {
@@ -84,7 +90,11 @@ struct RootView<ChatDestination: View>: View {
                     whatsNew: whatsNew
                 )
             case let .newProjectChat(request):
-                ProjectNewChatSheet(viewModel: shell.newProjectChat, request: request, autoFocusInput: shouldAutoFocusNewChatInput) {
+                ProjectNewChatSheet(
+                    viewModel: shell.newProjectChat,
+                    request: request,
+                    autoFocusInput: shouldAutoFocusNewChatInput
+                ) {
                     withAnimation(opencodeSelectionAnimation) {
                         showDetailColumn()
                     }
@@ -106,10 +116,16 @@ struct RootView<ChatDestination: View>: View {
             OpenClientPaywallView(commerce: shell.commerce, reason: reason)
         }
         .animation(.snappy(duration: 0.34, extraBounce: 0.02), value: shell.isShowingConnectionOverlay)
-        .onChange(of: shell.isConnected) { _, _ in
+        .onChange(of: shell.isConnected) { _, isConnected in
+            if !isConnected {
+                shell.talkSessions.stop()
+            }
             withAnimation(opencodeSelectionAnimation) {
                 showProjectSidebarIfNeeded()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            shell.talkSessions.applicationActivityChanged(isActive: phase == .active)
         }
         .onChange(of: shell.isShowingConnectionOverlay) { _, isShowing in
             guard !isShowing else { return }

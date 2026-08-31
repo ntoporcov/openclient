@@ -14,6 +14,7 @@ final class ConnectionFacade: ObservableObject {
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.appIconStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.speechVoiceStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.funAndGamesStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.$config.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$isShowingConnectionOverlay.map { _ in () }.eraseToAnyPublisher(),
@@ -46,6 +47,7 @@ final class ConnectionFacade: ObservableObject {
     var isUsingAppleIntelligence: Bool { viewModel.isUsingAppleIntelligence }
     var recentServerConfigs: [OpenCodeServerConfig] { viewModel.recentServerConfigs }
     var appIconStore: AppIconStore { viewModel.appIconStore }
+    var speechVoiceStore: SpeechVoiceStore { viewModel.speechVoiceStore }
     var showsChatActivityShimmer: Bool { viewModel.appCustomizationStore.showsChatActivityShimmer }
     var showsToolCalls: Bool { viewModel.appCustomizationStore.showsToolCalls }
     var showsReasoningBlocks: Bool { viewModel.appCustomizationStore.showsReasoningBlocks }

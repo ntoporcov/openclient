@@ -75,4 +75,5 @@ final class NewProjectChatFacade: ObservableObject {
             newWorkspaceName: newWorkspaceName
         )
     }
+
 }

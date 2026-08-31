@@ -247,6 +247,27 @@ final class OpenCodeIOSClientUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["Stop Live"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Delete"].exists)
+        XCTAssertTrue(app.buttons["Rename"].exists)
+    }
+
+    @MainActor
+    func testActivitySessionContextMenuShowsSessionActions() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "activity"
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["screenshot.scene.activity"].waitForExistence(timeout: 10))
+        let row = app.buttons["activity.session.session-screenshot-release"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.press(forDuration: 1.0)
+
+        XCTAssertTrue(app.buttons["Rename"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Delete"].exists)
+        XCTAssertTrue(app.buttons["Stop Live"].exists)
+        app.buttons["Rename"].tap()
+        let renameAlert = app.alerts["Rename Session"]
+        XCTAssertTrue(renameAlert.waitForExistence(timeout: 5))
+        renameAlert.buttons["Cancel"].tap()
     }
 
     @MainActor
@@ -358,6 +379,25 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             waitForAccessibilityValue(of: modelTrigger, equalTo: "Claude Sonnet 4.5, Balanced"),
             "Expected selecting Balanced to update the reasoning level"
         )
+    }
+
+    @MainActor
+    func testChatTodoStripMinimizesAndRestores() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "chat"
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["screenshot.scene.chat"].waitForExistence(timeout: 10))
+        let expandedTodos = app.descendants(matching: .any)["chat.todos.expanded"]
+        XCTAssertTrue(expandedTodos.waitForExistence(timeout: 10))
+
+        expandedTodos.swipeDown()
+
+        let minimizedTodos = app.buttons["chat.todos.minimized"]
+        XCTAssertTrue(minimizedTodos.waitForExistence(timeout: 5))
+        minimizedTodos.tap()
+
+        XCTAssertTrue(expandedTodos.waitForExistence(timeout: 5))
     }
 
     @MainActor

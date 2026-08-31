@@ -2079,6 +2079,16 @@ struct OpenCodeControlRequest: Decodable, Hashable, Sendable {
     let body: OpenCodeJSONValue
 }
 
+struct OpenCodePartTime: Codable, Hashable, Sendable {
+    let start: Double
+    let end: Double?
+
+    init(start: Double, end: Double? = nil) {
+        self.start = start
+        self.end = end
+    }
+}
+
 struct OpenCodePart: Codable, Hashable, Sendable {
     let id: String?
     let messageID: String?
@@ -2095,6 +2105,8 @@ struct OpenCodePart: Codable, Hashable, Sendable {
     let state: OpenCodeToolState?
     var text: String?
     let synthetic: Bool?
+    let ignored: Bool?
+    let time: OpenCodePartTime?
     let auto: Bool?
     let overflow: Bool?
     let tailStartID: String?
@@ -2115,6 +2127,8 @@ struct OpenCodePart: Codable, Hashable, Sendable {
         case state
         case text
         case synthetic
+        case ignored
+        case time
         case auto
         case overflow
         case tailStartID = "tail_start_id"
@@ -2136,6 +2150,8 @@ struct OpenCodePart: Codable, Hashable, Sendable {
         state: OpenCodeToolState?,
         text: String?,
         synthetic: Bool? = nil,
+        ignored: Bool? = nil,
+        time: OpenCodePartTime? = nil,
         auto: Bool? = nil,
         overflow: Bool? = nil,
         tailStartID: String? = nil
@@ -2155,6 +2171,8 @@ struct OpenCodePart: Codable, Hashable, Sendable {
         self.state = state
         self.text = text
         self.synthetic = synthetic
+        self.ignored = ignored
+        self.time = time
         self.auto = auto
         self.overflow = overflow
         self.tailStartID = tailStartID
@@ -2179,6 +2197,8 @@ struct OpenCodePart: Codable, Hashable, Sendable {
             state: state,
             text: isToolLikeTextPart ? nil : text,
             synthetic: synthetic,
+            ignored: ignored,
+            time: time,
             auto: auto,
             overflow: overflow,
             tailStartID: tailStartID

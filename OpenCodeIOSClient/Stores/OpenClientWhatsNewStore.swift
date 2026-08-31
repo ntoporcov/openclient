@@ -7,6 +7,7 @@ struct OpenClientReleaseNotes: Identifiable, Equatable {
         case activity
         case internationalization
         case ipad
+        case talk
     }
 
     struct Feature: Identifiable, Equatable {
@@ -213,6 +214,36 @@ enum OpenClientReleaseNotesCatalog {
             ],
             hero: .ipad,
             featureSectionTitle: "More room for the work that matters",
+            showsSetup: false
+        ),
+        OpenClientReleaseNotes(
+            version: "1.0.19",
+            title: "Talk it through",
+            summary: "Speak naturally with OpenClient, hear answers sooner, and keep the conversation going from the Lock Screen.",
+            features: [
+                OpenClientReleaseNotes.Feature(
+                    title: "Meet Talk mode",
+                    detail: "Start a voice conversation from Projects, Activity, session lists, or any chat, with automatic and hold-to-talk controls.",
+                    systemImage: "waveform"
+                ),
+                OpenClientReleaseNotes.Feature(
+                    title: "Answers without the wait",
+                    detail: "OpenClient speaks each completed answer while longer work continues, with Talk visible on the Lock Screen and Dynamic Island.",
+                    systemImage: "waveform.badge.mic"
+                ),
+                OpenClientReleaseNotes.Feature(
+                    title: "Todos on your terms",
+                    detail: "Minimize the todo list when you want more room, then bring it back with one tap.",
+                    systemImage: "checklist"
+                ),
+                OpenClientReleaseNotes.Feature(
+                    title: "Activity, refined",
+                    detail: "Search across sessions, projects, messages, statuses, and running tools with cleaner controls.",
+                    systemImage: "magnifyingglass"
+                ),
+            ],
+            hero: .talk,
+            featureSectionTitle: "More natural, less in the way",
             showsSetup: false
         ),
     ]

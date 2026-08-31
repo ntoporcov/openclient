@@ -1,5 +1,12 @@
 import Foundation
 
+enum OpenCodeTalkActivityPhase: String, Codable, Hashable {
+    case listening
+    case working
+    case speaking
+    case paused
+}
+
 #if canImport(ActivityKit) && os(iOS) && !targetEnvironment(macCatalyst)
 import ActivityKit
 
@@ -31,6 +38,19 @@ struct OpenCodeChatActivityLine: Codable, Hashable, Identifiable {
     var role: String
     var text: String
     var isStreaming: Bool
+}
+
+struct OpenCodeTalkActivityAttributes: ActivityAttributes {
+    struct ContentState: Codable, Hashable {
+        var phase: OpenCodeTalkActivityPhase
+        var sessionID: String?
+        var updatedAt: Date
+    }
+
+    var activityID: String
+    var title: String
+    var directory: String?
+    var workspaceID: String?
 }
 
 #endif

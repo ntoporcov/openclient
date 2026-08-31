@@ -420,6 +420,7 @@ private struct GitIntensityStrip: View {
                 }
                 .padding(.vertical, 2)
             }
+            .scrollClipDisabled()
 
             Text("Darker tiles mean more changed lines. Tap a tile to open that file diff.")
                 .font(.caption)

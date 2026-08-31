@@ -216,8 +216,18 @@ extension AppViewModel {
         saveNewSessionDefaults()
     }
 
+    func setVoiceModeModel(_ reference: OpenCodeModelReference?) {
+        objectWillChange.send()
+        modelConfigurationStore.setVoiceModeModel(reference)
+        saveNewSessionDefaults()
+    }
+
     func newSessionDefaultModelReference() -> OpenCodeModelReference? {
         modelConfigurationStore.newSessionDefaultModelReference()
+    }
+
+    func voiceModeModelReference() -> OpenCodeModelReference? {
+        modelConfigurationStore.voiceModeModelReference()
     }
 
     func model(for reference: OpenCodeModelReference?) -> OpenCodeModel? {

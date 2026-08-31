@@ -191,4 +191,138 @@ extension LiveActivityCoordinator {
         )
     }
 }
+
+private enum TalkLiveActivityCoordinator {
+    static func request(
+        activityID: String,
+        title: String,
+        directory: String?,
+        workspaceID: String?,
+        state: OpenCodeTalkActivityAttributes.ContentState
+    ) async {
+        await Task.detached(priority: .userInitiated) {
+            guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+            _ = try? Activity.request(
+                attributes: OpenCodeTalkActivityAttributes(
+                    activityID: activityID,
+                    title: title,
+                    directory: directory,
+                    workspaceID: workspaceID
+                ),
+                content: ActivityContent(state: state, staleDate: nil),
+                pushType: nil
+            )
+        }.value
+    }
+
+    static func update(activityID: String, state: OpenCodeTalkActivityAttributes.ContentState) async {
+        await Task.detached(priority: .utility) {
+            guard let activity = Activity<OpenCodeTalkActivityAttributes>.activities.first(where: {
+                $0.attributes.activityID == activityID
+            }) else { return }
+            await activity.update(ActivityContent(state: state, staleDate: nil))
+        }.value
+    }
+
+    static func end(activityID: String, state: OpenCodeTalkActivityAttributes.ContentState) async {
+        await Task.detached(priority: .userInitiated) {
+            guard let activity = Activity<OpenCodeTalkActivityAttributes>.activities.first(where: {
+                $0.attributes.activityID == activityID
+            }) else { return }
+            await activity.end(
+                ActivityContent(state: state, staleDate: nil),
+                dismissalPolicy: .immediate
+            )
+        }.value
+    }
+}
+
+@MainActor
+final class TalkLiveActivitySession {
+    private var activityID: String?
+    private var sessionID: String?
+    private var phase: OpenCodeTalkActivityPhase = .listening
+    private var operationTask: Task<Void, Never>?
+
+    func start(
+        title: String,
+        directory: String?,
+        workspaceID: String?,
+        sessionID: String?,
+        phase: OpenCodeTalkActivityPhase
+    ) {
+        let activityID = UUID().uuidString
+        self.activityID = activityID
+        self.sessionID = sessionID
+        self.phase = phase
+        enqueue { [activityID] in
+            let state = OpenCodeTalkActivityAttributes.ContentState(
+                phase: phase,
+                sessionID: sessionID,
+                updatedAt: Date()
+            )
+            await TalkLiveActivityCoordinator.request(
+                activityID: activityID,
+                title: title,
+                directory: directory,
+                workspaceID: workspaceID,
+                state: state
+            )
+        }
+    }
+
+    func update(phase: OpenCodeTalkActivityPhase, sessionID: String? = nil) {
+        guard let activityID else { return }
+        self.phase = phase
+        if let sessionID {
+            self.sessionID = sessionID
+        }
+        let resolvedSessionID = self.sessionID
+        enqueue { [activityID] in
+            let state = OpenCodeTalkActivityAttributes.ContentState(
+                phase: phase,
+                sessionID: resolvedSessionID,
+                updatedAt: Date()
+            )
+            await TalkLiveActivityCoordinator.update(activityID: activityID, state: state)
+        }
+    }
+
+    func end() {
+        guard let activityID else { return }
+        let state = OpenCodeTalkActivityAttributes.ContentState(
+            phase: phase,
+            sessionID: sessionID,
+            updatedAt: Date()
+        )
+        self.activityID = nil
+        sessionID = nil
+        enqueue { [activityID] in
+            await TalkLiveActivityCoordinator.end(activityID: activityID, state: state)
+        }
+    }
+
+    private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
+        let previous = operationTask
+        operationTask = Task { @MainActor in
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            await operation()
+        }
+    }
+}
+#else
+@MainActor
+final class TalkLiveActivitySession {
+    func start(
+        title: String,
+        directory: String?,
+        workspaceID: String?,
+        sessionID: String?,
+        phase: OpenCodeTalkActivityPhase
+    ) {}
+
+    func update(phase: OpenCodeTalkActivityPhase, sessionID: String? = nil) {}
+    func end() {}
+}
 #endif

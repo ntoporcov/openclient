@@ -83,6 +83,144 @@ struct OpenCodeChatActivityWidget: Widget {
     }
 }
 
+struct OpenCodeTalkActivityWidget: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: OpenCodeTalkActivityAttributes.self) { context in
+            OpenCodeTalkActivityView(context: context)
+                .widgetURL(destination(for: context))
+                .activityBackgroundTint(.clear)
+                .activitySystemActionForegroundColor(.white)
+        } dynamicIsland: { context in
+            let status = OpenCodeTalkActivityDisplayStatus(phase: context.state.phase)
+            return DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    OpenCodeTalkAppIcon(size: 30)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    Text(status.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(status.color)
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    HStack(spacing: 10) {
+                        Text(context.attributes.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Image(systemName: status.symbol)
+                            .foregroundStyle(status.color)
+                    }
+                }
+            } compactLeading: {
+                Image(systemName: "waveform")
+                    .foregroundStyle(.blue)
+            } compactTrailing: {
+                Circle()
+                    .fill(status.color)
+                    .frame(width: 9, height: 9)
+            } minimal: {
+                Image(systemName: "waveform")
+                    .foregroundStyle(.blue)
+            }
+            .widgetURL(destination(for: context))
+            .keylineTint(status.color)
+        }
+    }
+
+    private func destination(for context: ActivityViewContext<OpenCodeTalkActivityAttributes>) -> URL? {
+        guard let sessionID = context.state.sessionID else { return nil }
+        return OpenCodeChatActivityDeepLink.openAppURL(
+            sessionID: sessionID,
+            directory: context.attributes.directory,
+            workspaceID: context.attributes.workspaceID
+        )
+    }
+
+}
+
+private struct OpenCodeTalkActivityView: View {
+    let context: ActivityViewContext<OpenCodeTalkActivityAttributes>
+
+    var body: some View {
+        let status = OpenCodeTalkActivityDisplayStatus(phase: context.state.phase)
+        HStack(spacing: 14) {
+            OpenCodeTalkAppIcon(size: 48)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(context.attributes.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(status.title)
+                    .font(.subheadline)
+                    .foregroundStyle(status.color)
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: status.symbol)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(status.color)
+                .symbolEffect(.variableColor.iterative, options: .repeating, isActive: context.state.phase != .paused)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+}
+
+private struct OpenCodeTalkAppIcon: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image("ios-120")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+    }
+}
+
+private struct OpenCodeTalkActivityDisplayStatus {
+    let phase: OpenCodeTalkActivityPhase
+
+    var title: LocalizedStringResource {
+        switch phase {
+        case .listening:
+            return "Listening"
+        case .working:
+            return "Working"
+        case .speaking:
+            return "Speaking"
+        case .paused:
+            return "Paused"
+        }
+    }
+
+    var symbol: String {
+        switch phase {
+        case .listening:
+            return "waveform"
+        case .working:
+            return "ellipsis"
+        case .speaking:
+            return "speaker.wave.2.fill"
+        case .paused:
+            return "pause.fill"
+        }
+    }
+
+    var color: Color {
+        switch phase {
+        case .listening, .speaking:
+            return .blue
+        case .working:
+            return .orange
+        case .paused:
+            return .gray
+        }
+    }
+}
+
 private struct OpenCodeChatActivityView: View {
     let context: ActivityViewContext<OpenCodeChatActivityAttributes>
 

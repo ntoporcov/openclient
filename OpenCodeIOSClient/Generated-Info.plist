@@ -47,11 +47,13 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenClient connects to your OpenCode server and its device-tool bridge on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OpenClient uses the microphone to dictate chat messages.</string>
+	<string>OpenClient uses the microphone for dictation and voice conversations.</string>
+	<key>NSPersonalVoiceUsageDescription</key>
+	<string>OpenClient uses your Personal Voice to read AI responses aloud when you select it.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>OpenClient uses your photo library to show recent photos and attach selected images to messages.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>OpenClient uses speech recognition to transcribe dictated chat messages.</string>
+	<string>OpenClient uses speech recognition to transcribe dictation and voice conversations.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>OpenClientAlternateIconPreviewFiles</key>

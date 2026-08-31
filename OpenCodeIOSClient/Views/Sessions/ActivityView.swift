@@ -7,29 +7,35 @@ struct ActivityView: View {
     let onSessionChosen: () -> Void
     @State private var excludedProjectIDs: Set<String> = []
     @State private var isShowingSettings = false
+    @State private var searchQuery = ""
 
     var body: some View {
+        activityContent
+    }
+
+    @ViewBuilder
+    private var activityContent: some View {
         ActivityContent(
             facade: facade,
             snapshot: facade.snapshot,
             excludedProjectIDs: excludedProjectIDs,
+            searchQuery: searchQuery,
             showsLastUserMessage: facade.snapshot.showsLastUserMessage,
             onSessionChosen: onSessionChosen
         )
         .equatable()
         .safeAreaInset(edge: .bottom) {
-            if !facade.snapshot.isReadOnly {
-                HStack {
-                    Spacer()
-                    OpenCodeNewChatFloatingButton(
-                        accessibilityIdentifier: "activity.newChat",
-                        action: facade.presentNewChat
-                    )
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, newChatBottomPadding)
-            }
+            OpenCodeConversationBottomBar(
+                query: $searchQuery,
+                isSearching: false,
+                allowsNewChat: !facade.snapshot.isReadOnly,
+                accessibilityPrefix: "activity",
+                onNewChat: facade.presentNewChat,
+                onNewTalk: facade.presentNewTalk
+            )
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, newChatBottomPadding)
         }
         .navigationTitle("Activity")
         .opencodeInlineNavigationTitle()
@@ -60,7 +66,7 @@ struct ActivityView: View {
         #if targetEnvironment(macCatalyst)
         16
         #else
-        0
+        OpenCodeConversationControlsLayout.bottomEdgeAdjustment
         #endif
     }
 
@@ -197,13 +203,17 @@ private struct ActivityContent: View, Equatable {
     let facade: ActivityFacade
     let snapshot: ActivityFacade.Snapshot
     let excludedProjectIDs: Set<String>
+    let searchQuery: String
     let showsLastUserMessage: Bool
     let onSessionChosen: () -> Void
+    @State private var renamingRow: ActivityFacade.RowSnapshot?
+    @State private var renameTitle = ""
 
     nonisolated static func == (lhs: ActivityContent, rhs: ActivityContent) -> Bool {
         lhs.facade === rhs.facade
             && lhs.snapshot == rhs.snapshot
             && lhs.excludedProjectIDs == rhs.excludedProjectIDs
+            && lhs.searchQuery == rhs.searchQuery
             && lhs.showsLastUserMessage == rhs.showsLastUserMessage
     }
 
@@ -241,6 +251,12 @@ private struct ActivityContent: View, Equatable {
                             "No Projects Selected",
                             systemImage: "line.3.horizontal.decrease.circle",
                             description: Text("Select at least one project from the filter menu.")
+                        )
+                    } else if !normalizedSearchQuery.isEmpty {
+                        ContentUnavailableView(
+                            "No Matching Activity",
+                            systemImage: "magnifyingglass",
+                            description: Text("Try a different search.")
                         )
                     } else {
                         ContentUnavailableView(
@@ -290,7 +306,35 @@ private struct ActivityContent: View, Equatable {
         .accessibilityIdentifier("activity.list")
         .animation(
             .snappy(duration: 0.42, extraBounce: 0.06),
-            value: snapshot.placementSignature + "|filters:" + excludedProjectIDs.sorted().joined(separator: ",")
+            value: snapshot.placementSignature
+                + "|filters:" + excludedProjectIDs.sorted().joined(separator: ",")
+                + "|search:" + normalizedSearchQuery
+        )
+        .alert("Rename Session", isPresented: renameAlertBinding) {
+            TextField("Title", text: $renameTitle)
+            Button("Cancel", role: .cancel) {
+                clearRenameState()
+            }
+            Button("Rename") {
+                guard let row = renamingRow else { return }
+                let title = renameTitle
+                clearRenameState()
+                Task { await facade.rename(row, title: title) }
+            }
+            .disabled(renameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Enter a new title for this session.")
+        }
+    }
+
+    private var renameAlertBinding: Binding<Bool> {
+        Binding(
+            get: { renamingRow != nil },
+            set: { isPresented in
+                if !isPresented {
+                    clearRenameState()
+                }
+            }
         )
     }
 
@@ -326,7 +370,36 @@ private struct ActivityContent: View, Equatable {
     }
 
     private func visible(_ rows: [ActivityFacade.RowSnapshot]) -> [ActivityFacade.RowSnapshot] {
-        rows.filter { !excludedProjectIDs.contains($0.projectID) }
+        rows.filter {
+            !excludedProjectIDs.contains($0.projectID) && matchesSearch($0)
+        }
+    }
+
+    private var normalizedSearchQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func matchesSearch(_ row: ActivityFacade.RowSnapshot) -> Bool {
+        guard !normalizedSearchQuery.isEmpty else { return true }
+        var values = [
+            row.recent.projectTitle,
+            row.statusTitle,
+        ]
+        values += [
+            row.recent.session.title,
+            row.latestUserText,
+            row.latestAssistantText,
+        ].compactMap { $0 }
+        for tool in row.runningTools {
+            values.append(tool.tool)
+            values.append(tool.title)
+            if let detail = tool.detail {
+                values.append(detail)
+            }
+        }
+        return values.contains {
+            $0.localizedCaseInsensitiveContains(normalizedSearchQuery)
+        }
     }
 
     private func activitySection(
@@ -361,24 +434,21 @@ private struct ActivityContent: View, Equatable {
                     guard presentation == .fullContext else { return }
                     await facade.hydrateIfNeeded(row)
                 }
+                .contextMenu {
+                    if !snapshot.isReadOnly {
+                        deleteButton(for: row)
+                        renameButton(for: row)
+#if !targetEnvironment(macCatalyst)
+                        liveActivityButton(for: row)
+#endif
+                    }
+                }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     if !snapshot.isReadOnly {
-                        Button(role: .destructive) {
-                            Task { await facade.delete(row) }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-
+                        deleteButton(for: row)
+                        renameButton(for: row)
 #if !targetEnvironment(macCatalyst)
-                        Button {
-                            Task { await facade.toggleLiveActivity(row) }
-                        } label: {
-                            Label(
-                                row.isLiveActivityActive ? LocalizedStringResource("Stop Live") : LocalizedStringResource("Live"),
-                                systemImage: row.isLiveActivityActive ? "waveform.slash" : "waveform"
-                            )
-                        }
-                        .tint(.indigo)
+                        liveActivityButton(for: row)
 #endif
                     }
                 }
@@ -388,6 +458,41 @@ private struct ActivityContent: View, Equatable {
                 .font(.headline)
                 .textCase(nil)
         }
+    }
+
+    private func renameButton(for row: ActivityFacade.RowSnapshot) -> some View {
+        Button {
+            renamingRow = row
+            renameTitle = row.recent.session.title ?? ""
+        } label: {
+            Label("Rename", systemImage: "pencil")
+        }
+        .tint(.blue)
+    }
+
+    private func deleteButton(for row: ActivityFacade.RowSnapshot) -> some View {
+        Button(role: .destructive) {
+            Task { await facade.delete(row) }
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+
+    private func liveActivityButton(for row: ActivityFacade.RowSnapshot) -> some View {
+        Button {
+            Task { await facade.toggleLiveActivity(row) }
+        } label: {
+            Label(
+                row.isLiveActivityActive ? LocalizedStringResource("Stop Live") : LocalizedStringResource("Live"),
+                systemImage: row.isLiveActivityActive ? "waveform.slash" : "waveform"
+            )
+        }
+        .tint(.indigo)
+    }
+
+    private func clearRenameState() {
+        renamingRow = nil
+        renameTitle = ""
     }
 }
 

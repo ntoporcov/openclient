@@ -625,7 +625,8 @@ extension AppViewModel {
         projectID: String,
         workspaceDirectory: String? = nil,
         workspaceSelection: NewSessionWorkspaceSelection? = nil,
-        newWorkspaceName: String = ""
+        newWorkspaceName: String = "",
+        onSessionCreated: ((OpenCodeSession) -> Void)? = nil
     ) async -> Bool {
         guard backendMode == .server, isConnected else {
             errorMessage = String(localized: "Connect to an OpenCode server before starting a chat.")
@@ -652,15 +653,20 @@ extension AppViewModel {
                 workspaceSelection: workspaceSelection,
                 newWorkspaceName: newWorkspaceName
             )
+            try Task.checkCancellation()
             currentProject = project
             prepareDirectorySelection(routeDirectory)
 
             let createSubmission = sessionCoordinator.prepareCreateSession(title: title, directory: targetDirectory)
             let session = try await sessionCoordinator.submitCreate(client: client, submission: createSubmission)
+            try Task.checkCancellation()
+            onSessionCreated?(session)
             recordCreatedSessionForMetering()
             upsertVisibleSession(session)
             try await reloadSessions()
+            try Task.checkCancellation()
             await loadComposerOptions()
+            try Task.checkCancellation()
             if let composerSelection {
                 applyNewProjectChatComposerSelection(composerSelection, to: session)
             } else {
@@ -669,8 +675,10 @@ extension AppViewModel {
             upsertVisibleSession(session)
             prepareSessionSelection(session)
             await selectSession(session)
+            try Task.checkCancellation()
 
             try await waitForWorktreeReadyIfNeeded(directory: targetDirectory)
+            try Task.checkCancellation()
 
             let didSend = await sendMessage(
                 text,

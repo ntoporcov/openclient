@@ -173,6 +173,25 @@ final class AppShellFacadeTests: XCTestCase {
         XCTAssertNil(request?.composerSelection)
     }
 
+    func testProjectTalkPresentsLockedCurrentContext() {
+        let viewModel = AppViewModel()
+        let shell = viewModel.appShellFacade
+        let project = makeProject()
+        viewModel.currentProject = project
+        viewModel.selectedDirectory = "/tmp/workspace"
+        viewModel.backendMode = .server
+        viewModel.isConnected = true
+        viewModel.talkSessionCoordinator.setHoldToTalkEnabled(true)
+
+        shell.presentNewTalkForCurrentContext()
+
+        XCTAssertEqual(viewModel.talkSessionCoordinator.phase, .listening)
+        XCTAssertEqual(viewModel.talkSessionCoordinator.selectedProjectID, project.id)
+        XCTAssertNil(viewModel.newProjectChatSheetRequest)
+        XCTAssertNil(viewModel.selectedSession)
+        viewModel.talkSessionCoordinator.stop()
+    }
+
     func testPluginSetupPresentsPrefilledGlobalChat() {
         let viewModel = AppViewModel()
         let shell = viewModel.appShellFacade

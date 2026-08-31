@@ -16,8 +16,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    CURRENT_PROJECT_VERSION: 12
-    MARKETING_VERSION: 1.0.18
+    CURRENT_PROJECT_VERSION: 15
+    MARKETING_VERSION: 1.0.19
   configs:
     Debug:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
@@ -146,9 +146,10 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: OpenClient connects to your OpenCode server and its device-tool bridge on your local network.
-        NSMicrophoneUsageDescription: OpenClient uses the microphone to dictate chat messages.
+        NSMicrophoneUsageDescription: OpenClient uses the microphone for dictation and voice conversations.
+        NSPersonalVoiceUsageDescription: OpenClient uses your Personal Voice to read AI responses aloud when you select it.
         NSPhotoLibraryUsageDescription: OpenClient uses your photo library to show recent photos and attach selected images to messages.
-        NSSpeechRecognitionUsageDescription: OpenClient uses speech recognition to transcribe dictated chat messages.
+        NSSpeechRecognitionUsageDescription: OpenClient uses speech recognition to transcribe dictation and voice conversations.
         OpenClientAlternateIconPreviewFiles:
           Liquidy: Liquidy.png
           Trees: Trees.png
@@ -193,6 +194,9 @@ targets:
         excludes:
           - AGENTS.md
           - "**/AGENTS.md"
+      - path: OpenCodeIOSClient/Assets.xcassets/AppIcon.appiconset/ios-120.png
+        buildPhase: resources
+        group: OpenCodeChatActivityExtension
     preBuildScripts:
       - name: Validate bundle identifier
         script: |

@@ -407,6 +407,22 @@
         }
       }
     },
+    "Listening": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvindo"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In ascolto"
+          }
+        }
+      }
+    },
     "Live": {
       "localizations": {
         "pt-BR": {
@@ -1043,6 +1059,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Comando slash"
+          }
+        }
+      }
+    },
+    "Speaking": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Falando"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parlando"
           }
         }
       }

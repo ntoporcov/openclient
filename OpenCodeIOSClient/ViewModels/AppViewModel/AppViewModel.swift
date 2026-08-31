@@ -35,6 +35,8 @@ final class AppViewModel: ObservableObject {
     let connectionStore = ConnectionStore()
     let appCustomizationStore = AppCustomizationStore()
     let appIconStore = AppIconStore()
+    let speechVoiceStore = SpeechVoiceStore()
+    lazy var talkSessionCoordinator = TalkSessionCoordinator(viewModel: self)
     lazy var localCacheRepository: any OpenCodeLocalCacheRepository = OpenCodeLocalCacheRepositoryFactory.makeDefault()
     var localCacheDirectoryRefreshedAtByKey: [String: Date] = [:]
     var localCacheMessageRefreshedAtByKey: [String: Date] = [:]

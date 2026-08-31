@@ -286,6 +286,13 @@ final class ModelConfigurationStore: ObservableObject {
         return validModelReferences.contains(reference) ? reference : nil
     }
 
+    func voiceModeModelReference() -> OpenCodeModelReference? {
+        guard let providerID = newSessionDefaults.voiceModeProviderID,
+              let modelID = newSessionDefaults.voiceModeModelID else { return nil }
+        let reference = OpenCodeModelReference(providerID: providerID, modelID: modelID)
+        return validModelReferences.contains(reference) ? reference : nil
+    }
+
     func defaultModelReference() -> OpenCodeModelReference? {
         for provider in sortedProviders {
             guard let defaultModelID = defaultModelsByProviderID[provider.id], provider.models[defaultModelID] != nil else { continue }
@@ -307,6 +314,13 @@ final class ModelConfigurationStore: ObservableObject {
         return model.name
     }
 
+    var configurationVoiceModeModelTitle: String {
+        guard let reference = voiceModeModelReference(), let model = model(for: reference) else {
+            return String(localized: "Use New Session Default")
+        }
+        return model.name
+    }
+
     var configurationAgentTitle: String {
         guard let name = newSessionDefaults.agentName, selectableAgents.contains(where: { $0.name == name }) else { return String(localized: "System Default") }
         return name.capitalized
@@ -325,6 +339,11 @@ final class ModelConfigurationStore: ObservableObject {
         if let variant = newSessionDefaults.reasoningVariant, !reasoningVariants(for: configurationEffectiveModelReference).contains(variant) {
             newSessionDefaults.reasoningVariant = nil
         }
+    }
+
+    func setVoiceModeModel(_ reference: OpenCodeModelReference?) {
+        newSessionDefaults.voiceModeProviderID = reference?.providerID
+        newSessionDefaults.voiceModeModelID = reference?.modelID
     }
 
     func setNewSessionDefaultReasoning(_ variant: String?) { newSessionDefaults.reasoningVariant = variant }
@@ -374,6 +393,13 @@ final class ModelConfigurationStore: ObservableObject {
             sanitized.modelID = nil
         }
         if let variant = sanitized.reasoningVariant, !configurationReasoningVariants.contains(variant) { sanitized.reasoningVariant = nil }
+        if let reference = voiceModeModelReference() {
+            sanitized.voiceModeProviderID = reference.providerID
+            sanitized.voiceModeModelID = reference.modelID
+        } else {
+            sanitized.voiceModeProviderID = nil
+            sanitized.voiceModeModelID = nil
+        }
         if sanitized != newSessionDefaults {
             newSessionDefaults = sanitized
         }
@@ -398,6 +424,13 @@ final class ModelConfigurationStore: ObservableObject {
         }
         if selectedVariantsBySessionID[sessionID] == nil, let defaultVariant = newSessionDefaults.reasoningVariant, reasoningVariants(forSessionID: sessionID).contains(defaultVariant) {
             selectedVariantsBySessionID[sessionID] = defaultVariant
+        }
+    }
+
+    func seedSelectionsForVoiceSession(sessionID: String) {
+        seedSelectionsForNewSession(sessionID: sessionID)
+        if let reference = voiceModeModelReference() {
+            selectModel(reference, forSessionID: sessionID)
         }
     }
 

@@ -1,5 +1,10 @@
 import Foundation
 
+struct OpenCodeMessagePage: Sendable {
+    let messages: [OpenCodeMessageEnvelope]
+    let nextCursor: String?
+}
+
 struct OpenCodeAPIClient: Sendable {
     let config: OpenCodeServerConfig
     var session: URLSession = .shared
@@ -289,18 +294,39 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     func listMessages(sessionID: String, limit: Int? = nil, directory: String? = nil) async throws -> [OpenCodeMessageEnvelope] {
+        try await listMessagePage(sessionID: sessionID, limit: limit, directory: directory).messages
+    }
+
+    func listMessagePage(
+        sessionID: String,
+        limit: Int? = nil,
+        before: String? = nil,
+        directory: String? = nil
+    ) async throws -> OpenCodeMessagePage {
         var queryItems: [URLQueryItem] = []
         if let limit {
             queryItems.append(URLQueryItem(name: "limit", value: String(limit)))
         }
+        if let before {
+            queryItems.append(URLQueryItem(name: "before", value: before))
+        }
         if let directory, !directory.isEmpty {
             queryItems.append(URLQueryItem(name: "directory", value: directory))
         }
-        return try await send(
+        let request = try makeRequest(
             path: "/session/\(sessionID)/message",
             method: "GET",
             queryItems: queryItems,
             directoryHeader: directory
+        )
+        let (data, response) = try await session.data(for: request)
+        let messages: [OpenCodeMessageEnvelope] = try decode(data: data, response: response)
+        guard let http = response as? HTTPURLResponse else {
+            throw OpenCodeAPIError.invalidResponse
+        }
+        return OpenCodeMessagePage(
+            messages: messages,
+            nextCursor: http.value(forHTTPHeaderField: "X-Next-Cursor")
         )
     }
 

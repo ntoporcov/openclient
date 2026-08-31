@@ -17,6 +17,710 @@
         }
       }
     },
+    "Automatic": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automático"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatico"
+          }
+        }
+      }
+    },
+    "Automatic sends after silence. Hold to Talk sends when you release the sphere.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O modo Automático envia após o silêncio. Segure para falar envia quando você solta a esfera."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La modalità Automatico invia dopo il silenzio. Tieni premuto per parlare invia quando rilasci la sfera."
+          }
+        }
+      }
+    },
+    "Hold Sending": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suspender envio"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sospendi invio"
+          }
+        }
+      }
+    },
+    "Input Mode": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modo de entrada"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modalità di input"
+          }
+        }
+      }
+    },
+    "Mute Microphone": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Silenciar microfone"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disattiva microfono"
+          }
+        }
+      }
+    },
+    "Prevents silence from sending the current message while continuing to listen.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impede que o silêncio envie a mensagem atual enquanto continua escutando."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impedisce al silenzio di inviare il messaggio attuale mentre continua l'ascolto."
+          }
+        }
+      }
+    },
+    "Allow Personal Voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permitir Voz Pessoal"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consenti Voce personale"
+          }
+        }
+      }
+    },
+    "Automatically prefers Premium, then Enhanced, then Standard.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prefere automaticamente Premium, depois Aprimorada e, por fim, Padrão."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preferisce automaticamente Premium, poi Migliorata e infine Standard."
+          }
+        }
+      }
+    },
+    "Best Available": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Melhor disponível"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Migliore disponibile"
+          }
+        }
+      }
+    },
+    "Best Available automatically uses the highest-quality installed voice for your language.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Melhor disponível usa automaticamente a voz instalada de maior qualidade para seu idioma."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Migliore disponibile usa automaticamente la voce installata di qualità più alta per la tua lingua."
+          }
+        }
+      }
+    },
+    "Conversation Voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voz da conversa"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voce della conversazione"
+          }
+        }
+      }
+    },
+    "Create a Personal Voice in Settings > Accessibility > Personal Voice, then allow OpenClient to use it here.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crie uma Voz Pessoal em Ajustes > Acessibilidade > Voz Pessoal e permita que o OpenClient a use aqui."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crea una Voce personale in Impostazioni > Accessibilità > Voce personale, quindi consenti a OpenClient di usarla qui."
+          }
+        }
+      }
+    },
+    "Download more voices in Settings > Accessibility > Read & Speak (or Spoken Content) > Voices. OpenClient updates this list automatically after a voice downloads.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Baixe mais vozes em Ajustes > Acessibilidade > Ler e Falar (ou Conteúdo Falado) > Vozes. O OpenClient atualiza esta lista automaticamente após o download de uma voz."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scarica altre voci in Impostazioni > Accessibilità > Leggi e parla (o Contenuto letto ad alta voce) > Voci. OpenClient aggiorna automaticamente questo elenco dopo il download di una voce."
+          }
+        }
+      }
+    },
+    "Enhanced": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aprimorada"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Migliorata"
+          }
+        }
+      }
+    },
+    "Hello. This is how I will sound in voice conversations.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Olá. É assim que minha voz soará nas conversas por voz."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ciao. Questa è la voce che userò nelle conversazioni vocali."
+          }
+        }
+      }
+    },
+    "Installed Voices": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vozes instaladas"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voci installate"
+          }
+        }
+      }
+    },
+    "No installed voices are available for this language.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma voz instalada está disponível para este idioma."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessuna voce installata è disponibile per questa lingua."
+          }
+        }
+      }
+    },
+    "Personal Voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voz Pessoal"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voce personale"
+          }
+        }
+      }
+    },
+    "Personal Voice access is allowed.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O acesso à Voz Pessoal está permitido."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'accesso a Voce personale è consentito."
+          }
+        }
+      }
+    },
+    "Personal Voice access was denied. You can change this in Settings.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O acesso à Voz Pessoal foi negado. Você pode alterar isso nos Ajustes."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'accesso a Voce personale è stato negato. Puoi modificarlo nelle Impostazioni."
+          }
+        }
+      }
+    },
+    "Personal Voice is not available on this device.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A Voz Pessoal não está disponível neste dispositivo."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voce personale non è disponibile su questo dispositivo."
+          }
+        }
+      }
+    },
+    "Premium": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Premium"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Premium"
+          }
+        }
+      }
+    },
+    "Preview": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prévia"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anteprima"
+          }
+        }
+      }
+    },
+    "Stop Preview": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parar prévia"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrompi anteprima"
+          }
+        }
+      }
+    },
+    "Standard": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Padrão"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard"
+          }
+        }
+      }
+    },
+    "Voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voz"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voce"
+          }
+        }
+      }
+    },
+    "Conversation paused": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversa pausada"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversazione in pausa"
+          }
+        }
+      }
+    },
+    "Give me a moment.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Só um momento."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dammi un momento."
+          }
+        }
+      }
+    },
+    "I'm thinking that through.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estou pensando nisso."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ci sto riflettendo."
+          }
+        }
+      }
+    },
+    "Hmm, let me think about that.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hmm, deixe-me pensar sobre isso."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mmh, fammi pensare."
+          }
+        }
+      }
+    },
+    "Let me check on that.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deixe-me verificar isso."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fammi controllare."
+          }
+        }
+      }
+    },
+    "Let me see what I can find.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deixe-me ver o que encontro."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fammi vedere cosa riesco a trovare."
+          }
+        }
+      }
+    },
+    "Let me take a closer look.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deixe-me analisar mais de perto."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fammi dare un'occhiata più da vicino."
+          }
+        }
+      }
+    },
+    "Let me work through that.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deixe-me pensar nisso com calma."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fammi ragionare su questo."
+          }
+        }
+      }
+    },
+    "Listening...": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvindo..."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In ascolto..."
+          }
+        }
+      }
+    },
+    "Okay, give me a second.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Certo, só um segundo."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Va bene, dammi un secondo."
+          }
+        }
+      }
+    },
+    "One moment while I think.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Um momento enquanto penso."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un momento mentre ci penso."
+          }
+        }
+      }
+    },
+    "Sending...": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviando..."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invio in corso..."
+          }
+        }
+      }
+    },
+    "Speaking...": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Falando..."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riproduzione vocale..."
+          }
+        }
+      }
+    },
+    "Start Conversation": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iniciar conversa"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avvia conversazione"
+          }
+        }
+      }
+    },
+    "Starting conversation...": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iniciando conversa..."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avvio conversazione..."
+          }
+        }
+      }
+    },
+    "Stop Conversation": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encerrar conversa"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrompi conversazione"
+          }
+        }
+      }
+    },
+    "Voice Conversation": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversa por voz"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversazione vocale"
+          }
+        }
+      }
+    },
+    "Waiting for a response...": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aguardando uma resposta..."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In attesa di una risposta..."
+          }
+        }
+      }
+    },
     "Bring your language next": {
       "localizations": {
         "pt-BR": {
@@ -2809,6 +3513,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Titolo chat"
+          }
+        }
+      }
+    },
+    "Chat": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chat"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chat"
           }
         }
       }
@@ -6722,6 +7442,38 @@
         }
       }
     },
+    "Hold": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Segurar"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tieni premuto"
+          }
+        }
+      }
+    },
+    "Hold to Talk": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Segure para falar"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tieni premuto per parlare"
+          }
+        }
+      }
+    },
     "Hold for more options": {
       "localizations": {
         "pt-BR": {
@@ -7442,6 +8194,22 @@
         }
       }
     },
+    "Load earlier messages": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carregar mensagens anteriores"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carica messaggi precedenti"
+          }
+        }
+      }
+    },
     "Loading": {
       "localizations": {
         "pt-BR": {
@@ -7550,6 +8318,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Caricamento modifiche"
+          }
+        }
+      }
+    },
+    "Loading earlier messages...": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carregando mensagens anteriores..."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caricamento dei messaggi precedenti..."
           }
         }
       }
@@ -8679,6 +9463,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nuova sessione qui"
+          }
+        }
+      }
+    },
+    "New Talk": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nova conversa por voz"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nuova conversazione vocale"
           }
         }
       }
@@ -11561,6 +12361,22 @@
         }
       }
     },
+    "Press and hold while speaking. Release to send.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pressione e segure enquanto fala. Solte para enviar."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tieni premuto mentre parli. Rilascia per inviare."
+          }
+        }
+      }
+    },
     "Project Settings": {
       "localizations": {
         "pt-BR": {
@@ -13315,6 +14131,22 @@
         }
       }
     },
+    "Select where this voice conversation should begin.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecione onde esta conversa por voz deve começar."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seleziona dove deve iniziare questa conversazione vocale."
+          }
+        }
+      }
+    },
     "Select a Session": {
       "localizations": {
         "pt-BR": {
@@ -14965,6 +15797,38 @@
         }
       }
     },
+    "Talk": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Falar"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parla"
+          }
+        }
+      }
+    },
+    "Talk Model": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modelo de conversa por voz"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modello per conversazioni vocali"
+          }
+        }
+      }
+    },
     "System Prompt": {
       "localizations": {
         "pt-BR": {
@@ -15123,6 +15987,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Grazie ai maintainer di OpenCode"
+          }
+        }
+      }
+    },
+    "The conversation listens and sends automatically.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A conversa ouve e envia automaticamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La conversazione ascolta e invia automaticamente."
           }
         }
       }
@@ -17039,6 +17919,22 @@
         }
       }
     },
+    "Use New Session Default": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usar o padrão de nova sessão"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa il valore predefinito della nuova sessione"
+          }
+        }
+      }
+    },
     "Use System Default": {
       "localizations": {
         "pt-BR": {
@@ -17275,6 +18171,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Visualizza utilizzo contesto"
+          }
+        }
+      }
+    },
+    "View older messages": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ver mensagens mais antigas"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visualizza messaggi meno recenti"
           }
         }
       }
@@ -18963,6 +19875,182 @@
           "stringUnit": {
             "state": "translated",
             "value": "Disconnetti ora si trova in fondo all'elenco Progetti, così la navigazione principale resta più essenziale."
+          }
+        }
+      }
+    },
+    "Activity, refined": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atividade, refinada"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attività, perfezionata"
+          }
+        }
+      }
+    },
+    "Answers without the wait": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Respostas sem esperar"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Risposte senza attese"
+          }
+        }
+      }
+    },
+    "Meet Talk mode": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conheça o modo Talk"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scopri la modalità Talk"
+          }
+        }
+      }
+    },
+    "Minimize the todo list when you want more room, then bring it back with one tap.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minimize a lista de tarefas quando quiser mais espaço e traga-a de volta com um toque."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riduci l'elenco dei todo quando vuoi più spazio e ripristinalo con un tocco."
+          }
+        }
+      }
+    },
+    "More natural, less in the way": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mais natural, menos intrusivo"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Più naturale, meno ingombrante"
+          }
+        }
+      }
+    },
+    "OpenClient speaks each completed answer while longer work continues, with Talk visible on the Lock Screen and Dynamic Island.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O OpenClient fala cada resposta concluída enquanto trabalhos mais longos continuam, com o Talk visível na Tela Bloqueada e na Ilha Dinâmica."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenClient pronuncia ogni risposta completata mentre le attività più lunghe continuano, con Talk visibile nella schermata di blocco e nella Dynamic Island."
+          }
+        }
+      }
+    },
+    "Search across sessions, projects, messages, statuses, and running tools with cleaner controls.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pesquise sessões, projetos, mensagens, status e ferramentas em execução com controles mais simples."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cerca tra sessioni, progetti, messaggi, stati e strumenti in esecuzione con controlli più essenziali."
+          }
+        }
+      }
+    },
+    "Speak naturally with OpenClient, hear answers sooner, and keep the conversation going from the Lock Screen.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Converse naturalmente com o OpenClient, ouça respostas mais cedo e continue a conversa pela Tela Bloqueada."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parla in modo naturale con OpenClient, ascolta prima le risposte e continua la conversazione dalla schermata di blocco."
+          }
+        }
+      }
+    },
+    "Start a voice conversation from Projects, Activity, session lists, or any chat, with automatic and hold-to-talk controls.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inicie uma conversa por voz em Projetos, Atividade, listas de sessões ou qualquer chat, com controles automáticos e de segurar para falar."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avvia una conversazione vocale da Progetti, Attività, elenchi delle sessioni o qualsiasi chat, con controlli automatici e premi per parlare."
+          }
+        }
+      }
+    },
+    "Talk it through": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vamos conversar"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parliamone"
+          }
+        }
+      }
+    },
+    "Todos on your terms": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tarefas do seu jeito"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Todo alle tue condizioni"
           }
         }
       }

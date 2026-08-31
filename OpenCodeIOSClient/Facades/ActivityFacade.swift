@@ -236,6 +236,11 @@ final class ActivityFacade: ObservableObject {
         }
     }
 
+    func rename(_ row: RowSnapshot, title: String) async {
+        guard !viewModel.isBrowsingLocalCache else { return }
+        await viewModel.renameSession(row.recent.session, title: title)
+    }
+
     func toggleLiveActivity(_ row: RowSnapshot) async {
         guard !viewModel.isBrowsingLocalCache else { return }
         await viewModel.liveActivityFacade.toggle(session: row.recent.session)
@@ -244,6 +249,11 @@ final class ActivityFacade: ObservableObject {
     func presentNewChat() {
         guard !viewModel.isBrowsingLocalCache else { return }
         viewModel.presentNewProjectChatSheet()
+    }
+
+    func presentNewTalk() {
+        guard !viewModel.isBrowsingLocalCache else { return }
+        viewModel.talkSessionCoordinator.presentProjectSelection()
     }
 
     var showsLastUserMessage: Bool {

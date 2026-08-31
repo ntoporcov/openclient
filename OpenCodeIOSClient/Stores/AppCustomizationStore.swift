@@ -36,6 +36,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
     var showsToolCalls: Bool
     var showsReasoningBlocks: Bool
     var showsActivityLastUserMessage: Bool
+    var isTodoStripMinimized: Bool
     var sessionCardStyle: SessionCardStyle
     var autoConnectServerID: String?
     var autoConnectLandingDestination: AutoConnectLandingDestination
@@ -45,6 +46,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         showsToolCalls: Bool = true,
         showsReasoningBlocks: Bool = true,
         showsActivityLastUserMessage: Bool = true,
+        isTodoStripMinimized: Bool = false,
         sessionCardStyle: SessionCardStyle = .simple,
         autoConnectServerID: String? = nil,
         autoConnectLandingDestination: AutoConnectLandingDestination = .projects
@@ -53,6 +55,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         self.showsToolCalls = showsToolCalls
         self.showsReasoningBlocks = showsReasoningBlocks
         self.showsActivityLastUserMessage = showsActivityLastUserMessage
+        self.isTodoStripMinimized = isTodoStripMinimized
         self.sessionCardStyle = sessionCardStyle
         self.autoConnectServerID = autoConnectServerID
         self.autoConnectLandingDestination = autoConnectLandingDestination
@@ -63,6 +66,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         case showsToolCalls
         case showsReasoningBlocks
         case showsActivityLastUserMessage
+        case isTodoStripMinimized
         case sessionCardStyle
         case autoConnectServerID
         case autoConnectLandingDestination
@@ -74,6 +78,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         showsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .showsToolCalls) ?? true
         showsReasoningBlocks = try container.decodeIfPresent(Bool.self, forKey: .showsReasoningBlocks) ?? true
         showsActivityLastUserMessage = try container.decodeIfPresent(Bool.self, forKey: .showsActivityLastUserMessage) ?? true
+        isTodoStripMinimized = try container.decodeIfPresent(Bool.self, forKey: .isTodoStripMinimized) ?? false
         sessionCardStyle = try container.decodeIfPresent(String.self, forKey: .sessionCardStyle)
             .flatMap(SessionCardStyle.init(rawValue:)) ?? .simple
         autoConnectServerID = try container.decodeIfPresent(String.self, forKey: .autoConnectServerID)
@@ -127,6 +132,10 @@ final class AppCustomizationStore: ObservableObject {
         preferences.showsActivityLastUserMessage
     }
 
+    var isTodoStripMinimized: Bool {
+        preferences.isTodoStripMinimized
+    }
+
     var sessionCardStyle: SessionCardStyle {
         preferences.sessionCardStyle
     }
@@ -152,6 +161,12 @@ final class AppCustomizationStore: ObservableObject {
     func setShowsActivityLastUserMessage(_ shows: Bool) {
         guard preferences.showsActivityLastUserMessage != shows else { return }
         preferences.showsActivityLastUserMessage = shows
+        persist()
+    }
+
+    func setTodoStripMinimized(_ isMinimized: Bool) {
+        guard preferences.isTodoStripMinimized != isMinimized else { return }
+        preferences.isTodoStripMinimized = isMinimized
         persist()
     }
 

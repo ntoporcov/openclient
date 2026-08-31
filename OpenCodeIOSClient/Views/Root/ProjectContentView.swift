@@ -121,20 +121,6 @@ struct ProjectContentView: View {
 #endif
     }
 
-    private var usesNativeSearchRoleComposeTab: Bool {
-#if targetEnvironment(macCatalyst)
-        return false
-#else
-#if os(iOS)
-        if #available(iOS 18.0, *) {
-            return horizontalSizeClass == .compact && !usesIPadGlassTabSwitcher
-        }
-#endif
-
-        return false
-#endif
-    }
-
     @ViewBuilder
     private var tabContent: some View {
 #if os(iOS) || targetEnvironment(macCatalyst)
@@ -150,7 +136,7 @@ struct ProjectContentView: View {
 
     private var legacyTabContent: some View {
         TabView(selection: selectedTab) {
-            SessionListView(facade: shell.sessions, onSessionChosen: onDetailChosen)
+            sessionList
                 .tabItem {
                     Label(projectTabTitle(.sessions), systemImage: OpenClientProjectContentTab.sessions.systemImage)
                 }
@@ -185,13 +171,22 @@ struct ProjectContentView: View {
 #if os(iOS) || targetEnvironment(macCatalyst)
     @available(iOS 18.0, *)
     private var nativeRoleTabContent: some View {
+        nativeRoleTabView
+            .opencodeProjectBrowserAccessory(
+                browser: shell.browser,
+                isEnabled: !usesIPadGlassTabSwitcher
+            )
+    }
+
+    @available(iOS 18.0, *)
+    private var nativeRoleTabView: some View {
         TabView(selection: nativeTabSelection) {
             Tab(
                 projectTabTitle(.sessions),
                 systemImage: OpenClientProjectContentTab.sessions.systemImage,
                 value: ProjectNativeTab.sessions
             ) {
-                SessionListView(facade: shell.sessions, onSessionChosen: onDetailChosen)
+                sessionList
             }
 
             if snapshot.availableTabs.contains(.git) {
@@ -225,21 +220,7 @@ struct ProjectContentView: View {
                 }
             }
 
-            if !snapshot.isReadOnly, usesNativeSearchRoleComposeTab {
-                Tab(value: ProjectNativeTab.compose, role: .search) {
-                    EmptyView()
-                } label: {
-                    Label("New", systemImage: "square.and.pencil")
-                        .accessibilityLabel("Create Session")
-                        .accessibilityIdentifier("sessions.create")
-                }
-            }
         }
-        .opencodeSearchTabSelectionActivation(isEnabled: usesNativeSearchRoleComposeTab)
-        .opencodeProjectBrowserAccessory(
-            browser: shell.browser,
-            isEnabled: !usesIPadGlassTabSwitcher
-        )
     }
 
     @available(iOS 18.0, *)
@@ -247,9 +228,7 @@ struct ProjectContentView: View {
         Binding(
             get: { ProjectNativeTab(projectTab: snapshot.selectedTab) },
             set: { selection in
-                if selection == .compose {
-                    presentCreateSessionSheet()
-                } else if let projectTab = selection.projectTab {
+                if let projectTab = selection.projectTab {
                     shell.selectProjectContentTab(projectTab)
                 }
             }
@@ -258,7 +237,7 @@ struct ProjectContentView: View {
 #endif
 
     private var showsTopToolbarAction: Bool {
-        snapshot.showsToolbarAction(usesNativeComposeTab: usesNativeSearchRoleComposeTab)
+        snapshot.selectedTab != .sessions
     }
 
     private var showsBrowserToolbarAction: Bool {
@@ -274,12 +253,12 @@ struct ProjectContentView: View {
     private var content: some View {
         switch snapshot.selectedTab {
         case .sessions:
-            SessionListView(facade: shell.sessions, onSessionChosen: onDetailChosen)
+            sessionList
         case .git:
             if snapshot.hasGitProject {
                 GitStatusView(facade: shell.projectFiles, onFileChosen: onDetailChosen)
             } else {
-                SessionListView(facade: shell.sessions, onSessionChosen: onDetailChosen)
+                sessionList
             }
         case .mcp:
             MCPListView(facade: shell.mcp)
@@ -287,7 +266,7 @@ struct ProjectContentView: View {
             if snapshot.isTerminalAvailable {
                 TerminalProjectView(facade: shell.terminal, onTerminalChosen: onDetailChosen)
             } else {
-                SessionListView(facade: shell.sessions, onSessionChosen: onDetailChosen)
+                sessionList
             }
         }
     }
@@ -325,8 +304,13 @@ struct ProjectContentView: View {
         shell.performProjectContentToolbarAction()
     }
 
-    private func presentCreateSessionSheet() {
-        shell.presentNewChatForCurrentContext()
+    private var sessionList: some View {
+        SessionListView(
+            facade: shell.sessions,
+            onSessionChosen: onDetailChosen,
+            onNewChat: shell.presentNewChatForCurrentContext,
+            onNewTalk: shell.presentNewTalkForCurrentContext
+        )
     }
 }
 
@@ -416,7 +400,6 @@ private enum ProjectNativeTab: Hashable {
     case git
     case terminal
     case mcp
-    case compose
 
     init(projectTab: OpenClientProjectContentTab) {
         switch projectTab {
@@ -441,8 +424,6 @@ private enum ProjectNativeTab: Hashable {
             return .mcp
         case .terminal:
             return .terminal
-        case .compose:
-            return nil
         }
     }
 }

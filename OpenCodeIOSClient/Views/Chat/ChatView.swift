@@ -780,7 +780,7 @@ private enum ChatDisplayItem: Identifiable {
 private enum ChatTranscriptRow: Identifiable {
     case weatherAttribution
     case previousUserContext(OpenCodeMessageEnvelope)
-    case olderMessages(count: Int)
+    case olderMessages(count: Int, hasMoreHistory: Bool, isLoading: Bool)
     case displayItem(ChatDisplayItem)
     case thinking(isVisible: Bool, toolName: String?, height: CGFloat)
     case bottomAnchor
@@ -810,8 +810,8 @@ private extension ChatTranscriptRow {
             return id
         case let .previousUserContext(message):
             return "\(id):\(message.renderSignature)"
-        case let .olderMessages(count):
-            return "\(id):\(count)"
+        case let .olderMessages(count, hasMoreHistory, isLoading):
+            return "\(id):\(count):\(hasMoreHistory):\(isLoading)"
         case let .thinking(isVisible, toolName, height):
             return "\(id):\(isVisible):\(toolName ?? ""):\(height)"
         case .bottomAnchor:
@@ -1502,6 +1502,8 @@ private struct MessageComposerSnapshot: Equatable {
     let mentionableAgentSignature: String
     let actionSignature: String
     let contextSnapshot: OpenCodeSessionContextSnapshot?
+    let conversationState: ConversationModeController.State
+    let conversationInputLevel: CGFloat
 }
 
 private struct MessageBubbleSnapshot: Equatable {
@@ -1639,6 +1641,8 @@ private struct CachedChatReadOnlyComposerNotice: View {
 private struct ChatDisplaySnapshot {
     let messages: [OpenCodeMessageEnvelope]
     let hiddenMessageCount: Int
+    let hasMoreHistory: Bool
+    let isLoadingHistory: Bool
     let previousUserMessage: OpenCodeMessageEnvelope?
     let items: [ChatDisplayItem]
     let showsThinking: Bool
@@ -1941,6 +1945,9 @@ private struct EquatableMessageComposerHost: View, Equatable {
     var onSelectModel: ((OpenCodeModelReference) -> Void)?
     var onSelectReasoningVariant: ((String?) -> Void)?
     var onShowContextMetrics: (() -> Void)?
+    var conversationState: ConversationModeController.State = .inactive
+    var conversationInputLevel: CGFloat = 0
+    var onToggleConversation: (() -> Void)?
 
     nonisolated static func == (lhs: EquatableMessageComposerHost, rhs: EquatableMessageComposerHost) -> Bool {
         lhs.snapshot == rhs.snapshot
@@ -1989,7 +1996,10 @@ private struct EquatableMessageComposerHost: View, Equatable {
             onSelectAgent: onSelectAgent,
             onSelectModel: onSelectModel,
             onSelectReasoningVariant: onSelectReasoningVariant,
-            onShowContextMetrics: onShowContextMetrics
+            onShowContextMetrics: onShowContextMetrics,
+            conversationState: conversationState,
+            conversationInputLevel: conversationInputLevel,
+            onToggleConversation: onToggleConversation
         )
     }
 }
@@ -2046,6 +2056,9 @@ struct ChatView: View {
         _sessionListStore = ObservedObject(wrappedValue: chatFacade.sessionListStore)
         _chatStore = ObservedObject(wrappedValue: chatFacade.chatStore)
         _appCustomizationStore = ObservedObject(wrappedValue: chatFacade.appCustomizationStore)
+        _conversationController = StateObject(
+            wrappedValue: ConversationModeController(voiceStore: chatFacade.speechVoiceStore)
+        )
         self.chatFacade = chatFacade
         _sessionInteractionStore = ObservedObject(wrappedValue: chatFacade.sessionInteractionStore)
         _composerStore = ObservedObject(wrappedValue: chatFacade.composerStore)
@@ -2078,6 +2091,7 @@ struct ChatView: View {
     @State private var taskStore = ChatViewTaskStore()
     @State private var composerDraftStore = MessageComposerDraftStore()
     @StateObject private var pinnedCommandStore = PinnedCommandStore()
+    @StateObject private var conversationController: ConversationModeController
     @State private var isComposerInputFocused = false
     @State private var composerAccessoryExpansion: ComposerAccessoryExpansion = .collapsed
     @State private var selectedAttachmentPreview: OpenCodeComposerAttachment?
@@ -2170,6 +2184,10 @@ struct ChatView: View {
         composerOverlaySnapshot.questions.map { $0.id }.joined(separator: "|")
     }
 
+    private var conversationBlockingInteractionSignature: String {
+        [permissionIDs, questionIDs].joined(separator: "|")
+    }
+
     private var liveSession: OpenCodeSession {
         if let selected = directoryStore.selectedSession, selected.id == sessionID {
             return selected
@@ -2195,6 +2213,10 @@ struct ChatView: View {
 
     private var isComposerBusy: Bool {
         isSessionBusy || pendingOutgoingSend != nil
+    }
+
+    private var showsImmersiveConversation: Bool {
+        conversationController.state.isActive && conversationController.state != .paused
     }
 
     private var contextMetrics: OpenCodeSessionContextMetrics {
@@ -2290,8 +2312,8 @@ struct ChatView: View {
                 scrollController: transcriptScrollController,
                 bottomReadjustmentToken: bottomReadjustmentToken,
                 animatedBottomScrollToken: animatedBottomScrollToken,
-                composerMeasuredHeight: composerMeasuredHeight,
-                keyboardMeasuredHeight: keyboardMeasuredHeight,
+                 composerMeasuredHeight: showsImmersiveConversation ? 0 : composerMeasuredHeight,
+                 keyboardMeasuredHeight: showsImmersiveConversation ? 0 : keyboardMeasuredHeight,
                 bottomContentInsetAnimationToken: bottomContentInsetAnimationToken,
                 messageBottomPadding: messageBottomPadding,
                 bottomRefreshThreshold: bottomRefreshThreshold,
@@ -2342,7 +2364,7 @@ struct ChatView: View {
                         .frame(maxWidth: chatContentMaximumWidth)
                         .frame(maxWidth: .infinity)
                 }
-            )
+             )
             .onChange(of: chatStore.messages.count) { _, count in
                 if count == 0 {
                     additionalLeadingMessageCount = 0
@@ -2371,11 +2393,35 @@ struct ChatView: View {
             }
             bottomRefreshFloatingIndicator
             scrollToBottomButtonOverlay
+
+            if showsImmersiveConversation {
+                ImmersiveConversationView(
+                    state: conversationController.state,
+                    inputMode: conversationController.inputMode,
+                    inputLevel: conversationController.inputLevel,
+                    inputPitch: conversationController.inputPitch,
+                    isSpeakingFiller: conversationController.isSpeakingFiller,
+                    isSendHeld: conversationController.isSendHeld,
+                    isMuted: conversationController.isMuted,
+                    transcript: conversationController.transcript,
+                    showsBackdrop: true,
+                    onStop: conversationController.stop,
+                    onToggleHold: conversationController.toggleSendHold,
+                    onToggleMute: conversationController.toggleMute,
+                    onBeginHold: conversationController.beginHoldToTalk,
+                    onEndHold: conversationController.endHoldToTalk
+                )
+                .zIndex(10)
+            }
         }
-        .overlay(alignment: .bottom) {
-            composerOverlay
-                .frame(maxWidth: chatContentMaximumWidth)
-        }
+         .overlay(alignment: .bottom) {
+             composerOverlay
+                 .frame(maxWidth: chatContentMaximumWidth)
+                 .opacity(showsImmersiveConversation ? 0 : 1)
+                 .offset(y: showsImmersiveConversation ? 140 : 0)
+                 .allowsHitTesting(!showsImmersiveConversation)
+                 .animation(.snappy(duration: 0.34, extraBounce: 0.04), value: showsImmersiveConversation)
+         }
         .overlay(alignment: .top) {
             ZStack(alignment: .top) {
                 if showsChatActivityShimmer {
@@ -2419,9 +2465,14 @@ struct ChatView: View {
             await chatFacade.hydrateSessionForPresentation(liveSession)
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            clearInactiveKeyboardMeasurement()
-            scheduleEagerChatRefresh(reason: "scene active")
+            if phase == .active {
+                clearInactiveKeyboardMeasurement()
+                scheduleEagerChatRefresh(reason: "scene active")
+                if conversationBlockingInteractionSignature == "|" {
+                    conversationController.resume(isSessionBusy: isSessionBusy)
+                    conversationController.update(messages: chatStore.messages, isSessionBusy: isSessionBusy)
+                }
+            }
         }
 #if canImport(UIKit)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -2441,6 +2492,7 @@ struct ChatView: View {
             outgoingEntryResetTask?.cancel()
             initialBottomScrollTask?.cancel()
             eagerRefreshTask?.cancel()
+            conversationController.stop()
             keyboardMeasuredHeight = 0
             showsDelayedLoadingIndicator = false
             if !isDedicatedWindow {
@@ -2561,6 +2613,15 @@ struct ChatView: View {
             guard !isSessionBusy else { return }
             refreshCachedContextMetrics()
         }
+        .onReceive(chatStore.$messages.dropFirst()) { messages in
+            conversationController.update(messages: messages, isSessionBusy: isSessionBusy)
+        }
+        .onReceive(conversationController.$transcript.dropFirst()) { transcript in
+            if composerDraftStore.text != transcript {
+                composerDraftStore.text = transcript
+                scheduleComposerDraftPersistence(transcript)
+            }
+        }
         .onReceive(modelConfigurationStore.$availableProviders.dropFirst()) { _ in
             guard !isSessionBusy else { return }
             refreshCachedContextMetrics()
@@ -2581,6 +2642,18 @@ struct ChatView: View {
                 refreshCachedContextMetrics()
                 refreshCachedForkableMessages()
             }
+            conversationController.update(messages: chatStore.messages, isSessionBusy: isBusy)
+        }
+        .onChange(of: conversationController.sendRequestToken) { _, _ in
+            handleConversationSendRequest()
+        }
+        .onChange(of: conversationBlockingInteractionSignature) { _, signature in
+            if signature == "|" {
+                conversationController.resume(isSessionBusy: isSessionBusy)
+                conversationController.update(messages: chatStore.messages, isSessionBusy: isSessionBusy)
+            } else {
+                conversationController.pause()
+            }
         }
         .onChange(of: composerStore.resetToken) { _, _ in
             syncComposerDraftFromViewModel()
@@ -2590,6 +2663,23 @@ struct ChatView: View {
         }
         .onChange(of: presentationRequest) { _, _ in
             handleChatPresentationRequest()
+        }
+        .alert(
+            "Dictation Unavailable",
+            isPresented: Binding(
+                get: { conversationController.errorMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        conversationController.errorMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                conversationController.errorMessage = nil
+            }
+        } message: {
+            Text(conversationController.errorMessage ?? "")
         }
     }
 
@@ -2698,6 +2788,10 @@ struct ChatView: View {
                     todos: overlaySnapshot.todos,
                     attachments: overlaySnapshot.attachments,
                     expansion: $composerAccessoryExpansion,
+                    isTodoStripMinimized: appCustomizationStore.isTodoStripMinimized,
+                    onSetTodoStripMinimized: { isMinimized in
+                        appCustomizationStore.setTodoStripMinimized(isMinimized)
+                    },
                     onTapTodo: {
                         showingTodoInspector = true
                     },
@@ -2829,7 +2923,9 @@ struct ChatView: View {
             pinnedCommandSignature: pinnedCommandSignature,
             mentionableAgentSignature: mentionableAgentSignature,
             actionSignature: composerSnapshot.actionSignature,
-            contextSnapshot: contextMetrics.context
+            contextSnapshot: contextMetrics.context,
+            conversationState: conversationController.state,
+            conversationInputLevel: conversationController.inputLevel
         )
 
         let composer = EquatableMessageComposerHost(
@@ -2867,7 +2963,7 @@ struct ChatView: View {
                 handleComposerHeightChange(height)
             },
             onSend: {
-                startOutgoingBubbleAnimationAndSend()
+                _ = startOutgoingBubbleAnimationAndSend()
             },
             onStop: {
                 stopComposerAction()
@@ -2931,7 +3027,10 @@ struct ChatView: View {
             onSelectAgent: { chatFacade.selectAgent(named: $0, for: liveSession) },
             onSelectModel: { chatFacade.selectModel($0, for: liveSession) },
             onSelectReasoningVariant: { chatFacade.selectReasoningVariant($0, for: liveSession) },
-            onShowContextMetrics: { showingContextMetrics = true }
+            onShowContextMetrics: { showingContextMetrics = true },
+            conversationState: snapshot.conversationState,
+            conversationInputLevel: snapshot.conversationInputLevel,
+            onToggleConversation: toggleConversationMode
         )
 
         composer
@@ -2940,6 +3039,49 @@ struct ChatView: View {
             .padding(.top, 8)
             .padding(.bottom, activeComposerBottomPadding)
             .background(.clear)
+    }
+
+    private func toggleConversationMode() {
+        if conversationController.isActive {
+            conversationController.stop()
+            return
+        }
+
+        _ = startConversationMode()
+    }
+
+    @discardableResult
+    private func startConversationMode(initialTranscript: String? = nil) -> Bool {
+        guard !conversationController.isActive,
+              !isComposerBusy,
+              composerStore.draftAttachments.isEmpty else { return false }
+        isComposerInputFocused = false
+#if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+#endif
+        composerDraftStore.agentMentions = []
+        chatFacade.setDraftAgentMentions([], forSessionID: sessionID)
+        if let voiceModel = modelConfigurationStore.voiceModeModelReference() {
+            chatFacade.selectModel(voiceModel, for: liveSession)
+        }
+        conversationController.start(initialTranscript: initialTranscript ?? composerDraftStore.text)
+        conversationController.startLiveActivity(
+            title: liveSession.displayTitle(),
+            directory: liveSession.directory,
+            workspaceID: liveSession.workspaceID,
+            sessionID: liveSession.id
+        )
+        return conversationController.isActive
+    }
+
+    private func handleConversationSendRequest() {
+        guard conversationController.state == .submitting else { return }
+        let baselineMessageIDs = Set(chatStore.messages.map(\.id))
+        if startOutgoingBubbleAnimationAndSend() {
+            conversationController.didSubmit(baselineMessageIDs: baselineMessageIDs)
+        } else {
+            conversationController.submissionDidNotStart()
+        }
     }
 
     private var activeComposerBottomPadding: CGFloat {
@@ -3397,6 +3539,8 @@ struct ChatView: View {
         let snapshot = ChatDisplaySnapshot(
             messages: messages,
             hiddenMessageCount: window.hiddenMessageCount,
+            hasMoreHistory: chatFacade.hasOlderMessages(forSessionID: sessionID),
+            isLoadingHistory: chatFacade.isLoadingOlderMessages(forSessionID: sessionID),
             previousUserMessage: previousUserMessage(before: messages),
             items: items,
             showsThinking: showsThinking,
@@ -3642,8 +3786,12 @@ struct ChatView: View {
         if let previousUserMessage = displaySnapshot.previousUserMessage {
             rows.append(.previousUserContext(previousUserMessage))
         }
-        if displaySnapshot.hiddenMessageCount > 0 {
-            rows.append(.olderMessages(count: displaySnapshot.hiddenMessageCount))
+        if displaySnapshot.hiddenMessageCount > 0 || displaySnapshot.hasMoreHistory {
+            rows.append(.olderMessages(
+                count: displaySnapshot.hiddenMessageCount,
+                hasMoreHistory: displaySnapshot.hasMoreHistory,
+                isLoading: displaySnapshot.isLoadingHistory
+            ))
         }
         rows.append(contentsOf: displaySnapshot.items.map(ChatTranscriptRow.displayItem))
         rows.append(.thinking(
@@ -3668,11 +3816,31 @@ struct ChatView: View {
                 .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
         case let .previousUserContext(message):
             previousUserContextRow(for: message)
-        case let .olderMessages(count):
+        case let .olderMessages(count, hasMoreHistory, isLoading):
             Button {
-                additionalLeadingMessageCount += olderMessageWindowSize
+                if count > 0 {
+                    additionalLeadingMessageCount += olderMessageWindowSize
+                } else {
+                    Task { @MainActor in
+                        let loadedCount = await chatFacade.loadOlderMessages(
+                            for: liveSession,
+                            count: olderMessageWindowSize
+                        )
+                        additionalLeadingMessageCount += loadedCount
+                    }
+                }
             } label: {
-                Text("View older messages (\(count))")
+                Group {
+                    if isLoading {
+                        Text("Loading earlier messages...")
+                    } else if count > 0, !hasMoreHistory {
+                        Text("View older messages (\(count))")
+                    } else if count > 0 {
+                        Text("View older messages")
+                    } else {
+                        Text("Load earlier messages")
+                    }
+                }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.blue)
                     .frame(maxWidth: .infinity)
@@ -3680,6 +3848,7 @@ struct ChatView: View {
                     .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
             }
             .buttonStyle(.plain)
+            .disabled(isLoading)
             .accessibilityIdentifier(ChatScrollTarget.olderMessagesButton)
             .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
         case let .displayItem(item):
@@ -3993,33 +4162,34 @@ struct ChatView: View {
         }
     }
 
-    private func startOutgoingBubbleAnimationAndSend() {
+    @discardableResult
+    private func startOutgoingBubbleAnimationAndSend() -> Bool {
         let rawDraftText = composerDraftStore.text
         let draftText = rawDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
         let draftAgentMentions = composerDraftStore.agentMentions
         let draftAttachments = composerStore.draftAttachments
         let hasAttachments = !draftAttachments.isEmpty
 
-        guard !draftText.isEmpty || hasAttachments else { return }
+        guard !draftText.isEmpty || hasAttachments else { return false }
         chatFacade.flushBufferedTranscript(reason: "send action")
 
         if !hasAttachments,
            (chatFacade.shouldOpenForkSheet(forSlashInput: draftText) || chatFacade.slashCommandInput(from: draftText).map({ chatFacade.isForkClientCommand($0.command) }) == true) {
             clearComposerDraft()
             chatFacade.presentForkSessionSheet()
-            return
+            return false
         }
 
         let shouldMeterPrompt = chatFacade.shouldMeterPrompts(for: sessionID)
         if shouldMeterPrompt {
-            guard chatFacade.reserveUserPromptIfAllowed() else { return }
+            guard chatFacade.reserveUserPromptIfAllowed() else { return false }
         }
 
         if !hasAttachments,
            chatFacade.slashCommandInput(from: draftText).map({ chatFacade.isCompactClientCommand($0.command) }) == true {
             clearComposerDraft()
             Task { await chatFacade.compactSession(sessionID: sessionID, userVisible: true, meterPrompt: false) }
-            return
+            return false
         }
 
         OpenCodeHaptics.impact(.strong)
@@ -4054,7 +4224,7 @@ struct ChatView: View {
             guard !Task.isCancelled, pendingOutgoingSend?.messageID == pendingSend.messageID else { return }
 
             hasSubmittedPendingOutgoingSend = true
-            await chatFacade.sendMessage(
+            let didSend = await chatFacade.sendMessage(
                 pendingSend.text,
                 agentMentions: pendingSend.agentMentions,
                 attachments: pendingSend.attachments,
@@ -4065,6 +4235,9 @@ struct ChatView: View {
                 appendOptimisticMessage: false,
                 meterPrompt: false
             )
+            if !didSend {
+                conversationController.submissionDidNotStart()
+            }
             guard !Task.isCancelled, pendingOutgoingSend?.messageID == pendingSend.messageID else { return }
             let optimisticMessageStillVisible = pendingSend.messageID.map { messageID in
                 chatStore.messages.contains { $0.id == messageID }
@@ -4077,6 +4250,7 @@ struct ChatView: View {
             pendingOutgoingSend = nil
             hasSubmittedPendingOutgoingSend = false
         }
+        return true
     }
 
     private func scheduleOutgoingEntryAnimation(messageID: String) {

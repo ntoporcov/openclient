@@ -143,6 +143,21 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         ])
     }
 
+    func testCurrentCatalogDescribesTalkRelease() {
+        let release = OpenClientReleaseNotesCatalog.releases.first { $0.version == "1.0.19" }
+
+        XCTAssertEqual(release?.title, "Talk it through")
+        XCTAssertEqual(release?.hero, .talk)
+        XCTAssertEqual(release?.featureSectionTitle, "More natural, less in the way")
+        XCTAssertFalse(release?.showsSetup == true)
+        XCTAssertEqual(release?.features.map(\.title), [
+            "Meet Talk mode",
+            "Answers without the wait",
+            "Todos on your terms",
+            "Activity, refined",
+        ])
+    }
+
     private var release: OpenClientReleaseNotes {
         OpenClientReleaseNotes(
             version: "2.0",

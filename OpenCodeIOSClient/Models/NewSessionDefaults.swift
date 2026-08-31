@@ -5,6 +5,8 @@ struct NewSessionDefaults: Codable, Equatable {
     var providerID: String?
     var modelID: String?
     var reasoningVariant: String?
+    var voiceModeProviderID: String? = nil
+    var voiceModeModelID: String? = nil
 }
 
 struct ServerScopedComposerPreferences: Codable, Equatable {
