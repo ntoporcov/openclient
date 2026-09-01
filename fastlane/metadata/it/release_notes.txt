@@ -1,5 +1,8 @@
-OpenClient è ora disponibile in portoghese brasiliano e italiano in tutta l'app, nei widget, nelle Attività in tempo reale e nelle estensioni.
+Parliamone con OpenClient.
 
-Questo aggiornamento rende inoltre più affidabile la riconnessione automatica e migliora i nuovi tentativi di connessione al server mentre esplori le chat scaricate.
+• Avvia conversazioni vocali naturali da Progetti, Attività, elenchi delle sessioni o qualsiasi chat.
+• Ascolta ogni risposta completata mentre le attività più lunghe continuano.
+• Mantieni Talk visibile nella schermata di blocco e nella Dynamic Island.
+• Riduci i todo e cerca in Attività tra sessioni, progetti, messaggi, stati e strumenti in esecuzione.
 
-Grazie a Lorenzo Salami (@LSalami) per aver contribuito con la traduzione italiana.
+Questo aggiornamento perfeziona anche la navigazione su iPad, il compositore e la consultazione delle sessioni.

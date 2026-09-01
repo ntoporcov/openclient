@@ -1,5 +1,8 @@
-OpenClient now speaks Brazilian Portuguese and Italian throughout the app, widgets, Live Activities, and extensions.
+Talk it through with OpenClient.
 
-This update also makes automatic reconnection more resilient and improves retrying your server while browsing downloaded chats.
+• Start natural voice conversations from Projects, Activity, session lists, or any chat.
+• Hear each completed answer while longer work continues.
+• Keep Talk visible on the Lock Screen and Dynamic Island.
+• Minimize todos and search Activity across sessions, projects, messages, statuses, and running tools.
 
-Thank you to Lorenzo Salami (@LSalami) for contributing the Italian translation.
+This update also refines iPad navigation, the composer, and session browsing.
