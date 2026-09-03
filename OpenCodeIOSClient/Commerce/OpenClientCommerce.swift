@@ -3,12 +3,55 @@ import Security
 import StoreKit
 
 enum OpenClientProductID {
-    static let proUnlock = "com.ntoporcov.openclient.pro"
+    static let proLifetime = "com.ntoporcov.openclient.pro"
+    static let proMonthly = "com.ntoporcov.openclient.pro.monthly.v1"
+
+    static let proProducts: Set<String> = [proLifetime, proMonthly]
+
+    static func grantsProAccess(_ productID: String) -> Bool {
+        proProducts.contains(productID)
+    }
+
+    static func grantsProLifetimeAccess(_ productID: String) -> Bool {
+        productID == proLifetime
+    }
+}
+
+enum OpenClientProPurchaseOption: CaseIterable, Identifiable {
+    case lifetime
+    case monthly
+
+    var id: String { productID }
+
+    var productID: String {
+        switch self {
+        case .lifetime: OpenClientProductID.proLifetime
+        case .monthly: OpenClientProductID.proMonthly
+        }
+    }
 }
 
 enum OpenClientCommerceLimits {
     static let dailyPromptLimit = 5
     static let freeSessionLimit = 1
+}
+
+enum OpenClientCommercePricing {
+    static func isLifetimeLaunchPriceActive(
+        at date: Date = Date(),
+        timeZone: TimeZone = .current
+    ) -> Bool {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        guard let priceIncreaseDate = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 9,
+            day: 30
+        )) else {
+            return false
+        }
+        return date < priceIncreaseDate
+    }
 }
 
 enum OpenClientPaywallReason: Identifiable, Equatable {
@@ -38,9 +81,9 @@ enum OpenClientPaywallReason: Identifiable, Equatable {
     var message: String {
         switch self {
         case .promptLimit:
-            String(localized: "Upgrade once to send unlimited prompts and support continued development of the open-source app.")
+            String(localized: "Upgrade to send unlimited prompts and support continued development of the open-source app.")
         case .sessionLimit:
-            String(localized: "Free users can create one session. Upgrade once for unlimited sessions and prompts.")
+            String(localized: "Free users can create one session. Upgrade for unlimited sessions and prompts.")
         case .actions:
             String(localized: "Actions run project commands in temporary sessions and only surface when they need your attention.")
         case .manual:
@@ -124,6 +167,7 @@ struct OpenClientUsageStore: OpenClientUsagePersisting {
 enum OpenClientDebugEntitlementOverride: String, CaseIterable, Identifiable {
     case system
     case free
+    case monthly
     case unlocked
     case limitReached
 
@@ -133,6 +177,7 @@ enum OpenClientDebugEntitlementOverride: String, CaseIterable, Identifiable {
         switch self {
         case .system: String(localized: "System")
         case .free: String(localized: "Free")
+        case .monthly: String(localized: "Monthly")
         case .unlocked: String(localized: "Unlocked")
         case .limitReached: String(localized: "Limit Reached")
         }
@@ -142,9 +187,15 @@ enum OpenClientDebugEntitlementOverride: String, CaseIterable, Identifiable {
 
 @MainActor
 final class OpenClientPurchaseManager: ObservableObject {
-    @Published private(set) var proProduct: Product?
+    @Published private(set) var proLifetimeProduct: Product?
+    @Published private(set) var proMonthlyProduct: Product?
     @Published private(set) var hasProUnlock = false
+    @Published private(set) var hasProLifetimeUnlock = false
+    @Published private(set) var hasProMonthlyUnlock = false
+    @Published private(set) var hasRefreshedEntitlements = false
     @Published private(set) var isLoadingProducts = false
+    @Published private(set) var purchasingProductID: String?
+    @Published private(set) var isRestoringPurchases = false
     @Published private(set) var purchaseError: String?
 
     private var updatesTask: Task<Void, Never>?
@@ -165,30 +216,45 @@ final class OpenClientPurchaseManager: ObservableObject {
         isLoadingProducts = true
         defer { isLoadingProducts = false }
         do {
-            let products = try await Product.products(for: [OpenClientProductID.proUnlock])
-            proProduct = products.first
+            let products = try await Product.products(for: OpenClientProductID.proProducts)
+            proLifetimeProduct = products.first { $0.id == OpenClientProductID.proLifetime }
+            proMonthlyProduct = products.first { $0.id == OpenClientProductID.proMonthly }
             purchaseError = nil
         } catch {
             purchaseError = error.localizedDescription
         }
     }
 
-    func purchaseProUnlock() async {
-        if proProduct == nil {
+    func product(for option: OpenClientProPurchaseOption) -> Product? {
+        switch option {
+        case .lifetime: proLifetimeProduct
+        case .monthly: proMonthlyProduct
+        }
+    }
+
+    func purchasePro(_ option: OpenClientProPurchaseOption) async {
+        guard hasRefreshedEntitlements,
+              purchasingProductID == nil,
+              !isRestoringPurchases,
+              !isLoadingProducts else { return }
+        purchasingProductID = option.productID
+        defer { purchasingProductID = nil }
+
+        if product(for: option) == nil {
             await refreshProducts()
         }
 
-        guard let proProduct else {
+        guard let product = product(for: option) else {
             purchaseError = String(localized: "OpenClient Pro is not available yet.")
             return
         }
 
         do {
-            let result = try await proProduct.purchase()
+            let result = try await product.purchase()
             switch result {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
-                hasProUnlock = transaction.revocationDate == nil
+                await refreshEntitlements()
                 await transaction.finish()
                 purchaseError = nil
             case .userCancelled, .pending:
@@ -202,6 +268,13 @@ final class OpenClientPurchaseManager: ObservableObject {
     }
 
     func restorePurchases() async {
+        guard hasRefreshedEntitlements,
+              purchasingProductID == nil,
+              !isRestoringPurchases,
+              !isLoadingProducts else { return }
+        isRestoringPurchases = true
+        defer { isRestoringPurchases = false }
+
         do {
             try await AppStore.sync()
             await refreshEntitlements()
@@ -213,14 +286,20 @@ final class OpenClientPurchaseManager: ObservableObject {
 
     func refreshEntitlements() async {
         var unlocked = false
+        var lifetimeUnlocked = false
+        var monthlyUnlocked = false
         for await result in Transaction.currentEntitlements {
             guard let transaction = try? checkVerified(result) else { continue }
-            if transaction.productID == OpenClientProductID.proUnlock, transaction.revocationDate == nil {
+            if OpenClientProductID.grantsProAccess(transaction.productID), transaction.revocationDate == nil {
                 unlocked = true
-                break
+                lifetimeUnlocked = lifetimeUnlocked || OpenClientProductID.grantsProLifetimeAccess(transaction.productID)
+                monthlyUnlocked = monthlyUnlocked || transaction.productID == OpenClientProductID.proMonthly
             }
         }
         hasProUnlock = unlocked
+        hasProLifetimeUnlock = lifetimeUnlocked
+        hasProMonthlyUnlock = monthlyUnlocked
+        hasRefreshedEntitlements = true
     }
 
     private func observeTransactions() -> Task<Void, Never> {

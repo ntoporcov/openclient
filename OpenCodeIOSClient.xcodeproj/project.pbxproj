@@ -43,6 +43,7 @@
 		12B1DCAA4CCB5172F9C0B833 /* AppViewModel+FunAndGames.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9304D56786D6480F97A8713 /* AppViewModel+FunAndGames.swift */; };
 		12C2018FDD2650ACC154D7F7 /* OpenCodeEventManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18EFEF6227AAFB3590882300 /* OpenCodeEventManager.swift */; };
 		136FC2975B7CDADDA123A37E /* OpenCodeShortcutIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48AF3C5E5F98D07F3D56267E /* OpenCodeShortcutIntents.swift */; };
+		140052332580787B946911CF /* AppIcon Pro Life.png in Resources */ = {isa = PBXBuildFile; fileRef = 4805D5FC7A70D8355D00CE80 /* AppIcon Pro Life.png */; };
 		144C858B2C350E1183D79BC5 /* ProjectFilesFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = C479DF6A48BB9D9A47D68D87 /* ProjectFilesFacade.swift */; };
 		14FF75E6FD8E02F45BFDC89D /* ActivityFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078F5EE4FD7BEBB9BEBAC187 /* ActivityFacade.swift */; };
 		152399F750FB324E47871DAA /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DF20ACB6AD0EFAC28A95D9 /* HelpView.swift */; };
@@ -328,6 +329,7 @@
 		B4886ACD51D0D4389A832A55 /* OpenCodeServerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DD58E8A5CEDA4251579066 /* OpenCodeServerConfig.swift */; };
 		B6DDAFA3312E71AA5A0B6BAD /* SessionInteractionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445E28ADB7450FBB1F94C653 /* SessionInteractionStore.swift */; };
 		B71DE83912485B00B1154A72 /* OpenCodeRecentSessionsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98F6B7B7FF622238644FF222 /* OpenCodeRecentSessionsWidget.swift */; };
+		B72FD7648EDE4DA7CD5EC532 /* AppIcon Pro Life.icon in Resources */ = {isa = PBXBuildFile; fileRef = 52E5F683457025BA4ED1606C /* AppIcon Pro Life.icon */; };
 		B7D4C8E7F54B605BCA4F4D09 /* OpenClientImageContentCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26CB71AED9EC4155CBA5498A /* OpenClientImageContentCoordinator.swift */; };
 		B7E12BD83492DA96E87C8822 /* ChatGlassStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B166D24C208B9DEA796C69 /* ChatGlassStyle.swift */; };
 		B826F32CDAE5952E2606782A /* TerminalFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE8A16DD354360FC2871004 /* TerminalFeatureTests.swift */; };
@@ -572,6 +574,7 @@
 		475E008AEBCAC91BC0AC5E31 /* OpenCodeSavedServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeSavedServerTests.swift; sourceTree = "<group>"; };
 		47DD58E8A5CEDA4251579066 /* OpenCodeServerConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeServerConfig.swift; sourceTree = "<group>"; };
 		47F08F00F9F73042981F1215 /* OpenClientFeatureTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientFeatureTypes.swift; sourceTree = "<group>"; };
+		4805D5FC7A70D8355D00CE80 /* AppIcon Pro Life.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "AppIcon Pro Life.png"; path = "../AppIcon Pro Life.png"; sourceTree = "<group>"; };
 		483F003FBB5C24B5B8B08C06 /* GitStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatusView.swift; sourceTree = "<group>"; };
 		48723322E87F93E488181C34 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		48AF3C5E5F98D07F3D56267E /* OpenCodeShortcutIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeShortcutIntents.swift; sourceTree = "<group>"; };
@@ -581,6 +584,7 @@
 		4F7E5022ED5EC6307B304ACF /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		50694E000CB966DF38DDE41C /* SessionAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAvatar.swift; sourceTree = "<group>"; };
 		5098A1B36D1A31CC24A788C4 /* AppleIntelligenceIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceIntegrationTests.swift; sourceTree = "<group>"; };
+		52E5F683457025BA4ED1606C /* AppIcon Pro Life.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = "AppIcon Pro Life.icon"; path = "../AppIcon Pro Life.icon"; sourceTree = "<group>"; };
 		5495928F452F10791C0614E4 /* SessionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListView.swift; sourceTree = "<group>"; };
 		558B6702D8FFA44F888DDA12 /* TalkSessionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkSessionCoordinator.swift; sourceTree = "<group>"; };
 		55DADA32FD654651A3E00C30 /* BrowserStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStoreTests.swift; sourceTree = "<group>"; };
@@ -1228,6 +1232,8 @@
 		F8539406755F818008E2AD01 /* OpenCodeIOSClient */ = {
 			isa = PBXGroup;
 			children = (
+				52E5F683457025BA4ED1606C /* AppIcon Pro Life.icon */,
+				4805D5FC7A70D8355D00CE80 /* AppIcon Pro Life.png */,
 				00F78C3BDED61CA5491C804F /* AppIcon.icon */,
 				0F8EF9B77118356D45BBA49D /* AppShortcuts.xcstrings */,
 				E879D651F7196549575BBF97 /* Assets.xcassets */,
@@ -1505,6 +1511,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B72FD7648EDE4DA7CD5EC532 /* AppIcon Pro Life.icon in Resources */,
+				140052332580787B946911CF /* AppIcon Pro Life.png in Resources */,
 				6AE621B9A4D4F8445C701B57 /* AppIcon.icon in Resources */,
 				9FF72BD173261120DDD43A5A /* AppShortcuts.xcstrings in Resources */,
 				8705629CBF404A33F9F18000 /* Assets.xcassets in Resources */,
@@ -2132,7 +2140,7 @@
 		37A38C3C67B13A34407EB08A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -2144,7 +2152,7 @@
 		37B20BB1A98ED0C0FD08E35D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				ENABLE_TESTABILITY = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -2187,7 +2195,7 @@
 		6AEB18EE97BAC8A7F4EAB27D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "Liquidy Trees";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "Liquidy Trees \"AppIcon Pro Life\"";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
@@ -2253,7 +2261,7 @@
 		B90B4C9C97016BC70E1E5AF1 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "Liquidy Trees";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "Liquidy Trees \"AppIcon Pro Life\"";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;

@@ -3,6 +3,42 @@ import XCTest
 
 @MainActor
 final class CommerceStoreTests: XCTestCase {
+    func testLifetimeAndMonthlyProductsBothGrantProAccess() {
+        XCTAssertTrue(OpenClientProductID.grantsProAccess("com.ntoporcov.openclient.pro"))
+        XCTAssertTrue(OpenClientProductID.grantsProAccess("com.ntoporcov.openclient.pro.monthly.v1"))
+        XCTAssertFalse(OpenClientProductID.grantsProAccess("com.ntoporcov.openclient.unknown"))
+    }
+
+    func testOnlyLifetimeProductGrantsLifetimeAccess() {
+        XCTAssertTrue(OpenClientProductID.grantsProLifetimeAccess("com.ntoporcov.openclient.pro"))
+        XCTAssertFalse(OpenClientProductID.grantsProLifetimeAccess("com.ntoporcov.openclient.pro.monthly.v1"))
+    }
+
+    func testLifetimeLaunchPriceEndsAtLocalMidnightOnSeptember30() throws {
+        let easternTimeZone = try XCTUnwrap(TimeZone(secondsFromGMT: -4 * 60 * 60))
+        let formatter = ISO8601DateFormatter()
+        let justBeforeLocalMidnight = try XCTUnwrap(formatter.date(from: "2026-09-30T03:59:59Z"))
+        let localMidnight = try XCTUnwrap(formatter.date(from: "2026-09-30T04:00:00Z"))
+
+        XCTAssertTrue(OpenClientCommercePricing.isLifetimeLaunchPriceActive(
+            at: justBeforeLocalMidnight,
+            timeZone: easternTimeZone
+        ))
+        XCTAssertFalse(OpenClientCommercePricing.isLifetimeLaunchPriceActive(
+            at: localMidnight,
+            timeZone: easternTimeZone
+        ))
+    }
+
+    func testDebugMonthlyUnlocksProButNotLifetimeBenefits() {
+        let facade = makeFacade(persistence: MemoryUsageStore())
+
+        facade.debugEntitlementOverride = .monthly
+
+        XCTAssertTrue(facade.hasProUnlock)
+        XCTAssertFalse(facade.hasProLifetimeUnlock)
+    }
+
     func testFreePromptLimitAndRefund() {
         let persistence = MemoryUsageStore()
         let facade = makeFacade(persistence: persistence)

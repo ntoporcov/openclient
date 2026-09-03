@@ -145,6 +145,38 @@
         }
       }
     },
+    "BEST VALUE": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MELHOR OFERTA"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIGLIOR VALORE"
+          }
+        }
+      }
+    },
+    "Buying Pro Lifetime does not cancel Pro Monthly. Cancel Pro Monthly to avoid future renewals.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comprar o Pro Vitalício não cancela o Pro Mensal. Cancele o Pro Mensal para evitar futuras renovações."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'acquisto di Pro a vita non annulla Pro mensile. Annulla Pro mensile per evitare rinnovi futuri."
+          }
+        }
+      }
+    },
     "Best Available": {
       "localizations": {
         "pt-BR": {
@@ -173,6 +205,198 @@
           "stringUnit": {
             "state": "translated",
             "value": "Migliore disponibile usa automaticamente la voce installata di qualità più alta per la tua lingua."
+          }
+        }
+      }
+    },
+    "Lifetime": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vitalício"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A vita"
+          }
+        }
+      }
+    },
+    "Manage Pro Monthly": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gerenciar Pro Mensal"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gestisci Pro mensile"
+          }
+        }
+      }
+    },
+    "Lifetime launch price increases September 30. The regular price is US$29.99 or the local equivalent.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O preço promocional vitalício aumenta em 30 de setembro. O preço normal é US$ 29,99 ou o equivalente local."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il prezzo promozionale a vita aumenta il 30 settembre. Il prezzo normale è 29,99 USD o l'equivalente locale."
+          }
+        }
+      }
+    },
+    "Monthly": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mensal"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mensile"
+          }
+        }
+      }
+    },
+    "Monthly subscriptions automatically renew unless canceled at least 24 hours before the end of the current period.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As assinaturas mensais são renovadas automaticamente, a menos que sejam canceladas pelo menos 24 horas antes do fim do período atual."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gli abbonamenti mensili si rinnovano automaticamente se non vengono annullati almeno 24 ore prima della fine del periodo corrente."
+          }
+        }
+      }
+    },
+    "One-time purchase + Pro Life icon": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compra única + ícone Pro Life"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acquisto una tantum + icona Pro Life"
+          }
+        }
+      }
+    },
+    "Privacy Policy": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Política de Privacidade"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informativa sulla privacy"
+          }
+        }
+      }
+    },
+    "Pro Lifetime": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro Vitalício"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro a vita"
+          }
+        }
+      }
+    },
+    "Pro Monthly": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro Mensal"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro mensile"
+          }
+        }
+      }
+    },
+    "Renews monthly": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renovação mensal"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rinnovo mensile"
+          }
+        }
+      }
+    },
+    "Terms of Use": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termos de Uso"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termini di utilizzo"
+          }
+        }
+      }
+    },
+    "This app icon requires Pro Lifetime.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este ícone do app requer o Pro Vitalício."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questa icona dell'app richiede Pro a vita."
           }
         }
       }
@@ -7025,18 +7249,18 @@
         }
       }
     },
-    "Free users can create one session. Upgrade once for unlimited sessions and prompts.": {
+    "Free users can create one session. Upgrade for unlimited sessions and prompts.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Usuários do plano gratuito podem criar uma sessão. Faça um único upgrade para ter sessões e prompts ilimitados."
+            "value": "Usuários do plano gratuito podem criar uma sessão. Faça upgrade para ter sessões e prompts ilimitados."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Gli utenti gratuiti possono creare una sessione. Esegui l'upgrade una volta per sessioni e prompt illimitati."
+            "value": "Gli utenti gratuiti possono creare una sessione. Esegui l'upgrade per sessioni e prompt illimitati."
           }
         }
       }
@@ -17598,55 +17822,6 @@
         }
       }
     },
-    "Unlock Pro": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Desbloquear Pro"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sblocca Pro"
-          }
-        }
-      }
-    },
-    "Unlock for $9.99": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Desbloquear por US$ 9,99"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sblocca per 9,99 $"
-          }
-        }
-      }
-    },
-    "Unlock for %@": {
-      "comment": "Purchase button. The variable is a StoreKit-formatted localized price.",
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Desbloquear por %@"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sblocca per %@"
-          }
-        }
-      }
-    },
     "Unlock unlimited prompts and sessions, plus support the signed App Store build.": {
       "localizations": {
         "pt-BR": {
@@ -17807,18 +17982,18 @@
         }
       }
     },
-    "Upgrade once to send unlimited prompts and support continued development of the open-source app.": {
+    "Upgrade to send unlimited prompts and support continued development of the open-source app.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Faça um único upgrade para enviar prompts ilimitados e apoiar o desenvolvimento contínuo do app de código aberto."
+            "value": "Faça upgrade para enviar prompts ilimitados e apoiar o desenvolvimento contínuo do app de código aberto."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esegui l'upgrade una volta per inviare prompt illimitati e sostenere lo sviluppo continuo dell'app open source."
+            "value": "Esegui l'upgrade per inviare prompt illimitati e sostenere lo sviluppo continuo dell'app open source."
           }
         }
       }

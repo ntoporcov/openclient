@@ -12,63 +12,32 @@ struct OpenClientPaywallView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 22) {
-                Spacer(minLength: 12)
+            ScrollView {
+                VStack(spacing: 22) {
+                    PaywallAppIcon()
 
-                PaywallAppIcon()
+                    PaywallHeader(title: reasonTitle, message: reasonMessage)
 
-                VStack(spacing: 10) {
-                    Text(reasonTitle)
-                        .font(.title2.weight(.bold))
-                        .multilineTextAlignment(.center)
+                    PaywallBenefits()
 
-                    Text(reasonMessage)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                VStack(alignment: .leading, spacing: 14) {
-                    PaywallBenefitRow(
-                        title: "Unlimited prompts",
-                        systemImage: "paperplane.fill",
-                        tint: .blue
+                    PaywallPurchaseOptions(
+                        lifetimePrice: lifetimePrice,
+                        monthlyPrice: monthlyPrice,
+                        isPurchasing: purchaseControlsAreDisabled,
+                        showsLaunchPricingNotice: isScreenshotScene || OpenClientCommercePricing.isLifetimeLaunchPriceActive(),
+                        purchaseLifetime: { Task { await commerce.purchasePro(.lifetime) } },
+                        purchaseMonthly: { Task { await commerce.purchasePro(.monthly) } }
                     )
-                    PaywallBenefitRow(
-                        title: "Unlimited sessions",
-                        systemImage: "bubble.left.and.bubble.right.fill",
-                        tint: .purple
-                    )
-                    PaywallBenefitRow(
-                        title: "Project Actions",
-                        systemImage: "bolt.fill",
-                        tint: .orange
-                    )
-                    PaywallBenefitRow(
-                        title: "Supports the open-source app",
-                        systemImage: "heart.fill",
-                        tint: .pink
-                    )
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(18)
-                .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-
-                VStack(spacing: 10) {
-                    Button {
-                        Task { await commerce.purchaseProUnlock() }
-                    } label: {
-                        Text(purchaseButtonTitle)
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
 
                     Button("Restore Purchases") {
-                        Task { await commerce.restoreProUnlock() }
+                        Task { await commerce.restorePurchases() }
                     }
                     .font(.subheadline.weight(.medium))
+                    .disabled(purchaseControlsAreDisabled)
+
+                    PaywallSubscriptionDisclosure(
+                        hasActiveMonthlySubscription: !isScreenshotScene && commerce.storeKitHasProMonthlyUnlock
+                    )
 
                     if !isScreenshotScene, let error = commerce.purchaseError {
                         Text(error)
@@ -76,18 +45,18 @@ struct OpenClientPaywallView: View {
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
                     }
-                }
 
 #if DEBUG
-                if !isScreenshotScene {
-                    OpenClientDebugEntitlementControls(commerce: commerce)
-                        .padding(.top, 4)
-                }
+                    if !isScreenshotScene {
+                        OpenClientDebugEntitlementControls(commerce: commerce)
+                            .padding(.top, 4)
+                    }
 #endif
-
-                Spacer(minLength: 0)
+                }
+                .frame(maxWidth: 560)
+                .padding(24)
+                .frame(maxWidth: .infinity)
             }
-            .padding(24)
             .navigationTitle("OpenClient Pro")
             .opencodeInlineNavigationTitle()
             .toolbar {
@@ -102,27 +71,40 @@ struct OpenClientPaywallView: View {
                     commerce.dismissPaywall()
                 }
             }
+            .onChange(of: commerce.storeKitHasProLifetimeUnlock) { _, unlocked in
+                if unlocked, !commerce.storeKitHasProMonthlyUnlock {
+                    commerce.dismissPaywall()
+                }
+            }
         }
     }
 
-    private var purchaseButtonTitle: LocalizedStringResource {
+    private var lifetimePrice: String {
         if isScreenshotScene {
-            return "Unlock for $9.99"
+            return "$19.99"
         }
         if commerce.isLoadingProducts {
-            return "Loading..."
+            return String(localized: "Loading...")
         }
-        if let price = commerce.proDisplayPrice {
-            return LocalizedStringResource(
-                "Unlock for \(price)",
-                comment: "Purchase button. The variable is a StoreKit-formatted localized price."
-            )
+        return commerce.proLifetimeDisplayPrice ?? String(localized: "Unavailable")
+    }
+
+    private var monthlyPrice: String {
+        if isScreenshotScene {
+            return "$4.99"
         }
-        return "Unlock Pro"
+        if commerce.isLoadingProducts {
+            return String(localized: "Loading...")
+        }
+        return commerce.proMonthlyDisplayPrice ?? String(localized: "Unavailable")
     }
 
     private var isScreenshotScene: Bool {
         ProcessInfo.processInfo.environment["OPENCLIENT_SCREENSHOT_SCENE"] == "paywall"
+    }
+
+    private var purchaseControlsAreDisabled: Bool {
+        !isScreenshotScene && commerce.isPurchaseOperationInProgress
     }
 
     private var reasonTitle: LocalizedStringResource {
@@ -137,9 +119,9 @@ struct OpenClientPaywallView: View {
     private var reasonMessage: LocalizedStringResource {
         switch reason {
         case .promptLimit:
-            "Upgrade once to send unlimited prompts and support continued development of the open-source app."
+            "Upgrade to send unlimited prompts and support continued development of the open-source app."
         case .sessionLimit:
-            "Free users can create one session. Upgrade once for unlimited sessions and prompts."
+            "Free users can create one session. Upgrade for unlimited sessions and prompts."
         case .actions:
             "Actions run project commands in temporary sessions and only surface when they need your attention."
         case .manual:
@@ -147,6 +129,181 @@ struct OpenClientPaywallView: View {
         }
     }
 
+}
+
+private struct PaywallHeader: View {
+    let title: LocalizedStringResource
+    let message: LocalizedStringResource
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(title)
+                .font(.title2.weight(.bold))
+                .multilineTextAlignment(.center)
+
+            Text(message)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+}
+
+private struct PaywallBenefits: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PaywallBenefitRow(
+                title: "Unlimited prompts",
+                systemImage: "paperplane.fill",
+                tint: .blue
+            )
+            PaywallBenefitRow(
+                title: "Unlimited sessions",
+                systemImage: "bubble.left.and.bubble.right.fill",
+                tint: .purple
+            )
+            PaywallBenefitRow(
+                title: "Project Actions",
+                systemImage: "bolt.fill",
+                tint: .orange
+            )
+            PaywallBenefitRow(
+                title: "Supports the open-source app",
+                systemImage: "heart.fill",
+                tint: .pink
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+private struct PaywallPurchaseOptions: View {
+    let lifetimePrice: String
+    let monthlyPrice: String
+    let isPurchasing: Bool
+    let showsLaunchPricingNotice: Bool
+    let purchaseLifetime: () -> Void
+    let purchaseMonthly: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            PaywallPurchaseOptionButton(
+                title: "Pro Lifetime",
+                detail: "One-time purchase + Pro Life icon",
+                price: lifetimePrice,
+                badge: "BEST VALUE",
+                isProminent: true,
+                action: purchaseLifetime
+            )
+
+            PaywallPurchaseOptionButton(
+                title: "Pro Monthly",
+                detail: "Renews monthly",
+                price: monthlyPrice,
+                badge: nil,
+                isProminent: false,
+                action: purchaseMonthly
+            )
+
+            if showsLaunchPricingNotice {
+                Text("Lifetime launch price increases September 30. The regular price is US$29.99 or the local equivalent.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+            }
+        }
+        .disabled(isPurchasing)
+    }
+}
+
+private struct PaywallPurchaseOptionButton: View {
+    let title: LocalizedStringResource
+    let detail: LocalizedStringResource
+    let price: String
+    let badge: LocalizedStringResource?
+    let isProminent: Bool
+    let action: () -> Void
+
+    @ViewBuilder
+    var body: some View {
+        if isProminent {
+            purchaseButton
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+        } else {
+            purchaseButton
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+        }
+    }
+
+    private var purchaseButton: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        Text(title)
+                            .font(.headline)
+
+                        if let badge {
+                            Text(badge)
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(.white.opacity(0.2), in: Capsule())
+                        }
+                    }
+
+                    Text(detail)
+                        .font(.subheadline)
+                        .foregroundStyle(isProminent ? .white.opacity(0.82) : .secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(price)
+                    .font(.headline.monospacedDigit())
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+    }
+}
+
+private struct PaywallSubscriptionDisclosure: View {
+    private static let privacyURL = URL(string: "https://open-client.com/privacy/")!
+    private static let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+    private static let manageSubscriptionsURL = URL(string: "https://apps.apple.com/account/subscriptions")!
+
+    let hasActiveMonthlySubscription: Bool
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if hasActiveMonthlySubscription {
+                Text("Buying Pro Lifetime does not cancel Pro Monthly. Cancel Pro Monthly to avoid future renewals.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                Link("Manage Pro Monthly", destination: Self.manageSubscriptionsURL)
+                    .font(.caption.weight(.semibold))
+            }
+
+            Text("Monthly subscriptions automatically renew unless canceled at least 24 hours before the end of the current period.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 18) {
+                Link("Terms of Use", destination: Self.termsURL)
+                Link("Privacy Policy", destination: Self.privacyURL)
+            }
+            .font(.caption.weight(.medium))
+        }
+    }
 }
 
 private struct PaywallBenefitRow: View {

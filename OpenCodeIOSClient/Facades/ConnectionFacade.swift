@@ -14,6 +14,7 @@ final class ConnectionFacade: ObservableObject {
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.appIconStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.commerceFacade.objectWillChange.eraseToAnyPublisher(),
             viewModel.speechVoiceStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.funAndGamesStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.$config.map { _ in () }.eraseToAnyPublisher(),
@@ -30,6 +31,22 @@ final class ConnectionFacade: ObservableObject {
                 self?.objectWillChange.send()
             }
             .store(in: &observations)
+
+        Publishers.CombineLatest(
+            viewModel.commerceFacade.purchaseManager.$hasProLifetimeUnlock,
+            viewModel.commerceFacade.purchaseManager.$hasRefreshedEntitlements
+        )
+        .filter { _, hasRefreshedEntitlements in hasRefreshedEntitlements }
+        .map { hasProLifetimeUnlock, _ in hasProLifetimeUnlock }
+        .removeDuplicates()
+        .sink { [weak self] allowsProLifetimeIcons in
+            Task { @MainActor [weak self] in
+                await self?.viewModel.appIconStore.enforceLifetimeEligibility(
+                    allowsProLifetimeIcons: allowsProLifetimeIcons
+                )
+            }
+        }
+        .store(in: &observations)
     }
 
     func attachLiveActivityBackgroundBridge(_ bridge: LiveActivityBackgroundBridge) {
@@ -47,6 +64,8 @@ final class ConnectionFacade: ObservableObject {
     var isUsingAppleIntelligence: Bool { viewModel.isUsingAppleIntelligence }
     var recentServerConfigs: [OpenCodeServerConfig] { viewModel.recentServerConfigs }
     var appIconStore: AppIconStore { viewModel.appIconStore }
+    var appIcons: [OpenClientAppIcon] { viewModel.appIconStore.icons }
+    var selectedAppIcon: OpenClientAppIcon { viewModel.appIconStore.selectedIcon }
     var speechVoiceStore: SpeechVoiceStore { viewModel.speechVoiceStore }
     var showsChatActivityShimmer: Bool { viewModel.appCustomizationStore.showsChatActivityShimmer }
     var showsToolCalls: Bool { viewModel.appCustomizationStore.showsToolCalls }
@@ -98,6 +117,21 @@ final class ConnectionFacade: ObservableObject {
 
     func setShowsChatActivityShimmer(_ shows: Bool) {
         viewModel.appCustomizationStore.setShowsChatActivityShimmer(shows)
+    }
+
+    func isAppIconEnabled(_ icon: OpenClientAppIcon) -> Bool {
+        !icon.requiresProLifetime || viewModel.commerceFacade.hasProLifetimeUnlock
+    }
+
+    func selectAppIcon(_ icon: OpenClientAppIcon) async {
+        await viewModel.appIconStore.select(
+            icon,
+            allowsProLifetimeIcons: viewModel.commerceFacade.hasProLifetimeUnlock
+        )
+    }
+
+    func presentProLifetimePaywall() {
+        viewModel.commerceFacade.presentPaywall(reason: .manual)
     }
 
     func setShowsToolCalls(_ shows: Bool) {

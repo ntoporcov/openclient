@@ -10,14 +10,6 @@ extension AppViewModel {
         commerceFacade.presentPaywall(reason: reason)
     }
 
-    func purchaseProUnlock() async {
-        await commerceFacade.purchaseProUnlock()
-    }
-
-    func restoreProUnlock() async {
-        await commerceFacade.restoreProUnlock()
-    }
-
     func reserveUserPromptIfAllowed() -> Bool {
         commerceFacade.reserveUserPromptIfAllowed()
     }

@@ -563,7 +563,7 @@ private struct OpenClientWhatsNewSetupSection: View {
                     .font(.title2.bold())
             }
 
-            OpenClientWhatsNewIconPicker(store: connection.appIconStore)
+            OpenClientWhatsNewIconPicker(connection: connection)
 
             Toggle(isOn: Binding(
                 get: { connection.showsChatActivityShimmer },
@@ -582,7 +582,9 @@ private struct OpenClientWhatsNewSetupSection: View {
 }
 
 private struct OpenClientWhatsNewIconPicker: View {
-    @ObservedObject var store: AppIconStore
+    @ObservedObject var connection: ConnectionFacade
+
+    private var store: AppIconStore { connection.appIconStore }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -591,13 +593,18 @@ private struct OpenClientWhatsNewIconPicker: View {
 
             ScrollView(.horizontal) {
                 HStack(spacing: 10) {
-                    ForEach(store.icons) { icon in
+                    ForEach(connection.appIcons) { icon in
                         OpenClientWhatsNewIconOption(
                             icon: icon,
                             isSelected: icon.alternateIconName == store.selectedAlternateIconName,
-                            isDisabled: store.isChangingIcon
+                            isDisabled: store.isChangingIcon,
+                            isLocked: !connection.isAppIconEnabled(icon)
                         ) {
-                            Task { await store.select(icon) }
+                            if connection.isAppIconEnabled(icon) {
+                                Task { await connection.selectAppIcon(icon) }
+                            } else {
+                                connection.presentProLifetimePaywall()
+                            }
                         }
                     }
                 }
@@ -614,12 +621,22 @@ private struct OpenClientWhatsNewIconOption: View {
     let icon: OpenClientAppIcon
     let isSelected: Bool
     let isDisabled: Bool
+    let isLocked: Bool
     let select: () -> Void
 
     var body: some View {
         Button(action: select) {
             VStack(spacing: 7) {
-                OpenClientWhatsNewIconArtwork(icon: icon, isSelected: isSelected, background: iconBackground)
+                ZStack(alignment: .topTrailing) {
+                    OpenClientWhatsNewIconArtwork(icon: icon, isSelected: isSelected, background: iconBackground)
+                    if isLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(.black.opacity(0.7), in: Circle())
+                    }
+                }
                 Text(icon.displayName)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.primary)

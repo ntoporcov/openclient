@@ -89,7 +89,7 @@ struct OpenCodeShortcutUsageGate: Sendable {
     private static func currentProUnlock() async -> Bool {
         for await result in Transaction.currentEntitlements {
             guard case let .verified(transaction) = result else { continue }
-            if transaction.productID == OpenClientProductID.proUnlock, transaction.revocationDate == nil {
+            if OpenClientProductID.grantsProAccess(transaction.productID), transaction.revocationDate == nil {
                 return true
             }
         }

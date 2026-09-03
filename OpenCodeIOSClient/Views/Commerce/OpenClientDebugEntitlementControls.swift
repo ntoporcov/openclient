@@ -38,6 +38,7 @@ private func debugEntitlementTitle(_ option: OpenClientDebugEntitlementOverride)
     switch option {
     case .system: "System"
     case .free: "Free"
+    case .monthly: "Monthly"
     case .unlocked: "Unlocked"
     case .limitReached: "Limit Reached"
     }

@@ -64,8 +64,18 @@ final class CommerceFacade: ObservableObject {
     }
 
     var storeKitHasProUnlock: Bool { purchaseManager.hasProUnlock }
+    var storeKitHasProLifetimeUnlock: Bool { purchaseManager.hasProLifetimeUnlock }
+    var storeKitHasProMonthlyUnlock: Bool { purchaseManager.hasProMonthlyUnlock }
     var isLoadingProducts: Bool { purchaseManager.isLoadingProducts }
-    var proDisplayPrice: String? { purchaseManager.proProduct?.displayPrice }
+    var isPurchasing: Bool { purchaseManager.purchasingProductID != nil }
+    var isPurchaseOperationInProgress: Bool {
+        !purchaseManager.hasRefreshedEntitlements
+            || isLoadingProducts
+            || isPurchasing
+            || purchaseManager.isRestoringPurchases
+    }
+    var proLifetimeDisplayPrice: String? { purchaseManager.proLifetimeProduct?.displayPrice }
+    var proMonthlyDisplayPrice: String? { purchaseManager.proMonthlyProduct?.displayPrice }
     var purchaseError: String? { purchaseManager.purchaseError }
 
 #if DEBUG
@@ -82,11 +92,26 @@ final class CommerceFacade: ObservableObject {
             return purchaseManager.hasProUnlock
         case .free, .limitReached:
             return false
-        case .unlocked:
+        case .monthly, .unlocked:
             return true
         }
 #else
         return purchaseManager.hasProUnlock
+#endif
+    }
+
+    var hasProLifetimeUnlock: Bool {
+#if DEBUG
+        switch store.debugEntitlementOverride {
+        case .system:
+            return purchaseManager.hasProLifetimeUnlock
+        case .unlocked:
+            return true
+        case .free, .monthly, .limitReached:
+            return false
+        }
+#else
+        return purchaseManager.hasProLifetimeUnlock
 #endif
     }
 
@@ -124,11 +149,11 @@ final class CommerceFacade: ObservableObject {
         store.paywallReason = nil
     }
 
-    func purchaseProUnlock() async {
-        await purchaseManager.purchaseProUnlock()
+    func purchasePro(_ option: OpenClientProPurchaseOption) async {
+        await purchaseManager.purchasePro(option)
     }
 
-    func restoreProUnlock() async {
+    func restorePurchases() async {
         await purchaseManager.restorePurchases()
     }
 

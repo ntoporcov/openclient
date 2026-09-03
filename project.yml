@@ -16,7 +16,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    CURRENT_PROJECT_VERSION: 16
+    CURRENT_PROJECT_VERSION: 18
     MARKETING_VERSION: 1.0.19
   configs:
     Debug:
@@ -67,6 +67,12 @@ targets:
         buildPhase: resources
         group: OpenCodeIOSClient
       - path: Trees.icon
+        buildPhase: resources
+        group: OpenCodeIOSClient
+      - path: AppIcon Pro Life.icon
+        buildPhase: resources
+        group: OpenCodeIOSClient
+      - path: AppIcon Pro Life.png
         buildPhase: resources
         group: OpenCodeIOSClient
       - path: Liquidy.png
@@ -153,6 +159,11 @@ targets:
         OpenClientAlternateIconPreviewFiles:
           Liquidy: Liquidy.png
           Trees: Trees.png
+          "AppIcon Pro Life": AppIcon Pro Life.png
+        OpenClientAlternateIconDisplayNames:
+          "AppIcon Pro Life": Pro Life
+        OpenClientProLifetimeIconNames:
+          - AppIcon Pro Life
         CFBundleURLTypes:
           - CFBundleURLName: com.ntoporcov.openclient
             CFBundleURLSchemes:
@@ -163,7 +174,7 @@ targets:
         PRODUCT_NAME: OpenClient
         SUPPORTED_PLATFORMS: iphoneos iphonesimulator macosx
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "Liquidy Trees"
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: 'Liquidy Trees "AppIcon Pro Life"'
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: NO
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic

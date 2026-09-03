@@ -56,13 +56,24 @@
 	<string>OpenClient uses speech recognition to transcribe dictation and voice conversations.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>OpenClientAlternateIconDisplayNames</key>
+	<dict>
+		<key>AppIcon Pro Life</key>
+		<string>Pro Life</string>
+	</dict>
 	<key>OpenClientAlternateIconPreviewFiles</key>
 	<dict>
+		<key>AppIcon Pro Life</key>
+		<string>AppIcon Pro Life.png</string>
 		<key>Liquidy</key>
 		<string>Liquidy.png</string>
 		<key>Trees</key>
 		<string>Trees.png</string>
 	</dict>
+	<key>OpenClientProLifetimeIconNames</key>
+	<array>
+		<string>AppIcon Pro Life</string>
+	</array>
 	<key>OpenCodeSharedKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.ntoporcov.openclient.shared</string>
 	<key>UIApplicationSceneManifest</key>

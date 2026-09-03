@@ -281,9 +281,9 @@ struct RootConfigurationsView: View {
         Form {
             Section {
                 NavigationLink {
-                    AppIconSelectionView(store: facade.appIconStore)
+                    AppIconSelectionView(facade: facade)
                 } label: {
-                    LabeledContent("App Icon", value: facade.appIconStore.selectedIcon.displayName)
+                    LabeledContent("App Icon", value: facade.selectedAppIcon.displayName)
                 }
                 .accessibilityIdentifier("configurations.app-icon")
 
@@ -390,14 +390,20 @@ struct RootConfigurationsView: View {
 }
 
 private struct AppIconSelectionView: View {
-    @ObservedObject var store: AppIconStore
+    @ObservedObject var facade: ConnectionFacade
+
+    private var store: AppIconStore { facade.appIconStore }
 
     var body: some View {
         List {
             Section {
-                ForEach(store.icons) { icon in
+                ForEach(facade.appIcons) { icon in
                     Button {
-                        Task { await store.select(icon) }
+                        if facade.isAppIconEnabled(icon) {
+                            Task { await facade.selectAppIcon(icon) }
+                        } else {
+                            facade.presentProLifetimePaywall()
+                        }
                     } label: {
                         HStack(spacing: 14) {
                             AppIconThumbnail(icon: icon)
@@ -406,6 +412,12 @@ private struct AppIconSelectionView: View {
                                 .foregroundStyle(.primary)
 
                             Spacer()
+
+                            if !facade.isAppIconEnabled(icon) {
+                                Label("Lifetime", systemImage: "lock.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
 
                             if icon.alternateIconName == store.selectedAlternateIconName {
                                 Image(systemName: "checkmark")
@@ -416,7 +428,10 @@ private struct AppIconSelectionView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(store.isChangingIcon || icon.alternateIconName == store.selectedAlternateIconName)
+                    .disabled(
+                        store.isChangingIcon
+                            || icon.alternateIconName == store.selectedAlternateIconName
+                    )
                     .accessibilityIdentifier("configurations.app-icon.\(icon.id)")
                 }
             } footer: {

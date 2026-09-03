@@ -9,6 +9,19 @@ struct OpenClientAppIcon: Identifiable, Equatable {
     let alternateIconName: String?
     let displayName: String
     let iconFiles: [String]
+    let requiresProLifetime: Bool
+
+    init(
+        alternateIconName: String?,
+        displayName: String,
+        iconFiles: [String],
+        requiresProLifetime: Bool = false
+    ) {
+        self.alternateIconName = alternateIconName
+        self.displayName = displayName
+        self.iconFiles = iconFiles
+        self.requiresProLifetime = requiresProLifetime
+    }
 
     var id: String {
         alternateIconName ?? "__primary__"
@@ -45,8 +58,12 @@ final class AppIconStore: ObservableObject {
         #endif
     }
 
-    func select(_ icon: OpenClientAppIcon) async {
+    func select(_ icon: OpenClientAppIcon, allowsProLifetimeIcons: Bool) async {
         guard icon.alternateIconName != selectedAlternateIconName else { return }
+        guard !icon.requiresProLifetime || allowsProLifetimeIcons else {
+            errorMessage = String(localized: "This app icon requires Pro Lifetime.")
+            return
+        }
 
         #if canImport(UIKit)
         guard supportsAlternateIcons else {
@@ -69,6 +86,15 @@ final class AppIconStore: ObservableObject {
         #endif
     }
 
+    func enforceLifetimeEligibility(allowsProLifetimeIcons: Bool) async {
+        refresh()
+        guard !allowsProLifetimeIcons, selectedIcon.requiresProLifetime,
+              let primaryIcon = icons.first(where: { $0.alternateIconName == nil }) else {
+            return
+        }
+        await select(primaryIcon, allowsProLifetimeIcons: true)
+    }
+
     func clearError() {
         errorMessage = nil
     }
@@ -79,6 +105,7 @@ final class AppIconStore: ObservableObject {
             ?? [:]
         let displayNames = infoDictionary["OpenClientAlternateIconDisplayNames"] as? [String: String] ?? [:]
         let previewFiles = infoDictionary["OpenClientAlternateIconPreviewFiles"] as? [String: String] ?? [:]
+        let proLifetimeIconNames = Set(infoDictionary["OpenClientProLifetimeIconNames"] as? [String] ?? [])
         let primary = iconsDictionary["CFBundlePrimaryIcon"] as? [String: Any] ?? [:]
         let primaryName = primary["CFBundleIconName"] as? String ?? "AppIcon"
 
@@ -94,7 +121,8 @@ final class AppIconStore: ObservableObject {
             return OpenClientAppIcon(
                 alternateIconName: name,
                 displayName: displayNames[name] ?? formattedDisplayName(name),
-                iconFiles: previewFiles[name].map { [$0] } ?? (icon["CFBundleIconFiles"] as? [String] ?? [])
+                iconFiles: previewFiles[name].map { [$0] } ?? (icon["CFBundleIconFiles"] as? [String] ?? []),
+                requiresProLifetime: proLifetimeIconNames.contains(name)
             )
         }.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending })
 
