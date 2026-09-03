@@ -40,3 +40,6 @@ Integrazioni con iOS e iPadOS:
 Privacy e gestione autonoma:
 
 OpenClient è progettato per un uso privato e autogestito. Scegli tu a quale server OpenCode connetterti e i dati delle sessioni restano associati alla tua configurazione di OpenCode. Le credenziali del server vengono archiviate in modo sicuro sul dispositivo e OpenClient non fornisce né gestisce un backend OpenCode per tuo conto.
+
+Termini di utilizzo (EULA):
+https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
