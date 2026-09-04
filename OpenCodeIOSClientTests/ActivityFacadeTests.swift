@@ -70,7 +70,7 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertNil(viewModel.selectedSession)
 
         viewModel.talkSessionCoordinator.applicationActivityChanged(isActive: false)
-        XCTAssertEqual(viewModel.talkSessionCoordinator.conversationController.state, .ready)
+        XCTAssertEqual(viewModel.talkSessionCoordinator.conversationController.state, .paused)
         viewModel.talkSessionCoordinator.applicationActivityChanged(isActive: true)
         XCTAssertEqual(viewModel.talkSessionCoordinator.conversationController.state, .ready)
 

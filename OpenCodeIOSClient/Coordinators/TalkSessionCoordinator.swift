@@ -121,7 +121,11 @@ final class TalkSessionCoordinator: ObservableObject {
     func applicationActivityChanged(isActive: Bool) {
         isApplicationActive = isActive
         guard isPresented, !isChoosingProject else { return }
-        guard isActive, viewModel.commerceFacade.paywallReason == nil else { return }
+        guard isActive else {
+            conversationController.pause()
+            return
+        }
+        guard viewModel.commerceFacade.paywallReason == nil else { return }
         switch phase {
         case .listening:
             conversationController.resume(isSessionBusy: false)
