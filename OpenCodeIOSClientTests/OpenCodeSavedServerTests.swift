@@ -117,6 +117,51 @@ final class OpenCodeSavedServerTests: XCTestCase {
         XCTAssertEqual(persistedServers.count, configs.count)
     }
 
+    func testSuccessfulConnectionPersistsServerWithoutUsername() throws {
+        let config = OpenCodeServerConfig(
+            name: "Unauthenticated LAN",
+            baseURL: "http://192.168.0.10:4096",
+            username: "",
+            password: ""
+        )
+        let viewModel = AppViewModel()
+        viewModel.config = config
+
+        viewModel.persistConfigAfterSuccessfulConnection()
+
+        XCTAssertEqual(viewModel.recentServerConfigs, [config])
+        let persistedData = try XCTUnwrap(defaults.data(forKey: storageKey))
+        let persistedServers = try JSONDecoder().decode([OpenCodeSavedServer].self, from: persistedData)
+        XCTAssertEqual(persistedServers, [OpenCodeSavedServer(config: config)])
+        XCTAssertEqual(viewModel.loadRecentServerConfigs(), [config])
+    }
+
+    func testEditedServerCanBeSavedWithoutUsername() throws {
+        let original = OpenCodeServerConfig(
+            name: "LAN",
+            baseURL: "http://192.168.0.10:4096",
+            username: "opencode",
+            password: ""
+        )
+        try writeSavedServers([original])
+        let viewModel = AppViewModel()
+        viewModel.recentServerConfigs = [original]
+        viewModel.config = OpenCodeServerConfig(
+            name: original.name,
+            iconName: original.iconName,
+            baseURL: original.baseURL,
+            username: "",
+            password: ""
+        )
+        viewModel.savedServerEditorMode = .edit(originalServerID: original.recentServerID)
+
+        XCTAssertTrue(viewModel.canSaveEditedServer)
+        viewModel.saveEditedServer()
+
+        XCTAssertEqual(viewModel.recentServerConfigs, [viewModel.config])
+        XCTAssertEqual(viewModel.loadRecentServerConfigs(), [viewModel.config])
+    }
+
     func testSaveEditedServerRenamesWithoutChangingIdentity() throws {
         let original = OpenCodeServerConfig(name: "Old Name", iconName: "server.rack", baseURL: "https://rename-only.example.com", username: "nick", password: "secret")
         let viewModel = AppViewModel()

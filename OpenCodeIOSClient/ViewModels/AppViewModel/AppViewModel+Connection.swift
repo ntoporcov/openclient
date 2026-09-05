@@ -334,7 +334,7 @@ extension AppViewModel {
     }
 
     var canSaveEditedServer: Bool {
-        !isLoading && config.hasCredentials && config.hasRequiredConnectionFields
+        !isLoading && config.hasRequiredConnectionFields
     }
 
     func saveEditedServer() {
@@ -715,7 +715,7 @@ extension AppViewModel {
     }
 
     private func upsertSavedServer(config: OpenCodeServerConfig, replacingServerID originalServerID: String? = nil) {
-        guard config.hasCredentials else { return }
+        guard config.hasRequiredConnectionFields else { return }
 
         let updatedConfig = config
         let updatedID = updatedConfig.recentServerID
