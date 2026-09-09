@@ -7,6 +7,41 @@ import ActivityKit
 
 @MainActor
 final class LiveActivityStore: ObservableObject {
+    struct Lifetime: Hashable, Sendable {
+        let owner: OpenCodeLiveActivityOwner
+        let connectionID: UUID?
+        let generation: Int
+    }
+
+    private(set) var lifetime: Lifetime?
+    private var operations: [String: UUID] = [:]
+    var activityIDsBySessionID: [String: String] = [:]
+
+    func bind(_ lifetime: Lifetime) {
+        guard self.lifetime != lifetime else { return }
+        for task in previewRefreshTasksBySessionID.values { task.cancel() }
+        for task in refreshTasksBySessionID.values { task.cancel() }
+        previewRefreshTasksBySessionID = [:]
+        refreshTasksBySessionID = [:]
+        operations = [:]
+        activityIDsBySessionID = [:]
+        activeSessionIDs = []
+        #if canImport(ActivityKit) && os(iOS) && !targetEnvironment(macCatalyst)
+        lastStatesBySessionID = [:]
+        #endif
+        self.lifetime = lifetime
+    }
+
+    func beginOperation(sessionID: String) -> UUID {
+        let token = UUID()
+        operations[sessionID] = token
+        return token
+    }
+
+    func owns(_ token: UUID, sessionID: String, lifetime: Lifetime) -> Bool {
+        self.lifetime == lifetime && operations[sessionID] == token
+    }
+
     @Published var activeSessionIDs: Set<String>
     var previewRefreshTasksBySessionID: [String: Task<Void, Never>]
     var refreshTasksBySessionID: [String: Task<Void, Never>]
@@ -68,6 +103,23 @@ final class LiveActivityStore: ObservableObject {
     }
 
 #if canImport(ActivityKit) && os(iOS) && !targetEnvironment(macCatalyst)
+    func reconcile(
+        _ activities: [(id: String, attributes: OpenCodeChatActivityAttributes, state: OpenCodeChatActivityAttributes.ContentState)],
+        lifetime: Lifetime
+    ) {
+        bind(lifetime)
+        operations = [:]
+        activeSessionIDs = []
+        activityIDsBySessionID = [:]
+        lastStatesBySessionID = [:]
+        for activity in activities.sorted(by: { $0.id < $1.id }) where activity.attributes.identity?.owner == lifetime.owner {
+            let sessionID = activity.attributes.sessionID
+            activeSessionIDs.insert(sessionID)
+            activityIDsBySessionID[sessionID] = activity.id
+            lastStatesBySessionID[sessionID] = activity.state
+        }
+    }
+
     func setLastState(_ state: OpenCodeChatActivityAttributes.ContentState?, for sessionID: String) {
         lastStatesBySessionID[sessionID] = state
     }

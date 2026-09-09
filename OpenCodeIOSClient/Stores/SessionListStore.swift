@@ -43,6 +43,71 @@ final class SessionListStore: ObservableObject {
     @Published var projectSessionSearchResults: [RecentProjectSession]
     @Published var isSearchingProjectSessions: Bool
 
+    struct WorkspacePage: Equatable {
+        var state = OpenCodeWorkspaceSessionState()
+        var nextCursor: String?
+        var hasLoaded = false
+        var requestID: UUID?
+    }
+
+    @Published private(set) var workspacePages: [BackendWorkspacePageKey: WorkspacePage] = [:]
+
+    func workspacePageSessions(_ previous: [OpenCodeSession], applying canonical: [OpenCodeSession]) -> [OpenCodeSession] {
+        var sessions = previous
+        for session in canonical {
+            if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+                sessions[index] = session
+            } else {
+                sessions.append(session)
+            }
+        }
+        return sessions
+    }
+
+    func beginWorkspacePage(_ key: BackendWorkspacePageKey, replacing: Bool) -> UUID? {
+        var page = workspacePages[key] ?? WorkspacePage()
+        guard replacing || !page.state.isLoading else { return nil }
+        let requestID = UUID()
+        page.requestID = requestID
+        page.state.isLoading = true
+        workspacePages[key] = page
+        workspaceSessionsByDirectory[key.directory] = page.state
+        return requestID
+    }
+
+    @discardableResult
+    func finishWorkspacePage(_ key: BackendWorkspacePageKey, requestID: UUID, sessions: [OpenCodeSession],
+                             nextCursor: String?, limit: Int, hasMore: Bool) -> Bool {
+        guard var page = workspacePages[key], page.requestID == requestID else { return false }
+        page.state = .init(isLoading: false, sessions: sessions,
+                           sessionTotal: sessions.filter(\.isRootSession).count + (hasMore ? 1 : 0), limit: limit)
+        page.nextCursor = nextCursor
+        page.hasLoaded = true
+        page.requestID = nil
+        workspacePages[key] = page
+        workspaceSessionsByDirectory[key.directory] = page.state
+        return true
+    }
+
+    func failWorkspacePage(_ key: BackendWorkspacePageKey, requestID: UUID, projectsToVisible: Bool = true) {
+        guard var page = workspacePages[key], page.requestID == requestID else { return }
+        page.requestID = nil
+        page.state.isLoading = false
+        workspacePages[key] = page
+        if projectsToVisible { workspaceSessionsByDirectory[key.directory] = page.state }
+    }
+
+    func removeWorkspacePage(_ key: BackendWorkspacePageKey) {
+        workspacePages[key] = nil
+        removeWorkspaceState(for: key.directory)
+    }
+
+    func resetWorkspacePages() {
+        workspacePages = [:]
+        workspaceSessionsByDirectory = [:]
+        workspaceOperationsByDirectory = [:]
+    }
+
     init(
         previews: [String: SessionPreview] = [:],
         pinnedSessionIDsByScope: [String: [String]] = [:],
@@ -318,6 +383,7 @@ final class SessionListStore: ObservableObject {
         projects: [OpenCodeProject],
         previews: [String: SessionPreview],
         statuses: [String: String],
+        hiddenActionSessionIDs: Set<String> = [],
         limit: Int = 15
     ) -> [RecentProjectSession] {
         var projectsByID: [String: OpenCodeProject] = [:]
@@ -327,7 +393,7 @@ final class SessionListStore: ObservableObject {
         var seen = Set<String>()
 
         return deduplicatedRecentSessions()
-            .filter { $0.isRootSession && !$0.isArchived }
+            .filter { $0.isRootSession && !$0.isArchived && !hiddenActionSessionIDs.contains($0.id) }
             .sorted { lhs, rhs in
                 let lhsTime = Self.sortTime(for: lhs, preview: previews[lhs.id])
                 let rhsTime = Self.sortTime(for: rhs, preview: previews[rhs.id])
@@ -354,6 +420,7 @@ final class SessionListStore: ObservableObject {
         previews: [String: SessionPreview],
         statuses: [String: String],
         query: String,
+        hiddenActionSessionIDs: Set<String> = [],
         limit: Int = 40
     ) -> [RecentProjectSession] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -372,7 +439,7 @@ final class SessionListStore: ObservableObject {
         var seen = Set<String>()
 
         return deduplicatedRecentSessions()
-            .filter { $0.isRootSession && !$0.isArchived }
+            .filter { $0.isRootSession && !$0.isArchived && !hiddenActionSessionIDs.contains($0.id) }
             .compactMap { session -> RecentProjectSession? in
                 let key = "\(Self.recentDirectoryKey(session.directory)):\(session.id)"
                 guard seen.insert(key).inserted else { return nil }

@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 #if canImport(LinkPresentation)
 @preconcurrency import LinkPresentation
 #endif
@@ -55,11 +58,22 @@ struct MarkdownMessageText: View {
             if isStreaming {
                 streamingRichMarkdownContent
             } else {
+#if canImport(UIKit)
+                if shouldUseNativeSelection {
+                    CompletedResponseText(markdownParts: [text])
+                } else {
+                    richMarkdownContent
+                }
+#else
                 richMarkdownContent
+#endif
             }
         }
         .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
-        .modifier(ConditionalTextSelectionModifier(isEnabled: !isStreaming))
+        .modifier(ConditionalTextSelectionModifier(
+            isEnabled: !isStreaming,
+            usesNativeSelection: shouldUseNativeSelection
+        ))
     }
 
     private var richMarkdownContent: some View {
@@ -99,15 +113,15 @@ struct MarkdownMessageText: View {
                         .padding(.bottom, textBlockBottomPadding(for: value))
 #endif
                 } else {
-                    styledText(markdownText(value))
+                    selectableOrStyledText(value)
                         .padding(.bottom, textBlockBottomPadding(for: value))
                 }
             case let .heading(_, level, value):
-                styledHeading(markdownText(value), level: level)
+                styledHeading(value, level: level)
             case let .blockQuote(_, value):
-                styledBlockQuote(markdownText(value))
+                styledBlockQuote(value)
             case let .listItem(_, marker, value):
-                styledListItem(markdownText(value), marker: marker)
+                styledListItem(value, marker: marker)
             case let .table(_, headers, rows):
                 styledTable(headers: headers, rows: rows)
             case let .codeBlock(id, language, value):
@@ -139,6 +153,27 @@ struct MarkdownMessageText: View {
         isStreaming && animatesStreamingText && !isUser && style == .standard
     }
 
+    private var shouldUseNativeSelection: Bool {
+        !isUser && style == .standard && !isStreaming
+    }
+
+    @ViewBuilder
+    private func selectableOrStyledText(_ value: String, isQuote: Bool = false) -> some View {
+#if canImport(UIKit)
+        if shouldUseNativeSelection {
+            SelectableResponseText(
+                text: value,
+                inlineMarkdown: OpenCodeMarkdownRenderCache.shared.inlineMarkdown(for: value),
+                styling: .init(foregroundColor: isQuote ? .secondaryLabel : .label, lineSpacing: textLineSpacing)
+            )
+        } else {
+            styledText(markdownText(value))
+        }
+#else
+        styledText(markdownText(value))
+#endif
+    }
+
     private func styledText(_ text: Text) -> some View {
         text
             .font(textFont)
@@ -148,24 +183,47 @@ struct MarkdownMessageText: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func styledHeading(_ text: Text, level: Int) -> some View {
-        text
-            .font(headingFont(level: level))
-            .foregroundStyle(textForegroundStyle)
-            .lineSpacing(textLineSpacing)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, headingTopPadding(level: level))
-            .padding(.bottom, headingBottomPadding(level: level))
+    private func styledHeading(_ value: String, level: Int) -> some View {
+        Group {
+#if canImport(UIKit)
+            if shouldUseNativeSelection {
+                SelectableResponseText(
+                    text: value,
+                    inlineMarkdown: OpenCodeMarkdownRenderCache.shared.inlineMarkdown(for: value),
+                    styling: .init(
+                        textStyle: level == 1 ? .title3 : (level == 2 ? .headline : .subheadline),
+                        weight: level <= 2 ? .bold : .semibold,
+                        lineSpacing: textLineSpacing
+                    )
+                )
+            } else {
+                markdownText(value)
+                    .font(headingFont(level: level))
+                    .foregroundStyle(textForegroundStyle)
+                    .lineSpacing(textLineSpacing)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+#else
+            markdownText(value)
+                .font(headingFont(level: level))
+                .foregroundStyle(textForegroundStyle)
+                .lineSpacing(textLineSpacing)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+#endif
+        }
+        .padding(.top, headingTopPadding(level: level))
+        .padding(.bottom, headingBottomPadding(level: level))
     }
 
-    private func styledBlockQuote(_ text: Text) -> some View {
+    private func styledBlockQuote(_ value: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                 .fill(blockQuoteAccentStyle)
                 .frame(width: 3)
 
-            styledText(text)
+            selectableOrStyledText(value, isQuote: true)
                 .foregroundStyle(blockQuoteForegroundStyle)
         }
         .padding(.vertical, blockQuoteVerticalPadding)
@@ -174,12 +232,12 @@ struct MarkdownMessageText: View {
         .padding(.vertical, blockQuoteOuterPadding)
     }
 
-    private func styledListItem(_ text: Text, marker: ListMarker) -> some View {
+    private func styledListItem(_ value: String, marker: ListMarker) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             listMarkerView(marker)
                 .frame(width: listMarkerWidth(for: marker), alignment: .trailing)
 
-            styledText(text)
+            selectableOrStyledText(value)
         }
         .padding(.vertical, listItemVerticalPadding)
     }
@@ -361,15 +419,34 @@ struct MarkdownMessageText: View {
     }
 
     private func tableCell(_ value: String, isHeader: Bool) -> some View {
-        markdownText(value)
-            .font(isHeader ? tableHeaderFont : textFont)
-            .foregroundStyle(isHeader ? tableHeaderForegroundStyle : textForegroundStyle)
-            .lineSpacing(textLineSpacing)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(minWidth: tableCellMinWidth, maxWidth: tableCellMaxWidth, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, isHeader ? 8 : 7)
+        Group {
+#if canImport(UIKit)
+            if shouldUseNativeSelection {
+                SelectableResponseText(
+                    text: value,
+                    inlineMarkdown: OpenCodeMarkdownRenderCache.shared.inlineMarkdown(for: value),
+                    styling: .init(weight: isHeader ? .semibold : nil, lineSpacing: textLineSpacing)
+                )
+            } else {
+                markdownText(value)
+                    .font(isHeader ? tableHeaderFont : textFont)
+                    .foregroundStyle(isHeader ? tableHeaderForegroundStyle : textForegroundStyle)
+                    .lineSpacing(textLineSpacing)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+#else
+            markdownText(value)
+                .font(isHeader ? tableHeaderFont : textFont)
+                .foregroundStyle(isHeader ? tableHeaderForegroundStyle : textForegroundStyle)
+                .lineSpacing(textLineSpacing)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+#endif
+        }
+        .frame(minWidth: tableCellMinWidth, maxWidth: tableCellMaxWidth, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, isHeader ? 8 : 7)
     }
 
     @ViewBuilder
@@ -456,6 +533,216 @@ struct MarkdownMessageText: View {
             return result
         }
     }
+
+    @MainActor
+    static func plainText(from markdown: String) -> String {
+        func inlineText(_ value: String) -> String {
+            // Copy/export parses the full input, independent of the render cache's size cap.
+            guard let attributed = try? AttributedString(
+                markdown: value,
+                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            ) else { return value }
+
+            var result = ""
+            // Coalesce by link so a label containing bold/italic runs gets one destination.
+            for (link, range) in attributed.runs[\.link] {
+                let label = String(attributed[range].characters)
+                result += label
+                if let link, label != link.absoluteString {
+                    result += " (\(link.absoluteString))"
+                }
+            }
+            return result
+        }
+
+        let message = MarkdownMessageText(text: markdown, isUser: false, style: .standard)
+        return message.blocks.map { block in
+            switch block {
+            case let .text(_, value), let .heading(_, _, value), let .blockQuote(_, value):
+                return inlineText(value)
+            case let .listItem(_, marker, value):
+                let prefix: String
+                switch marker {
+                case .unordered: prefix = "-"
+                case let .ordered(value): prefix = value
+                case let .checkbox(isChecked): prefix = isChecked ? "- [x]" : "- [ ]"
+                }
+                return "\(prefix) \(inlineText(value))"
+            case let .codeBlock(_, _, value):
+                return value
+            case let .table(_, headers, rows):
+                return ([headers] + rows)
+                    .map { $0.map(inlineText).joined(separator: "\t") }
+                    .joined(separator: "\n")
+            }
+        }.joined(separator: "\n")
+    }
+
+#if canImport(UIKit)
+    /// Each server part is parsed independently; all blocks share one native selection range.
+    @MainActor
+    static func selectableDocument(
+        from parts: [String],
+        baseFont: UIFont,
+        colorScheme: ColorScheme,
+        layoutDirection: LayoutDirection = .leftToRight
+    ) -> NSAttributedString {
+        let document = NSMutableAttributedString(string: "")
+        let scale = baseFont.pointSize / 17
+        let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
+        let foreground = UIColor.label.resolvedColor(with: traits)
+        let secondary = UIColor.secondaryLabel.resolvedColor(with: traits)
+        let background = (colorScheme == .dark ? UIColor.white : UIColor.black)
+            .withAlphaComponent(colorScheme == .dark ? 0.06 : 0.045)
+        let codeFont = UIFont.monospacedSystemFont(ofSize: 13 * scale, weight: .regular)
+
+        func inline(_ value: String, font: UIFont, color: UIColor, paragraph: NSParagraphStyle) -> NSMutableAttributedString {
+            // Completed documents have no streaming size cap and are cached for their view's lifetime.
+            let source = OpenCodeMarkdownRenderCache.shared.inlineMarkdown(for: value)
+                ?? (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                ?? AttributedString(value)
+            return SelectableResponseText.attributedString(from: source, font: font, color: color, paragraph: paragraph)
+        }
+
+        for (partIndex, part) in parts.enumerated() {
+            let message = MarkdownMessageText(text: part, isUser: false, style: .standard)
+            let blocks = message.blocks
+            for (blockIndex, block) in blocks.enumerated() {
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.lineSpacing = 3
+                paragraph.lineBreakMode = .byWordWrapping
+                paragraph.alignment = layoutDirection == .rightToLeft ? .right : .left
+                paragraph.baseWritingDirection = layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
+                var font = baseFont
+                var color = foreground
+                var blockPadding: CGFloat?
+                let rendered: NSMutableAttributedString
+
+                switch block {
+                case let .text(_, value):
+                    if value.isEmpty {
+                        paragraph.minimumLineHeight = 7 * scale
+                        paragraph.maximumLineHeight = 7 * scale
+                        paragraph.lineSpacing = 0
+                        font = baseFont.withSize(7 * scale)
+                    }
+                    rendered = inline(value, font: font, color: color, paragraph: paragraph)
+                case let .heading(_, level, value):
+                    let size: CGFloat = level == 1 ? 20 : (level == 2 ? 17 : 15)
+                    font = .systemFont(ofSize: size * scale, weight: level <= 2 ? .bold : .semibold)
+                    paragraph.paragraphSpacingBefore = message.headingTopPadding(level: level)
+                    paragraph.paragraphSpacing = message.headingBottomPadding(level: level)
+                    rendered = inline(value, font: font, color: color, paragraph: paragraph)
+                case let .blockQuote(_, value):
+                    color = secondary
+                    paragraph.firstLineHeadIndent = 23 * scale
+                    paragraph.headIndent = 23 * scale
+                    paragraph.tailIndent = -10 * scale
+                    blockPadding = 8
+                    rendered = inline(value, font: font, color: color, paragraph: paragraph)
+                    rendered.addAttribute(.backgroundColor, value: background, range: NSRange(location: 0, length: rendered.length))
+                case let .listItem(_, marker, value):
+                    let markerText: String
+                    switch marker {
+                    case .unordered: markerText = "\u{2022}"
+                    case let .ordered(value): markerText = value
+                    case let .checkbox(isChecked): markerText = isChecked ? "\u{2611}" : "\u{2610}"
+                    }
+                    let markerFont = UIFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold)
+                    let markerWidth = max(message.listMarkerWidth(for: marker) * scale,
+                                          ceil((markerText as NSString).size(withAttributes: [.font: markerFont]).width))
+                    let indent = markerWidth + 8 * scale
+                    paragraph.tabStops = [
+                        NSTextTab(textAlignment: layoutDirection == .rightToLeft ? .left : .right, location: markerWidth),
+                        NSTextTab(textAlignment: layoutDirection == .rightToLeft ? .right : .left, location: indent)
+                    ]
+                    paragraph.headIndent = indent
+                    paragraph.paragraphSpacingBefore = 2
+                    paragraph.paragraphSpacing = 2
+                    rendered = NSMutableAttributedString(string: "\t\(markerText)\t", attributes: [
+                        .font: markerFont, .foregroundColor: secondary, .paragraphStyle: paragraph
+                    ])
+                    rendered.append(inline(value, font: font, color: color, paragraph: paragraph))
+                case let .codeBlock(_, language, value):
+                    font = codeFont
+                    paragraph.alignment = .left
+                    paragraph.baseWritingDirection = .leftToRight
+                    paragraph.firstLineHeadIndent = 12
+                    paragraph.headIndent = 12
+                    paragraph.tailIndent = -12
+                    paragraph.defaultTabInterval = ("    " as NSString).size(withAttributes: [.font: codeFont]).width
+                    paragraph.tabStops = []
+                    paragraph.lineBreakMode = .byCharWrapping
+                    blockPadding = 12
+                    rendered = NSMutableAttributedString(string: value, attributes: [.foregroundColor: foreground])
+                    // Keep the existing highlighter's large-code fallback, without dropping any characters.
+                    if value.utf8.count <= 12_000,
+                       value.lazy.filter(\.isNewline).prefix(261).count <= 260,
+                       let highlighted = OpenCodeSyntaxHighlighter.shared.highlight(value, language: language, colorScheme: colorScheme),
+                       let native = try? NSAttributedString(highlighted, including: \.uiKit), native.string == value {
+                        rendered.setAttributedString(native)
+                    }
+                    rendered.addAttributes([
+                        .font: codeFont, .paragraphStyle: paragraph, .backgroundColor: background
+                    ], range: NSRange(location: 0, length: rendered.length))
+                case let .table(_, headers, rows):
+                    font = .monospacedSystemFont(ofSize: baseFont.pointSize, weight: .regular)
+                    paragraph.alignment = .left
+                    paragraph.baseWritingDirection = .leftToRight
+                    paragraph.lineBreakMode = .byCharWrapping
+                    paragraph.paragraphSpacingBefore = 5
+                    paragraph.paragraphSpacing = 5
+                    let cells = ([headers] + rows).enumerated().map { rowIndex, row in
+                        row.map { value in
+                            inline(value, font: .monospacedSystemFont(ofSize: font.pointSize, weight: rowIndex == 0 ? .semibold : .regular),
+                                   color: color, paragraph: paragraph)
+                        }
+                    }
+                    let widths = headers.indices.map { column in
+                        cells.map { $0[column].size().width }.max() ?? 0
+                    }
+                    let spaceWidth = max(1, (" " as NSString).size(withAttributes: [.font: font]).width)
+                    rendered = NSMutableAttributedString(string: "")
+                    for (rowIndex, row) in cells.enumerated() {
+                        if rowIndex > 0 { rendered.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: paragraph])) }
+                        let rowStart = rendered.length
+                        for (column, cell) in row.enumerated() {
+                            rendered.append(cell)
+                            if column < row.count - 1 {
+                                let padding = max(0, Int(ceil((widths[column] - cell.size().width) / spaceWidth))) + 3
+                                rendered.append(NSAttributedString(string: String(repeating: " ", count: padding), attributes: [.font: font, .paragraphStyle: paragraph]))
+                            }
+                        }
+                        rendered.addAttribute(.backgroundColor, value: rowIndex == 0 ? secondary.withAlphaComponent(0.11) : background,
+                                              range: NSRange(location: rowStart, length: rendered.length - rowStart))
+                    }
+                }
+
+                if let blockPadding, rendered.length > 0 {
+                    // Outer spacing belongs only to the first/last paragraph, not every code/quote line.
+                    let string = rendered.string as NSString
+                    let first = string.paragraphRange(for: NSRange(location: 0, length: 0))
+                    let last = string.paragraphRange(for: NSRange(location: rendered.length - 1, length: 0))
+                    let firstStyle = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                    firstStyle.paragraphSpacingBefore = blockPadding
+                    rendered.addAttribute(.paragraphStyle, value: firstStyle, range: first)
+                    let lastStyle = (first == last ? firstStyle : paragraph).mutableCopy() as! NSMutableParagraphStyle
+                    lastStyle.paragraphSpacing = blockPadding
+                    rendered.addAttribute(.paragraphStyle, value: lastStyle, range: last)
+                }
+                document.append(rendered)
+                let separator = blockIndex < blocks.count - 1 ? "\n" : (partIndex < parts.count - 1 ? "\u{2029}" : "")
+                var separatorAttributes: [NSAttributedString.Key: Any] = rendered.length > 0
+                    ? rendered.attributes(at: rendered.length - 1, effectiveRange: nil) : [
+                    .font: font, .foregroundColor: color, .paragraphStyle: paragraph
+                ]
+                separatorAttributes.removeValue(forKey: .link)
+                document.append(NSAttributedString(string: separator, attributes: separatorAttributes))
+            }
+        }
+        return NSAttributedString(attributedString: document)
+    }
+#endif
 
 #if DEBUG
     @MainActor
@@ -937,6 +1224,54 @@ struct MarkdownMessageText: View {
     }
 }
 
+#if canImport(UIKit)
+struct CompletedResponseText: View {
+    let markdownParts: [String]
+    var onTextTap: (() -> Void)? = nil
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.layoutDirection) private var layoutDirection
+    @State private var cache = CompletedResponseDocumentCache()
+
+    var body: some View {
+        SelectableResponseText(
+            attributedText: cache.document(
+                parts: markdownParts,
+                font: SelectableResponseText.preferredFont(for: dynamicTypeSize),
+                colorScheme: colorScheme,
+                layoutDirection: layoutDirection
+            ),
+            onTextTap: onTextTap
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+@MainActor
+private final class CompletedResponseDocumentCache {
+    private var parts: [String] = []
+    private var font: UIFont?
+    private var colorScheme: ColorScheme?
+    private var layoutDirection: LayoutDirection?
+    private var rendered: NSAttributedString?
+
+    func document(parts: [String], font: UIFont, colorScheme: ColorScheme, layoutDirection: LayoutDirection) -> NSAttributedString {
+        if let rendered, self.parts == parts, self.font == font,
+           self.colorScheme == colorScheme, self.layoutDirection == layoutDirection { return rendered }
+        let document = MarkdownMessageText.selectableDocument(
+            from: parts, baseFont: font, colorScheme: colorScheme, layoutDirection: layoutDirection
+        )
+        self.parts = parts
+        self.font = font
+        self.colorScheme = colorScheme
+        self.layoutDirection = layoutDirection
+        self.rendered = document
+        return document
+    }
+}
+#endif
+
 @MainActor
 enum MessageLinkExtractor {
     private static let detector = try? NSDataDetector(
@@ -1288,14 +1623,26 @@ fileprivate final class OpenCodeMarkdownRenderCache {
 
 private struct ConditionalTextSelectionModifier: ViewModifier {
     let isEnabled: Bool
+    let usesNativeSelection: Bool
 
     @ViewBuilder
     func body(content: Content) -> some View {
+#if canImport(UIKit)
+        if usesNativeSelection {
+            // SwiftUI's selection interaction competes with UITextView's range selection.
+            content
+        } else if isEnabled {
+            content.textSelection(.enabled)
+        } else {
+            content.textSelection(.disabled)
+        }
+#else
         if isEnabled {
             content.textSelection(.enabled)
         } else {
             content.textSelection(.disabled)
         }
+#endif
     }
 }
 

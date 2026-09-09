@@ -1,12 +1,126 @@
 import Combine
 import Foundation
 
+struct FunAndGamesOwner: Hashable {
+    let backendID: String
+    let profile: OpenCodeProfileIdentity
+}
+
+enum FunAndGamesGame: Equatable {
+    case findPlace
+    case findBug(FindBugGameLanguage)
+
+    var key: String {
+        switch self {
+        case .findPlace: "place"
+        case .findBug: "bug"
+        }
+    }
+}
+
+struct FunAndGamesSetup {
+    enum Phase: Equatable {
+        case preparing, creating, creationUncertain, created, configuring, submitting, uncertain, admitted, rejected, failed
+    }
+
+    let game: FunAndGamesGame
+    let model: OpenCodeModelReference
+    let messageID: String
+    var phase: Phase = .preparing
+    var scope = BackendScope()
+    var project: OpenCodeProject?
+    var session: OpenCodeSession?
+    var prompt = ""
+    var city: FindPlaceGameCity?
+    var weather: FindPlaceWeatherSummary?
+}
+
 @MainActor
 final class FunAndGamesStore: ObservableObject {
     @Published var preferences: FunAndGamesPreferences
-    @Published var findPlaceSessionsByID: [String: FindPlaceGameSession]
-    @Published var findBugSessionsByID: [String: FindBugGameSession]
-    @Published var pendingFindBugLanguage: FindBugGameLanguage?
+    private struct Games {
+        var places: [String: FindPlaceGameSession] = [:]
+        var bugs: [String: FindBugGameSession] = [:]
+        var language: FindBugGameLanguage?
+        var setups: [String: FunAndGamesSetup] = [:]
+        var setupsBySessionID: [String: FunAndGamesSetup] = [:]
+        var running: Set<String> = []
+    }
+    @Published private var gamesByOwner: [FunAndGamesOwner: Games] = [:]
+    // In-memory only. Existing persisted game preferences and transcript markers are unchanged.
+    var ownerProvider: (@MainActor () -> FunAndGamesOwner)? {
+        didSet {
+            if oldValue == nil, ownerProvider != nil,
+               let initial = gamesByOwner.removeValue(forKey: .init(backendID: "unbound", profile: .legacy)) {
+                gamesByOwner[owner] = initial
+            }
+        }
+    }
+    private var owner: FunAndGamesOwner {
+        ownerProvider?() ?? FunAndGamesOwner(backendID: "unbound", profile: .legacy)
+    }
+    var findPlaceSessionsByID: [String: FindPlaceGameSession] {
+        get { gamesByOwner[owner]?.places ?? [:] }
+        set { gamesByOwner[owner, default: Games()].places = newValue }
+    }
+    var findBugSessionsByID: [String: FindBugGameSession] {
+        get { gamesByOwner[owner]?.bugs ?? [:] }
+        set { gamesByOwner[owner, default: Games()].bugs = newValue }
+    }
+    var pendingFindBugLanguage: FindBugGameLanguage? {
+        get { gamesByOwner[owner]?.language }
+        set { gamesByOwner[owner, default: Games()].language = newValue }
+    }
+
+    func setup(for game: FunAndGamesGame, owner: FunAndGamesOwner) -> FunAndGamesSetup? {
+        gamesByOwner[owner]?.setups[game.key]
+    }
+
+    func saveSetup(_ setup: FunAndGamesSetup, owner: FunAndGamesOwner) {
+        var setup = setup
+        let active = gamesByOwner[owner]?.setups[setup.game.key]
+        let existing = setup.session.flatMap { gamesByOwner[owner]?.setupsBySessionID[$0.id] } ?? active
+        if let existing,
+           existing.messageID == setup.messageID, existing.phase == .admitted {
+            setup.phase = .admitted
+        }
+        // Advancing creation must not retire an older session's admission guard. Late
+        // evidence updates that session without replacing the active creation checkpoint.
+        if active == nil || active?.messageID == setup.messageID || setup.phase == .preparing {
+            gamesByOwner[owner, default: Games()].setups[setup.game.key] = setup
+        }
+        guard let session = setup.session else { return }
+        gamesByOwner[owner, default: Games()].setupsBySessionID[session.id] = setup
+        switch setup.game {
+        case .findPlace:
+            if let city = setup.city, gamesByOwner[owner]?.places[session.id] == nil {
+                gamesByOwner[owner, default: Games()].places[session.id] = .init(sessionID: session.id, city: city, weather: setup.weather)
+            }
+        case .findBug(let language):
+            gamesByOwner[owner, default: Games()].bugs[session.id] = .init(sessionID: session.id, language: language)
+        }
+    }
+
+    func beginSetup(for game: FunAndGamesGame, owner: FunAndGamesOwner) -> Bool {
+        gamesByOwner[owner, default: Games()].running.insert(game.key).inserted
+    }
+
+    func finishSetup(for game: FunAndGamesGame, owner: FunAndGamesOwner) {
+        gamesByOwner[owner]?.running.remove(game.key)
+    }
+
+    func setupPhase(for sessionID: String) -> FunAndGamesSetup.Phase? {
+        setup(for: sessionID)?.phase
+    }
+
+    func setup(for sessionID: String, owner: FunAndGamesOwner? = nil) -> FunAndGamesSetup? {
+        gamesByOwner[owner ?? self.owner]?.setupsBySessionID[sessionID]
+    }
+
+    func hasPendingSetup(for sessionID: String) -> Bool {
+        guard let phase = setupPhase(for: sessionID) else { return false }
+        return phase != .admitted
+    }
 
     init(
         preferences: FunAndGamesPreferences = FunAndGamesPreferences(),
@@ -60,12 +174,25 @@ final class FunAndGamesStore: ObservableObject {
             changed = recordFindBugSession(game) || changed
         }
 
+        if var setup = setup(for: sessionID), setup.phase != .admitted,
+           messages.contains(where: { $0.id == setup.messageID && $0.info.role == "user" && $0.info.sessionID == sessionID }) {
+            setup.phase = .admitted
+            saveSetup(setup, owner: owner)
+            changed = true
+        }
+
+        if var game = findPlaceSessionsByID[sessionID], !game.didReveal,
+           messages.contains(where: { $0.info.role == "assistant" && $0.info.sessionID == sessionID && $0.parts.contains { $0.text?.contains(FindPlaceGame.winMarker) == true } }) {
+            game.didReveal = true
+            changed = recordFindPlaceSession(game) || changed
+        }
+
         return changed
     }
 
     @discardableResult
     func inferGame(from part: OpenCodePart) -> Bool {
-        guard let sessionID = part.sessionID,
+        guard part.type == "text", let sessionID = part.sessionID,
               let text = part.text else { return false }
         return inferGame(fromSetupText: text, sessionID: sessionID)
     }
@@ -102,11 +229,12 @@ final class FunAndGamesStore: ObservableObject {
     }
 
     static func inferredFindPlaceGame(in messages: [OpenCodeMessageEnvelope], sessionID: String) -> FindPlaceGameSession? {
-        for message in messages where message.info.sessionID == nil || message.info.sessionID == sessionID {
+        for message in messages where (message.info.role == "user" || message.info.role == "system") && (message.info.sessionID == nil || message.info.sessionID == sessionID) {
             for part in message.parts {
                 guard let text = part.text, text.contains(FindPlaceGame.setupMarker) else { continue }
                 guard let city = findPlaceCity(fromSetupPrompt: text) else { continue }
-                return FindPlaceGameSession(sessionID: sessionID, city: city, weather: findPlaceWeather(fromSetupPrompt: text))
+                let revealed = messages.contains { $0.info.role == "assistant" && $0.info.sessionID == sessionID && $0.parts.contains { $0.text?.contains(FindPlaceGame.winMarker) == true } }
+                return FindPlaceGameSession(sessionID: sessionID, city: city, weather: findPlaceWeather(fromSetupPrompt: text), didReveal: revealed)
             }
         }
 
@@ -114,7 +242,7 @@ final class FunAndGamesStore: ObservableObject {
     }
 
     static func inferredFindBugGame(in messages: [OpenCodeMessageEnvelope], sessionID: String) -> FindBugGameSession? {
-        for message in messages where message.info.sessionID == nil || message.info.sessionID == sessionID {
+        for message in messages where (message.info.role == "user" || message.info.role == "system") && (message.info.sessionID == nil || message.info.sessionID == sessionID) {
             for part in message.parts {
                 guard let text = part.text, text.contains(FindBugGame.setupMarker) else { continue }
                 guard let language = findBugLanguage(fromSetupPrompt: text) else { continue }

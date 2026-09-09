@@ -4,6 +4,27 @@ import XCTest
 #if canImport(ActivityKit) && os(iOS)
 @MainActor
 final class LiveActivitySnapshotBuilderTests: XCTestCase {
+    func testV2FormsRemainOpenAppOnlyAndIgnoreLegacyQuestionProjection() {
+        let session = makeSession(id: "ses_live")
+        var input = makeInput(session: session, questions: [
+            .init(id: "question", sessionID: session.id,
+                  questions: [.init(question: "Proceed?", header: "Question", options: [.init(label: "Yes", description: "Continue")])], tool: nil)
+        ])
+        input.profile = .v2
+        XCTAssertNil(LiveActivitySnapshotBuilder.state(for: input).pendingInteractionKind)
+        input.forms = [
+            .init(id: "foreign", sessionID: "other", title: "Not this session", fields: []),
+            .init(id: "form", sessionID: session.id, title: "Provide details", fields: [])
+        ]
+        let state = LiveActivitySnapshotBuilder.state(for: input)
+        XCTAssertEqual(state.pendingInteractionKind, "form")
+        XCTAssertEqual(state.interactionID, "form")
+        XCTAssertEqual(state.interactionSummary, "Provide details")
+        XCTAssertEqual(state.status, "Action")
+        XCTAssertTrue(state.questionOptionLabels.isEmpty)
+        XCTAssertFalse(state.canReplyToQuestionInline)
+    }
+
     func testTranscriptShowsLatestAssistantLineOnly() {
         let session = makeSession(id: "ses_live")
         let input = makeInput(

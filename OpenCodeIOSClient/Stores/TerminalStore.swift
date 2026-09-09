@@ -28,6 +28,7 @@ final class TerminalStore: ObservableObject {
     static let defaultFontSize: Float = 12
 
     @Published private(set) var activeDirectory: String?
+    @Published private(set) var activeWorkspaceID: String? = nil
     @Published private(set) var workspaces: [String: OpenClientTerminalWorkspaceState]
     @Published private(set) var isLoadingTerminals: Bool
     @Published private(set) var isCreatingTerminal: Bool
@@ -35,6 +36,10 @@ final class TerminalStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var fontSize: Float
     private let defaults: UserDefaults
+
+    private var activeKey: String? {
+        activeDirectory.map { Self.workspaceKey(directory: $0, workspaceID: activeWorkspaceID) }
+    }
 
     init(
         activeDirectory: String? = nil,
@@ -59,7 +64,7 @@ final class TerminalStore: ObservableObject {
 
     var activeWorkspace: OpenClientTerminalWorkspaceState {
         guard let activeDirectory else { return OpenClientTerminalWorkspaceState() }
-        return workspaces[activeDirectory] ?? OpenClientTerminalWorkspaceState()
+        return workspace(directory: activeDirectory, workspaceID: activeWorkspaceID)
     }
 
     var activeTerminal: OpenClientTerminalTab? {
@@ -68,14 +73,36 @@ final class TerminalStore: ObservableObject {
         return workspace.terminals.first { $0.id == activeTerminalID }
     }
 
-    func activate(directory: String) {
+    nonisolated static func workspaceKey(directory: String, workspaceID: String?) -> String {
+        // NUL cannot occur in a directory path, so scoped keys cannot collide with plain paths.
+        workspaceID.map { directory + "\u{0000}" + $0 } ?? directory
+    }
+
+    func workspace(directory: String, workspaceID: String? = nil) -> OpenClientTerminalWorkspaceState {
+        workspaces[Self.workspaceKey(directory: directory, workspaceID: workspaceID)] ?? OpenClientTerminalWorkspaceState()
+    }
+
+    func reset() {
+        activeDirectory = nil
+        activeWorkspaceID = nil
+        workspaces = [:]
+        isLoadingTerminals = false
+        isCreatingTerminal = false
+        connectionState = .disconnected
+        errorMessage = nil
+    }
+
+    func activate(directory: String, workspaceID: String? = nil) {
         guard !directory.isEmpty else { return }
-        if workspaces[directory] == nil {
-            workspaces[directory] = OpenClientTerminalWorkspaceState()
+        let key = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
+        if workspaces[key] == nil {
+            workspaces[key] = OpenClientTerminalWorkspaceState()
         }
         activeDirectory = directory
+        activeWorkspaceID = workspaceID
         errorMessage = nil
         isLoadingTerminals = false
+        isCreatingTerminal = false
         connectionState = .disconnected
     }
 
@@ -101,7 +128,8 @@ final class TerminalStore: ObservableObject {
         isCreatingTerminal = false
     }
 
-    func append(_ info: OpenCodePTY, directory: String) {
+    func append(_ info: OpenCodePTY, directory: String, workspaceID: String? = nil) {
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         var workspace = workspaces[directory] ?? OpenClientTerminalWorkspaceState()
         if let index = workspace.terminals.firstIndex(where: { $0.id == info.id }) {
             workspace.terminals[index].info = info
@@ -110,10 +138,11 @@ final class TerminalStore: ObservableObject {
         }
         workspace.activeTerminalID = info.id
         workspaces[directory] = workspace
-        errorMessage = nil
+        if directory == activeKey { errorMessage = nil }
     }
 
-    func upsert(_ info: OpenCodePTY, directory: String) {
+    func upsert(_ info: OpenCodePTY, directory: String, workspaceID: String? = nil) {
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         var workspace = workspaces[directory] ?? OpenClientTerminalWorkspaceState()
         if let index = workspace.terminals.firstIndex(where: { $0.id == info.id }) {
             workspace.terminals[index].info = info
@@ -121,13 +150,14 @@ final class TerminalStore: ObservableObject {
             workspace.terminals.append(OpenClientTerminalTab(info: info, cursor: 0))
         }
         workspaces[directory] = workspace
-        errorMessage = nil
+        if directory == activeKey { errorMessage = nil }
     }
 
-    func replaceTerminals(_ infos: [OpenCodePTY], directory: String) {
+    func replaceTerminals(_ infos: [OpenCodePTY], directory: String, workspaceID: String? = nil) {
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         let existing = workspaces[directory] ?? OpenClientTerminalWorkspaceState()
         let existingByID = Dictionary(uniqueKeysWithValues: existing.terminals.map { ($0.id, $0) })
-        let terminals = infos.map { info in
+        let terminals = infos.filter { $0.status != "exited" }.map { info in
             guard var terminal = existingByID[info.id] else {
                 return OpenClientTerminalTab(info: info, cursor: 0)
             }
@@ -141,23 +171,26 @@ final class TerminalStore: ObservableObject {
             terminals: terminals,
             activeTerminalID: activeTerminalID
         )
-        errorMessage = nil
+        if directory == activeKey { errorMessage = nil }
     }
 
-    func select(id: String, directory: String) {
+    func select(id: String, directory: String, workspaceID: String? = nil) {
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         guard var workspace = workspaces[directory],
               workspace.terminals.contains(where: { $0.id == id }) else { return }
         let changedSelection = workspace.activeTerminalID != id
         workspace.activeTerminalID = id
         workspaces[directory] = workspace
-        errorMessage = nil
-        if changedSelection {
+        if directory == activeKey { errorMessage = nil }
+        if changedSelection && directory == activeKey {
             connectionState = .disconnected
         }
     }
 
     @discardableResult
-    func remove(id: String, directory: String) -> Bool {
+    func remove(id: String, directory: String, workspaceID: String? = nil) -> Bool {
+        let isActiveScope = activeDirectory == directory && activeWorkspaceID == workspaceID
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         guard var workspace = workspaces[directory],
               let index = workspace.terminals.firstIndex(where: { $0.id == id }) else { return false }
         let wasActive = workspace.activeTerminalID == id
@@ -167,13 +200,14 @@ final class TerminalStore: ObservableObject {
             workspace.activeTerminalID = workspace.terminals.isEmpty ? nil : workspace.terminals[nextIndex].id
         }
         workspaces[directory] = workspace
-        if wasActive {
+        if wasActive && isActiveScope {
             connectionState = .disconnected
         }
-        return wasActive
+        return wasActive && isActiveScope
     }
 
-    func replace(id: String, with info: OpenCodePTY, directory: String) {
+    func replace(id: String, with info: OpenCodePTY, directory: String, workspaceID: String? = nil) {
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         guard var workspace = workspaces[directory],
               let index = workspace.terminals.firstIndex(where: { $0.id == id }) else { return }
         let wasActive = workspace.activeTerminalID == id
@@ -184,21 +218,24 @@ final class TerminalStore: ObservableObject {
         workspaces[directory] = workspace
     }
 
-    func update(info: OpenCodePTY, directory: String) {
+    func update(info: OpenCodePTY, directory: String, workspaceID: String? = nil) {
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         guard var workspace = workspaces[directory],
               let index = workspace.terminals.firstIndex(where: { $0.id == info.id }) else { return }
         workspace.terminals[index].info = info
         workspaces[directory] = workspace
     }
 
-    func updateCursor(_ cursor: Int, id: String, directory: String) {
+    func updateCursor(_ cursor: Int, id: String, directory: String, workspaceID: String? = nil) {
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         guard var workspace = workspaces[directory],
               let index = workspace.terminals.firstIndex(where: { $0.id == id }) else { return }
         workspace.terminals[index].cursor = cursor
         workspaces[directory] = workspace
     }
 
-    func updateSize(rows: Int, columns: Int, id: String, directory: String) {
+    func updateSize(rows: Int?, columns: Int?, id: String, directory: String, workspaceID: String? = nil) {
+        let directory = Self.workspaceKey(directory: directory, workspaceID: workspaceID)
         guard var workspace = workspaces[directory],
               let index = workspace.terminals.firstIndex(where: { $0.id == id }) else { return }
         workspace.terminals[index].rows = rows
@@ -215,7 +252,6 @@ final class TerminalStore: ObservableObject {
 
     func setError(_ error: Error) {
         errorMessage = error.localizedDescription
-        connectionState = .disconnected
     }
 
     func setFontSize(_ fontSize: Float) {

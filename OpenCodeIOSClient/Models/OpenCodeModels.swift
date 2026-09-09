@@ -56,6 +56,39 @@ struct HealthResponse: Codable, Sendable {
     let version: String
 }
 
+// SessionPending.Message in next-17155 and the user/synthetic subset of
+// SessionInbox.Item at 41cb354 share this payload after boundary normalization.
+struct OpenCodeV2AdmittedInput: Decodable, Sendable {
+    enum Kind: String, Decodable, Sendable {
+        case user, synthetic
+    }
+
+    struct Payload: Decodable, Sendable {
+        struct File: Decodable, Sendable {
+            let data: String
+            let mime: String
+            let name: String?
+        }
+
+        struct Agent: Decodable, Sendable {
+            struct Mention: Decodable, Sendable {
+                let text: String
+                let start: Double
+                let end: Double
+            }
+            let name: String
+            let mention: Mention?
+        }
+
+        let text: String
+        let files: [File]?
+        let agents: [Agent]?
+    }
+
+    let type: Kind
+    let data: Payload
+}
+
 struct OpenCodeSession: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let title: String?
@@ -64,6 +97,8 @@ struct OpenCodeSession: Codable, Identifiable, Hashable, Sendable {
     let projectID: String?
     let parentID: String?
     var time: OpenCodeMessageTime? = nil
+    var agent: String? = nil
+    var model: OpenCodeMessageModelReference? = nil
 
     var isRootSession: Bool {
         parentID == nil
@@ -110,6 +145,8 @@ struct OpenCodeSession: Codable, Identifiable, Hashable, Sendable {
             parentID: incoming.parentID ?? parentID
         )
         session.time = incoming.time ?? time
+        session.agent = incoming.agent ?? agent
+        session.model = incoming.model ?? model
         return session
     }
 }
@@ -438,6 +475,28 @@ struct OpenCodeDirectorySyncState: Equatable, Sendable {
                 }
             }
             partsByMessageID[envelope.info.id] = parts.isEmpty ? nil : parts
+        }
+    }
+
+    mutating func replaceMessagesPreservingOrder(_ envelopes: [OpenCodeMessageEnvelope], forSessionID sessionID: String) {
+        let previousMessageIDs = messagesBySessionID[sessionID]?.map(\.id) ?? []
+        for messageID in previousMessageIDs {
+            partsByMessageID[messageID] = nil
+        }
+        messagesBySessionID[sessionID] = []
+
+        var ordered: [OpenCodeMessageEnvelope] = []
+        var indexByID: [String: Int] = [:]
+        for envelope in envelopes {
+            if let index = indexByID[envelope.id] {
+                ordered[index] = envelope
+            } else {
+                indexByID[envelope.id] = ordered.count
+                ordered.append(envelope)
+            }
+        }
+        for envelope in ordered {
+            appendMessageEnvelope(envelope, forSessionID: sessionID)
         }
     }
 
@@ -800,12 +859,14 @@ struct OpenCodeMessageTime: Codable, Hashable, Sendable {
     let updated: Double?
     let completed: Double?
     let archived: Double?
+    let streamed: Double?
 
-    init(created: Double? = nil, updated: Double? = nil, completed: Double? = nil, archived: Double? = nil) {
+    init(created: Double? = nil, updated: Double? = nil, completed: Double? = nil, archived: Double? = nil, streamed: Double? = nil) {
         self.created = created
         self.updated = updated
         self.completed = completed
         self.archived = archived
+        self.streamed = streamed
     }
 }
 
@@ -831,7 +892,7 @@ struct OpenCodeMessageTokenCache: Codable, Hashable, Sendable {
 
     private static func decodeInt(_ container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> Int {
         if let value = try? container.decode(Int.self, forKey: key) { return value }
-        if let value = try? container.decode(Double.self, forKey: key) { return Int(value) }
+        if let value = try? container.decode(Double.self, forKey: key) { return Int(exactly: value.rounded(.towardZero)) ?? 0 }
         return 0
     }
 }
@@ -878,7 +939,7 @@ struct OpenCodeMessageTokens: Codable, Hashable, Sendable {
 
     private static func decodeOptionalInt(_ container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> Int? {
         if let value = try? container.decode(Int.self, forKey: key) { return value }
-        if let value = try? container.decode(Double.self, forKey: key) { return Int(value) }
+        if let value = try? container.decode(Double.self, forKey: key) { return Int(exactly: value.rounded(.towardZero)) }
         return nil
     }
 }
@@ -1104,6 +1165,8 @@ struct OpenCodeModel: Codable, Identifiable, Hashable, Sendable {
     let status: String?
     let releaseDate: String?
     let cost: OpenCodeModelCost?
+    // V2 catalog choices are generic settings overlays, not a reasoning capability signal.
+    let catalogVariantIDs: [String]?
 
     init(
         id: String,
@@ -1115,7 +1178,8 @@ struct OpenCodeModel: Codable, Identifiable, Hashable, Sendable {
         family: String? = nil,
         status: String? = nil,
         releaseDate: String? = nil,
-        cost: OpenCodeModelCost? = nil
+        cost: OpenCodeModelCost? = nil,
+        catalogVariantIDs: [String]? = nil
     ) {
         self.id = id
         self.providerID = providerID
@@ -1127,6 +1191,7 @@ struct OpenCodeModel: Codable, Identifiable, Hashable, Sendable {
         self.status = status
         self.releaseDate = releaseDate
         self.cost = cost
+        self.catalogVariantIDs = catalogVariantIDs
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1140,6 +1205,7 @@ struct OpenCodeModel: Codable, Identifiable, Hashable, Sendable {
         case status
         case releaseDate = "release_date"
         case cost
+        case catalogVariantIDs
     }
 }
 
@@ -1661,6 +1727,7 @@ struct OpenCodeMCPServer: Identifiable, Hashable, Sendable {
 enum AppBackendMode: String, Codable, Sendable {
     case none
     case server
+    case serverV2
     case cachedServer
     case appleIntelligence
 }
@@ -2063,6 +2130,11 @@ enum OpenCodeJSONValue: Codable, Hashable, Sendable {
         return nil
     }
 
+    var literalStringValue: String? {
+        guard case let .string(value) = self else { return nil }
+        return value
+    }
+
     var arrayValue: [OpenCodeJSONValue]? {
         if case let .array(value) = self { return value }
         return nil
@@ -2071,6 +2143,10 @@ enum OpenCodeJSONValue: Codable, Hashable, Sendable {
     var doubleValue: Double? {
         if case let .number(value) = self { return value }
         return nil
+    }
+
+    var intValue: Int? {
+        doubleValue.flatMap(Int.init(exactly:))
     }
 }
 
@@ -2362,7 +2438,8 @@ struct OpenCodeToolInput: Codable, Hashable, Sendable {
         self.path = path
         self.query = query
         self.pattern = pattern
-        self.subagentType = subagentType
+        // Both HTTP and live v2 adapters retain the server input in arguments.
+        self.subagentType = subagentType ?? arguments?["agent"]?.literalStringValue
         self.url = url
         self.clientID = clientID
         self.toolID = toolID
@@ -2406,6 +2483,29 @@ struct OpenCodeToolMetadata: Codable, Hashable, Sendable {
         case renderer
         case schemaVersion
         case payload
+    }
+
+    private enum V2CodingKeys: String, CodingKey {
+        case sessionID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v2 = try decoder.container(keyedBy: V2CodingKeys.self)
+        output = try container.decodeIfPresent(String.self, forKey: .output)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        exit = try container.decodeIfPresent(Int.self, forKey: .exit)
+        filediff = try container.decodeIfPresent(OpenCodeJSONValue.self, forKey: .filediff)
+        loaded = try container.decodeIfPresent([String].self, forKey: .loaded)
+        sessionId = try v2.decodeIfPresent(String.self, forKey: .sessionID)
+            ?? container.decodeIfPresent(String.self, forKey: .sessionId)
+        truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated)
+        files = try container.decodeIfPresent([OpenCodeJSONValue].self, forKey: .files)
+        clientID = try container.decodeIfPresent(String.self, forKey: .clientID)
+        toolID = try container.decodeIfPresent(String.self, forKey: .toolID)
+        renderer = try container.decodeIfPresent(String.self, forKey: .renderer)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        payload = try container.decodeIfPresent(OpenCodeJSONValue.self, forKey: .payload)
     }
 
     init(
@@ -3451,6 +3551,7 @@ enum OpenCodeAPIError: LocalizedError {
     case invalidResponse
     case httpError(Int, String)
     case timedOut
+    case v2Unavailable
 
     var errorDescription: String? {
         switch self {
@@ -3460,6 +3561,8 @@ enum OpenCodeAPIError: LocalizedError {
             return String(localized: "The server returned an invalid response.")
         case .timedOut:
             return String(localized: "The server took too long to respond. Check that the URL is reachable, then try again.")
+        case .v2Unavailable:
+            return String(localized: "This server does not expose the OpenCode v2 API. Choose Legacy or Automatic and try again.")
         case let .httpError(code, body):
             if body.isEmpty {
                 return String(localized: "The server request failed with status \(code).")

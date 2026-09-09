@@ -11,6 +11,100 @@ enum OpenCodeManagedEventDecodeResult: Sendable {
     case dropped(String)
 }
 
+struct OpenCodeV2ManagedEvent: Decodable, Sendable {
+    struct Location: Codable, Hashable, Sendable {
+        let directory: String
+        let workspaceID: String?
+    }
+
+    let id: String?
+    let created: Double?
+    let type: String
+    let location: Location?
+    let data: OpenCodeJSONValue
+
+    var sessionID: String? {
+        data.objectValue?["sessionID"]?.literalStringValue
+            ?? data.objectValue?["form"]?.objectValue?["sessionID"]?.literalStringValue
+    }
+
+    var routingLocation: Location? {
+        if type == "session.created" || type == "session.moved",
+           let value = data.objectValue?["location"],
+           let encoded = try? JSONEncoder().encode(value),
+           let location = try? JSONDecoder().decode(Location.self, from: encoded) {
+            return location
+        }
+        return location
+    }
+
+    var globalFormEvent: BackendSessionFormsEvent? {
+        guard sessionID == "global", let data = data.objectValue else { return nil }
+        switch type {
+        case "form.created":
+            guard let value = data["form"], let encoded = try? JSONEncoder().encode(value),
+                  let form = try? JSONDecoder().decode(OpenCodeV2Form.self, from: encoded) else { return nil }
+            return .created(form.backendForm)
+        case "form.replied":
+            guard let id = data["id"]?.literalStringValue, let raw = data["answer"]?.objectValue,
+                  let answer = try? raw.mapValues({ try BackendFormValue(jsonValue: $0) }) else { return nil }
+            return .answered(.init(sessionID: "global", formID: id), answer)
+        case "form.cancelled":
+            guard let id = data["id"]?.literalStringValue else { return nil }
+            return .cancelled(.init(sessionID: "global", formID: id))
+        default: return nil
+        }
+    }
+
+    // The publisher counts text and reasoning independently, not by content-array index.
+    static func partID(messageID: String, type: String, ordinal: Int) -> String {
+        "\(messageID):v2:\(type):\(ordinal)"
+    }
+
+    var isExecutionStarted: Bool { type == "session.execution.started" }
+
+    var inputID: String? {
+        switch type {
+        case "session.input.admitted", "session.input.promoted", "session.input.cancelled":
+            return data.objectValue?["inputID"]?.literalStringValue
+        case "session.inbox.enqueued", "session.inbox.delivered", "session.inbox.cancelled":
+            return data.objectValue?["inboxID"]?.literalStringValue
+        default: return nil
+        }
+    }
+
+    var admittedInput: OpenCodeV2AdmittedInput? {
+        let value: OpenCodeJSONValue?
+        switch type {
+        case "session.input.admitted":
+            value = data.objectValue?["input"]
+        case "session.inbox.enqueued":
+            guard let item = data.objectValue?["item"]?.objectValue,
+                  let kind = item["type"], let payload = item["payload"] else { return nil }
+            value = .object(["type": kind, "data": payload])
+        default: return nil
+        }
+        guard let value, let encoded = try? JSONEncoder().encode(value) else { return nil }
+        return try? JSONDecoder().decode(OpenCodeV2AdmittedInput.self, from: encoded)
+    }
+
+    var affectsTranscript: Bool {
+        type.hasPrefix("session.step.") || type.hasPrefix("session.text.")
+            || type.hasPrefix("session.reasoning.") || type.hasPrefix("session.tool.")
+            || type.hasPrefix("session.shell.") || type.hasPrefix("session.compaction.")
+            || ["session.message.content.updated", "session.revert.committed", "session.inbox.delivered",
+                "session.input.promoted", "session.input.cancelled", "session.inbox.cancelled",
+                "session.synthetic", "session.instructions.updated", "session.skill.activated",
+                "session.agent.selected", "session.model.selected", "session.moved"].contains(type)
+    }
+
+    var isExecutionTerminal: Bool {
+        type == "session.execution.succeeded"
+            || type == "session.execution.failed"
+            || type == "session.execution.interrupted"
+    }
+}
+
 actor OpenCodeManagedEventBatcher {
     private static let maxEventsPerFlush = 24
 
@@ -24,12 +118,14 @@ actor OpenCodeManagedEventBatcher {
     private var coalescedIndexes: [String: Int] = [:]
     private var flushTask: Task<Void, Never>?
     private var isFlushing = false
+    private var isStopped = false
 
     init(onEvent: @escaping @Sendable (OpenCodeManagedEvent) async -> Void) {
         self.onEvent = onEvent
     }
 
     func enqueue(_ event: OpenCodeManagedEvent) {
+        guard !isStopped else { return }
         let directory = event.directory
         if let key = coalescingKey(directory: directory, event: event),
            let index = coalescedIndexes[key] {
@@ -60,9 +156,18 @@ actor OpenCodeManagedEventBatcher {
             rebuildCoalescedIndexes()
 
             for item in events {
+                guard !isStopped else { return }
                 await onEvent(item.event)
             }
         }
+    }
+
+    func stop() {
+        isStopped = true
+        flushTask?.cancel()
+        flushTask = nil
+        queue.removeAll()
+        coalescedIndexes.removeAll()
     }
 
     private func scheduleFlush() {
@@ -70,8 +175,16 @@ actor OpenCodeManagedEventBatcher {
         guard flushTask == nil else { return }
         flushTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(16))
-            await self?.flush()
+            guard !Task.isCancelled else { return }
+            await self?.flushScheduledEvents()
         }
+    }
+
+    private func flushScheduledEvents() async {
+        guard !Task.isCancelled else { return }
+        // The timer is now delivering, not pending. flush() must not cancel its own callbacks.
+        flushTask = nil
+        await flush()
     }
 
     private func coalescingKey(directory: String, event: OpenCodeManagedEvent) -> String? {
@@ -96,21 +209,29 @@ actor OpenCodeManagedEventBatcher {
 }
 
 private actor OpenCodeStreamHeartbeat {
-    private var lastEventAt = Date.now
+    private var lastEventAt = ContinuousClock.now
 
     func markEvent() {
-        lastEventAt = .now
+        lastEventAt = ContinuousClock.now
     }
 
     func isTimedOut(timeout: TimeInterval) -> Bool {
-        Date.now.timeIntervalSince(lastEventAt) >= timeout
+        lastEventAt.duration(to: .now) >= .seconds(timeout)
     }
 }
 
 @MainActor
 final class OpenCodeEventManager {
+    typealias V2StreamConsumer = @Sendable (
+        OpenCodeAPIClient, URL,
+        @escaping @Sendable (String) async -> Void,
+        @escaping @Sendable () async -> Void,
+        @escaping @Sendable (OpenCodeServerEvent) async -> Void
+    ) async -> Void
     private static let heartbeatTimeoutSeconds: TimeInterval = 15
+    private static let v2HeartbeatTimeoutSeconds: TimeInterval = 45
     private var task: Task<Void, Never>?
+    private(set) var generation: UInt = 0
     private var managedEventObserver: (@Sendable (OpenCodeManagedEvent) async -> Void)?
 
     func setManagedEventObserver(
@@ -152,6 +273,11 @@ final class OpenCodeEventManager {
         )
     }
 
+    nonisolated static func decodeV2Event(from rawData: String) -> OpenCodeV2ManagedEvent? {
+        guard let data = rawData.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(OpenCodeV2ManagedEvent.self, from: data)
+    }
+
     func start(
         client: OpenCodeAPIClient,
         onStatus: @escaping @Sendable (String) async -> Void,
@@ -161,15 +287,49 @@ final class OpenCodeEventManager {
     ) {
         stop()
         let managedEventObserver = self.managedEventObserver
-        task = Task.detached {
+        let generation = self.generation
+        task = Task.detached { [weak self] in
             await Self.runStreamLoop(
                 client: client,
                 onStatus: onStatus,
                 onRawLine: onRawLine,
                 onDroppedEvent: onDroppedEvent,
-                onEvent: { managed in
+                onEvent: { [weak self] managed in
+                    guard await self?.generation == generation else { return }
                     await onEvent(managed)
+                    guard await self?.generation == generation else { return }
                     await managedEventObserver?(managed)
+                }
+            )
+        }
+    }
+
+    func startV2(
+        client: OpenCodeAPIClient,
+        onStatus: @escaping @Sendable (String) async -> Void,
+        onDroppedEvent: (@Sendable (String) async -> Void)? = nil,
+        consume: @escaping V2StreamConsumer = { client, url, status, activity, event in
+            await OpenCodeEventStream.consume(client: client, url: url, onStatus: status, onActivity: activity, onEvent: event)
+        },
+        onEvent: @escaping @Sendable (OpenCodeV2ManagedEvent) async -> Void
+    ) {
+        stop()
+        let generation = self.generation
+        task = Task.detached { [weak self] in
+            await Self.runV2StreamLoop(
+                client: client,
+                onStatus: { [weak self] status in
+                    guard !Task.isCancelled, await self?.generation == generation else { return }
+                    await onStatus(status)
+                },
+                onDroppedEvent: { [weak self] message in
+                    guard !Task.isCancelled, await self?.generation == generation else { return }
+                    await onDroppedEvent?(message)
+                },
+                consume: consume,
+                onEvent: { [weak self] event in
+                    guard !Task.isCancelled, await self?.generation == generation else { return }
+                    await onEvent(event)
                 }
             )
         }
@@ -257,8 +417,46 @@ final class OpenCodeEventManager {
     }
 
     func stop() {
+        generation &+= 1
         task?.cancel()
         task = nil
+    }
+
+    func stopAndWait() async {
+        let previous = task
+        stop()
+        await previous?.value
+    }
+
+    deinit {
+        task?.cancel()
+    }
+
+    nonisolated static func withHeartbeat(
+        timeout: TimeInterval,
+        onTimeout: @escaping @Sendable () async -> Void,
+        consume: @escaping @Sendable (_ onActivity: @escaping @Sendable () async -> Void) async -> Void
+    ) async {
+        guard !Task.isCancelled else { return }
+        let heartbeat = OpenCodeStreamHeartbeat()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                guard !Task.isCancelled else { return }
+                await consume { await heartbeat.markEvent() }
+            }
+            group.addTask {
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
+                    guard !Task.isCancelled else { return }
+                    if await heartbeat.isTimedOut(timeout: timeout) {
+                        await onTimeout()
+                        return
+                    }
+                }
+            }
+            _ = await group.next()
+            group.cancelAll()
+        }
     }
 
     nonisolated private static func runStreamLoop(
@@ -278,15 +476,16 @@ final class OpenCodeEventManager {
             }
 
             let startedAt = Date.now
-            let heartbeat = OpenCodeStreamHeartbeat()
-            let streamTask = Task {
+            await withHeartbeat(timeout: Self.heartbeatTimeoutSeconds, onTimeout: {
+                await onStatus("stream heartbeat timeout")
+            }) { onActivity in
                 await OpenCodeEventStream.consume(
                     client: client,
                     url: url,
                     onStatus: onStatus,
+                    onActivity: onActivity,
                     onRawLine: onRawLine,
                     onEvent: { event in
-                        await heartbeat.markEvent()
                         switch Self.decodeManagedEvent(from: event.data) {
                         case let .event(managed):
                             await batcher.enqueue(managed)
@@ -296,30 +495,12 @@ final class OpenCodeEventManager {
                     }
                 )
             }
-            let heartbeatTask = Task { [streamTask] in
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(Int(Self.heartbeatTimeoutSeconds)))
-                    guard !Task.isCancelled else { return }
-                    guard await heartbeat.isTimedOut(timeout: Self.heartbeatTimeoutSeconds) else { continue }
-                    await onStatus("stream heartbeat timeout")
-                    streamTask.cancel()
-                    return
-                }
-            }
-
-            await withTaskCancellationHandler {
-                await streamTask.value
-            } onCancel: {
-                streamTask.cancel()
-                heartbeatTask.cancel()
-            }
-            heartbeatTask.cancel()
-
-            await batcher.flush()
 
             if Task.isCancelled {
+                await batcher.stop()
                 return
             }
+            await batcher.flush()
 
             if Date.now.timeIntervalSince(startedAt) > 10 {
                 reconnectAttempt = 0
@@ -328,6 +509,47 @@ final class OpenCodeEventManager {
             let delaySeconds = min(8.0, 0.25 * pow(2.0, Double(reconnectAttempt))) + Double.random(in: 0 ... 0.2)
             reconnectAttempt = min(reconnectAttempt + 1, 6)
             await onStatus("stream reconnecting")
+            try? await Task.sleep(for: .milliseconds(Int(delaySeconds * 1_000)))
+        }
+        await batcher.stop()
+    }
+
+    nonisolated private static func runV2StreamLoop(
+        client: OpenCodeAPIClient,
+        onStatus: @escaping @Sendable (String) async -> Void,
+        onDroppedEvent: (@Sendable (String) async -> Void)?,
+        consume: @escaping V2StreamConsumer,
+        onEvent: @escaping @Sendable (OpenCodeV2ManagedEvent) async -> Void
+    ) async {
+        var reconnectAttempt = 0
+
+        while !Task.isCancelled {
+            guard let url = client.v2EventURL() else {
+                await onStatus("stream invalid v2 url")
+                return
+            }
+
+            let startedAt = Date.now
+            await withHeartbeat(timeout: Self.v2HeartbeatTimeoutSeconds, onTimeout: {
+                await onStatus("stream v2 heartbeat timeout")
+            }) { onActivity in
+                await consume(
+                    client, url, onStatus, onActivity,
+                    { event in
+                        guard let managed = Self.decodeV2Event(from: event.data) else {
+                            await onDroppedEvent?("drop v2 event: \(String(event.data.prefix(160)))")
+                            return
+                        }
+                        await onEvent(managed)
+                    }
+                )
+            }
+            if Task.isCancelled { return }
+            if Date.now.timeIntervalSince(startedAt) > 10 { reconnectAttempt = 0 }
+
+            let delaySeconds = min(8.0, 0.25 * pow(2.0, Double(reconnectAttempt))) + Double.random(in: 0 ... 0.2)
+            reconnectAttempt = min(reconnectAttempt + 1, 6)
+            await onStatus("stream v2 reconnecting")
             try? await Task.sleep(for: .milliseconds(Int(delaySeconds * 1_000)))
         }
     }

@@ -194,6 +194,7 @@ struct ConnectionView: View {
             helpSection
         }
         .connectionListStyle(hasRecentServers: hasRecentServers)
+        .accessibilityIdentifier(hasRecentServers ? "connection.recent-servers" : "connection.form")
     }
 
     private var recentServersSection: some View {
@@ -521,6 +522,7 @@ private struct ServerConnectionEditorView: View {
         List {
             ServerConnectionSections(facade: facade)
         }
+        .accessibilityIdentifier("connection.form")
         .opencodeGroupedListStyle()
         .scrollContentBackground(.hidden)
         .background(.clear)

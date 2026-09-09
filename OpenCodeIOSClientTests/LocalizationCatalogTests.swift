@@ -59,6 +59,49 @@ final class LocalizationCatalogTests: XCTestCase {
         }
     }
 
+    func testTranslationValidationHandlesVariations() {
+        let translated: [String: Any] = ["stringUnit": ["state": "translated", "value": "%lld form"]]
+        let incomplete: [String: Any] = ["stringUnit": ["state": "needs_review", "value": "%lld forms"]]
+        XCTAssertTrue(isTranslated(translated))
+        XCTAssertTrue(isTranslated(["stringSet": ["state": "translated", "values": ["A", "B"]]]))
+        XCTAssertTrue(isTranslated(["variations": ["plural": ["one": translated, "other": translated]]]))
+        XCTAssertFalse(isTranslated(["variations": ["plural": ["one": translated, "other": incomplete]]]))
+        XCTAssertFalse(isTranslated(["variations": ["plural": ["one": translated, "other": [:]]]]))
+        XCTAssertFalse(isTranslated(["variations": ["plural": [:]]]))
+        XCTAssertFalse(isTranslated(["variations": [:]]))
+        XCTAssertFalse(isTranslated([:]))
+
+        let nested: [String: Any] = ["variations": ["device": ["other": [
+            "variations": ["plural": [
+                "one": translated,
+                "other": ["stringUnit": ["state": "translated", "value": "%@ forms"]],
+            ]],
+        ]]]]
+        XCTAssertTrue(isTranslated(nested))
+        let values = localizedValues(nested, fallback: "fallback")
+        XCTAssertEqual(values, ["%lld form", "%@ forms"])
+        XCTAssertEqual(values.map { placeholders(in: $0) }, [["%lld"], ["%@"]])
+    }
+
+    func testPendingFormsPreservesIntegerPlurals() throws {
+        let strings = try catalogStrings(at: "OpenCodeIOSClient/Localizable.xcstrings")
+        let entry = try XCTUnwrap(strings["%lld pending forms"] as? [String: Any])
+        let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any])
+        for language in ["en"] + requiredLanguages {
+            let localization = try XCTUnwrap(localizations[language] as? [String: Any])
+            XCTAssertTrue(isTranslated(localization), "Incomplete pending forms translation for \(language)")
+            let variations = try XCTUnwrap(localization["variations"] as? [String: Any])
+            let plurals = try XCTUnwrap(variations["plural"] as? [String: Any])
+            XCTAssertNotNil(plurals["one"], "Missing singular for \(language)")
+            XCTAssertNotNil(plurals["other"], "Missing plural for \(language)")
+            let values = localizedValues(localization, fallback: "")
+            XCTAssertGreaterThanOrEqual(Set(values).count, 2, "Expected distinct singular and plural for \(language)")
+            for value in values {
+                XCTAssertEqual(placeholders(in: value), ["%lld"], "Expected integer count for \(language)")
+            }
+        }
+    }
+
     func testMainAppEnablesMultipleScenes() throws {
         let repositoryURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -90,6 +133,11 @@ final class LocalizationCatalogTests: XCTestCase {
         if let stringSet = localization["stringSet"] as? [String: Any] {
             return stringSet["state"] as? String == "translated"
         }
+        if let variations = localization["variations"] as? [String: [String: [String: Any]]], !variations.isEmpty {
+            return variations.values.allSatisfy { branches in
+                !branches.isEmpty && branches.values.allSatisfy { isTranslated($0) }
+            }
+        }
         return false
     }
 
@@ -101,6 +149,13 @@ final class LocalizationCatalogTests: XCTestCase {
         if let stringSet = localization?["stringSet"] as? [String: Any],
            let values = stringSet["values"] as? [String] {
             return values
+        }
+        if let variations = localization?["variations"] as? [String: [String: [String: Any]]] {
+            // Match source and translation branches deterministically, not by dictionary iteration order.
+            return variations.keys.sorted().flatMap { dimension in
+                let branches = variations[dimension] ?? [:]
+                return branches.keys.sorted().flatMap { localizedValues(branches[$0], fallback: fallback) }
+            }
         }
         return [fallback]
     }

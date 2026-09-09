@@ -30,6 +30,13 @@ struct CreateSessionSheet: View {
             }
         }
         .presentationDetents(snapshot.hasProUnlock && !snapshot.showsWorkspacePicker ? [.medium] : [.large])
+        .task(id: facade.workspaceCreationContextID) {
+            if snapshot.showsWorkspacePicker { await facade.loadWorkspaceSessionsIfNeeded() }
+        }
+        .onChange(of: facade.workspaceCreationContextID) { _, _ in
+            startingSnapshot = nil
+            facade.dismissCreateSession()
+        }
     }
 
     private var createSessionForm: some View {
@@ -78,6 +85,19 @@ struct CreateSessionSheet: View {
                             .autocorrectionDisabled()
                             .accessibilityIdentifier("sessions.create.worktree.name")
 
+                        if facade.requiresWorktreeDestinationParent {
+                            TextField("Destination Parent Directory", text: Binding(
+                                get: { facade.worktreeDestinationParent },
+                                set: { facade.worktreeDestinationParent = $0 }
+                            ))
+                            .opencodeDisableTextAutocapitalization()
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("sessions.create.worktree.destinationParent")
+                            Text("Choose an absolute path on the server. New worktrees are created inside this directory.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
                         Text("OpenCode will create a separate git worktree, then start this session inside it.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -104,10 +124,21 @@ struct CreateSessionSheet: View {
                 Button(createButtonTitle) {
                     startCreatingSession()
                 }
-                .disabled(snapshot.isLoading)
+                .disabled(snapshot.isLoading || !hasValidWorkspaceDestination)
                 .accessibilityIdentifier("sessions.create.confirm")
             }
+            if let error = facade.workspaceErrorMessage {
+                Section("Error") { Text(error).foregroundStyle(.red) }
+            }
         }
+        .disabled(facade.snapshot.isReadOnly || snapshot.isLoading)
+    }
+
+    private var hasValidWorkspaceDestination: Bool {
+        let snapshot = facade.createSessionSnapshot
+        guard snapshot.showsWorkspacePicker, snapshot.workspaceSelection == .createNew,
+              facade.requiresWorktreeDestinationParent else { return true }
+        return facade.worktreeDestinationParent.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
     }
 
     private var selectedWorkspaceDescription: String {
@@ -132,6 +163,8 @@ struct CreateSessionSheet: View {
     }
 
     private func startCreatingSession() {
+        guard !facade.snapshot.isReadOnly, !facade.createSessionSnapshot.isLoading, hasValidWorkspaceDestination else { return }
+        let context = facade.workspaceCreationContextID
         startingSnapshot = NewSessionStartingSnapshot(
             title: submittedTitle,
             subtitle: facade.createSessionSnapshot.projectScopeTitle,
@@ -141,6 +174,7 @@ struct CreateSessionSheet: View {
         )
 
         Task { @MainActor in
+            guard facade.workspaceCreationContextID == context else { return }
             await facade.createSession()
             if facade.createSessionSnapshot.isPresented {
                 startingSnapshot = nil

@@ -43,6 +43,10 @@ struct ProjectListView: View {
         projectListContent
     }
 
+    private var emptyProjectsMessage: LocalizedStringResource {
+        facade.isReadOnly ? "No projects found." : "No projects are visible. Use the project settings button to show projects."
+    }
+
     @ViewBuilder
     private var projectListContent: some View {
         let snapshot = facade.listSnapshot
@@ -59,6 +63,7 @@ struct ProjectListView: View {
                     onSelect: openProjectSession
                 )
             } else {
+                if facade.allowsActivity {
                 Section {
                     Button(action: onActivityChosen) {
                         HStack(spacing: 12) {
@@ -89,10 +94,11 @@ struct ProjectListView: View {
                     .accessibilityIdentifier("projects.activity")
                     .listRowInsets(projectListRowInsets)
                 }
+                }
 
                 Section {
                     if displayedProjects.isEmpty, !isEditingProjects {
-                        Text("No projects are visible. Use the project settings button to show projects.")
+                        Text(emptyProjectsMessage)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .listRowInsets(projectListRowInsets)
@@ -140,30 +146,32 @@ struct ProjectListView: View {
                             }
                         }
                         .contextMenu {
-                            if isEditingProjects {
-                                EmptyView()
-                            } else if facade.canEditPreferences(for: project) {
-                                Button {
-                                    projectForColorPicker = project
-                                } label: {
-                                    Label("Set Color", systemImage: "paintpalette")
-                                }
-
-                                Button {
-                                    projectForImagePicker = project
-                                } label: {
-                                    Label("Set Image", systemImage: "photo.on.rectangle")
-                                }
-
-                                if project.icon?.override?.isEmpty == false {
-                                    Button(role: .destructive) {
-                                        Task { await facade.setImageOverride(nil, for: project) }
+                            if !facade.isReadOnly {
+                                if isEditingProjects {
+                                    EmptyView()
+                                } else if facade.canEditPreferences(for: project) {
+                                    Button {
+                                        projectForColorPicker = project
                                     } label: {
-                                        Label("Clear Image", systemImage: "trash")
+                                        Label("Set Color", systemImage: "paintpalette")
                                     }
+
+                                    Button {
+                                        projectForImagePicker = project
+                                    } label: {
+                                        Label("Set Image", systemImage: "photo.on.rectangle")
+                                    }
+
+                                    if project.icon?.override?.isEmpty == false {
+                                        Button(role: .destructive) {
+                                            Task { await facade.setImageOverride(nil, for: project) }
+                                        } label: {
+                                            Label("Clear Image", systemImage: "trash")
+                                        }
+                                    }
+                                } else {
+                                    Label("Preferences unavailable", systemImage: "lock")
                                 }
-                            } else {
-                                Label("Preferences unavailable", systemImage: "lock")
                             }
                         }
                         .disabled(facade.isPreparingSelection(project))
@@ -172,8 +180,9 @@ struct ProjectListView: View {
                     .onMove(perform: facade.moveProjects)
                 } header: {
                     ProjectListSectionHeader(
+                        allowsEditing: !facade.isReadOnly,
                         isEditingProjects: isEditingProjects,
-                        allowsProjectCreation: !facade.isReadOnly,
+                        allowsProjectCreation: facade.allowsProjectCreation,
                         onCreateProject: facade.presentCreateProject,
                         onToggleEditing: toggleProjectEditing
                     )
@@ -235,24 +244,27 @@ struct ProjectListView: View {
             await facade.refreshList()
         }
         .safeAreaInset(edge: .bottom) {
-            OpenCodeConversationBottomBar(
-                query: Binding(
-                    get: { facade.projectSessionSearchQuery },
-                    set: { facade.projectSessionSearchQuery = $0 }
-                ),
-                isSearching: snapshot.isSearching,
-                allowsNewChat: !facade.isReadOnly,
-                accessibilityPrefix: "projects",
-                onNewChat: {
-                    facade.presentNewChat()
-                },
-                onNewTalk: {
-                    facade.presentNewTalk()
-                }
-            )
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, projectListBottomBarBottomPadding)
+            if facade.allowsSessionSearch {
+                OpenCodeConversationBottomBar(
+                    query: Binding(
+                        get: { facade.projectSessionSearchQuery },
+                        set: { facade.projectSessionSearchQuery = $0 }
+                    ),
+                    isSearching: snapshot.isSearching,
+                    allowsNewChat: facade.allowsNewChat,
+                    allowsNewTalk: facade.allowsNewTalk,
+                    accessibilityPrefix: "projects",
+                    onNewChat: {
+                        facade.presentNewChat()
+                    },
+                    onNewTalk: {
+                        facade.presentNewTalk()
+                    }
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, projectListBottomBarBottomPadding)
+            }
         }
         .task(id: snapshot.recentLoadKey) {
             guard !isScreenshotScene else { return }
@@ -268,7 +280,7 @@ struct ProjectListView: View {
         }
         .navigationTitle("Projects")
         .toolbar {
-            if let bridge, !facade.isReadOnly {
+            if let bridge, facade.allowsBridge {
                 ToolbarItem(placement: .opencodeTrailing) {
                     OpenClientBridgeToolbarButton(bridge: bridge) {
                         isShowingBridgeStatus = true
@@ -486,6 +498,7 @@ struct OpenCodeConversationBottomBar: View {
     @Binding var query: String
     let isSearching: Bool
     let allowsNewChat: Bool
+    var allowsNewTalk: Bool = true
     let accessibilityPrefix: String
     let onNewChat: () -> Void
     let onNewTalk: () -> Void
@@ -549,10 +562,12 @@ struct OpenCodeConversationBottomBar: View {
                 .zIndex(1)
             } else if allowsNewChat {
                 HStack(spacing: ProjectListLayout.conversationButtonSpacing) {
-                    OpenCodeNewTalkFloatingButton(
-                        accessibilityIdentifier: "\(accessibilityPrefix).newTalk",
-                        action: onNewTalk
-                    )
+                    if allowsNewTalk {
+                        OpenCodeNewTalkFloatingButton(
+                            accessibilityIdentifier: "\(accessibilityPrefix).newTalk",
+                            action: onNewTalk
+                        )
+                    }
                     OpenCodeNewChatFloatingButton(
                         accessibilityIdentifier: "\(accessibilityPrefix).newChat",
                         action: onNewChat
@@ -706,6 +721,7 @@ struct ProjectNewChatSheet: View, Equatable {
     @State private var newWorkspaceName = ""
     @State private var hasInitializedSelection = false
     @State private var hasAppliedInitialWorkspace = false
+    @State private var hasAppliedInitialContent = false
     @State private var selectedAgentName: String?
     @State private var selectedModelReference: OpenCodeModelReference?
     @State private var selectedReasoningVariant: String?
@@ -735,18 +751,56 @@ struct ProjectNewChatSheet: View, Equatable {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-                OpenCodePlatformColor.groupedBackground
-                    .ignoresSafeArea()
-                    .ignoresSafeArea(.keyboard, edges: .bottom)
+        selectionObservedContent
+            .onChange(of: projectSelectionSourceSignature) { _, _ in
+                initializeSelectionIfNeeded()
+            }
+            .onChange(of: selectedModelReference) { _, _ in
+                syncReasoningSelection()
+            }
+            .onChange(of: composerSettingsSourceSignature) { _, _ in
+                initializeComposerSettingsIfNeeded()
+            }
+            .onChange(of: isChatTitleFocused) { _, isFocused in
+                if !isFocused, isEditingChatTitle {
+                    finishEditingChatTitle()
+                }
+            }
+    }
 
-                newChatBody
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, startingSnapshot == nil ? 96 : 0)
+    private var navigationContent: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                GlobalFormsBanner(facade: viewModel.globalForms, location: newChatFormLocation)
+                GeometryReader { geometry in
+                    ScrollView {
+                        newChatBody
+                            .padding(.horizontal, 24)
+                            .frame(minHeight: geometry.size.height)
+                    }
+                }
 
                 if startingSnapshot == nil {
                     VStack(spacing: 6) {
+                        if viewModel.ownsSubmission(request) {
+                            if let error = viewModel.shareError(for: request) {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 16)
+                            }
+                            if !viewModel.isReady(for: request) {
+                                if viewModel.isPreparingShare(request) {
+                                    ProgressView("Connecting...")
+                                        .font(.caption)
+                                } else {
+                                    Button("Retry") {
+                                        Task { await viewModel.retryShare(request) }
+                                    }
+                                }
+                            }
+                        }
                         if !attachments.isEmpty {
                             ComposerAccessoryArea(
                                 todos: [],
@@ -768,13 +822,14 @@ struct ProjectNewChatSheet: View, Equatable {
                             isAccessoryMenuOpen: $isComposerMenuOpen,
                             attachmentCount: attachments.count,
                             isSending: isStartingChat,
-                            canSend: selectedProject != nil,
+                            canSend: canStartChat,
                             autoFocus: autoFocusInput && !isEditingChatTitle && !isChatTitleFocused,
                             usesKeyboardBottomPadding: isEditingChatTitle || isChatTitleFocused,
                             onSend: startChat,
                             onAddAttachments: addAttachments
                         )
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
 
             }
@@ -801,33 +856,59 @@ struct ProjectNewChatSheet: View, Equatable {
                 }
             }
         }
+    }
+
+    private var selectionObservedContent: some View {
+        navigationContent
         .presentationDetents([.large])
+        .sheet(item: Binding(
+            get: { viewModel.ownsSubmission(request) && viewModel.isPresented(request) ? viewModel.paywallReason : nil },
+            set: { if viewModel.isPresented(request) { viewModel.commerce.paywallReason = $0 } }
+        )) { reason in
+            OpenClientPaywallView(commerce: viewModel.commerce, reason: reason)
+        }
         .onAppear {
-            if let initialContent = request.initialContent,
+            if !hasAppliedInitialContent, let initialContent = request.initialContent,
                !initialContent.text.isEmpty,
                draftStore.text.isEmpty {
                 draftStore.text = initialContent.text
             }
+            hasAppliedInitialContent = true
             initializeSelectionIfNeeded()
             initializeComposerSettingsIfNeeded()
         }
         .onChange(of: selectedProjectID) { _, _ in
             syncWorkspaceSelection()
         }
-        .onChange(of: viewModel.projects.map(\.id).joined(separator: "|")) { _, _ in
-            initializeSelectionIfNeeded()
-        }
-        .onChange(of: selectedModelReference) { _, _ in
-            syncReasoningSelection()
-        }
-        .onChange(of: composerSettingsSourceSignature) { _, _ in
-            initializeComposerSettingsIfNeeded()
-        }
-        .onChange(of: isChatTitleFocused) { _, isFocused in
-            if !isFocused, isEditingChatTitle {
-                finishEditingChatTitle()
+        .onChange(of: viewModel.connectionContextID) { _, _ in
+            if !viewModel.ownsSubmission(request) {
+                dismissSheet()
+            } else {
+                startingSnapshot = nil
+                hasInitializedSelection = false
+                hasInitializedComposerSettings = false
+                selectedProjectID = ""
+                initializeSelectionIfNeeded()
+                initializeComposerSettingsIfNeeded()
             }
         }
+        .onChange(of: showsWorkspacePicker) { _, shows in
+            if !shows && workspaceSelection == .createNew { workspaceSelection = .main }
+        }
+        .onChange(of: workspaceDirectories) { _, _ in syncWorkspaceSelection() }
+        .task(id: workspaceInventoryTaskID) {
+            if let selectedProject, showsWorkspacePicker {
+                await viewModel.prepareWorkspaceInventory(for: selectedProject)
+            }
+        }
+    }
+
+    private var workspaceInventoryTaskID: String {
+        [viewModel.connectionContextID, selectedProjectID, String(showsWorkspacePicker)].joined(separator: "|")
+    }
+
+    private var projectSelectionSourceSignature: String {
+        viewModel.projects.map(\.id).joined(separator: "|")
     }
 
     @ViewBuilder
@@ -1012,7 +1093,7 @@ struct ProjectNewChatSheet: View, Equatable {
 
     @ViewBuilder
     private var newWorktreeFields: some View {
-        if workspaceSelection == .createNew {
+        if showsWorkspacePicker && workspaceSelection == .createNew {
             VStack(spacing: 8) {
                 TextField("Worktree name (optional)", text: $newWorkspaceName)
                     .textInputAutocapitalization(.never)
@@ -1025,11 +1106,32 @@ struct ProjectNewChatSheet: View, Equatable {
                     .frame(maxWidth: 280)
                     .accessibilityIdentifier("projects.newChat.worktree.name")
 
+                if viewModel.requiresWorktreeDestinationParent, let selectedProject {
+                    TextField("Destination Parent Directory", text: Binding(
+                        get: { viewModel.worktreeDestinationParent(for: selectedProject) },
+                        set: { viewModel.setWorktreeDestinationParent($0, for: selectedProject) }
+                    ))
+                    .opencodeDisableTextAutocapitalization()
+                    .autocorrectionDisabled()
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .frame(maxWidth: 320)
+                    .accessibilityIdentifier("projects.newChat.worktree.destinationParent")
+                    Text("Choose an absolute path on the server. New worktrees are created inside this directory.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 320)
+                }
+
                 Text("OpenCode will create a separate git worktree before sending.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
+            .disabled(viewModel.isReadOnly || isStartingChat)
             .padding(.top, 2)
         }
     }
@@ -1321,6 +1423,21 @@ struct ProjectNewChatSheet: View, Equatable {
         return viewModel.isWorkspacesEnabled(for: selectedProject)
     }
 
+    private var canStartChat: Bool {
+        guard let selectedProject, viewModel.isReady(for: request) else { return false }
+        guard viewModel.globalForms.pending(for: newChatFormLocation).isEmpty else { return false }
+        guard workspaceSelection == .createNew else { return true }
+        guard showsWorkspacePicker else { return false }
+        return !viewModel.requiresWorktreeDestinationParent
+            || viewModel.worktreeDestinationParent(for: selectedProject).trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+    }
+
+    private var newChatFormLocation: BackendFormLocation? {
+        let directory: String?
+        if case let .directory(value) = workspaceSelection { directory = value } else { directory = nil }
+        return viewModel.globalFormLocation(project: selectedProject, directory: directory)
+    }
+
     private func initializeSelectionIfNeeded() {
         guard !viewModel.projects.isEmpty else { return }
         if !hasInitializedSelection || !viewModel.projects.contains(where: { $0.id == selectedProjectID }) {
@@ -1396,8 +1513,8 @@ struct ProjectNewChatSheet: View, Equatable {
     }
 
     private func startChat() {
-        guard let selectedProject else { return }
-        guard !isStartingChat else { return }
+        guard canStartChat, let selectedProject else { return }
+        guard !isStartingChat, startingSnapshot == nil else { return }
         guard !draftStore.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         let workspaceDirectory = selectedProject.id == "global" ? nil : workspaceDirectoryForSelection
         let prompt = draftStore.text
@@ -1405,6 +1522,9 @@ struct ProjectNewChatSheet: View, Equatable {
         let currentAttachments = attachments
         let messageID = OpenCodeIdentifier.message()
         let partID = OpenCodeIdentifier.part()
+        let context = viewModel.connectionContextID
+        let destinationParent = workspaceSelection == .createNew && viewModel.requiresWorktreeDestinationParent
+            ? viewModel.worktreeDestinationParent(for: selectedProject) : nil
 
         withAnimation(.snappy(duration: 0.28, extraBounce: 0.02)) {
             startingSnapshot = NewSessionStartingSnapshot(
@@ -1419,6 +1539,7 @@ struct ProjectNewChatSheet: View, Equatable {
         }
 
         Task {
+            guard viewModel.connectionContextID == context else { return }
             isStartingChat = true
             defer { isStartingChat = false }
             Task { @MainActor in
@@ -1443,15 +1564,23 @@ struct ProjectNewChatSheet: View, Equatable {
                 projectID: selectedProject.id,
                 workspaceDirectory: workspaceDirectory,
                 workspaceSelection: selectedProject.id == "global" ? nil : workspaceSelection,
-                newWorkspaceName: newWorkspaceName
+                newWorkspaceName: newWorkspaceName,
+                newWorkspaceDestinationParent: destinationParent,
+                request: request
             )
+            guard viewModel.connectionContextID == context, viewModel.isPresented(request) else { return }
+            if viewModel.ownsSubmission(request),
+               draftStore.text != prompt || draftStore.agentMentions != agentMentions || attachments != currentAttachments {
+                startingSnapshot = nil
+                return
+            }
             if didStart {
                 withAnimation(.easeInOut(duration: 0.16)) {
                     startingSnapshot?.phase = .waitingForOpenCode
                 }
                 dismissSheet()
                 onChatStarted()
-            } else if viewModel.paywallReason != nil {
+            } else if viewModel.shouldDismissForPaywall(request) {
                 dismissSheet()
             } else {
                 withAnimation(.snappy(duration: 0.22, extraBounce: 0.02)) {
@@ -1490,7 +1619,7 @@ struct ProjectNewChatSheet: View, Equatable {
     }
 
     private func dismissSheet() {
-        viewModel.dismissNewChat()
+        viewModel.dismissNewChat(requestID: request.id)
         dismiss()
     }
 
@@ -1594,6 +1723,7 @@ private struct NewChatInputBar: View {
 }
 
 private struct ProjectListSectionHeader: View {
+    let allowsEditing: Bool
     let isEditingProjects: Bool
     let allowsProjectCreation: Bool
     let onCreateProject: () -> Void
@@ -1629,6 +1759,7 @@ private struct ProjectListSectionHeader: View {
             .buttonBorderShape(.circle)
             .accessibilityLabel(Text(projectEditingAccessibilityLabel))
             .accessibilityIdentifier("projects.manage")
+            .disabled(!allowsEditing)
         }
         .padding(.leading, -16)
         .padding(.trailing, -29)

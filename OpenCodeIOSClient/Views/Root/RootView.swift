@@ -68,8 +68,18 @@ struct RootView<ChatDestination: View>: View {
                     .transition(.opacity)
             }
 
-            appShell
-                .opacity(isShowingConnectionExperience ? 0 : 1)
+            VStack(spacing: 0) {
+                if shell.isConnected, !isShowingConnectionExperience {
+                    GlobalFormsBanner(facade: shell.globalForms, location: shell.globalFormLocation)
+                }
+                if scenePhase == .active, let connectionID = shell.v2NoticeConnectionID {
+                    V2ConnectionNoticeBanner {
+                        shell.connection.dismissV2Notice(connectionID: connectionID)
+                    }
+                }
+                appShell
+            }
+            .opacity(isShowingConnectionExperience ? 0 : 1)
 
             if let message = shell.openURLNavigationMessage {
                 RootDeepLinkProgressOverlay(message: message)
@@ -89,6 +99,8 @@ struct RootView<ChatDestination: View>: View {
                     commerce: shell.commerce,
                     whatsNew: whatsNew
                 )
+            case .createSession:
+                CreateSessionSheet(facade: shell.sessions)
             case let .newProjectChat(request):
                 ProjectNewChatSheet(
                     viewModel: shell.newProjectChat,
@@ -110,8 +122,8 @@ struct RootView<ChatDestination: View>: View {
             )
         }
         .sheet(item: Binding(
-            get: { shell.commerce.paywallReason },
-            set: { shell.commerce.paywallReason = $0 }
+            get: { shell.newProjectChat.ownsPaywallPresentation ? nil : shell.commerce.paywallReason },
+            set: { if !shell.newProjectChat.ownsPaywallPresentation { shell.commerce.paywallReason = $0 } }
         )) { reason in
             OpenClientPaywallView(commerce: shell.commerce, reason: reason)
         }
@@ -264,7 +276,7 @@ struct RootView<ChatDestination: View>: View {
         }
         .onChange(of: shell.selectedSessionID) { _, sessionID in
             if sessionID != nil {
-                guard shell.isSelectedSessionPrepared else { return }
+                guard shell.canPresentSelectedSessionDetail else { return }
                 withAnimation(opencodeSelectionAnimation) {
                     showDetailColumn()
                 }
@@ -362,6 +374,42 @@ struct RootView<ChatDestination: View>: View {
     private func showDetailColumn() {
         columnVisibility = horizontalSizeClass == .compact ? .detailOnly : .doubleColumn
         preferredCompactColumn = .detail
+    }
+}
+
+private struct V2ConnectionNoticeBanner: View {
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("OpenCode v2 detected")
+                    .font(.subheadline.weight(.semibold))
+                Text("OpenClient is using experimental v2 support. If something doesn’t work as expected, please report a bug.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("Report a Bug", destination: AppSupportURLs.issues)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("connection.v2-notice.report-bug")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+            .accessibilityIdentifier("connection.v2-notice.dismiss")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("connection.v2-notice")
     }
 }
 

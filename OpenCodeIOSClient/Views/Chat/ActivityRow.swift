@@ -71,7 +71,7 @@ struct OpenCodeToolActivityAppearance {
             return OpenCodeToolActivityAppearance(icon: "globe", tint: .teal)
         case "codesearch", "code_search":
             return OpenCodeToolActivityAppearance(icon: "chevron.left.forwardslash.chevron.right", tint: .purple)
-        case "task":
+        case "task", "subagent":
             return OpenCodeToolActivityAppearance(icon: "square.stack.3d.up.fill", tint: .purple)
         case "edit", "write":
             return OpenCodeToolActivityAppearance(icon: "square.and.pencil", tint: .orange)

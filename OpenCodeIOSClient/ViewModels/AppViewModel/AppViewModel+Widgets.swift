@@ -1,7 +1,11 @@
 import Foundation
 
 extension AppViewModel {
-    func widgetSnapshotInput(includeModelOptions: Bool = false) -> WidgetSnapshotInput {
+    func widgetSnapshotInput(
+        includeModelOptions: Bool = false,
+        commandsAreAuthoritative: Bool = false,
+        modelsAreAuthoritative: Bool = false
+    ) -> WidgetSnapshotInput {
         let sessions = allSessions.filter(\.isRootSession)
         var providers: [OpenCodeProvider] = []
         var visibleModelsByProviderID: [String: [OpenCodeModel]] = [:]
@@ -42,7 +46,14 @@ extension AppViewModel {
             questionsBySessionID: questionsBySessionID,
             commands: directoryCommands,
             providers: providers,
-            visibleModelsByProviderID: visibleModelsByProviderID
+            visibleModelsByProviderID: visibleModelsByProviderID,
+            profile: isConnected ? connectionStore.apiProfile.flatMap { OpenCodeProfileIdentity(rawValue: $0.rawValue) } : nil,
+            projectsAreAuthoritative: isConnected && !isLoading,
+            commandsAreAuthoritative: commandsAreAuthoritative,
+            modelsAreAuthoritative: modelsAreAuthoritative,
+            supportsNewSession: isConnected && backendConnection?.isClosed == false && backendConnection?.sessionSelection != nil,
+            supportsCommands: isConnected && backendConnection?.isClosed == false && backendConnection?.sessionSelection != nil && backendConnection?.commands != nil,
+            defaultDirectory: projectStore.defaultServerDirectory
         )
     }
 
@@ -55,7 +66,8 @@ extension AppViewModel {
     }
 
     func removeWidgetSessionSnapshot(for sessionID: String) {
-        guard config.hasCredentials else { return }
-        widgetSnapshotPublisher.removeSession(serverID: config.recentServerID, sessionID: sessionID)
+        guard config.hasCredentials, isConnected,
+              let profile = connectionStore.apiProfile.flatMap({ OpenCodeProfileIdentity(rawValue: $0.rawValue) }) else { return }
+        widgetSnapshotPublisher.removeSession(owner: .init(profile: profile, serverID: config.recentServerID), sessionID: sessionID)
     }
 }

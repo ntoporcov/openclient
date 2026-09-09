@@ -42,6 +42,13 @@ enum MessageBubbleUserPartPolicy {
 }
 
 enum MessageBubblePartVisibilityPolicy {
+    static func renderableText(for part: OpenCodePart, isUser: Bool) -> String? {
+        guard isUser || part.type == "text" || part.type == "reasoning",
+              let text = part.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+        return text
+    }
+
     static func shouldDisplay(
         _ part: OpenCodePart,
         showsToolCalls: Bool,
@@ -76,7 +83,10 @@ enum MessageBubbleMessageVisibilityPolicy {
                 showsToolCalls: showsToolCalls,
                 showsReasoningBlocks: showsReasoningBlocks
             ) else { return false }
-            if part.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false { return true }
+            if MessageBubblePartVisibilityPolicy.renderableText(
+                for: part,
+                isUser: (message.info.role ?? "").lowercased() == "user"
+            ) != nil { return true }
             if part.type == "file", part.url != nil { return true }
             return OpenCodeToolActivityPolicy.isToolCall(part)
         }
@@ -96,8 +106,28 @@ enum MessageBubbleDisplayIdentity {
     }
 }
 
+enum MessageBubbleTaskNavigation {
+    static func sessionID(
+        for part: OpenCodePart,
+        currentSessionID: String,
+        resolveLegacyTask: (OpenCodePart, String) -> String?
+    ) -> String? {
+        switch OpenCodeToolActivityPolicy.toolName(for: part) {
+        case "subagent":
+            // V2 supplies explicit child identity; never guess from output or similar titles.
+            guard let id = part.state?.metadata?.sessionId, !id.isEmpty, id != currentSessionID else { return nil }
+            return id
+        case "task":
+            return resolveLegacyTask(part, currentSessionID)
+        default:
+            return nil
+        }
+    }
+}
+
 struct MessageBubble: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     let message: OpenCodeMessageEnvelope
     let detailedMessage: OpenCodeMessageEnvelope?
@@ -112,6 +142,7 @@ struct MessageBubble: View {
     let expandedContextGroupIDs: Set<String>
     let showsAllActivity: Bool
     var tableMaximumWidth: CGFloat? = nil
+    var allowsForkMessage: Bool = true
     let resolveTaskSessionID: (OpenCodePart, String) -> String?
     let onSelectPart: (OpenCodePart) -> Void
     let onOpenTaskSession: (String) -> Void
@@ -126,9 +157,27 @@ struct MessageBubble: View {
     let imageLoadingStore: OpenClientImageLoadingStore
     let videoStreams: OpenClientVideoStreamCoordinator?
     let videoPlaybackStore: OpenClientVideoPlaybackStore
+    var onAnswerTextTap: () -> Void = {}
+    var onEntryAnimationCompleted: (String) -> Void = { _ in }
+    var onEntryAnimationCancelled: (String) -> Void = { _ in }
+    #if DEBUG
+    var entryReduceMotionOverride: Bool? = nil
+    #endif
+
+    private var reduceMotion: Bool {
+        #if DEBUG
+        if let entryReduceMotionOverride { return entryReduceMotionOverride }
+        #endif
+        #if DEBUG && canImport(UIKit)
+        if TranscriptContinuityDiagnostics.enabled, TranscriptContinuityDiagnostics.reducesMotion { return true }
+        #endif
+        return systemReduceMotion
+    }
 
     @State private var entryAnimationStartDate: Date?
+    @State private var entryAnimationMessageID: String?
     @State private var hasRunEntryAnimation = false
+    @State private var hasFinishedEntryAnimation = false
     @State private var entryAnimationStartTask: Task<Void, Never>?
     @State private var entryAnimationTask: Task<Void, Never>?
     @State private var displayEntryCache = MessageBubbleDisplayEntryCache()
@@ -201,6 +250,26 @@ struct MessageBubble: View {
         return result
     }
 
+    private var renderedDisplayEntries: [DisplayEntry] {
+        guard !isUser else { return displayEntries }
+        var result: [DisplayEntry] = []
+        for entry in displayEntries {
+            if case let .part(indexed) = entry,
+               indexed.part.type == "text", !isReasoningPart(indexed.part),
+               !isStreamingMessage || indexed.part.time?.end != nil {
+                if case let .answer(parts) = result.last {
+                    result[result.count - 1] = .answer(parts + [indexed])
+                } else {
+                    result.append(.answer([indexed]))
+                }
+            } else {
+                // Preserve the position of tools, reasoning, and attachments between answers.
+                result.append(entry)
+            }
+        }
+        return result
+    }
+
     var body: some View {
         animatedEntryContent
             .onAppear {
@@ -218,6 +287,14 @@ struct MessageBubble: View {
             }
             .onDisappear {
                 finishEntryAnimation()
+            }
+            .onChange(of: reduceMotion) { _, reduced in
+                guard reduced else { return }
+                if hasRunEntryAnimation {
+                    finishEntryAnimation(completed: true)
+                } else {
+                    scheduleReservedEntryAnimationIfNeeded()
+                }
             }
     }
 
@@ -239,7 +316,7 @@ struct MessageBubble: View {
 
     @ViewBuilder
     private var animatedEntryContent: some View {
-        if let entryAnimationStartDate, isUser, hasRunEntryAnimation {
+        if let entryAnimationStartDate, isUser, hasRunEntryAnimation, !reduceMotion {
             TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
                 let progress = entryAnimationProgress(at: timeline.date, startDate: entryAnimationStartDate)
                 baseContent
@@ -249,8 +326,16 @@ struct MessageBubble: View {
                     )
                     .opacity(0.72 + 0.28 * progress)
                     .scaleEffect(0.94 + 0.06 * progress, anchor: .bottomTrailing)
+                    .onChange(of: progress) { _, progress in
+                        if progress >= 1 { finishEntryAnimation(completed: true) }
+                    }
+                    #if DEBUG && canImport(UIKit)
+                    .onChange(of: progress, initial: true) { _, progress in
+                        TranscriptContinuityDiagnostics.frame(progress)
+                    }
+                    #endif
             }
-        } else if isUser, reserveEntryFromComposer, !hasRunEntryAnimation {
+        } else if isUser, reserveEntryFromComposer, !hasRunEntryAnimation, !hasFinishedEntryAnimation, !reduceMotion {
             baseContent
                 .offset(Self.outgoingEntryStartOffset)
                 .opacity(0.72)
@@ -260,11 +345,35 @@ struct MessageBubble: View {
         }
     }
 
+    @ViewBuilder
     private var messageContent: some View {
+        if isUser {
+            messageParts.contextMenu { messageContextMenu }
+        } else {
+            messageParts
+        }
+    }
+
+    private var messageParts: some View {
         let retainedHTMLPartIDs = retainedVisualHTMLPartIDs
         return VStack(alignment: isUser ? .trailing : .leading, spacing: MessageBubbleSpacing.part) {
-            ForEach(displayEntries, id: \.id) { entry in
+            ForEach(renderedDisplayEntries, id: \.id) { entry in
                 switch entry {
+                case let .answer(parts):
+                    let textParts = parts.compactMap { renderableText(for: $0.part) }
+                    VStack(alignment: .leading, spacing: MessageBubbleSpacing.part) {
+                        ResponseTextContent(
+                            messageID: effectiveMessage.id,
+                            markdownParts: textParts,
+                            onTextTap: onAnswerTextTap
+                        )
+#if canImport(LinkPresentation)
+                        let urls = MessageLinkExtractor.urls(in: textParts.joined(separator: "\n\n"))
+                        if !urls.isEmpty {
+                            OpenClientMessageLinkPreviews(urls: urls, alignment: .leading)
+                        }
+#endif
+                    }
                 case let .part(indexed):
                     revealWrappedPartView(
                         indexed.part,
@@ -299,8 +408,8 @@ struct MessageBubble: View {
                 ErrorMessageCard(message: error, title: effectiveMessage.info.error?.name)
                     .transition(.identity)
             }
+
         }
-        .contextMenu { messageContextMenu }
     }
 
     @ViewBuilder
@@ -328,7 +437,7 @@ struct MessageBubble: View {
             Label("Debug JSON", systemImage: "curlybraces")
         }
 
-        if let copiedText = effectiveMessage.copiedTextContent() {
+        if isUser, let copiedText = effectiveMessage.copiedTextContent() {
             Button {
                 OpenCodeClipboard.copy(copiedText)
             } label: {
@@ -336,7 +445,7 @@ struct MessageBubble: View {
             }
         }
 
-        if isUser {
+        if isUser, allowsForkMessage {
             Divider()
 
             Button {
@@ -377,7 +486,12 @@ struct MessageBubble: View {
     }
 
     private func scheduleReservedEntryAnimationIfNeeded() {
-        guard reserveEntryFromComposer, isUser, !hasRunEntryAnimation else { return }
+        guard reserveEntryFromComposer, isUser, !hasRunEntryAnimation, !hasFinishedEntryAnimation else { return }
+        if entryAnimationMessageID == nil { entryAnimationMessageID = effectiveMessage.id }
+        if reduceMotion {
+            startEntryAnimationIfNeeded()
+            return
+        }
         guard entryAnimationStartTask == nil else { return }
 
         entryAnimationStartTask = Task { @MainActor in
@@ -388,11 +502,20 @@ struct MessageBubble: View {
     }
 
     private func startEntryAnimationIfNeeded() {
-        guard isUser, !hasRunEntryAnimation else { return }
+        guard isUser, !hasRunEntryAnimation, !hasFinishedEntryAnimation else { return }
         guard reserveEntryFromComposer || animateEntryFromComposer else { return }
 
         hasRunEntryAnimation = true
-        onEntryAnimationStarted(effectiveMessage.id)
+        let messageID = entryAnimationMessageID ?? effectiveMessage.id
+        entryAnimationMessageID = messageID
+        #if DEBUG && canImport(UIKit)
+        TranscriptContinuityDiagnostics.started(messageID)
+        #endif
+        onEntryAnimationStarted(messageID)
+        if reduceMotion {
+            finishEntryAnimation(completed: true)
+            return
+        }
         entryAnimationStartTask?.cancel()
         entryAnimationStartTask = nil
         entryAnimationStartDate = Date()
@@ -401,7 +524,7 @@ struct MessageBubble: View {
         entryAnimationTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(560))
             guard !Task.isCancelled else { return }
-            finishEntryAnimation()
+            finishEntryAnimation(completed: true)
         }
     }
 
@@ -418,12 +541,24 @@ struct MessageBubble: View {
         finishEntryAnimation()
     }
 
-    private func finishEntryAnimation() {
+    private func finishEntryAnimation(completed: Bool = false) {
         entryAnimationStartTask?.cancel()
         entryAnimationStartTask = nil
         entryAnimationTask?.cancel()
         entryAnimationTask = nil
         entryAnimationStartDate = nil
+        guard !hasFinishedEntryAnimation,
+              hasRunEntryAnimation || reserveEntryFromComposer || animateEntryFromComposer else { return }
+        hasFinishedEntryAnimation = true
+        let messageID = entryAnimationMessageID ?? effectiveMessage.id
+        if completed {
+            #if DEBUG && canImport(UIKit)
+            TranscriptContinuityDiagnostics.entryCompleted(messageID, reduced: reduceMotion)
+            #endif
+            onEntryAnimationCompleted(messageID)
+        } else {
+            onEntryAnimationCancelled(messageID)
+        }
     }
 
     @ViewBuilder
@@ -687,10 +822,7 @@ struct MessageBubble: View {
     }
 
     private func renderableText(for part: OpenCodePart) -> String? {
-        guard let text = part.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-            return nil
-        }
-        return text
+        MessageBubblePartVisibilityPolicy.renderableText(for: part, isUser: isUser)
     }
 
     private func todoWriteTitle(for part: OpenCodePart, running: Bool) -> ActivityText {
@@ -805,6 +937,8 @@ struct MessageBubble: View {
         retainedVisualHTMLPartIDs: Set<String>
     ) -> Bool {
         switch entry {
+        case .answer:
+            return true
         case let .part(indexed):
             let part = indexed.part
             if attachment(for: part) != nil { return true }
@@ -938,8 +1072,7 @@ struct MessageBubble: View {
     }
 
     private func handleActivityTap(for part: OpenCodePart) {
-        if toolName(for: part) == "task",
-           let currentSessionID,
+        if let currentSessionID,
            let sessionID = resolveTaskSessionID(for: part, currentSessionID: currentSessionID) {
             onOpenTaskSession(sessionID)
             return
@@ -1046,7 +1179,7 @@ struct MessageBubble: View {
                 showsDisclosure: true,
                 shimmerTitle: false
             )
-        case "task":
+        case "task", "subagent":
             let agent = taskAgentTitle(for: part)
             let subtitle = firstNonEmpty(part.state?.input?.description, resolveTaskSessionID(for: part, currentSessionID: currentSessionID ?? ""), toolSubtitle(for: part, fallback: nil))
             return ActivityStyle(
@@ -1156,7 +1289,9 @@ struct MessageBubble: View {
     }
 
     private func resolveTaskSessionID(for part: OpenCodePart, currentSessionID: String) -> String? {
-        resolveTaskSessionID(part, currentSessionID)
+        MessageBubbleTaskNavigation.sessionID(
+            for: part, currentSessionID: currentSessionID, resolveLegacyTask: resolveTaskSessionID
+        )
     }
 
     private func displayTitle(for tool: String, fallback: String) -> String {
@@ -1355,11 +1490,14 @@ private final class MessageBubbleDisplayEntryCache {
 
 private enum DisplayEntry: Identifiable {
     case part(IndexedPart)
+    case answer([IndexedPart])
     case context(ContextGroup)
     case earlierActivity(hiddenCount: Int)
 
     var id: String {
         switch self {
+        case let .answer(parts):
+            return "answer-\(parts.first?.id ?? "")"
         case let .part(indexed):
             return indexed.id
         case let .context(group):

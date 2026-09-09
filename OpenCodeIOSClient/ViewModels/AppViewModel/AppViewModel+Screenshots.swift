@@ -13,6 +13,7 @@ enum OpenClientScreenshotScene: String, CaseIterable {
     case terminal
     case terminalShowcase = "terminal-showcase"
     case chat
+    case submissionRecovery = "submission-recovery"
     case permission
     case question
     case funGames = "fun-games"
@@ -67,6 +68,70 @@ extension AppViewModel {
             return screenshotSessionPinned()
         case .chat:
             return screenshotChat()
+        case .submissionRecovery:
+            let model = screenshotChat()
+            let legacy = ProcessInfo.processInfo.environment["OPENCLIENT_RECOVERY_PROFILE"] == "legacy"
+            let submitting = ProcessInfo.processInfo.environment["OPENCLIENT_RECOVERY_SUBMITTING"] == "1"
+            model.config = .init(baseURL: "https://recovery-preview.invalid", apiPreference: legacy ? .legacy : .v2)
+            if legacy { model.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true) }
+            else { model.connectionStore.applySuccessfulV2Connection(version: "0.0.0-next-17155", healthy: true) }
+            _ = try? model.requireBackendConnection()
+            let session = OpenClientScreenshotData.releaseSession
+            model.directoryStore.insertV2Session(session)
+            model.selectedSession = session
+            model.chatStore.activeChatSessionID = session.id
+            var canonical = [
+                OpenCodeMessageEnvelope.local(role: "user", text: "A later confirmed message.", messageID: "recovery-canonical-user", sessionID: session.id),
+                OpenCodeMessageEnvelope.local(role: "assistant", text: "Later canonical reply.", messageID: "recovery-canonical-answer", sessionID: session.id),
+            ]
+            for index in canonical.indices {
+                canonical[index].info = OpenCodeMessage(id: canonical[index].id, role: canonical[index].info.role,
+                    sessionID: session.id, time: .init(created: Double(index + 1)), agent: nil, model: nil)
+            }
+            if ProcessInfo.processInfo.environment["OPENCLIENT_RECOVERY_PENDING_ONLY"] == "1" { canonical = [] }
+            if legacy {
+                model.chatStore.beginSelectingSession(sessionID: session.id, cachedMessages: [])
+                model.chatStore.applyCanonicalMessages([], forSessionID: session.id, isActiveSession: true)
+            } else {
+                model.chatStore.beginV2TranscriptHydration(sessionID: session.id)
+                model.chatStore.applyInitialV2Transcript([], olderCursor: nil, sessionID: session.id)
+            }
+            model.directoryStore.applyV2Messages(canonical, forSessionID: session.id)
+            model.directoryStore.applySessionStatus("idle", forSessionID: session.id)
+            let mention = OpenCodeAgentMention(name: "build", content: "@build", start: 0, end: 6)
+            let file = OpenCodeComposerAttachment(id: "recovery-file", kind: .file, filename: "recovery-note.txt",
+                mime: "text/plain", dataURL: "data:text/plain;base64,S2VlcCB0aGlzLg==")
+            let input = OpenCodeMessageEnvelope.local(role: "user", text: "@build preserve this unconfirmed submission.",
+                agentMentions: [mention], attachments: [file], messageID: "recovery-local-input", sessionID: session.id)
+            let seed = {
+                if legacy, let connectionID = model.backendConnection?.id {
+                    _ = model.chatStore.beginPromptAdmission(.init(sessionID: session.id, messageID: input.id,
+                        text: "@build preserve this unconfirmed submission.", scope: .init(directory: session.directory),
+                        attachments: [file], agentMentions: [mention]), connectionID: connectionID)
+                    if !submitting { model.chatStore.applyPromptAdmission(.uncertain, messageID: input.id, connectionID: connectionID) }
+                } else {
+                    _ = model.chatStore.beginV2Prompt(input, sessionID: session.id, attachments: [file], agentMentions: [mention])
+                    if !submitting { model.chatStore.markSubmissionUncertain(messageID: input.id, sessionID: session.id) }
+                }
+                if ProcessInfo.processInfo.environment["OPENCLIENT_RECOVERY_FAST_ADMISSION"] == "1" {
+                    model.chatStore.confirmSubmissionAdmission(messageID: input.id, sessionID: session.id)
+                }
+                if legacy {
+                    model.chatStore.applyCanonicalMessages(canonical, forSessionID: session.id, isActiveSession: true)
+                } else {
+                    model.chatStore.applyInitialV2Transcript(canonical, olderCursor: nil, sessionID: session.id)
+                }
+            }
+            if submitting {
+                // Give capture automation time to observe the actual two-second row transition after launch.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(4))
+                    seed()
+                }
+            } else {
+                seed()
+            }
+            return model
         case .permission:
             return screenshotPermission()
         case .question, .recentWidget, .pinnedWidget, .quickStartWidgets, .liveActivity:
@@ -296,7 +361,15 @@ extension AppViewModel {
     }
 
     private static func screenshotChat() -> AppViewModel {
-        baseConnectedScreenshotViewModel(selectedSession: OpenClientScreenshotData.releaseSession)
+        if ProcessInfo.processInfo.environment["OPENCLIENT_UI_TEST_RESPONSE_COPY"] == "1" {
+            let viewModel = baseConnectedScreenshotViewModel(
+                messages: OpenClientScreenshotData.responseCopyMessages,
+                todos: []
+            )
+            viewModel.sessionStatuses = [OpenClientScreenshotData.releaseSession.id: "idle"]
+            return viewModel
+        }
+        return baseConnectedScreenshotViewModel(selectedSession: OpenClientScreenshotData.releaseSession)
     }
 
     private static func screenshotPermission() -> AppViewModel {
@@ -422,6 +495,43 @@ extension AppViewModel {
 }
 
 enum OpenClientScreenshotData {
+    static var responseCopyMessages: [OpenCodeMessageEnvelope] {
+        func message(id: String, role: String, created: Double, completed: Double?, texts: [String]) -> OpenCodeMessageEnvelope {
+            OpenCodeMessageEnvelope(
+                info: OpenCodeMessage(
+                    id: id, role: role, sessionID: releaseSession.id,
+                    time: .init(created: created, completed: completed),
+                    agent: "build", model: assistantMessage.info.model
+                ),
+                parts: texts.enumerated().map { index, text in
+                    OpenCodePart(
+                        id: "\(id)-\(index)", messageID: id, sessionID: releaseSession.id, type: "text",
+                        mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil,
+                        text: text, time: role == "assistant" ? .init(start: created, end: completed) : nil
+                    )
+                }
+            )
+        }
+        let start: Double = 1_712_286_500_000
+        return [
+            message(id: "response-copy-prompt", role: "user", created: start, completed: nil, texts: ["Explain the update."]),
+            message(id: "response-copy-answer", role: "assistant", created: start + 1_000, completed: start + 10_000, texts: [
+                "First paragraph has **formatted text**.\n\nA second paragraph belongs to the same answer.",
+                "This paragraph comes from another text part.\n\n- Select across paragraphs\n- Keep the text together"
+            ]),
+            message(id: "response-copy-followup", role: "assistant", created: start + 11_000, completed: start + 20_000, texts: [
+                "The final answer completes the turn."
+            ]),
+            OpenCodeMessageEnvelope(
+                info: OpenCodeMessage(
+                    id: "response-copy-tool", role: "assistant", sessionID: releaseSession.id,
+                    time: .init(created: start + 21_000, completed: start + 30_000), agent: nil, model: nil
+                ),
+                parts: toolMessage.parts
+            )
+        ]
+    }
+
     static let browserURL = URL(string: "https://preview.openclient.dev/")!
 
     static let browserHTML = """

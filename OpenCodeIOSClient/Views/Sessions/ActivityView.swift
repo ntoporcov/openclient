@@ -29,6 +29,7 @@ struct ActivityView: View {
                 query: $searchQuery,
                 isSearching: false,
                 allowsNewChat: !facade.snapshot.isReadOnly,
+                allowsNewTalk: facade.allowsNewTalk,
                 accessibilityPrefix: "activity",
                 onNewChat: facade.presentNewChat,
                 onNewTalk: facade.presentNewTalk
@@ -439,7 +440,9 @@ private struct ActivityContent: View, Equatable {
                         deleteButton(for: row)
                         renameButton(for: row)
 #if !targetEnvironment(macCatalyst)
-                        liveActivityButton(for: row)
+                        if facade.allowsLiveActivities {
+                            liveActivityButton(for: row)
+                        }
 #endif
                     }
                 }
@@ -448,7 +451,9 @@ private struct ActivityContent: View, Equatable {
                         deleteButton(for: row)
                         renameButton(for: row)
 #if !targetEnvironment(macCatalyst)
-                        liveActivityButton(for: row)
+                        if facade.allowsLiveActivities {
+                            liveActivityButton(for: row)
+                        }
 #endif
                     }
                 }

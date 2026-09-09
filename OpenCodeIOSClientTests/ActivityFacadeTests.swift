@@ -1,10 +1,101 @@
+import Combine
 import XCTest
 import UIKit
 import SwiftUI
 @testable import OpenClient
 
+private final class ActivityMetadataURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let body: String
+        switch request.url?.path {
+        case "/api/session/active":
+            body = #"{"data":{"home-session":{"type":"running"},"sandbox-session":{"type":"running"}}}"#
+        case "/api/permission/request":
+            body = #"{"data":[]}"#
+        case "/api/form/request":
+            body = #"{"data":[{"id":"external-form","sessionID":"sandbox-session","title":"Authenticate","fields":[{"key":"auth","type":"external","required":true}]}]}"#
+        default:
+            XCTFail("Activity must not call legacy routes or bypass core session/transcript services: \(request.url?.path ?? "")")
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 @MainActor
 final class ActivityFacadeTests: XCTestCase {
+    func testInjectedBackendDoesNotAdvertiseActivityWithoutStatusService() async throws {
+        let viewModel = AppViewModel(backendFactory: HomeTestBackend())
+        await viewModel.connectionFacade.connect()
+        defer { viewModel.disconnect() }
+
+        XCTAssertFalse(viewModel.activityFacade.isAvailable)
+        XCTAssertFalse(viewModel.projectFacade.allowsActivity)
+        viewModel.appShellFacade.selectActivity()
+        XCTAssertFalse(viewModel.appShellFacade.isActivitySelected)
+        await viewModel.activityFacade.prepareForPresentation()
+        XCTAssertTrue(viewModel.activityFacade.snapshot.isEmpty)
+    }
+
+    func testV2ActivityLoadsCatalogScopesAndCanonicalStatusAndPreview() async throws {
+        let backend = HomeTestBackend()
+        backend.storedSessions.append(.init(id: "sandbox-session", title: "Sandbox work", workspaceID: nil,
+            directory: "/home-sandbox", projectID: "home-project", parentID: nil))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ActivityMetadataURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let client = OpenCodeAPIClient(config: .init(baseURL: "https://activity.invalid", password: "test"), session: session)
+        let adapter = OpenCodeBackendAdapter(client: client, profile: .v2)
+        let viewModel = AppViewModel(backendFactory: backend)
+        viewModel.backendConnection = BackendConnection(descriptor: .init(id: "activity-test", name: "OpenCode", version: "next"),
+            capabilities: [.interactions], projects: adapter, sessions: backend, chat: backend, models: backend, events: backend)
+        viewModel.connectionStore.applySuccessfulV2Connection(version: "next", healthy: true)
+        viewModel.projects = try await backend.projectsSnapshot().projects
+        defer { viewModel.disconnect() }
+
+        XCTAssertTrue(viewModel.activityFacade.isAvailable)
+        viewModel.appShellFacade.selectActivity()
+        XCTAssertEqual(viewModel.appShellFacade.contentRoute(isCompact: true), .activity)
+        await viewModel.activityFacade.prepareForPresentation()
+
+        XCTAssertTrue(backend.listScopes.contains(.init(projectID: "global", directory: nil)))
+        XCTAssertTrue(backend.listScopes.contains(.init(projectID: "home-project", directory: "/home-sandbox")))
+        XCTAssertEqual(viewModel.activityFacade.snapshot.workingRows.map(\.recent.session.id), ["home-session"])
+        XCTAssertEqual(viewModel.activityFacade.snapshot.needsInputRows.map(\.recent.session.id), ["sandbox-session"])
+        XCTAssertEqual(viewModel.activityFacade.snapshot.needsInputRows.first?.pendingInteractionCount, 1)
+        XCTAssertTrue(viewModel.directoryStoreRegistry.store(for: nil).v2FormsByID.isEmpty)
+        let row = try XCTUnwrap(viewModel.activityFacade.snapshot.workingRows.first { $0.recent.session.id == "home-session" })
+        await viewModel.activityFacade.hydrateIfNeeded(row)
+
+        let hydrated = try XCTUnwrap(viewModel.activityFacade.snapshot.workingRows.first { $0.recent.session.id == "home-session" })
+        XCTAssertEqual(hydrated.latestAssistantText, "Backend preview")
+        XCTAssertEqual(viewModel.sessionPreviews["home-session"]?.text, "Backend preview")
+        XCTAssertNil(viewModel.selectedSession)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+
+        let listRequestCount = backend.listScopes.count
+        let liveRow = expectation(description: "Activity observes live directory sessions without refreshing")
+        let observation = viewModel.activityFacade.$snapshot
+            .filter { $0.workingRows.contains { $0.recent.session.id == "live-created" } }
+            .prefix(1)
+            .sink { _ in liveRow.fulfill() }
+        let owner = viewModel.directoryStoreRegistry.store(for: "/home-project")
+        owner.insertV2Session(.init(id: "live-created", title: "Live creation", workspaceID: nil,
+            directory: "/home-project", projectID: "home-project", parentID: nil))
+        owner.applySessionStatus("busy", forSessionID: "live-created")
+        await fulfillment(of: [liveRow], timeout: 1)
+        XCTAssertEqual(backend.listScopes.count, listRequestCount)
+        withExtendedLifetime(observation) {}
+    }
+
     func testRecentBucketsUseCalendarDayBoundaries() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
@@ -42,10 +133,11 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertFalse(request.locksProject)
     }
 
-    func testNewTalkPresentationAsksForAProject() throws {
-        let viewModel = AppViewModel()
-        viewModel.backendMode = .server
-        viewModel.isConnected = true
+    func testNewTalkPresentationAsksForAProject() async {
+        let viewModel = AppViewModel(backendFactory: HomeTestBackend())
+        await viewModel.connectionFacade.connect()
+        defer { viewModel.talkSessionCoordinator.stop(); viewModel.disconnect() }
+        XCTAssertTrue(viewModel.projectFacade.allowsNewTalk)
 
         viewModel.activityFacade.presentNewTalk()
 
@@ -54,12 +146,15 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertNil(viewModel.selectedSession)
     }
 
-    func testSelectingTalkProjectStartsListeningBeforeCreatingSession() {
-        let viewModel = AppViewModel()
+    func testSelectingTalkProjectStartsListeningBeforeCreatingSession() async {
+        let backend = HomeTestBackend()
+        let viewModel = AppViewModel(backendFactory: backend)
+        await viewModel.connectionFacade.connect()
+        defer { viewModel.talkSessionCoordinator.stop(); viewModel.disconnect() }
         let project = makeProject(id: "voice-project", directory: "/tmp/voice-project")
         viewModel.projects = [project]
-        viewModel.backendMode = .server
-        viewModel.isConnected = true
+        let initialSessionCount = backend.storedSessions.count
+        XCTAssertTrue(viewModel.projectFacade.allowsNewTalk)
         viewModel.talkSessionCoordinator.setHoldToTalkEnabled(true)
         viewModel.talkSessionCoordinator.presentProjectSelection()
 
@@ -68,13 +163,13 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertEqual(viewModel.talkSessionCoordinator.phase, .listening)
         XCTAssertEqual(viewModel.talkSessionCoordinator.selectedProjectID, project.id)
         XCTAssertNil(viewModel.selectedSession)
+        XCTAssertEqual(backend.storedSessions.count, initialSessionCount)
+        XCTAssertTrue(backend.submissions.isEmpty)
 
         viewModel.talkSessionCoordinator.applicationActivityChanged(isActive: false)
         XCTAssertEqual(viewModel.talkSessionCoordinator.conversationController.state, .paused)
         viewModel.talkSessionCoordinator.applicationActivityChanged(isActive: true)
         XCTAssertEqual(viewModel.talkSessionCoordinator.conversationController.state, .ready)
-
-        viewModel.talkSessionCoordinator.stop()
     }
 
     func testPreparationHydratesCardMetadataFromPersistentCacheBeforeServerReconciliation() async throws {
@@ -105,7 +200,8 @@ final class ActivityFacadeTests: XCTestCase {
             name: "Cache Test",
             baseURL: "https://cache.example",
             username: "opencode",
-            password: "password"
+            password: "password",
+            apiPreference: .legacy
         )
         let repository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
         viewModel.config = config
@@ -157,6 +253,9 @@ final class ActivityFacadeTests: XCTestCase {
 
     func testSnapshotPlacesWorkingSessionsFirstAndUsesPerDirectoryTranscripts() {
         let viewModel = AppViewModel()
+        viewModel.config.apiPreference = .legacy
+        viewModel.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)
+        viewModel.liveActivityStore.bind(viewModel.liveActivityFacade.currentLifetime!)
         let projectA = makeProject(id: "project-a", directory: "/tmp/a")
         let projectB = makeProject(id: "project-b", directory: "/tmp/b")
         let working = makeSession(

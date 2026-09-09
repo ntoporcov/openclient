@@ -42,6 +42,7 @@ struct ProjectSettingsSheet: View {
                     }
 
 #if !targetEnvironment(macCatalyst)
+                    if !connection.isV2Connection {
                     Toggle("Auto-start Live Activity", isOn: Binding(
                         get: { facade.settingsSnapshot.isLiveActivityAutoStartEnabled },
                         set: { facade.setLiveActivityAutoStartEnabled($0) }
@@ -50,18 +51,50 @@ struct ProjectSettingsSheet: View {
                     Text("Start a Live Activity automatically when a session begins working in this project.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    }
 #endif
                 }
 
-                Section("Actions") {
-                    if snapshot.hasProUnlock {
-                        actionEditor(snapshot)
-                    } else {
-                        lockedActions
+                if facade.supportsProjectActions {
+                    Section("Actions") {
+                        if snapshot.hasProUnlock {
+                            actionEditor(snapshot)
+                        } else {
+                            lockedActions
+                        }
+                        if !facade.actionRunHistory.isEmpty {
+                            DisclosureGroup("Action Run History") {
+                                ForEach(facade.actionRunHistory) { run in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text(verbatim: "/\(run.commandName)")
+                                            Spacer()
+                                            Text(run.createdAt, format: .dateTime.month().day().hour().minute())
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Text(actionRunStatus(run))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if run.sessionID != nil {
+                                            Button("Show Session") {
+                                                Task { await facade.recoverActionRun(id: run.id) }
+                                            }
+                                        } else {
+                                            Text("Session creation could not be confirmed. Check the server before running this action again.")
+                                                .font(.caption)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
                 Section("Workspaces") {
+                    if !facade.supportsWorkspaceManagement {
+                        Text("Workspace management is unavailable on this server.")
+                            .foregroundStyle(.secondary)
+                    } else {
                     Toggle("Show Workspaces", isOn: Binding(
                         get: { facade.settingsSnapshot.isProjectWorkspacesEnabled },
                         set: { isEnabled in
@@ -73,6 +106,25 @@ struct ProjectSettingsSheet: View {
                     Text(workspacesDescription(snapshot))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    if snapshot.hasGitProject && facade.requiresWorktreeDestinationParent {
+                        TextField("Destination Parent Directory", text: Binding(
+                            get: { facade.worktreeDestinationParent },
+                            set: { facade.worktreeDestinationParent = $0 }
+                        ))
+                        .opencodeDisableTextAutocapitalization()
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("workspace.destinationParent")
+                        Text("Choose an absolute path on the server. New worktrees are created inside this directory.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    }
+                }
+                if !facade.allowsProjectMetadataEditing {
+                    Section("Project Appearance") {
+                        Text("Project colors and images are read-only on this server.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("Project Settings")
@@ -100,7 +152,7 @@ struct ProjectSettingsSheet: View {
     @ViewBuilder
     private func actionEditor(_ snapshot: ProjectFacade.SettingsSnapshot) -> some View {
         if snapshot.actions.isEmpty {
-            Text("Configure commands as quick Actions. They run in temporary sessions and only appear if they need debugging.")
+            Text("Configure commands as quick Actions. Sessions stay on the server. Successful runs are hidden locally and can be restored from Action Run History.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } else {
@@ -156,12 +208,24 @@ struct ProjectSettingsSheet: View {
         }
     }
 
+    private func actionRunStatus(_ run: ProjectActionRun) -> LocalizedStringResource {
+        if run.requiresAttention { return "Needs Attention" }
+        switch run.state {
+        case .creating: return "Creating Session"
+        case .runningCommand: return "Running Command"
+        case .checkingResult: return "Checking Result"
+        case .succeeded: return run.isHidden ? "Succeeded, Hidden Locally" : "Succeeded"
+        case .failed: return "Failed or Unconfirmed"
+        case .interrupted: return "Interrupted or Unconfirmed"
+        }
+    }
+
     private var lockedActions: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Actions are a Pro feature", systemImage: "bolt.fill")
                 .font(.headline)
 
-            Text("Run project commands in temporary sessions, then only keep the session when the action needs debugging.")
+            Text("Run project commands in dedicated sessions. Successful runs are hidden locally, never deleted, and remain recoverable.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 

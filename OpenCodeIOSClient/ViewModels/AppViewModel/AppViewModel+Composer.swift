@@ -31,6 +31,8 @@ extension AppViewModel {
         let scope: String
         if isUsingAppleIntelligence {
             scope = ["apple-intelligence", activeAppleIntelligenceWorkspaceID ?? "global"].joined(separator: "|")
+        } else if let connection = backendConnection, connection.openCodeCompatibility == nil {
+            scope = connection.descriptor.id
         } else {
             scope = ["opencode", NewSessionDefaultsStore.normalizedBaseURL(config.baseURL) ?? config.baseURL].joined(separator: "|")
         }
@@ -141,7 +143,8 @@ extension AppViewModel {
     }
 
     var currentServerDefaultsKey: String? {
-        NewSessionDefaultsStore.normalizedBaseURL(config.baseURL)
+        if let connection = backendConnection, connection.openCodeCompatibility == nil { return connection.descriptor.id }
+        return NewSessionDefaultsStore.normalizedBaseURL(config.baseURL)
     }
 
     var validModelReferences: Set<OpenCodeModelReference> {
@@ -310,28 +313,76 @@ extension AppViewModel {
         modelConfigurationStore.formattedVariantTitle(variant)
     }
 
-    func loadComposerOptions() async {
+    @discardableResult
+    func loadComposerOptions() async -> Bool {
+        guard let connection = try? requireBackendConnection() else { return false }
         let directory = effectiveSelectedDirectory
         let providerScope = providerConfigurationScope(directory: directory)
+        let profile = connectionStore.apiProfile
+        let generation = directoryStoreRegistry.generation
+        let navigationGeneration = sessionNavigationGeneration
+        let commandScope = selectedSession.map {
+            BackendScope(projectID: $0.projectID ?? currentProject?.id, directory: directory, workspaceID: $0.workspaceID)
+        } ?? currentProject.map { projectExecutionScope(for: $0, directory: directory) }
+            ?? BackendScope(directory: directory)
         do {
-            async let agents = client.listAgents(directory: directory)
-            async let providerState = client.providerState(directory: directory)
-            let loadedProviderState = try await providerState
+            let catalog = try await connection.models.modelCatalog(scope: .init(projectID: currentProject?.id, directory: directory))
+            guard isCurrentBackendConnection(connection), connectionStore.apiProfile == profile,
+                  directoryStoreRegistry.generation == generation, sessionNavigationGeneration == navigationGeneration,
+                  effectiveSelectedDirectory == directory else { return false }
+            var commands: [OpenCodeCommand] = []
+            var commandsAreAuthoritative = false
+            if let service = connection.commands {
+                commands = try await service.listCommands(scope: commandScope)
+                commandsAreAuthoritative = true
+            } else if let compatibility = try? connection.requireOpenCodeClient(for: .commands) {
+                if profile == .v2 {
+                    commands = try await compatibility.listV2Commands(directory: directory)
+                } else {
+                    commands = try await compatibility.listCommands(directory: directory)
+                }
+                commandsAreAuthoritative = true
+            }
+            guard isCurrentBackendConnection(connection), connectionStore.apiProfile == profile,
+                  directoryStoreRegistry.generation == generation, sessionNavigationGeneration == navigationGeneration,
+                  effectiveSelectedDirectory == directory else { return false }
             objectWillChange.send()
-            modelConfigurationStore.availableAgents = try await agents
-            modelConfigurationStore.applyProviderState(loadedProviderState)
+            modelConfigurationStore.applyComposerOptions(agents: catalog.agents, providers: catalog.providers, defaults: catalog.defaults)
+            directoryCommands = commands
+            modelConfigurationStore.providerErrorMessage = nil
             modelConfigurationStore.markProvidersLoaded(for: providerScope)
             loadNewSessionDefaults()
+            await widgetSnapshotPublisher.publishNow(includeModelOptions: true,
+                commandsAreAuthoritative: commandsAreAuthoritative, modelsAreAuthoritative: true)
+            guard isCurrentBackendConnection(connection), connectionStore.apiProfile == profile,
+                  directoryStoreRegistry.generation == generation, sessionNavigationGeneration == navigationGeneration,
+                  effectiveSelectedDirectory == directory else { return false }
+            if profile == .v2 {
+                for session in directoryStore.sessions { applyV2SessionConfiguration(session) }
+                return true
+            }
             loadFunAndGamesPreferences()
             loadProjectListPreferences()
             sanitizeComposerSelections()
             scheduleWidgetSnapshotPublication(includeModelOptions: true)
+            return true
         } catch {
+            guard isCurrentBackendConnection(connection), connectionStore.apiProfile == profile,
+                  directoryStoreRegistry.generation == generation, sessionNavigationGeneration == navigationGeneration,
+                  effectiveSelectedDirectory == directory else { return false }
             objectWillChange.send()
+            directoryCommands = []
+            if profile == .v2 {
+                modelConfigurationStore.clearComposerOptions()
+                modelConfigurationStore.providerErrorMessage = error.localizedDescription
+                errorMessage = error.localizedDescription
+                return false
+            }
             modelConfigurationStore.clearComposerOptions()
             loadNewSessionDefaults()
             loadFunAndGamesPreferences()
             loadProjectListPreferences()
+            return false
         }
     }
 
@@ -348,9 +399,26 @@ extension AppViewModel {
     func seedComposerSelectionsForNewSession(_ session: OpenCodeSession) {
         objectWillChange.send()
         modelConfigurationStore.seedSelectionsForNewSession(sessionID: session.id)
+        applyV2SessionConfiguration(session)
+    }
+
+    func applyV2SessionConfiguration(_ session: OpenCodeSession) {
+        guard connectionStore.apiProfile == .v2 else { return }
+        if let agent = session.agent {
+            modelConfigurationStore.selectAgent(named: agent, forSessionID: session.id)
+        }
+        if let model = session.model {
+            let reference = OpenCodeModelReference(providerID: model.providerID, modelID: model.modelID)
+            modelConfigurationStore.selectModel(reference, forSessionID: session.id)
+            modelConfigurationStore.selectVariant(model.variant, forSessionID: session.id)
+        }
     }
 
     func syncComposerSelections(for session: OpenCodeSession, sourceMessages: [OpenCodeMessageEnvelope]? = nil) {
+        if connectionStore.apiProfile == .v2 {
+            applyV2SessionConfiguration(session)
+            return
+        }
         let source = sourceMessages ?? chatFacade.messageSource(for: session)
         let lastUserMessage = source.reversed().first { message in
             message.info.sessionID == session.id && (message.info.role ?? "").lowercased() == "user"

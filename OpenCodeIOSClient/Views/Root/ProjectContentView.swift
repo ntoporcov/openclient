@@ -174,7 +174,7 @@ struct ProjectContentView: View {
         nativeRoleTabView
             .opencodeProjectBrowserAccessory(
                 browser: shell.browser,
-                isEnabled: !usesIPadGlassTabSwitcher
+                isEnabled: shell.allowsProjectBrowser && !usesIPadGlassTabSwitcher
             )
     }
 
@@ -241,6 +241,7 @@ struct ProjectContentView: View {
     }
 
     private var showsBrowserToolbarAction: Bool {
+        guard shell.allowsProjectBrowser else { return false }
         #if os(iOS) || targetEnvironment(macCatalyst)
         if #available(iOS 26.0, *) {
             return true

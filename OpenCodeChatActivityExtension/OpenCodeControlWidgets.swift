@@ -59,14 +59,15 @@ private struct OpenCodeControlPayload {
         let project = resolvedProject(configuration.project, server: server)
         let model = resolvedModel(configuration.model, server: server)
         let reasoning = resolvedReasoning(configuration.reasoning, model: model)
-        let serverID = server?.id ?? project?.serverID ?? model?.serverID
-        let url = OpenCodeWidgetDeepLink.newSessionURL(
+        let serverID = server?.rawServerID ?? server?.id
+        let url = (configuration.model != nil && model == nil) || (configuration.reasoning != nil && reasoning == nil) ? nil : OpenCodeWidgetDeepLink.newSessionURL(
             serverID: serverID,
             projectID: project?.projectID,
             directory: project?.directory,
             providerID: model?.providerID,
             modelID: model?.modelID,
-            reasoningVariant: reasoning
+            reasoningVariant: reasoning,
+            profile: server?.profile ?? .legacy
         )
 
         return OpenCodeControlPayload(
@@ -83,16 +84,17 @@ private struct OpenCodeControlPayload {
         let command = resolvedCommand(configuration.command, server: server, project: project)
         let model = resolvedModel(configuration.model, server: server)
         let reasoning = resolvedReasoning(configuration.reasoning, model: model)
-        let serverID = server?.id ?? project?.serverID ?? command?.serverID ?? model?.serverID
+        let serverID = server?.rawServerID ?? server?.id
         let directory = project?.directory ?? command?.directory
-        let url = OpenCodeWidgetDeepLink.actionURL(
+        let url = (configuration.model != nil && model == nil) || (configuration.reasoning != nil && reasoning == nil) ? nil : OpenCodeWidgetDeepLink.actionURL(
             serverID: serverID,
             projectID: project?.projectID ?? command?.projectID,
             directory: directory,
             commandName: command?.name,
             providerID: model?.providerID,
             modelID: model?.modelID,
-            reasoningVariant: reasoning
+            reasoningVariant: reasoning,
+            profile: server?.profile ?? .legacy
         )
 
         let title = command.map { "/\($0.name)" } ?? String(localized: "Slash Command")

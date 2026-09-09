@@ -54,7 +54,7 @@ struct OpenCodeSessionsWidgetView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 14) {
-                    ForEach(entry.largeSessions) { session in
+                    ForEach(entry.largeSessions, id: \.entityID) { session in
                         Link(destination: openURL(for: session)) {
                             OpenCodeWidgetSessionRow(session: session)
                         }
@@ -69,11 +69,7 @@ struct OpenCodeSessionsWidgetView: View {
     }
 
     private func openURL(for session: OpenCodeWidgetSessionSnapshot) -> URL {
-        OpenCodeChatActivityDeepLink.openAppURL(
-            sessionID: session.id,
-            directory: session.directory,
-            workspaceID: session.workspaceID
-        ) ?? URL(string: "openclient://live-activity/session/\(session.id)")!
+        OpenCodeWidgetDeepLink.sessionURL(session) ?? URL(string: "openclient://widget")!
     }
 }
 

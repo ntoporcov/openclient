@@ -18,14 +18,15 @@ final class OpenCodeEventInterestSnapshot: @unchecked Sendable {
     private struct Snapshot {
         var selectedSessionID: String?
         var activeChatSessionID: String?
+        var windowSessionIDs: Set<String> = []
     }
 
     private let lock = NSLock()
     private var snapshot = Snapshot()
 
-    func update(selectedSessionID: String?, activeChatSessionID: String?) {
+    func update(selectedSessionID: String?, activeChatSessionID: String?, windowSessionIDs: Set<String> = []) {
         lock.lock()
-        snapshot = Snapshot(selectedSessionID: selectedSessionID, activeChatSessionID: activeChatSessionID)
+        snapshot = Snapshot(selectedSessionID: selectedSessionID, activeChatSessionID: activeChatSessionID, windowSessionIDs: windowSessionIDs)
         lock.unlock()
     }
 
@@ -42,7 +43,7 @@ final class OpenCodeEventInterestSnapshot: @unchecked Sendable {
         let current = snapshot
         lock.unlock()
 
-        return sessionID == current.activeChatSessionID || sessionID == current.selectedSessionID
+        return sessionID == current.activeChatSessionID || sessionID == current.selectedSessionID || current.windowSessionIDs.contains(sessionID)
     }
 
     private static func sessionID(for event: OpenCodeTypedEvent) -> String? {
@@ -94,7 +95,8 @@ extension AppViewModel {
     func updateEventInterestSnapshot() {
         eventInterestSnapshot.update(
             selectedSessionID: selectedSession?.id,
-            activeChatSessionID: activeChatSessionID
+            activeChatSessionID: activeChatSessionID,
+            windowSessionIDs: Set(windowSessionInterests.values)
         )
     }
 
@@ -125,16 +127,28 @@ extension AppViewModel {
     }
 
     func startEventStream() {
+        if let backendConnection {
+            startBackendEventStream(backendConnection)
+            return
+        }
+        guard backendFactory == nil else { return }
+        if connectionStore.apiProfile == .v2 {
+            startV2EventStream()
+            return
+        }
         stopEventStream()
         let client = self.client
         updateEventInterestSnapshot()
         lastStreamEventAt = .now
         debugLastEventSummary = "stream starting"
         appendDebugLog("stream start global")
+        let streamGeneration = eventManager.generation &+ 1
+        let activityLifetime = liveActivityFacade.currentLifetime
         eventManager.start(
             client: client,
             onStatus: { [weak self] status in
                 await MainActor.run {
+                    guard self?.eventManager.generation == streamGeneration else { return }
                     self?.debugLastEventSummary = status
                     self?.appendDebugLog(status)
                 }
@@ -142,12 +156,14 @@ extension AppViewModel {
             onRawLine: nil,
             onDroppedEvent: { [weak self] message in
                 await MainActor.run {
+                    guard self?.eventManager.generation == streamGeneration else { return }
                     self?.appendDebugLog(message)
                 }
             },
             onEvent: { [weak self] managed in
                 await MainActor.run {
-                    guard let self else { return }
+                    guard let self, self.eventManager.generation == streamGeneration else { return }
+                    self.liveActivityFacade.consumeBackgroundEvent(managed.typed, lifetime: activityLifetime)
                     if self.shouldLogEventDetails(for: managed.envelope.type) {
                         self.appendDebugLog("event \(managed.envelope.type): \(managed.directory)")
                     }
@@ -157,18 +173,426 @@ extension AppViewModel {
         )
     }
 
+    func startV2EventStream() {
+        if let backendConnection {
+            startBackendEventStream(backendConnection)
+            return
+        }
+        guard backendFactory == nil else { return }
+        stopEventStream()
+        let client = self.client
+        lastStreamEventAt = .now
+        debugLastEventSummary = "stream v2 starting"
+        appendDebugLog("stream start v2")
+        let streamGeneration = eventManager.generation &+ 1
+        let activityLifetime = liveActivityFacade.currentLifetime
+        eventManager.startV2(
+            client: client,
+            onStatus: { [weak self] status in
+                await MainActor.run {
+                    guard let self, !Task.isCancelled, self.eventManager.generation == streamGeneration else { return }
+                    self.debugLastEventSummary = status
+                    self.appendDebugLog(status)
+                    if status == "stream v2 reconnecting" {
+                        self.v2TimelineReconcileTask?.cancel()
+                        self.v2TimelineReconcileTask = nil
+                        self.v2TimelineReconcileGeneration &+= 1
+                    }
+                    if status.hasPrefix("stream open") {
+                        self.directoryStoreRegistry.requestV2Reconciliation(reconnect: true)
+                        self.scheduleV2TimelineReconciliation(immediate: true)
+                    }
+                }
+            },
+            onDroppedEvent: { [weak self] message in
+                await MainActor.run {
+                    guard self?.eventManager.generation == streamGeneration else { return }
+                    self?.appendDebugLog(message)
+                }
+            },
+            onEvent: { [weak self] event in
+                await MainActor.run {
+                    guard !Task.isCancelled, self?.eventManager.generation == streamGeneration else { return }
+                    self?.liveActivityFacade.consumeBackgroundEvent(event, lifetime: activityLifetime)
+                    self?.handleV2Event(event)
+                }
+            }
+        )
+    }
+
+    private func startBackendEventStream(_ connection: BackendConnection) {
+        stopEventStream()
+        guard isCurrentBackendConnection(connection) else { return }
+        let activityLifetime = liveActivityFacade.currentLifetime
+        updateEventInterestSnapshot()
+        lastStreamEventAt = .now
+        if let source = connection.events as? OpenCodeBackendEventSource {
+            source.legacyEvent = { [weak self, weak connection] event in
+                guard let self, let connection, self.isCurrentBackendConnection(connection) else { return }
+                self.liveActivityFacade.consumeBackgroundEvent(event.typed, lifetime: activityLifetime)
+                self.handleManagedEvent(event)
+            }
+            source.v2Event = { [weak self, weak connection] event in
+                guard let self, let connection, self.isCurrentBackendConnection(connection) else { return }
+                self.liveActivityFacade.consumeBackgroundEvent(event, lifetime: activityLifetime)
+                self.handleV2Event(event)
+            }
+        }
+        let stream = connection.eventStream()
+        backendEventTask = Task { [weak self, weak connection] in
+            for await event in stream {
+                guard let self, let connection, self.isCurrentBackendConnection(connection) else { return }
+                self.handleBackendEvent(event)
+            }
+        }
+    }
+
+    func handleBackendEvent(_ event: BackendEvent) {
+        switch event {
+        case let .status(status):
+            if status.hasPrefix("stream open") { globalFormsFacade.reconnect() }
+            debugLastEventSummary = status
+            appendDebugLog(status)
+            if connectionStore.apiProfile == .v2 {
+                if status == "stream v2 reconnecting" {
+                    v2TimelineReconcileTask?.cancel()
+                    v2TimelineReconcileTask = nil
+                    v2TimelineReconcileGeneration &+= 1
+                }
+                if status.hasPrefix("stream open") {
+                    directoryStoreRegistry.requestV2Reconciliation(reconnect: true)
+                    scheduleV2TimelineReconciliation(immediate: true)
+                }
+            }
+        case let .diagnostic(message):
+            appendDebugLog(message)
+        case let .actionSignal(signal):
+            guard let connection = backendConnection, let commands = connection.commands else { return }
+            projectActionCoordinator.receive(signal, backendID: connection.descriptor.id, contractID: commands.actionContractID)
+        case let .sessionForm(directory, event):
+            guard isConnected, backendConnection?.sessionForms != nil, event.sessionID != "global" else { return }
+            let owner = directoryStoreRegistry.ownerStore(forSessionID: event.sessionID) ?? directoryStoreRegistry.store(for: directory)
+            owner.applySessionFormEvent(event)
+            liveActivityFacade.reducerDidCommit(sessionIDs: [event.sessionID])
+            if case .created = event { handleBackendEvent(.actionSignal(.needsAttention(sessionID: event.sessionID))) }
+        case let .globalForm(location, event):
+            globalFormsFacade.receive(location: location, event: event)
+        case let .mutation(directory, typed):
+            guard isConnected else { return }
+            do {
+                let managed = try BackendMutationBridge.managed(directory: directory, event: typed)
+                let targets = directorySyncFacade.targetStores(for: managed, selectedSessionID: selectedSession?.id,
+                    selectedSessionDirectory: selectedSession?.directory, effectiveSelectedDirectory: effectiveSelectedDirectory,
+                    activeLiveActivitySessionIDs: [])
+                guard confirmRoutedPromptAdmission(managed, targets: targets) else { return }
+                var reducedProjects = projects
+                var reducedCurrentProject = currentProject
+                if eventSyncCoordinator.applyGlobalEvent(managed, projects: &reducedProjects, currentProject: &reducedCurrentProject) != nil {
+                    projects = reducedProjects
+                    currentProject = reducedCurrentProject
+                    return
+                }
+                // Same directory routing and reducers, without legacy polling/cache/optional-feature side effects.
+                let applications = directorySyncFacade.apply(
+                    managed, activeState: directoryEventState(), selectedSessionID: selectedSession?.id,
+                    selectedSessionDirectory: selectedSession?.directory, effectiveSelectedDirectory: effectiveSelectedDirectory,
+                    activeLiveActivitySessionIDs: [],
+                    scopedSessions: { [sessionListStore] in sessionListStore.sessions($0, scopedTo: $1) }
+                )
+                if let active = applications.first(where: { $0.store === directoryStore }) {
+                    objectWillChange.send()
+                    applyDirectoryEventState(active.application.state, to: active.store, appliesToStore: false)
+                }
+                reconcileCommittedSubmissionPresentations(managed, stores: applications.map(\.store))
+                lastStreamEventAt = .now
+            } catch {
+                appendDebugLog("drop backend mutation: \(error)")
+            }
+        }
+    }
+
+    func handleV2Event(_ event: OpenCodeV2ManagedEvent) {
+        guard connectionStore.apiProfile == .v2 else { return }
+        lastStreamEventAt = .now
+        debugLastEventSummary = event.type
+        if shouldLogEventDetails(for: event.type) {
+            appendDebugLog("v2 event \(event.type)")
+        }
+
+        if terminalFacade.consumeV2(event) || configurationsFacade.consumeV2(event) { return }
+
+        directoryStoreRegistry.recordV2LifecycleEvent(event)
+        if event.type == "project.directories.updated", let id = event.data.objectValue?["projectID"]?.literalStringValue,
+           let connection = backendConnection {
+            Task { [weak self] in
+                guard let self, self.isCurrentBackendConnection(connection) else { return }
+                await self.refreshProjectWorktreeInventory(projectID: id)
+            }
+            return
+        }
+        if event.type.hasPrefix("project.") || event.type.hasPrefix("worktree.") {
+            directoryStoreRegistry.requestV2Reconciliation(reconnect: true)
+            scheduleV2TimelineReconciliation()
+        }
+        guard let sessionID = event.sessionID else { return }
+        guard event.type == "session.deleted" || !directoryStoreRegistry.isV2SessionDeleted(sessionID) else { return }
+        let wasSelected = selectedSession?.id == sessionID
+        let owner = directoryStoreRegistry.targetStore(forV2Event: event)
+        let known = directoryStoreRegistry.session(matching: sessionID) != nil
+        let scopeChanged = directoryStoreRegistry.ownerStore(forSessionID: sessionID).map { $0 !== owner } ?? false
+        if event.type == "session.deleted" {
+            removeSessionFromLocalCache(sessionID)
+            removeWidgetSessionSnapshot(for: sessionID)
+            for store in directoryStoreRegistry.stores(containingSessionID: sessionID) {
+                store.removeV2Session(sessionID: sessionID)
+            }
+            chatStore.clearCachedMessages(forSessionID: sessionID)
+            if wasSelected { chatStore.clearActiveTranscript() }
+            removePinnedSessionIDFromAllScopes(sessionID)
+            removeSessionPreview(for: sessionID)
+            sessionListStore.removeRecentSession(sessionID: sessionID)
+        } else {
+            if event.type == "session.moved", let previous = directoryStoreRegistry.session(matching: sessionID) {
+                owner.insertV2Session(previous)
+                for old in directoryStoreRegistry.stores(containingSessionID: sessionID) where old !== owner {
+                    owner.applyV2Messages(old.syncState.messageEnvelopes(forSessionID: sessionID), forSessionID: sessionID)
+                    if let status = old.sessionStatuses[sessionID] { owner.applySessionStatus(status, forSessionID: sessionID) }
+                    old.removeV2Session(sessionID: sessionID)
+                }
+                if wasSelected, owner !== directoryStore { chatStore.clearActiveTranscript() }
+            }
+            _ = owner.applyV2Event(event)
+            if wasSelected, event.type == "session.execution.failed" {
+                errorMessage = event.data.objectValue?["error"]?.objectValue?["message"]?.literalStringValue
+            }
+            let projected = chatStore.applyV2StreamEvent(event, sessionID: sessionID)
+            if let inputID = event.inputID, let connection = backendConnection,
+               chatStore.submissionRecoveries[inputID]?.phase == .admitted
+                || chatStore.submissionRecoveries[inputID]?.phase == .cancelled
+                || chatStore.canonicalSubmissionSessions[inputID] == sessionID {
+                connectionStore.clearPromptError(connectionID: connection.id, sessionID: sessionID, messageID: inputID)
+                if chatStore.submissionRecoveries[inputID]?.phase == .admitted {
+                    chatStore.applyPromptAdmission(.admitted, messageID: inputID, connectionID: connection.id)
+                } else if let canonical = chatStore.cachedMessagesBySessionID[sessionID]?.first(where: { $0.id == inputID }) {
+                    confirmCanonicalPromptAdmission(canonical.info, connectionID: connection.id)
+                }
+            }
+            if projected {
+                owner.applyV2Messages(chatStore.cachedMessagesBySessionID[sessionID] ?? [], forSessionID: sessionID)
+            } else {
+                owner.applyV2Messages(chatStore.withoutRecoveryMessages(owner.syncState.messageEnvelopes(forSessionID: sessionID),
+                    sessionID: sessionID), forSessionID: sessionID)
+            }
+            finishTranscriptCommit(in: owner, sessionID: sessionID)
+            let requiresProjection = event.isExecutionTerminal || !known || scopeChanged
+                || chatStore.isHydratingV2Transcript(sessionID: sessionID)
+                || event.type == "session.forked" || event.type == "session.moved"
+                || event.type == "session.inbox.delivered"
+                || event.type == "session.agent.selected" || event.type == "session.model.selected"
+                || event.type.hasPrefix("session.compaction.") || event.type.hasPrefix("session.shell.")
+                || event.type == "session.synthetic" || event.type == "session.skill.activated"
+                || event.type == "session.instructions.updated"
+                || (!projected && event.affectsTranscript)
+            if requiresProjection, sessionID != "global" {
+                directoryStoreRegistry.requestV2Reconciliation(sessionID: sessionID)
+                scheduleV2TimelineReconciliation()
+            }
+        }
+        if let selected = selectedSession {
+            sessionInteractionStore.applySelectedSession(sessionID: selected.id, sessions: directoryStore.sessions, syncState: directoryStore.syncState)
+        } else if wasSelected {
+            _ = sessionInteractionStore.applyVisibleInteractions(todos: [], permissions: [], questions: [])
+        }
+        sessionListFacade.invalidateWorkspaceSnapshot()
+        liveActivityFacade.reducerDidCommit(sessionIDs: [sessionID])
+        objectWillChange.send()
+    }
+
+    func scheduleV2InteractionRefresh(for sessionID: String) {
+        directoryStoreRegistry.requestV2Reconciliation(sessionID: sessionID)
+        scheduleV2TimelineReconciliation()
+    }
+
+    func scheduleV2TimelineReconciliation(immediate: Bool = false) {
+        guard connectionStore.apiProfile == .v2 else { return }
+        if directoryStoreRegistry.v2PendingSessionIDs.isEmpty,
+           let sessionID = selectedSession?.id {
+            directoryStoreRegistry.requestV2Reconciliation(sessionID: sessionID)
+        }
+        isV2TimelineReconcilePending = true
+        guard v2TimelineReconcileTask == nil else { return }
+        v2TimelineReconcileGeneration &+= 1
+        let generation = v2TimelineReconcileGeneration
+        v2TimelineReconcileTask?.cancel()
+        v2TimelineReconcileTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.v2TimelineReconcileGeneration == generation {
+                    self.v2TimelineReconcileTask = nil
+                }
+            }
+            if !immediate {
+                try? await Task.sleep(for: .milliseconds(180))
+            }
+            let registryGeneration = self.directoryStoreRegistry.generation
+            while !Task.isCancelled, self.directoryStoreRegistry.generation == registryGeneration {
+                self.isV2TimelineReconcilePending = false
+                let request = self.directoryStoreRegistry.takeV2Reconciliation()
+                if request.reconnect { await self.hydrateV2ReconnectState() }
+                for sessionID in request.sessionIDs.sorted() {
+                    guard !Task.isCancelled, self.directoryStoreRegistry.generation == registryGeneration else { return }
+                    await self.reconcileV2KnownSession(sessionID: sessionID)
+                }
+                guard self.isV2TimelineReconcilePending || !self.directoryStoreRegistry.v2PendingSessionIDs.isEmpty else { return }
+                try? await Task.sleep(for: .milliseconds(180))
+            }
+        }
+    }
+
+    private func hydrateV2ReconnectState() async {
+        guard let connection = backendConnection else { return }
+        let generation = directoryStoreRegistry.generation
+        await terminalFacade.refreshAfterEventReconnect()
+        guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
+        await configurationsFacade.refreshAfterEventReconnect()
+        guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
+        if let projectID = currentProject?.id { await refreshProjectWorktreeInventory(projectID: projectID) }
+        guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
+        let projectRevision = directoryStoreRegistry.v2ProjectRevision
+        do {
+            let bootstrap = try await client.bootstrapV2Projects()
+            guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
+            if directoryStoreRegistry.v2ProjectRevision == projectRevision {
+                projectStore.defaultServerDirectory = bootstrap.selectedDirectory
+                projects = projectCoordinator.bootstrapProjects(bootstrap.projects, currentProject: bootstrap.currentProject)
+                    .map { projectStore.preservingSelectedDirectory($0, connectionID: connection.id) }
+                if let selected = currentProject, let updated = projects.first(where: { $0.id == selected.id }) {
+                    currentProject = updated
+                }
+                persistProjectsToLocalCache()
+            }
+        } catch {
+            if !Task.isCancelled { appendDebugLog("v2 project reconciliation failed: \(error.localizedDescription)") }
+        }
+        for store in directoryStoreRegistry.allStores {
+            guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
+            guard let key = directoryStoreRegistry.key(for: store) else { continue }
+            let directory = DirectoryStoreRegistry.directory(forKey: key)
+            let snapshot = directoryStoreRegistry.v2LifecycleSnapshot
+            let sessionsBeforeRequest = store.sessions
+            do {
+                let projectID = key == DirectoryStoreRegistry.globalKey ? "global" : store.sessions.first?.projectID ?? "global"
+                let page = try await client.listV2Sessions(projectID: projectID, directory: directory, roots: false)
+                guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
+                let unchanged = directoryStoreRegistry.unchangedV2Sessions(page.sessions, since: snapshot)
+                store.applyV2DiscoveredSessions(unchanged, ifUnchangedSince: sessionsBeforeRequest)
+                for session in unchanged {
+                    guard isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation else { return }
+                    directoryStoreRegistry.requestV2Reconciliation(sessionID: session.id)
+                    await funAndGamesFacade.reconcileSetup(for: session.id)
+                }
+            } catch {
+                if !Task.isCancelled { appendDebugLog("v2 directory reconciliation failed: \(error.localizedDescription)") }
+            }
+        }
+        let stores = directoryStoreRegistry.allStores.map { ($0, $0.statusRevision) }
+        let lifecycleSnapshot = directoryStoreRegistry.v2LifecycleSnapshot
+        do {
+            let statuses = try await client.listV2SessionStatuses()
+            guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
+            for (store, revision) in stores {
+                store.applyV2ActiveStatuses(statuses, requestedAtRevision: revision)
+            }
+            for id in statuses.keys where directoryStoreRegistry.ownerStore(forSessionID: id) == nil
+                && !directoryStoreRegistry.isV2SessionDeleted(id)
+                && directoryStoreRegistry.v2LifecycleRevision(sessionID: id) == (lifecycleSnapshot[id] ?? 0) {
+                directoryStoreRegistry.store(for: nil).applySessionStatus(statuses[id] ?? "busy", forSessionID: id)
+                directoryStoreRegistry.requestV2Reconciliation(sessionID: id)
+            }
+        } catch {
+            if !Task.isCancelled { appendDebugLog("v2 active hydration failed: \(error.localizedDescription)") }
+        }
+    }
+
+    private func reconcileV2KnownSession(sessionID: String) async {
+        let client = client
+        let registryGeneration = directoryStoreRegistry.generation
+        let originalOwner = directoryStoreRegistry.ownerStore(forSessionID: sessionID)
+        let originalSession = directoryStoreRegistry.session(matching: sessionID)
+        let lifecycleRevision = directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID)
+        do {
+            let session = try await client.getV2Session(sessionID: sessionID)
+            guard !Task.isCancelled, directoryStoreRegistry.generation == registryGeneration,
+                  directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID) == lifecycleRevision,
+                  directoryStoreRegistry.session(matching: sessionID) == originalSession else { return }
+            let owner = directoryStoreRegistry.targetStore(forV2Session: session)
+            owner.insertV2Session(session)
+            if let parent = session.parentID { handleBackendEvent(.actionSignal(.sessionParent(sessionID: session.id, parentID: parent))) }
+            applyV2SessionConfiguration(session)
+            if let originalOwner, originalOwner !== owner {
+                if selectedSession?.id == sessionID { chatStore.clearActiveTranscript() }
+                if let status = originalOwner.sessionStatuses[sessionID] { owner.applySessionStatus(status, forSessionID: sessionID) }
+                originalOwner.removeV2Session(sessionID: sessionID)
+            }
+            let permissionRevision = owner.permissionRevision
+            let questionRevision = owner.questionRevision
+            do {
+                async let permissions = client.listV2SessionPermissions(sessionID: sessionID)
+                async let forms = client.listV2SessionForms(sessionID: sessionID)
+                let (loadedPermissions, loadedForms) = try await (permissions, forms)
+                guard !Task.isCancelled, directoryStoreRegistry.generation == registryGeneration,
+                      directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID) == lifecycleRevision,
+                      owner.sessions.first(where: { $0.id == sessionID }) == session else { return }
+                owner.applyV2SessionInteractions(sessionID: sessionID, permissions: loadedPermissions, forms: loadedForms,
+                    permissionRevisionAtRequestStart: permissionRevision, questionRevisionAtRequestStart: questionRevision)
+                liveActivityFacade.reducerDidCommit(sessionIDs: [sessionID])
+                if selectedSession?.id == sessionID {
+                    sessionInteractionStore.applySelectedSession(sessionID: sessionID, sessions: owner.sessions, syncState: owner.syncState)
+                }
+            } catch {
+                guard !Task.isCancelled, directoryStoreRegistry.generation == registryGeneration else { return }
+                appendDebugLog("v2 interaction reconciliation failed: \(error.localizedDescription)")
+            }
+            guard !Task.isCancelled, directoryStoreRegistry.generation == registryGeneration,
+                   directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID) == lifecycleRevision,
+                   owner.sessions.first(where: { $0.id == sessionID }) == session else { return }
+            await reconcileV2TimelineFromEvent(sessionID: sessionID)
+        } catch OpenCodeAPIError.httpError(404, _) {
+            // Only GET Session.Info proves deletion. A missing subresource does not.
+            guard !Task.isCancelled, directoryStoreRegistry.generation == registryGeneration,
+                  directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID) == lifecycleRevision,
+                  directoryStoreRegistry.session(matching: sessionID) == originalSession else { return }
+            originalOwner?.removeV2Session(sessionID: sessionID)
+            directoryStoreRegistry.markV2SessionDeleted(sessionID)
+            chatStore.clearCachedMessages(forSessionID: sessionID)
+            if chatStore.preparedSessionID == sessionID { chatStore.clearActiveTranscript() }
+        } catch {
+            if !Task.isCancelled { appendDebugLog("v2 session reconciliation failed: \(error.localizedDescription)") }
+        }
+    }
+
     func stopEventStream() {
+        backendEventTask?.cancel()
+        backendEventTask = nil
+        backendConnection?.stopEvents()
         flushPendingTranscriptEvents(reason: "stream stop")
         reloadTask?.cancel()
         reloadTask = nil
         eventManager.stop()
         eventStreamRestartTask?.cancel()
         eventStreamRestartTask = nil
+        v2TimelineReconcileTask?.cancel()
+        v2TimelineReconcileTask = nil
+        v2InteractionRefreshTask?.cancel()
+        v2InteractionRefreshTask = nil
+        v2TimelineReconcileGeneration &+= 1
+        isV2TimelineReconcilePending = false
         debugLastEventSummary = "stream stopped"
         appendDebugLog("stream stopped")
     }
 
     func startDebugProbeStreams() {
+        guard backendFactory == nil || backendConnection?.openCodeCompatibility != nil else { return }
         let client = self.client
         guard let urls = try? client.eventURLs(directory: streamDirectory) else { return }
 
@@ -206,6 +630,7 @@ extension AppViewModel {
 
     func handleManagedEvent(_ managed: OpenCodeManagedEvent) {
         guard eventSyncCoordinator.shouldProcessEvent(isConnected: isConnected) else { return }
+        guard backendConnection?.openCodeCompatibility?.profile != .v2 else { return }
 
         if shouldLogEventDetails(for: managed.envelope.type) {
             appendDebugLog(eventScopeSummary(for: managed))
@@ -257,6 +682,7 @@ extension AppViewModel {
             appendDebugLog("drop \(managed.envelope.type): scope mismatch \(managed.directory) selected=\(debugDirectoryLabel(effectiveSelectedDirectory)) stream=\(debugDirectoryLabel(streamDirectory)) session=\(debugSessionLabel(selectedSession))")
             return
         }
+        guard confirmRoutedPromptAdmission(managed, targets: targetStores) else { return }
         let updatesActiveStore = targetStores.contains { $0 === directoryStore }
 
         if eventAffectsActiveSession(managed) {
@@ -329,6 +755,7 @@ extension AppViewModel {
         if updatesActiveStore, managed.envelope.type == "message.part.updated" {
             flushPendingTranscriptEvents(reason: "after \(managed.envelope.type)")
         }
+        reconcileCommittedSubmissionPresentations(managed, stores: applications.map(\.store))
         let result = applications.first(where: { $0.store === directoryStore })?.application.result
             ?? applications.last?.application.result
             ?? .ignored("no target store")
@@ -409,7 +836,7 @@ extension AppViewModel {
         switch managed.typed {
         case let .worktreeReady(name, branch):
             objectWillChange.send()
-            sessionListStore.setWorkspaceOperation(nil, for: managed.directory)
+            recordWorktreeReadiness(directory: managed.directory, error: nil)
             appendDebugLog("worktree ready dir=\(managed.directory) name=\(name) branch=\(branch)")
             Task { [weak self] in
                 await self?.refreshWorkspaceSessions(directory: managed.directory)
@@ -417,7 +844,7 @@ extension AppViewModel {
             return true
         case let .worktreeFailed(message):
             objectWillChange.send()
-            sessionListStore.setWorkspaceOperation(.failed(message), for: managed.directory)
+            recordWorktreeReadiness(directory: managed.directory, error: message)
             appendDebugLog("worktree failed dir=\(managed.directory) message=\(message)")
             return true
         default:
@@ -599,6 +1026,68 @@ extension AppViewModel {
         )
     }
 
+    private func confirmRoutedPromptAdmission(_ event: OpenCodeManagedEvent, targets: [DirectoryStore]) -> Bool {
+        let sessionID: String?
+        switch event.typed {
+        case let .messageUpdated(info): sessionID = info.sessionID
+        case let .messagePartUpdated(part): sessionID = part.sessionID
+        case let .messagePartDelta(id, _, _, _, _), let .messageRemoved(id, _): sessionID = id
+        default: return true
+        }
+        guard let sessionID else { return true }
+        guard !targets.isEmpty else { return false }
+        if let owner = directoryStoreRegistry.ownerStore(forSessionID: sessionID) {
+            let session = owner.sessions.first { $0.id == sessionID }
+                ?? (owner.selectedSession?.id == sessionID ? owner.selectedSession : nil)
+            // Project/global containers can own sessions whose actual location is a worktree.
+            let directory = session.map { DirectoryStoreRegistry.key(for: $0.directory) }
+                ?? directoryStoreRegistry.key(for: owner)
+            guard targets.contains(where: { $0 === owner }),
+                  event.directory == DirectoryStoreRegistry.globalKey
+                    || directory == DirectoryStoreRegistry.key(for: event.directory) else { return false }
+        }
+        if case let .messageUpdated(info) = event.typed, let connection = backendConnection {
+            confirmCanonicalPromptAdmission(info, connectionID: connection.id)
+        }
+        return true
+    }
+
+    private func reconcileCommittedSubmissionPresentations(_ event: OpenCodeManagedEvent, stores: [DirectoryStore]) {
+        guard !stores.isEmpty else { return }
+        if case let .messageRemoved(sessionID, messageID) = event.typed {
+            chatStore.removeSubmissionPresentation(messageID: messageID, sessionID: sessionID)
+        }
+        guard let sessionID = eventSyncCoordinator.sessionID(for: event.typed) else { return }
+        for store in stores {
+            finishTranscriptCommit(in: store, sessionID: sessionID)
+        }
+    }
+
+    /// Keep existing presentation owners on the same canonical snapshot before releasing the shared visual bridge.
+    func finishTranscriptCommit(in source: DirectoryStore, sessionID: String,
+                                completeInventory: [OpenCodeMessageEnvelope]? = nil) {
+        guard directoryStoreRegistry.key(for: source) != nil else { return }
+        let committed = source.syncState.messageEnvelopes(forSessionID: sessionID)
+        if windowSessionInterests.values.contains(sessionID),
+           let session = source.sessions.first(where: { $0.id == sessionID })
+                ?? (source.selectedSession?.id == sessionID ? source.selectedSession : nil) {
+            for target in directoryStoreRegistry.stores(containingSessionID: sessionID) where target !== source {
+                guard let targetSession = target.sessions.first(where: { $0.id == sessionID })
+                    ?? (target.selectedSession?.id == sessionID ? target.selectedSession : nil),
+                    DirectoryStoreRegistry.key(for: targetSession.directory) == DirectoryStoreRegistry.key(for: session.directory),
+                    targetSession.workspaceID == session.workspaceID else { continue }
+                // The source has already reduced/ordered these envelopes. Never merge a local overlay here.
+                target.applyV2Messages(committed, forSessionID: sessionID)
+                if let status = source.sessionStatuses[sessionID] { target.applySessionStatus(status, forSessionID: sessionID) }
+                if target === directoryStore, selectedSession?.id == sessionID {
+                    chatStore.replaceActiveMessagesWithCanonical(committed)
+                }
+            }
+        }
+        let inventory = completeInventory.map { inventory in committed.filter { inventory.contains($0) } } ?? committed
+        chatStore.retireSubmissionPresentations(in: inventory, sessionID: sessionID, completeInventory: completeInventory != nil)
+    }
+
     private func applyDirectoryEventState(
         _ state: EventSyncCoordinator.DirectoryEventState,
         to targetStore: DirectoryStore? = nil,
@@ -628,6 +1117,9 @@ extension AppViewModel {
             }
             if projectedMessages != messages {
                 chatStore.replaceActiveMessagesWithCanonical(projectedMessages)
+            }
+            if let sessionID = state.selectedSession?.id {
+                finishTranscriptCommit(in: targetStore, sessionID: sessionID)
             }
         }
         let selectedSessionID = state.selectedSession?.id

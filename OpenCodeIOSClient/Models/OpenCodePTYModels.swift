@@ -8,6 +8,7 @@ struct OpenCodePTY: Codable, Hashable, Identifiable, Sendable {
     let cwd: String
     let status: String
     let pid: Int
+    var exitCode: Int? = nil
 }
 
 struct OpenCodePTYCreateRequest: Encodable, Sendable {
@@ -53,6 +54,7 @@ struct OpenCodePTYUpdateRequest: Encodable, Sendable {
 
 enum OpenCodePTYSocketEvent: Equatable, Sendable {
     case connected
+    case closed(code: Int)
     case output(String, cursor: Int)
     case cursor(Int)
 }

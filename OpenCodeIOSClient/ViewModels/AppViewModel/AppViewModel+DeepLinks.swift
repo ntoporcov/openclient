@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 struct OpenClientShareDeepLink: Equatable, Sendable {
@@ -18,22 +19,12 @@ struct OpenClientShareDeepLink: Equatable, Sendable {
 
 extension AppViewModel {
     func prepareOpenURLPresentation(_ url: URL) {
-        if let shareRequest = OpenClientShareDeepLink(url: url),
-           let initialContent = shareInitialContent(payloadID: shareRequest.payloadID, deletesAfterLoad: false) {
-            presentNewProjectChatSheet(
-                initialContent: initialContent,
-                presentsAboveConnection: true
-            )
+        if let shareRequest = OpenClientShareDeepLink(url: url) {
+            newProjectChatFacade.prepareShare(shareRequest)
             return
         }
 
-        guard let widgetRequest = OpenCodeWidgetDeepLink.request(from: url),
-              case .newSession = widgetRequest.kind else { return }
-
-        presentWidgetNewSessionSheet(
-            for: widgetRequest,
-            composerSelection: widgetComposerSelection(from: widgetRequest)
-        )
+        // Widget destinations must be verified before exposing an editable composer.
     }
 
     func handleOpenURL(_ url: URL) async {
@@ -51,151 +42,139 @@ extension AppViewModel {
     }
 
     private func handleShareDeepLink(_ request: OpenClientShareDeepLink) async {
-        let initialContent = shareInitialContent(payloadID: request.payloadID, deletesAfterLoad: true)
-        if let serverID = request.serverID,
-           config.recentServerID != serverID {
-            guard let serverConfig = recentServerConfigs.first(where: { $0.recentServerID == serverID }) else {
-                errorMessage = String(localized: "Open the app once before sharing to this connection.")
-                return
-            }
-            await connect(to: serverConfig)
-        } else if !isConnected, hasSavedServer {
-            await connect()
-        }
-
-        guard isConnected else { return }
-        if projects.isEmpty {
-            do {
-                try await refreshProjects()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
-
-        presentNewProjectChatSheet(
-            initialContent: initialContent,
-            presentsAboveConnection: true
-        )
+        await newProjectChatFacade.acceptShare(request)
     }
 
-    private func shareInitialContent(payloadID: String, deletesAfterLoad: Bool) -> NewProjectChatInitialContent? {
-        guard let payload = try? OpenClientSharePayloadStore.load(id: payloadID, deletesAfterLoad: deletesAfterLoad) else {
-            return nil
+    func handleWidgetDeepLink(_ request: OpenCodeWidgetDeepLink.Request) async {
+        if case let .session(sessionID) = request.kind {
+            await openWidgetSession(sessionID, request: request)
+            return
         }
-        let attachments = payload.attachments.map { attachment in
-            OpenCodeComposerAttachment(
-                id: OpenCodeIdentifier.part(),
-                kind: attachment.mime.lowercased().hasPrefix("image/") ? .image : .file,
-                filename: attachment.filename,
-                mime: attachment.mime,
-                dataURL: attachment.dataURL
-            )
-        }
-        return NewProjectChatInitialContent(text: payload.text, attachments: attachments)
-    }
-
-    private func handleWidgetDeepLink(_ request: OpenCodeWidgetDeepLink.Request) async {
-        let selection = widgetComposerSelection(from: request)
-        if case .newSession = request.kind {
-            presentWidgetNewSessionSheet(for: request, composerSelection: selection)
-        }
-
-        guard await ensureWidgetDeepLinkServerConnection(serverID: request.serverID) else { return }
-
+        guard request.serverID?.isEmpty == false, request.projectID?.isEmpty == false else { return }
+        guard await ensureWidgetDeepLinkServerConnection(serverID: request.serverID, profile: request.profile),
+              let connection = backendConnection else { return }
         do {
-            if projects.isEmpty || shouldRefreshProjects(for: request) {
-                try await refreshProjects()
+            let catalog = try await connection.projects.projectsSnapshot()
+            guard isCurrentBackendConnection(connection), widgetConnectionMatches(request) else { return }
+            guard let project = catalog.projects.first(where: { $0.id == request.projectID }) else { throw BackendError.invalidScope }
+            let directory: String?
+            if project.id == "global" {
+                directory = request.profile == .v2 ? catalog.defaultDirectory : nil
+                guard request.directory == nil || request.directory == directory else { throw BackendError.invalidScope }
+                if request.profile == .v2, directory?.isEmpty != false { throw BackendError.invalidScope }
+            } else {
+                directory = request.directory ?? project.worktree
+                guard directory == project.worktree || (project.sandboxes ?? []).contains(directory ?? "") else {
+                    throw BackendError.invalidScope
+                }
             }
+            guard request.workspaceID == nil else { throw BackendError.invalidScope }
+            if request.profile == .v2, connection.sessionSelection == nil { throw BackendError.unsupported(.commands) }
+            if case .action = request.kind, connection.commands == nil { throw BackendError.unsupported(.commands) }
+            let scope = BackendScope(projectID: project.id, directory: directory)
+            let selection = widgetComposerSelection(from: request)
+            guard (request.providerID == nil) == (request.modelID == nil),
+                  request.reasoningVariant == nil || selection?.modelReference != nil else { throw BackendError.invalidScope }
+            if let reference = selection?.modelReference {
+                let models = try await connection.models.modelCatalog(scope: scope)
+                guard isCurrentBackendConnection(connection), widgetConnectionMatches(request) else { return }
+                guard let model = models.providers.first(where: { $0.id == reference.providerID })?.models[reference.modelID],
+                      request.reasoningVariant.map({ model.variants?[$0] != nil }) ?? true else { throw BackendError.invalidScope }
+            }
+            projects = catalog.projects
+            projectStore.defaultServerDirectory = catalog.defaultDirectory
+            await newProjectChatFacade.acceptWidget(request, project: project, scope: scope, selection: selection)
         } catch {
-            errorMessage = error.localizedDescription
-            return
-        }
-
-        guard let project = resolveWidgetDeepLinkProject(request) else {
-            errorMessage = String(localized: "Project is no longer available. Open the app to sync widget settings.")
-            return
-        }
-
-        await loadComposerOptions()
-
-        switch request.kind {
-        case .newSession:
-            return
-        case let .action(commandName):
-            await startWidgetSession(project: project, directory: request.directory, commandName: commandName, composerSelection: selection)
+            guard isCurrentBackendConnection(connection), widgetConnectionMatches(request) else { return }
+            newProjectChatFacade.setWidgetRoutingError(String(localized: "Project is no longer available. Open the app to sync widget settings."))
         }
     }
 
-    private func presentWidgetNewSessionSheet(
-        for request: OpenCodeWidgetDeepLink.Request,
-        composerSelection: NewProjectChatComposerSelection?
-    ) {
-        if let existing = newProjectChatSheetRequest,
-           existing.presentsAboveConnection,
-           existing.projectID == request.projectID,
-           existing.workspaceDirectory == request.directory,
-           existing.locksProject,
-           existing.composerSelection == composerSelection {
-            return
+    private func ensureWidgetDeepLinkServerConnection(serverID: String?, profile: OpenCodeProfileIdentity) async -> Bool {
+        let targetID = serverID ?? config.recentServerID
+        guard let saved = recentServerConfigs.first(where: { $0.recentServerID == targetID }),
+              saved.apiPreference == .automatic || saved.apiPreference.rawValue == profile.rawValue else {
+            newProjectChatFacade.setWidgetRoutingError(String(localized: "Open the app to reconnect the server used by this widget."))
+            return false
         }
 
-        presentNewProjectChatSheet(
-            projectID: request.projectID,
-            workspaceDirectory: request.directory,
-            locksProject: true,
-            composerSelection: composerSelection,
-            presentsAboveConnection: true
-        )
-    }
-
-    private func shouldRefreshProjects(for request: OpenCodeWidgetDeepLink.Request) -> Bool {
-        if let projectID = request.projectID,
-           !projects.contains(where: { $0.id == projectID }) {
-            return true
-        }
-        return false
-    }
-
-    private func ensureWidgetDeepLinkServerConnection(serverID: String?) async -> Bool {
-        if let serverID, config.recentServerID != serverID {
-            guard let serverConfig = recentServerConfigs.first(where: { $0.recentServerID == serverID }) else {
-                errorMessage = String(localized: "Open the app to reconnect the server used by this widget.")
-                return false
+        if connectionAttemptID != nil, connectionStore.isLoading {
+            // Join only this destination's attempt. Never replace an in-flight unrelated connection.
+            guard config.recentServerID == targetID, config.apiPreference == saved.apiPreference else { return false }
+            let attempt = connectionAttemptID
+            for await loading in connectionStore.$isLoading.values {
+                guard !Task.isCancelled, config.recentServerID == targetID,
+                      connectionAttemptID == attempt || connectionAttemptID == nil else { return false }
+                if !loading { break }
             }
-            await connect(to: serverConfig)
-            return isConnected
+        } else if !isConnected || config.recentServerID != targetID || config.apiPreference != saved.apiPreference
+                    || config.password != saved.password {
+            await connect(to: saved)
         }
-
-        if !isConnected {
-            guard hasSavedServer else { return false }
-            await connect()
+        let matches = !Task.isCancelled && isConnected && config.recentServerID == targetID
+            && config.apiPreference == saved.apiPreference
+            && connectionStore.apiProfile?.rawValue == profile.rawValue
+            && backendConnection?.isClosed == false
+            && widgetBackendMatches(profile: profile, serverID: targetID)
+        if !matches {
+            newProjectChatFacade.setWidgetRoutingError(String(localized: "Open the app to reconnect the server used by this widget."))
         }
-        return isConnected
+        return matches
     }
 
-    private func resolveWidgetDeepLinkProject(_ request: OpenCodeWidgetDeepLink.Request) -> OpenCodeProject? {
-        if let projectID = request.projectID,
-           let project = projects.first(where: { $0.id == projectID }) {
-            return project
-        }
+    func widgetConnectionMatches(_ request: OpenCodeWidgetDeepLink.Request) -> Bool {
+        !Task.isCancelled && isConnected
+            && (request.serverID == nil || request.serverID == config.recentServerID)
+            && recentServerConfigs.contains(where: { $0.recentServerID == config.recentServerID
+                && $0.apiPreference == config.apiPreference && $0.password == config.password })
+            && connectionStore.apiProfile?.rawValue == request.profile.rawValue
+            && widgetBackendMatches(profile: request.profile, serverID: request.serverID ?? config.recentServerID)
+    }
 
-        if let directory = request.directory {
-            let key = workspaceKey(directory)
-            if let project = projects.first(where: { project in
-                project.id != "global" && (
-                    workspaceKey(project.worktree) == key ||
-                        (project.sandboxes ?? []).contains { workspaceKey($0) == key }
-                )
-            }) {
-                return project
+    private func widgetBackendMatches(profile: OpenCodeProfileIdentity, serverID: String) -> Bool {
+        guard let adapter = backendConnection?.openCodeCompatibility else { return true }
+        let actual = adapter.client.config
+        return adapter.profile.rawValue == profile.rawValue && actual.recentServerID == serverID
+            && actual.trimmedBaseURL == config.trimmedBaseURL && actual.trimmedUsername == config.trimmedUsername
+            && actual.password == config.password && actual.apiPreference == config.apiPreference
+    }
+
+    private func openWidgetSession(_ sessionID: String, request: OpenCodeWidgetDeepLink.Request) async {
+        guard await ensureWidgetDeepLinkServerConnection(serverID: request.serverID, profile: request.profile),
+              let connection = backendConnection else { return }
+        let navigationGeneration = sessionNavigationGeneration
+        do {
+            let scope = BackendScope(projectID: request.projectID, directory: request.directory, workspaceID: request.workspaceID)
+            let session = try await connection.sessions.session(id: sessionID, scope: scope)
+            guard isCurrentBackendConnection(connection), widgetConnectionMatches(request),
+                  sessionNavigationGeneration == navigationGeneration else { return }
+            guard session.id == sessionID, session.projectID == request.projectID,
+                  widgetDirectory(session.directory) == widgetDirectory(request.directory),
+                  session.workspaceID == request.workspaceID else { throw BackendError.invalidScope }
+
+            let catalog = try await connection.projects.projectsSnapshot()
+            guard isCurrentBackendConnection(connection), widgetConnectionMatches(request),
+                  sessionNavigationGeneration == navigationGeneration else { return }
+            guard let project = catalog.projects.first(where: { $0.id == session.projectID }) else {
+                throw BackendError.invalidScope
             }
+            // Only canonical session/project values may alter navigation; the URL is not a cache seed.
+            newProjectChatFacade.setWidgetRoutingError(nil)
+            currentProject = project
+            prepareDirectorySelection(session.directory)
+            upsertVisibleSession(session)
+            isLoadingSessions = false
+            await selectSession(session)
+        } catch {
+            guard isCurrentBackendConnection(connection), widgetConnectionMatches(request),
+                  sessionNavigationGeneration == navigationGeneration else { return }
+            newProjectChatFacade.setWidgetRoutingError(String(localized: "Project is no longer available. Open the app to sync widget settings."))
         }
+    }
 
-        if let currentProject {
-            return currentProject
-        }
-
-        return projects.first(where: { $0.id != "global" }) ?? projects.first
+    private func widgetDirectory(_ directory: String?) -> String? {
+        guard let directory, !directory.isEmpty, directory != "/" else { return nil }
+        return directory
     }
 
     private func widgetComposerSelection(from request: OpenCodeWidgetDeepLink.Request) -> NewProjectChatComposerSelection? {
@@ -214,116 +193,4 @@ extension AppViewModel {
         )
     }
 
-    @discardableResult
-    private func startWidgetSession(
-        project: OpenCodeProject,
-        directory: String?,
-        commandName: String?,
-        composerSelection: NewProjectChatComposerSelection?
-    ) async -> Bool {
-        guard backendMode == .server, isConnected else {
-            errorMessage = String(localized: "Connect to an OpenCode server before starting a session.")
-            return false
-        }
-        guard canCreateSessionOrPresentPaywall() else { return false }
-
-        let hasCommand = commandName?.isEmpty == false
-        var didReservePrompt = false
-        if hasCommand {
-            guard reserveUserPromptIfAllowed() else { return false }
-            didReservePrompt = true
-        }
-
-        let routeDirectory = project.id == "global" ? nil : project.worktree
-        let targetDirectory: String?
-        if project.id == "global" {
-            targetDirectory = nil
-        } else if let directory, !directory.isEmpty {
-            targetDirectory = directory
-        } else {
-            targetDirectory = project.worktree
-        }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            currentProject = project
-            prepareDirectorySelection(routeDirectory)
-
-            let createSubmission = sessionCoordinator.prepareCreateSession(title: "", directory: targetDirectory)
-            let session = try await sessionCoordinator.submitCreate(client: client, submission: createSubmission)
-            recordCreatedSessionForMetering()
-            upsertVisibleSession(session)
-            try await reloadSessions()
-            await loadComposerOptions()
-
-            if let composerSelection {
-                applyNewProjectChatComposerSelection(composerSelection, to: session)
-            } else {
-                seedComposerSelectionsForNewSession(session)
-            }
-
-            upsertVisibleSession(session)
-            prepareSessionSelection(session)
-            await selectSession(session)
-
-            if let commandName, !commandName.isEmpty {
-                try await submitWidgetCommand(named: commandName, in: session)
-            }
-
-            errorMessage = nil
-            return true
-        } catch {
-            if didReservePrompt {
-                refundReservedUserPromptIfNeeded()
-            }
-            isLoadingSessions = false
-            appendDebugLog("widget deep link error: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-            return false
-        }
-    }
-
-    private func submitWidgetCommand(named commandName: String, in session: OpenCodeSession) async throws {
-        let command = directoryCommands.first { $0.name == commandName } ?? OpenCodeCommand(
-            name: commandName,
-            description: nil,
-            agent: nil,
-            model: nil,
-            source: "command",
-            template: "",
-            subtask: nil,
-            hints: []
-        )
-        let modelReference = effectiveModelReference(for: session)
-        let agentName = effectiveAgentName(for: session)
-        let variant = selectedVariant(for: session)
-        let commandPreparation = sessionCoordinator.prepareCommandSubmission(
-            command: command,
-            arguments: "",
-            attachments: [],
-            session: session,
-            selectedDirectory: effectiveSelectedDirectory,
-            currentProjectID: currentProject?.id,
-            model: modelReference,
-            agent: agentName,
-            variant: variant
-        )
-        let previousStatus = sessionStatuses[session.id]
-        let statusTransition = sessionCoordinator.commandStatusTransition(
-            for: commandPreparation,
-            previousStatus: previousStatus
-        )
-        sessionStatuses[statusTransition.sessionID] = statusTransition.nextStatus
-        await maybeAutoStartLiveActivity(for: session)
-
-        do {
-            try await sessionCoordinator.submitCommand(client: client, submission: commandPreparation.submission)
-            appendDebugLog("widget command accepted session=\(debugSessionLabel(session)) command=\(command.name)")
-        } catch {
-            sessionStatuses[statusTransition.sessionID] = statusTransition.previousStatus
-            throw error
-        }
-    }
 }

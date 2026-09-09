@@ -1,7 +1,182 @@
 import XCTest
+import SwiftData
 @testable import OpenClient
 
 final class OpenCodeLocalCacheRepositoryTests: XCTestCase {
+    @MainActor
+    func testOlderPagesOverPersistedHistoryKeepPrefixSuffixAndCapacityOrder() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let namespace = OpenCodeLocalCacheIdentity.namespace(serverID: "https://cache.invalid|user", profile: .v2)
+        for count in [6, 2_002] {
+            let schema = Schema(versionedSchema: OpenCodeLocalCacheSchemaV1.self)
+            let configuration = ModelConfiguration(schema: schema,
+                url: folder.appendingPathComponent("\(count).store"), cloudKitDatabase: .none)
+            let messages = (0..<count).map { message(id: "m\($0)", sessionID: "s", text: "Original \($0)") }
+            do {
+                let repository = SwiftDataOpenCodeLocalCacheRepository(modelContainer:
+                    try ModelContainer(for: schema, configurations: [configuration]))
+                try await repository.saveChatMessages(messages, serverID: namespace, sessionID: "s")
+            }
+            let reopened = SwiftDataOpenCodeLocalCacheRepository(modelContainer:
+                try ModelContainer(for: schema, configurations: [configuration]))
+            try await reopened.saveChatMessages(Array(messages.suffix(2)), serverID: namespace, sessionID: "s",
+                refreshedAt: Date(), writtenAt: Date(), coverage: .newestPage(hasOlder: true))
+            let older = ((count - 4)..<(count - 2)).map { message(id: "m\($0)", sessionID: "s", text: "Updated \($0)") }
+            try await reopened.saveChatMessages(older, serverID: namespace, sessionID: "s",
+                refreshedAt: Date(), writtenAt: Date(), coverage: .olderPage(beforeMessageID: "m\(count - 2)"))
+            let cached = try await reopened.loadChat(serverID: namespace, sessionID: "s")
+            XCTAssertEqual(cached?.messages.map(\.id), messages.suffix(2_000).map(\.id))
+            XCTAssertEqual(cached?.messages.filter { older.map(\.id).contains($0.id) }, older)
+        }
+    }
+
+    func testOlderPageWithoutOverlapUsesItsKnownNewerBoundary() async throws {
+        let repository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+        let namespace = OpenCodeLocalCacheIdentity.namespace(serverID: "https://cache.invalid|user", profile: .v2)
+        let messages = ["A", "B", "C", "D", "E", "F"].map { message(id: $0, sessionID: "s", text: $0) }
+        try await repository.saveChatMessages([messages[0], messages[1], messages[4], messages[5]], serverID: namespace, sessionID: "s")
+        try await repository.saveChatMessages(Array(messages[2...3]), serverID: namespace, sessionID: "s",
+            refreshedAt: Date(), writtenAt: Date(), coverage: .olderPage(beforeMessageID: "E"))
+        let cached = try await repository.loadChat(serverID: namespace, sessionID: "s")
+        XCTAssertEqual(cached?.messages, messages)
+    }
+
+    func testCanonicalCoverageRemovesOnlyProvenSuffixAndCompleteResponseReplacesHistory() async throws {
+        let repository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+        let namespace = OpenCodeLocalCacheIdentity.namespace(serverID: "https://cache.invalid|user", profile: .v2)
+        let old = message(id: "old", sessionID: "s", text: "Unloaded")
+        let anchor = message(id: "anchor", sessionID: "s", text: "Anchor")
+        let removed = message(id: "removed", sessionID: "s", text: "Reverted")
+        let latest = message(id: "latest", sessionID: "s", text: "Canonical")
+        try await repository.saveChatMessages([old, anchor, removed], serverID: namespace, sessionID: "s")
+        try await repository.saveChatMessages([anchor, latest], serverID: namespace, sessionID: "s",
+            refreshedAt: Date(), writtenAt: Date(), coverage: .newestPage(hasOlder: true))
+        let partial = try await repository.loadChat(serverID: namespace, sessionID: "s")
+        XCTAssertEqual(partial?.messages.map(\.id), ["old", "anchor", "latest"])
+        try await repository.saveChatMessages([], serverID: namespace, sessionID: "s",
+            refreshedAt: Date(), writtenAt: Date(), coverage: .newestPage(hasOlder: false))
+        let empty = try await repository.loadChat(serverID: namespace, sessionID: "s")
+        XCTAssertEqual(empty?.messages, [])
+        XCTAssertNil(empty?.messagesRefreshedAt)
+    }
+
+    @MainActor
+    func testOnDiskV1LegacyRecordsRemainReadableBesideV2AndTombstones() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("cache.store")
+        let schema = Schema(versionedSchema: OpenCodeLocalCacheSchemaV1.self)
+        let configuration = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
+        let raw = OpenCodeServerConfig(baseURL: "https://CACHE.example", username: "User", password: "secret").recentServerID
+        let v2 = OpenCodeLocalCacheIdentity.namespace(serverID: raw, profile: .v2)
+        let projects = [project(id: "shared", name: "Legacy")]
+        let sessions = [session(id: "shared", title: "Legacy", directory: nil)]
+        let legacyMessages = [message(id: "shared", sessionID: "shared", text: "Legacy")]
+        let v2Messages = [message(id: "shared", sessionID: "shared", text: "V2")]
+        let date = Date(timeIntervalSince1970: 100)
+        // Seed the actual V1 store with the original key encoding and old array payload.
+        do {
+            let container = try ModelContainer(for: schema, configurations: [configuration])
+            let context = ModelContext(container)
+            let serverKey = "s\(raw.utf8.count):\(raw)"
+            context.insert(OpenCodeCachedProjectsRecord(key: serverKey, serverID: raw,
+                payload: try JSONEncoder().encode(projects), refreshedAt: date, writtenAt: date))
+            context.insert(OpenCodeCachedDirectorySessionsRecord(key: serverKey + "n", serverID: raw,
+                payload: try JSONEncoder().encode(sessions), refreshedAt: date, writtenAt: date))
+            context.insert(OpenCodeCachedChatRecord(key: serverKey + "s6:shared", serverID: raw, sessionID: "shared",
+                messagesPayload: try JSONEncoder().encode(legacyMessages), messagesRefreshedAt: date, messagesWrittenAt: date))
+            try context.save()
+        }
+        do {
+            let container = try ModelContainer(for: schema, migrationPlan: OpenCodeLocalCacheMigrationPlan.self, configurations: [configuration])
+            let repository = SwiftDataOpenCodeLocalCacheRepository(modelContainer: container)
+            let loadedProjects = try await repository.loadProjects(serverID: raw)
+            let loadedSessions = try await repository.loadDirectorySessions(serverID: raw, directory: nil)
+            let loadedChat = try await repository.loadChat(serverID: raw, sessionID: "shared")
+            XCTAssertEqual(loadedProjects?.projects, projects)
+            XCTAssertEqual(loadedSessions?.sessions, sessions)
+            XCTAssertEqual(loadedChat?.messages, legacyMessages)
+            try await repository.saveChatMessages(v2Messages, serverID: v2, sessionID: "shared", refreshedAt: date, writtenAt: date)
+            try await repository.removeSession(serverID: v2, sessionID: "shared", removedAt: date.addingTimeInterval(2))
+        }
+        let reopened = SwiftDataOpenCodeLocalCacheRepository(modelContainer:
+            try ModelContainer(for: schema, migrationPlan: OpenCodeLocalCacheMigrationPlan.self, configurations: [configuration]))
+        try await reopened.saveChatMessages(v2Messages, serverID: v2, sessionID: "shared", refreshedAt: date, writtenAt: date.addingTimeInterval(1))
+        let tombstone = try await reopened.loadChat(serverID: v2, sessionID: "shared")
+        XCTAssertNil(tombstone)
+        try await reopened.clear(serverID: v2)
+        let legacy = try await reopened.loadChat(serverID: raw, sessionID: "shared")
+        XCTAssertEqual(legacy?.messages, legacyMessages)
+    }
+
+    func testProfileAndWorkspaceNamespaceEncodingIsDisjoint() {
+        let config = OpenCodeServerConfig(baseURL: "https://CACHE.example/path|user", username: "USER", password: "secret")
+        let raw = config.recentServerID
+        let v2 = OpenCodeLocalCacheIdentity.namespace(serverID: raw, profile: .v2)
+        XCTAssertEqual(raw, raw.lowercased())
+        XCTAssertEqual(OpenCodeLocalCacheIdentity.namespace(serverID: raw, profile: .legacy), raw)
+        XCTAssertNotEqual(v2, v2.lowercased())
+        let scopes: [(String?, String?)] = [(nil, nil), ("/", nil), ("global", nil), (nil, "w"), ("/", "w"), ("s1:wn", nil)]
+        XCTAssertEqual(Set(scopes.map { OpenCodeLocalCacheIdentity.directory($0.0, workspaceID: $0.1, namespace: v2) }).count, scopes.count)
+    }
+
+    func testV2PartialPagesPreserveUnloadedMessagesAndNeverValidateHistoryOrTodos() async throws {
+        let repository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+        let namespace = OpenCodeLocalCacheIdentity.namespace(serverID: "https://cache.example|user", profile: .v2)
+        let old = message(id: "m1", sessionID: "s", text: "Older")
+        let latest = message(id: "m2", sessionID: "s", text: "Latest")
+        try await repository.saveChatMessages([old], serverID: namespace, sessionID: "s")
+        try await repository.saveChatMessages([latest], serverID: namespace, sessionID: "s")
+        try await repository.saveChatMessages([], serverID: namespace, sessionID: "s")
+        try await repository.saveTodos([.init(content: "Must not cache", status: "pending", priority: "high")], serverID: namespace, sessionID: "s")
+        let snapshot = try await repository.loadChat(serverID: namespace, sessionID: "s")
+        XCTAssertEqual(Set(snapshot?.messages.map(\.info.id) ?? []), ["m1", "m2"])
+        XCTAssertFalse(snapshot?.areMessagesFresh() ?? true)
+        XCTAssertEqual(snapshot?.todos, [])
+        XCTAssertNil(snapshot?.todosRefreshedAt)
+    }
+
+    func testV2BoundsProjectAndSessionSnapshotsAndPreservesCanonicalMessageOrder() async throws {
+        let repository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+        let namespace = OpenCodeLocalCacheIdentity.namespace(serverID: "https://cache.example|user", profile: .v2)
+        let projects = (0..<105).map { project(id: "p\($0)", name: "Project") }
+        let sessions = (0..<105).map { session(id: "s\($0)", title: "Session", directory: "/project") }
+        try await repository.saveProjects(projects, serverID: namespace)
+        try await repository.saveDirectorySessions(sessions, serverID: namespace, directory: "/project")
+        let loadedProjects = try await repository.loadProjects(serverID: namespace)
+        let loadedSessions = try await repository.loadDirectorySessions(serverID: namespace, directory: "/project")
+        XCTAssertEqual(loadedProjects?.projects, Array(projects.prefix(100)))
+        XCTAssertEqual(loadedSessions?.sessions, Array(sessions.prefix(100)))
+        XCTAssertFalse(loadedSessions?.isFresh() ?? true)
+        let messages = [message(id: "z", sessionID: "s", text: "First"), message(id: "a", sessionID: "s", text: "Second")]
+        try await repository.saveChatMessages(messages, serverID: namespace, sessionID: "s")
+        let chat = try await repository.loadChat(serverID: namespace, sessionID: "s")
+        XCTAssertEqual(chat?.messages.map(\.info.id), ["z", "a"])
+    }
+
+    func testClearingOneProfilePreservesOtherProfilesLatestWriteGuard() async throws {
+        let repository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+        let raw = "https://cache.example|user"
+        let v2 = OpenCodeLocalCacheIdentity.namespace(serverID: raw, profile: .v2)
+        let original = [message(id: "m", sessionID: "s", text: "Current")]
+        let stale = [message(id: "m", sessionID: "s", text: "Stale")]
+        let date = Date(timeIntervalSince1970: 100)
+        try await repository.saveChatMessages(original, serverID: v2, sessionID: "s", refreshedAt: date, writtenAt: date)
+        try await repository.saveChatMessages(original, serverID: v2, sessionID: "s", refreshedAt: date, writtenAt: date.addingTimeInterval(2))
+        try await repository.clear(serverID: raw)
+        try await repository.saveChatMessages(stale, serverID: v2, sessionID: "s", refreshedAt: date, writtenAt: date.addingTimeInterval(1))
+        try await repository.removeSession(serverID: v2, sessionID: "s", removedAt: date.addingTimeInterval(1))
+        let snapshot = try await repository.loadChat(serverID: v2, sessionID: "s")
+        XCTAssertEqual(snapshot?.messages, original)
+        try await repository.clear(serverID: v2)
+        try await repository.saveChatMessages(stale, serverID: v2, sessionID: "s", refreshedAt: date, writtenAt: date)
+        let cleared = try await repository.loadChat(serverID: v2, sessionID: "s")
+        XCTAssertNil(cleared)
+    }
+
     func testStreamDeltasWaitForCanonicalEventBeforeWritingChatSnapshot() {
         XCTAssertFalse(OpenCodeLocalCacheEventWritePolicy.writesChatSnapshot(for: .messagePartDelta(
             sessionID: "ses_cache",

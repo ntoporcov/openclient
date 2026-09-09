@@ -36,10 +36,12 @@ struct OpenCodeWidgetStore {
         replacingSessionIDs: Set<String>,
         commands: [OpenCodeWidgetCommandSnapshot] = [],
         replacingCommandProjectIDs: Set<String> = [],
-        models: [OpenCodeWidgetModelSnapshot] = []
+        models: [OpenCodeWidgetModelSnapshot] = [],
+        projectsAreAuthoritative: Bool = true,
+        modelsAreAuthoritative: Bool = false
     ) {
         var payload = load()
-        payload.servers.removeAll { $0.id == server.id }
+        payload.servers.removeAll { $0.owner == server.owner }
         payload.servers = payload.servers.map { existing in
             OpenCodeWidgetServerSnapshot(
                 id: existing.id,
@@ -47,41 +49,55 @@ struct OpenCodeWidgetStore {
                 baseURL: existing.baseURL,
                 username: existing.username,
                 generatedAt: existing.generatedAt,
-                isLastConnected: false
+                isLastConnected: false,
+                profile: existing.profile,
+                supportsNewSession: existing.supportsNewSession,
+                supportsCommands: existing.supportsCommands
             )
         }
         payload.servers.insert(server, at: 0)
-        payload.projects.removeAll { $0.serverID == server.id }
-        payload.projects.append(contentsOf: projects)
-        payload.sessions.removeAll { $0.serverID == server.id && replacingSessionIDs.contains($0.id) }
-        payload.sessions.append(contentsOf: sessions)
+        if projectsAreAuthoritative {
+            payload.projects.removeAll { $0.owner == server.owner }
+            payload.projects.append(contentsOf: projects.filter { $0.owner == server.owner })
+        }
+        payload.sessions.removeAll { $0.owner == server.owner && replacingSessionIDs.contains($0.id) }
+        payload.sessions.append(contentsOf: sessions.filter { $0.owner == server.owner })
         if !replacingCommandProjectIDs.isEmpty {
             payload.commands.removeAll { command in
-                command.serverID == server.id && replacingCommandProjectIDs.contains(command.projectID)
+                command.owner == server.owner && replacingCommandProjectIDs.contains(command.projectID)
             }
-            payload.commands.append(contentsOf: commands)
+            payload.commands.append(contentsOf: commands.filter { $0.owner == server.owner })
         }
-        if !models.isEmpty {
-            payload.models.removeAll { $0.serverID == server.id }
-            payload.models.append(contentsOf: models)
+        if modelsAreAuthoritative || !models.isEmpty {
+            payload.models.removeAll { $0.owner == server.owner }
+            payload.models.append(contentsOf: models.filter { $0.owner == server.owner })
+        }
+        if projectsAreAuthoritative {
+            let projectIDs = Set(payload.projects.filter { $0.owner == server.owner }.map(\.id))
+            payload.sessions.removeAll { $0.owner == server.owner && !projectIDs.contains($0.projectID) }
+            payload.commands.removeAll { $0.owner == server.owner && !projectIDs.contains($0.projectID) }
         }
         payload.generatedAt = Date()
         save(payload)
     }
 
     private func limitedModelSnapshots(_ models: [OpenCodeWidgetModelSnapshot]) -> [OpenCodeWidgetModelSnapshot] {
-        var countsByServerID: [String: Int] = [:]
+        var countsByServerID: [OpenCodeWidgetOwner: Int] = [:]
         return models.filter { model in
-            let count = countsByServerID[model.serverID, default: 0]
+            let count = countsByServerID[model.owner, default: 0]
             guard count < maxModelsPerServer else { return false }
-            countsByServerID[model.serverID] = count + 1
+            countsByServerID[model.owner] = count + 1
             return true
         }
     }
 
     func removeSession(serverID: String, sessionID: String) {
+        removeSession(owner: .init(profile: .legacy, serverID: serverID), sessionID: sessionID)
+    }
+
+    func removeSession(owner: OpenCodeWidgetOwner, sessionID: String) {
         var payload = load()
-        payload.sessions.removeAll { $0.serverID == serverID && $0.id == sessionID }
+        payload.sessions.removeAll { $0.owner == owner && $0.id == sessionID }
         payload.generatedAt = Date()
         save(payload)
     }

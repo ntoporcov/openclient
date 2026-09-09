@@ -96,6 +96,18 @@ final class ConversationModeController: NSObject, ObservableObject {
     private let liveActivitySession = TalkLiveActivitySession()
     private var observations: Set<AnyCancellable> = []
     private var isPausedForAudioInterruption = false
+    private var isAudioAvailable = true
+    private var isApplicationActive = true
+    private var isSubmissionUncertain = false
+    private(set) var hasStartedLiveActivity = false
+    private let usesNativeAudio: Bool
+    private let audioLease: ConversationAudioLease
+    private let audioOwnerID = UUID()
+    private let responseSpeaker: ((String) -> Void)?
+    private var submissionTask: Task<Void, Never>?
+    private(set) var submittedMessageID: String?
+    private var submittedSessionID: String?
+    private var submittedContextID: String?
 
     #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
     private enum SpeechPurpose {
@@ -103,8 +115,8 @@ final class ConversationModeController: NSObject, ObservableObject {
         case response
     }
 
-    private let recognizer = OpenClientSpeechRecognitionController()
-    private let synthesizer = AVSpeechSynthesizer()
+    private lazy var recognizer = OpenClientSpeechRecognitionController()
+    private lazy var synthesizer = AVSpeechSynthesizer()
     private var speechPurpose: SpeechPurpose?
     private var fillerPhraseIndex = 0
     private var waitingEarconTask: Task<Void, Never>?
@@ -112,13 +124,37 @@ final class ConversationModeController: NSObject, ObservableObject {
     private var waitingEarconPlayer: AVAudioPlayerNode?
     #endif
 
-    init(voiceStore: SpeechVoiceStore = SpeechVoiceStore()) {
+    init(
+        voiceStore: SpeechVoiceStore = SpeechVoiceStore(),
+        usesNativeAudio: Bool = true,
+        responseSpeaker: ((String) -> Void)? = nil,
+        audioLease: ConversationAudioLease = .shared
+    ) {
         self.voiceStore = voiceStore
+        self.usesNativeAudio = usesNativeAudio
+        self.audioLease = audioLease
+        self.responseSpeaker = responseSpeaker
         super.init()
         inputMode = voiceStore.isHoldToTalkEnabled ? .holdToTalk : .automatic
         #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
-        synthesizer.delegate = self
-        synthesizer.usesApplicationAudioSession = true
+        if usesNativeAudio {
+            synthesizer.delegate = self
+            synthesizer.usesApplicationAudioSession = true
+            isApplicationActive = UIApplication.shared.applicationState == .active
+        }
+        NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
+            .sink { [weak self] _ in
+                self?.isApplicationActive = false
+                self?.pause()
+            }
+            .store(in: &observations)
+        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.isApplicationActive = true
+                self.resume(isSessionBusy: self.isResponseSessionBusy)
+            }
+            .store(in: &observations)
         NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
             .sink { [weak self] notification in
                 Task { @MainActor [weak self] in
@@ -130,7 +166,8 @@ final class ConversationModeController: NSObject, ObservableObject {
         $state
             .removeDuplicates()
             .sink { [weak self] state in
-                self?.liveActivitySession.update(phase: Self.talkActivityPhase(for: state))
+                guard let self, self.hasStartedLiveActivity else { return }
+                self.liveActivitySession.update(phase: Self.talkActivityPhase(for: state))
             }
             .store(in: &observations)
         voiceStore.$isHoldToTalkEnabled
@@ -146,12 +183,18 @@ final class ConversationModeController: NSObject, ObservableObject {
         state.isActive
     }
 
+    private var canRunAudio: Bool {
+        isAudioAvailable && isApplicationActive && !isPausedForAudioInterruption && !isSubmissionUncertain
+    }
+
     func startLiveActivity(
         title: String,
         directory: String?,
         workspaceID: String?,
         sessionID: String?
     ) {
+        guard usesNativeAudio, canRunAudio else { return }
+        hasStartedLiveActivity = true
         liveActivitySession.start(
             title: title,
             directory: directory,
@@ -162,6 +205,7 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     func updateLiveActivitySessionID(_ sessionID: String) {
+        guard hasStartedLiveActivity else { return }
         liveActivitySession.update(
             phase: Self.talkActivityPhase(for: state),
             sessionID: sessionID
@@ -182,7 +226,9 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     func start(initialTranscript: String) {
-        guard state == .inactive else { return }
+        guard state == .inactive, canRunAudio else { return }
+        audioLease.acquire(audioOwnerID) { [weak self] in self?.stop() }
+        isSubmissionUncertain = false
         committedTranscript = initialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         liveHypothesis = ""
         submittedTranscript = nil
@@ -336,15 +382,25 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     func stop() {
+        let ownsAudio = audioLease.release(audioOwnerID)
+        submissionTask?.cancel()
+        submissionTask = nil
+        submittedMessageID = nil
+        submittedSessionID = nil
+        submittedContextID = nil
         recognitionAttemptID = nil
         isPausedForAudioInterruption = false
-        liveActivitySession.end()
+        if hasStartedLiveActivity { liveActivitySession.end() }
+        hasStartedLiveActivity = false
+        isSubmissionUncertain = false
         #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
-        recognizer.cancel()
         speechPurpose = nil
-        synthesizer.stopSpeaking(at: .immediate)
-        stopWaitingEarcon()
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if usesNativeAudio {
+            recognizer.cancel(deactivatesAudioSession: ownsAudio)
+            synthesizer.stopSpeaking(at: .immediate)
+            stopWaitingEarcon()
+            if ownsAudio { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+        }
         #endif
         autoSendTask?.cancel()
         autoSendTask = nil
@@ -398,6 +454,7 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     func submissionDidNotStart() {
+        guard !isSubmissionUncertain else { return }
         guard state == .submitting || state == .waitingForResponse else { return }
         #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
         stopWaitingEarcon()
@@ -412,8 +469,115 @@ final class ConversationModeController: NSObject, ObservableObject {
         resumeInput()
     }
 
+    // A lost receipt is not permission to listen and create another input identity.
+    func submissionAdmissionChanged(isAdmitted: Bool, errorMessage: String? = nil) {
+        isSubmissionUncertain = !isAdmitted
+        if !isAdmitted { pause() }
+        if let errorMessage { self.errorMessage = errorMessage }
+    }
+
+    func submitTurn(in session: OpenCodeSession, chatFacade: ChatFacade) {
+        guard state == .submitting, canRunAudio, session.parentID == nil,
+              chatFacade.connectionStore.isConnected, !chatFacade.isPaywallPresented,
+              submittedMessageID == nil, submissionTask == nil,
+              chatFacade.sessionForms(forSessionID: session.id).isEmpty,
+              !chatFacade.hasPendingPromptAdmission(sessionID: session.id) else {
+            pause()
+            return
+        }
+        let messageID = OpenCodeIdentifier.message()
+        let context = chatFacade.promptContextID
+        let prompt = transcript
+        submittedMessageID = messageID
+        submittedSessionID = session.id
+        submittedContextID = context
+        didSubmit(baselineMessageIDs: Set(chatFacade.messageSource(for: session).map(\.id)))
+        submissionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Model/agent menu changes must settle before the core chat service POST.
+            while let configuration = chatFacade.v2ConfigurationTasks[session.id] {
+                let configured = await configuration.task.value
+                guard !Task.isCancelled, self.submittedMessageID == messageID else { return }
+                guard configured, chatFacade.promptContextID == context else {
+                    self.submissionTask = nil
+                    self.submissionAdmissionChanged(isAdmitted: false,
+                        errorMessage: chatFacade.connectionStore.errorMessage
+                            ?? String(localized: "Prompt admission is uncertain. Refresh the timeline before retrying."))
+                    return
+                }
+            }
+            guard !Task.isCancelled, chatFacade.promptContextID == context,
+                  chatFacade.connectionStore.isConnected, !chatFacade.isPaywallPresented,
+                  chatFacade.sessionForms(forSessionID: session.id).isEmpty,
+                  self.canRunAudio else {
+                self.submissionTask = nil
+                self.submissionAdmissionChanged(isAdmitted: false,
+                    errorMessage: String(localized: "Prompt admission is uncertain. Refresh the timeline before retrying."))
+                return
+            }
+            let admitted = await chatFacade.sendMessage(prompt, in: session, userVisible: true, messageID: messageID)
+            guard !Task.isCancelled, self.submittedMessageID == messageID,
+                  chatFacade.promptContextID == context else { return }
+            self.submissionTask = nil
+            if !admitted {
+                self.submissionAdmissionChanged(isAdmitted: false,
+                    errorMessage: chatFacade.connectionStore.errorMessage
+                        ?? String(localized: "Prompt admission is uncertain. Refresh the timeline before retrying."))
+            }
+            self.refreshPromptAdmission(chatFacade: chatFacade)
+        }
+    }
+
+    func refreshPromptAdmission(chatFacade: ChatFacade) {
+        guard let submittedMessageID, let submittedSessionID else { return }
+        guard submittedContextID == chatFacade.promptContextID else {
+            setAudioAvailable(false)
+            return
+        }
+        let phase = chatFacade.promptAdmissionPhase(messageID: submittedMessageID, sessionID: submittedSessionID)
+        if phase == .admitted {
+            submissionAdmissionChanged(isAdmitted: true)
+            // Do not let the still-suspended receipt callback affect a subsequent turn.
+            if submissionTask == nil {
+                self.submittedMessageID = nil
+                self.submittedSessionID = nil
+                self.submittedContextID = nil
+            }
+        } else if phase == .uncertain || phase == .rejected {
+            submissionAdmissionChanged(isAdmitted: false)
+        }
+        let session = chatFacade.directoryStore(forSessionID: submittedSessionID)
+            .sessions.first { $0.id == submittedSessionID }
+        let overlay = chatFacade.composerOverlaySnapshot(forSessionID: submittedSessionID)
+        if !chatFacade.connectionStore.isConnected || chatFacade.isPaywallPresented
+            || !chatFacade.sessionForms(forSessionID: submittedSessionID).isEmpty
+            || !overlay.permissions.isEmpty || !overlay.questions.isEmpty {
+            setAudioAvailable(false)
+        }
+        if let session {
+            let busy = chatFacade.directoryStore(forSessionID: session.id).sessionStatuses[session.id] == "busy"
+                || submissionTask != nil
+            resume(isSessionBusy: busy)
+            update(messages: chatFacade.messageSource(for: session), isSessionBusy: busy)
+        }
+    }
+
+    func setAudioAvailable(_ available: Bool) {
+        isAudioAvailable = available
+        if !available { pause() }
+    }
+
+    /// Also used by injected speech drivers, without microphone authorization or hardware.
+    func receiveFinalTranscript(_ text: String) {
+        guard !usesNativeAudio, canRunAudio, state == .ready || state == .listening else { return }
+        state = .listening
+        finishListening(with: text)
+    }
+
     func update(messages: [OpenCodeMessageEnvelope], isSessionBusy: Bool) {
+        guard canRunAudio else { return }
         guard state == .waitingForResponse || state == .speakingResponse else { return }
+        let isSessionBusy = isSessionBusy || submissionTask != nil
         isResponseSessionBusy = isSessionBusy
         if isSessionBusy {
             hasObservedResponseBusyState = true
@@ -442,11 +606,13 @@ final class ConversationModeController: NSObject, ObservableObject {
         pausedContext = state
         recognitionAttemptID = nil
         #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
-        recognizer.cancel()
         speechPurpose = nil
         isSpeakingFiller = false
-        synthesizer.stopSpeaking(at: .immediate)
-        stopWaitingEarcon()
+        if usesNativeAudio {
+            recognizer.cancel()
+            synthesizer.stopSpeaking(at: .immediate)
+            stopWaitingEarcon()
+        }
         #endif
         bargeInCandidate = nil
         bargeInConfirmationTask?.cancel()
@@ -461,10 +627,11 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     func resume(isSessionBusy: Bool) {
-        guard state == .paused else { return }
+        guard state == .paused, canRunAudio else { return }
         let context = pausedContext
         pausedContext = nil
 
+        let isSessionBusy = isSessionBusy || submissionTask != nil
         isResponseSessionBusy = isSessionBusy
         if context == .speakingResponse, let pendingResponseText {
             speakResponse(pendingResponseText)
@@ -483,15 +650,15 @@ final class ConversationModeController: NSObject, ObservableObject {
 
         switch type {
         case .began:
-            guard state.isActive, state != .paused else { return }
+            guard state.isActive else { return }
             isPausedForAudioInterruption = true
             pause()
         case .ended:
             guard isPausedForAudioInterruption else { return }
-            isPausedForAudioInterruption = false
             let optionsValue = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             guard options.contains(.shouldResume) else { return }
+            isPausedForAudioInterruption = false
             resume(isSessionBusy: isResponseSessionBusy)
         @unknown default:
             break
@@ -568,6 +735,10 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     private func beginListening() {
+        guard canRunAudio else {
+            pause()
+            return
+        }
         autoSendTask?.cancel()
         autoSendTask = nil
         isSilenceDetected = false
@@ -584,6 +755,10 @@ final class ConversationModeController: NSObject, ObservableObject {
         inputLevel = 0
         inputPitch = 0
 
+        guard usesNativeAudio else {
+            state = .listening
+            return
+        }
         #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
         Task { @MainActor [weak self] in
             guard let self,
@@ -781,6 +956,7 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     private func speakResponse(_ response: String) {
+        guard canRunAudio else { return }
         pendingResponseText = response
         submittedTranscript = nil
         bargeInCandidate = nil
@@ -789,6 +965,10 @@ final class ConversationModeController: NSObject, ObservableObject {
         bargeInEndpointTask?.cancel()
         bargeInEndpointTask = nil
         state = .speakingResponse
+        if !usesNativeAudio {
+            responseSpeaker?(response)
+            return
+        }
         #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
         stopWaitingEarcon()
         activeResponseSpeechText = response
@@ -806,6 +986,7 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     private func continueResponseTurn() {
+        guard canRunAudio else { return }
         if let segment = responseSpeechQueue.popFirst() {
             speakResponse(segment.text)
             return
@@ -843,6 +1024,10 @@ final class ConversationModeController: NSObject, ObservableObject {
         bargeInConfirmationTask?.cancel()
         bargeInConfirmationTask = nil
 
+        guard usesNativeAudio else {
+            resumeInput()
+            return
+        }
         #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
         stopWaitingEarcon()
         if inputMode == .holdToTalk {
@@ -1117,6 +1302,7 @@ final class ConversationModeController: NSObject, ObservableObject {
 
     #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
     private func startWaitingEarcon() {
+        guard usesNativeAudio, canRunAudio else { return }
         stopWaitingEarcon()
         waitingEarconTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
@@ -1211,6 +1397,10 @@ final class ConversationModeController: NSObject, ObservableObject {
     }
 
     private func resumeInput() {
+        guard canRunAudio else {
+            pause()
+            return
+        }
         if inputMode == .holdToTalk {
             state = .ready
             inputLevel = 0

@@ -78,6 +78,8 @@ final class SessionListFacade: ObservableObject {
         let isLoading: Bool
         let hasMore: Bool
         let operation: OpenCodeWorkspaceOperation?
+        var canReset = false
+        var canRemove = false
 
         var id: String { directory }
         var isBusy: Bool { isLoading || operation?.isBusy == true }
@@ -108,6 +110,8 @@ final class SessionListFacade: ObservableObject {
             isReadOnly: false,
             cardStyle: .simple,
             showsActivityLastUserMessage: true,
+            canCreateSession: true,
+            supportsLiveActivities: true,
             currentProjectActions: []
         )
 
@@ -125,7 +129,11 @@ final class SessionListFacade: ObservableObject {
         let isReadOnly: Bool
         let cardStyle: SessionCardStyle
         let showsActivityLastUserMessage: Bool
+        let canCreateSession: Bool
+        let supportsLiveActivities: Bool
         let currentProjectActions: [ProjectActionSnapshot]
+        var workspaceContextID: String = ""
+        var allowsNewTalk: Bool = false
 
         var hasBusySession: Bool {
             pinnedRows.contains(where: \.isBusy)
@@ -134,7 +142,7 @@ final class SessionListFacade: ObservableObject {
         }
 
         var workspaceTaskID: String {
-            showsWorkspaces ? workspaceSections.map(\.directory).joined(separator: "|") : "off"
+            showsWorkspaces ? workspaceContextID + "|" + workspaceSections.map(\.directory).joined(separator: "|") : "off"
         }
     }
 
@@ -143,6 +151,7 @@ final class SessionListFacade: ObservableObject {
         fileprivate let previousSessionID: String?
         fileprivate let navigationGeneration: UInt
         fileprivate let directoryKey: String
+        fileprivate let connectionID: UUID?
     }
 
     struct CreateSessionSnapshot: Equatable {
@@ -161,6 +170,13 @@ final class SessionListFacade: ObservableObject {
 
     private unowned let viewModel: AppViewModel
     private weak var liveActivityBackgroundBridge: LiveActivityBackgroundBridge?
+    struct WorktreeRemovalConfirmation: Identifiable {
+        let id = UUID()
+        let key: BackendWorkspacePageKey
+        let message: String
+        var directory: String { key.directory }
+    }
+    @Published private(set) var pendingWorktreeRemoval: WorktreeRemovalConfirmation?
     @Published private(set) var snapshot = Snapshot.empty
     private var observations: Set<AnyCancellable> = []
     private var activeDirectoryObservations: Set<AnyCancellable> = []
@@ -171,6 +187,7 @@ final class SessionListFacade: ObservableObject {
         snapshot = makeSnapshot()
         Publishers.MergeMany([
             viewModel.sessionListStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.projectActionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.projectStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.projectPreferencesStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.liveActivityStore.objectWillChange.eraseToAnyPublisher(),
@@ -219,7 +236,8 @@ final class SessionListFacade: ObservableObject {
         }
         let pinnedIDs = viewModel.pinnedSessionIDs
         let isReadOnly = viewModel.isBrowsingLocalCache
-        let showsWorkspaces = !isReadOnly && viewModel.isProjectWorkspacesEnabled && viewModel.hasGitProject
+        let showsWorkspaces = !isReadOnly && viewModel.backendConnection?.worktrees != nil
+            && viewModel.isProjectWorkspacesEnabled && viewModel.hasGitProject
         let workspaceDirectories = showsWorkspaces ? viewModel.workspaceDirectories() : []
         var sessionsByID: [String: OpenCodeSession] = [:]
         for session in sessions {
@@ -227,7 +245,7 @@ final class SessionListFacade: ObservableObject {
         }
         for directory in workspaceDirectories {
             for session in viewModel.workspaceSessionsByDirectory[directory]?.rootSessions ?? [] where !viewModel.isActionSession(session) {
-                sessionsByID[session.id] = session
+                sessionsByID[session.id] = viewModel.directoryStoreRegistry.session(matching: session.id) ?? session
             }
         }
         let permissionRootIDs = SessionInteractionStore.sessionTreeRootIDsWithRequests(
@@ -264,13 +282,17 @@ final class SessionListFacade: ObservableObject {
             isReadOnly: isReadOnly,
             cardStyle: viewModel.appCustomizationStore.sessionCardStyle,
             showsActivityLastUserMessage: viewModel.appCustomizationStore.showsActivityLastUserMessage,
-            currentProjectActions: viewModel.currentProjectActions.map { action in
+            canCreateSession: !viewModel.isBrowsingLocalCache,
+            supportsLiveActivities: !isReadOnly && viewModel.liveActivityFacade.supportsLiveActivities,
+            currentProjectActions: (viewModel.supportsProjectActionExecution ? viewModel.currentProjectActions : []).map { action in
                 ProjectActionSnapshot(
                     action: action,
                     command: viewModel.actionCommand(for: action),
                     phase: viewModel.actionRunPhase(for: action)
                 )
-            }
+            },
+            workspaceContextID: workspaceCreationContextID,
+            allowsNewTalk: viewModel.projectFacade.allowsNewTalk
         )
     }
 
@@ -299,7 +321,9 @@ final class SessionListFacade: ObservableObject {
             projectScopeTitle: viewModel.projectScopeTitle,
             currentProject: viewModel.currentProject,
             workspaceDirectories: viewModel.workspaceDirectories(),
-            showsWorkspacePicker: viewModel.isProjectWorkspacesEnabled && viewModel.hasGitProject,
+            showsWorkspacePicker: viewModel.backendConnection?.worktrees != nil
+                && viewModel.isProjectWorkspacesEnabled
+                && viewModel.hasGitProject,
             hasProUnlock: viewModel.commerceFacade.hasProUnlock,
             canCreateFreeSession: viewModel.canCreateFreeSession,
             isLoading: viewModel.isLoading
@@ -322,6 +346,7 @@ final class SessionListFacade: ObservableObject {
     }
 
     func dismissCreateSession() { viewModel.isShowingCreateSessionSheet = false }
+    func presentCreateSession() { viewModel.presentCreateSessionSheet() }
     func workspaceTitle(for selection: NewSessionWorkspaceSelection) -> String {
         viewModel.newSessionWorkspaceTitle(for: selection)
     }
@@ -344,6 +369,7 @@ final class SessionListFacade: ObservableObject {
     }
 
     func prepareActivityCardsIfNeeded() async {
+        guard viewModel.liveActivityFacade.supportsLiveActivities else { return }
         guard viewModel.appCustomizationStore.sessionCardStyle == .activity else { return }
         await viewModel.activityFacade.prepareForPresentation()
     }
@@ -358,17 +384,33 @@ final class SessionListFacade: ObservableObject {
             session: session,
             previousSessionID: previousSessionID,
             navigationGeneration: viewModel.sessionNavigationGeneration,
-            directoryKey: viewModel.directoryStoreRegistry.activeKey
+            directoryKey: viewModel.directoryStoreRegistry.activeKey,
+            connectionID: (try? viewModel.requireBackendConnection())?.id
         )
     }
 
     func completeSelection(_ ticket: SelectionTicket) async {
         guard selectionIsCurrent(ticket) else { return }
+        guard viewModel.connectionStore.apiProfile != .v2 else { return }
         await viewModel.selectSession(ticket.session)
     }
 
     func prepareSelectionForNavigation(_ ticket: SelectionTicket) async -> Bool {
         guard prepareSelectionIfCurrent(ticket) else { return false }
+        if viewModel.connectionStore.apiProfile == .v2 {
+            let hydrated = await viewModel.hydrateV2Transcript(
+                for: ticket.session,
+                navigationGeneration: ticket.navigationGeneration,
+                expectedDirectoryKey: ticket.directoryKey
+            )
+            if hydrated, selectionIsCurrent(ticket) {
+                await viewModel.hydrateV2Interactions(for: ticket.session)
+            }
+            return hydrated && selectionIsCurrent(ticket)
+        }
+        guard viewModel.isBrowsingLocalCache || viewModel.compatibilityClient(for: .localCache) != nil else {
+            return selectionIsCurrent(ticket)
+        }
         guard !viewModel.hasHydratedLocalChat(sessionID: ticket.session.id) else { return true }
 
         if await viewModel.hydrateChatFromLocalCache(
@@ -384,6 +426,9 @@ final class SessionListFacade: ObservableObject {
     @discardableResult
     func prepareSelectionIfCurrent(_ ticket: SelectionTicket) -> Bool {
         guard selectionIsCurrent(ticket) else { return false }
+        if viewModel.connectionStore.apiProfile == .v2 {
+            return true
+        }
         viewModel.prepareSessionSelection(
             ticket.session,
             preservingDraftForSessionID: ticket.previousSessionID,
@@ -393,7 +438,7 @@ final class SessionListFacade: ObservableObject {
     }
 
     private func selectionIsCurrent(_ ticket: SelectionTicket) -> Bool {
-        viewModel.isSessionNavigationCurrent(
+        viewModel.backendConnection?.id == ticket.connectionID && viewModel.isSessionNavigationCurrent(
             sessionID: ticket.session.id,
             generation: ticket.navigationGeneration,
             directoryKey: ticket.directoryKey
@@ -409,42 +454,105 @@ final class SessionListFacade: ObservableObject {
     }
 
     func rename(_ session: OpenCodeSession, title: String) async {
-        guard !viewModel.isBrowsingLocalCache else { return }
+        guard !snapshot.isReadOnly else { return }
         await viewModel.renameSession(session, title: title)
     }
     func delete(_ session: OpenCodeSession) async {
-        guard !viewModel.isBrowsingLocalCache else { return }
+        guard !snapshot.isReadOnly else { return }
+        let lifetime = viewModel.liveActivityFacade.currentLifetime
         if await viewModel.deleteSession(session) {
-            liveActivityBackgroundBridge?.cancel(sessionID: session.id, reason: "Session deleted")
+            liveActivityBackgroundBridge?.cancel(sessionID: session.id, reason: "Session deleted", lifetime: lifetime)
         }
     }
     func toggleLiveActivity(for session: OpenCodeSession) async {
-        guard !viewModel.isBrowsingLocalCache else { return }
+        guard snapshot.supportsLiveActivities else { return }
         await viewModel.liveActivityFacade.toggle(session: session)
     }
     func isLiveActivityActive(for session: OpenCodeSession) -> Bool { viewModel.liveActivityFacade.isActive(sessionID: session.id) }
     func runAction(_ action: OpenCodeAction) async {
-        guard !viewModel.isBrowsingLocalCache else { return }
+        guard !snapshot.isReadOnly else { return }
         await viewModel.runAction(action)
     }
-    func createWorkspace(name: String) async {
-        guard !viewModel.isBrowsingLocalCache else { return }
-        await viewModel.createWorkspace(name: name)
+    var requiresWorktreeDestinationParent: Bool { viewModel.backendConnection?.worktrees?.requiresDestinationParent == true }
+    var allowsWorkspaceCreation: Bool {
+        viewModel.projectFacade.supportsWorkspaceManagement && viewModel.hasGitProject && viewModel.isProjectWorkspacesEnabled
     }
-    func loadWorkspaceSessionsIfNeeded() async { await viewModel.loadWorkspaceSessionsIfNeeded() }
+    var worktreeDestinationParent: String {
+        get { viewModel.projectFacade.worktreeDestinationParent }
+        set { viewModel.projectFacade.worktreeDestinationParent = newValue }
+    }
+    var workspaceErrorMessage: String? { viewModel.errorMessage }
+    var workspaceCreationContextID: String {
+        [viewModel.backendConnection?.id.uuidString ?? "", viewModel.currentProject?.id ?? ""].joined(separator: "|")
+    }
+
+    @discardableResult
+    func createWorkspace(name: String, destinationParent: String? = nil) async -> Bool {
+        guard allowsWorkspaceCreation else { return false }
+        return await viewModel.createWorkspace(name: name, destinationParent: destinationParent)
+    }
+    func loadWorkspaceSessionsIfNeeded() async {
+        guard viewModel.projectFacade.supportsWorkspaceManagement else { return }
+        await viewModel.loadWorkspaceSessionsIfNeeded()
+    }
     func loadMoreWorkspaceSessions(directory: String) async { await viewModel.loadMoreWorkspaceSessions(directory: directory) }
-    func presentNewSession(inWorkspace directory: String) { viewModel.presentNewSession(inWorkspace: directory) }
+    func presentNewSession(inWorkspace directory: String) {
+        guard viewModel.projectFacade.supportsWorkspaceManagement, viewModel.workspaceDirectories().contains(directory) else { return }
+        viewModel.presentNewSession(inWorkspace: directory)
+    }
     func refreshWorkspaceSessions(directory: String) async { await viewModel.refreshWorkspaceSessions(directory: directory) }
-    func resetWorktree(directory: String) async { await viewModel.resetWorktree(directory: directory) }
-    func deleteWorktree(directory: String) async { await viewModel.deleteWorktree(directory: directory) }
+    func resetWorktree(directory: String) async {
+        guard viewModel.projectFacade.supportsWorkspaceManagement, viewModel.backendConnection?.worktreeReset != nil else { return }
+        await viewModel.resetWorktree(directory: directory)
+    }
+    func deleteWorktree(directory: String) async {
+        guard viewModel.projectFacade.supportsWorkspaceManagement, let key = viewModel.workspacePageKey(directory: directory) else { return }
+        pendingWorktreeRemoval = nil
+        let outcome = await viewModel.deleteWorktree(directory: directory)
+        guard viewModel.workspacePageKey(directory: directory) == key else { return }
+        if case let .requiresForce(message) = outcome {
+            pendingWorktreeRemoval = .init(key: key, message: message)
+        }
+    }
+
+    func cancelForceWorktreeRemoval() { pendingWorktreeRemoval = nil }
+
+    func confirmForceWorktreeRemoval(_ confirmed: WorktreeRemovalConfirmation? = nil) async {
+        guard let confirmation = confirmed ?? pendingWorktreeRemoval else { return }
+        pendingWorktreeRemoval = nil
+        guard viewModel.projectFacade.supportsWorkspaceManagement,
+              viewModel.workspacePageKey(directory: confirmation.directory) == confirmation.key else { return }
+        await viewModel.deleteWorktree(directory: confirmation.directory, force: true)
+    }
+
+    func refreshWorkspaceInventory() async {
+        guard viewModel.projectFacade.supportsWorkspaceManagement, let projectID = viewModel.currentProject?.id else { return }
+        let context = workspaceCreationContextID
+        await viewModel.refreshProjectWorktreeInventory(projectID: projectID, discover: true)
+        guard workspaceCreationContextID == context else { return }
+        await viewModel.loadWorkspaceSessionsIfNeeded()
+    }
+
+    /// Called after the shared pipeline changes an inactive workspace's canonical session store.
+    func invalidateWorkspaceSnapshot() { scheduleSnapshotRefresh() }
 
     private func workspaceSections(
         directories: [String],
         excluding pinnedIDSet: Set<String>
     ) -> [WorkspaceSection] {
         directories.map { directory in
-            let state = viewModel.workspaceSessionsByDirectory[directory] ?? OpenCodeWorkspaceSessionState()
-            let sessions = state.rootSessions.filter { !pinnedIDSet.contains($0.id) && !viewModel.isActionSession($0) }
+            let key = viewModel.workspacePageKey(directory: directory)
+            let page = key.flatMap { viewModel.sessionListStore.workspacePages[$0] }
+            let state = page?.state ?? OpenCodeWorkspaceSessionState(isLoading: true)
+            let managed = key.flatMap { viewModel.projectStore.worktreeInventories[$0.inventory] }?
+                .contains { $0.directory == directory && $0.isManaged } == true
+            let canonical = viewModel.directoryStoreRegistry.existingStore(for: directory)?.sessions ?? []
+            let scopedSessions = viewModel.sessionListStore.workspacePageSessions(state.sessions, applying: canonical)
+            let sessions = scopedSessions.filter {
+                $0.directory == directory && $0.workspaceID == key?.inventory.workspaceID
+                    && $0.isRootSession && !$0.isArchived && !pinnedIDSet.contains($0.id)
+                    && !viewModel.isActionSession($0) && !viewModel.directoryStoreRegistry.isV2SessionDeleted($0.id)
+            }
             return WorkspaceSection(
                 directory: directory,
                 title: viewModel.workspaceDisplayName(for: directory) ?? URL(fileURLWithPath: directory).lastPathComponent,
@@ -452,7 +560,9 @@ final class SessionListFacade: ObservableObject {
                 rows: sessions.map { rowSnapshot(for: $0) },
                 isLoading: state.isLoading,
                 hasMore: state.hasMore,
-                operation: viewModel.sessionListStore.workspaceOperation(for: directory)
+                operation: viewModel.sessionListStore.workspaceOperation(for: directory),
+                canReset: managed && viewModel.backendConnection?.worktreeReset != nil,
+                canRemove: managed && viewModel.backendConnection?.worktrees != nil
             )
         }
     }
@@ -466,12 +576,18 @@ final class SessionListFacade: ObservableObject {
         let generatedTitle = session.defaultGeneratedTitleDisplayName
         let isBusy = viewModel.sessionStatuses[session.id] == "busy"
         let directorySnapshot = viewModel.directoryStoreRegistry.snapshot(forSessionID: session.id)
-        let messages = directorySnapshot?.messages ?? []
+        let messages = (directorySnapshot?.messages ?? []).filter { $0.info.sessionID == session.id }
         let status = directorySnapshot?.status ?? viewModel.sessionStatuses[session.id]
         let isWorking = status.map { $0 != "idle" } ?? false
         let todos = directorySnapshot?.todos ?? []
         let permissionCount = directorySnapshot?.permissions.count ?? 0
-        let questionCount = directorySnapshot?.questions.count ?? 0
+        let owner = viewModel.directoryStoreRegistry.ownerStore(forSessionID: session.id)
+        let forms = SessionInteractionStore.forms(forSessionTreeRootID: session.id,
+            sessions: owner?.sessions ?? [], forms: owner.map { Array($0.sessionFormStore.forms.values) } ?? [])
+        let formKeys = Set(forms.map(\.key))
+        let questionCount = (directorySnapshot?.questions.filter {
+            !formKeys.contains(.init(sessionID: $0.sessionID, formID: $0.id))
+        }.count ?? 0) + forms.count
         let project = viewModel.currentProject
         return RowSnapshot(
             session: session,
@@ -479,11 +595,11 @@ final class SessionListFacade: ObservableObject {
             showsPinnedBadge: showsPinnedBadge,
             workspaceOverline: workspaceOverline,
             style: .regular,
-            preview: viewModel.sessionPreviews[session.id],
+            preview: messages.isEmpty ? viewModel.sessionPreviews[session.id] : viewModel.buildSessionPreview(from: messages),
             isBusy: isBusy,
             hasLiveActivity: viewModel.isLiveActivityActive(for: session),
             hasDraft: viewModel.hasMessageDraft(for: session),
-            hasPermissionRequest: hasPermissionRequest ?? viewModel.hasPermissionRequest(for: session),
+            hasPermissionRequest: (hasPermissionRequest ?? viewModel.hasPermissionRequest(for: session)) || !forms.isEmpty,
             displayTitle: generatedTitle ?? session.title.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "Untitled Session"),
             shimmersTitle: generatedTitle != nil && isBusy,
             projectTitle: projectTitle(project),
@@ -576,7 +692,7 @@ final class SessionListFacade: ObservableObject {
 
     private func bindActiveDirectoryStore(_ store: DirectoryStore) {
         activeDirectoryObservations.removeAll()
-        store.objectWillChange
+        Publishers.Merge(store.objectWillChange, store.syncStore.objectWillChange)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.scheduleSnapshotRefresh()

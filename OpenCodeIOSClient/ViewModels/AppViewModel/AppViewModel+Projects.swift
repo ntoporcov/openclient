@@ -36,6 +36,8 @@ struct NewProjectChatSheetRequest: Identifiable, Sendable {
     let composerSelection: NewProjectChatComposerSelection?
     let initialContent: NewProjectChatInitialContent?
     let presentsAboveConnection: Bool
+    let sharePayloadID: String?
+    let requiresLegacyWidgetActions: Bool
 
     init(
         id: UUID = UUID(),
@@ -44,7 +46,9 @@ struct NewProjectChatSheetRequest: Identifiable, Sendable {
         locksProject: Bool,
         composerSelection: NewProjectChatComposerSelection?,
         initialContent: NewProjectChatInitialContent? = nil,
-        presentsAboveConnection: Bool = false
+        presentsAboveConnection: Bool = false,
+        sharePayloadID: String? = nil,
+        requiresLegacyWidgetActions: Bool = false
     ) {
         self.id = id
         self.projectID = projectID
@@ -53,6 +57,8 @@ struct NewProjectChatSheetRequest: Identifiable, Sendable {
         self.composerSelection = composerSelection
         self.initialContent = initialContent
         self.presentsAboveConnection = presentsAboveConnection
+        self.sharePayloadID = sharePayloadID
+        self.requiresLegacyWidgetActions = requiresLegacyWidgetActions
     }
 }
 
@@ -70,7 +76,8 @@ extension AppViewModel {
     }
 
     var projectSessionSearchResults: [RecentProjectSession] {
-        sessionListStore.projectSessionSearchResults
+        let hiddenIDs = hiddenProjectActionSessionIDs
+        return Array(sessionListStore.projectSessionSearchResults.filter { !hiddenIDs.contains($0.session.id) }.prefix(40))
     }
 
     var isSearchingProjectSessions: Bool {
@@ -165,7 +172,8 @@ extension AppViewModel {
         return sessionListStore.recentProjectSessions(
             projects: projects,
             previews: sessionPreviews,
-            statuses: sessionStatuses
+            statuses: sessionStatuses,
+            hiddenActionSessionIDs: hiddenProjectActionSessionIDs
         )
     }
 
@@ -194,7 +202,9 @@ extension AppViewModel {
         locksProject: Bool = false,
         composerSelection: NewProjectChatComposerSelection? = nil,
         initialContent: NewProjectChatInitialContent? = nil,
-        presentsAboveConnection: Bool = false
+        presentsAboveConnection: Bool = false,
+        sharePayloadID: String? = nil,
+        requiresLegacyWidgetActions: Bool = false
     ) {
         newProjectChatSheetRequest = NewProjectChatSheetRequest(
             projectID: projectID,
@@ -202,7 +212,9 @@ extension AppViewModel {
             locksProject: locksProject,
             composerSelection: composerSelection,
             initialContent: initialContent,
-            presentsAboveConnection: presentsAboveConnection
+            presentsAboveConnection: presentsAboveConnection,
+            sharePayloadID: sharePayloadID,
+            requiresLegacyWidgetActions: requiresLegacyWidgetActions
         )
     }
 
@@ -217,21 +229,37 @@ extension AppViewModel {
     }
 
     func searchProjects() async {
-        projectSearchResults = await projectCoordinator.searchProjects(
-            client: client,
-            query: projectSearchQuery,
-            defaultSearchRoot: defaultSearchRoot
-        )
+        guard let connection = backendConnection, !connection.isClosed, let service = connection.projectLifecycle else { return }
+        let query = projectSearchQuery
+        do {
+            let result = try await service.searchDirectories(query: query, root: defaultSearchRoot)
+            guard isCurrentBackendConnection(connection), projectSearchQuery == query else { return }
+            projectSearchResults = result.directories
+        } catch {
+            guard isCurrentBackendConnection(connection), projectSearchQuery == query else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     func searchCreateProjectDirectories() async {
-        let result = await projectCoordinator.searchCreateProjectDirectories(
-            client: client,
-            query: createProjectQuery,
-            defaultSearchRoot: defaultSearchRoot
-        )
-        createProjectSelectedDirectory = result.selectedDirectory
-        createProjectResults = result.results
+        guard let connection = backendConnection, !connection.isClosed, let service = connection.projectLifecycle else { return }
+        let query = createProjectQuery
+        let requestID = UUID()
+        projectStore.directorySearchRequestID = requestID
+        do {
+            let result = try await service.searchDirectories(query: query, root: defaultSearchRoot)
+            guard isCurrentBackendConnection(connection), projectStore.directorySearchRequestID == requestID,
+                  createProjectQuery == query else { return }
+            createProjectSelectedDirectory = result.selectedDirectory
+            createProjectResults = result.directories
+            errorMessage = nil
+        } catch {
+            guard isCurrentBackendConnection(connection), projectStore.directorySearchRequestID == requestID,
+                  createProjectQuery == query else { return }
+            createProjectSelectedDirectory = nil
+            createProjectResults = []
+            errorMessage = error.localizedDescription
+        }
     }
 
     func selectCreateProjectDirectory(_ directory: String) async {
@@ -252,38 +280,39 @@ extension AppViewModel {
     }
 
     func createProject(from directory: String) async {
+        guard !isLoading, let connection = backendConnection, !connection.isClosed, let service = connection.projectLifecycle else { return }
+        let generation = sessionNavigationGeneration
+        let wasPresented = isShowingCreateProjectSheet
         isLoading = true
-        defer { isLoading = false }
+        defer { if isCurrentBackendConnection(connection) { isLoading = false } }
 
         do {
-            guard let result = try await projectCoordinator.createProject(
-                client: client,
-                directory: directory,
-                currentProjects: projects
-            ) else {
-                return
-            }
-
-            if let nextProjects = result.projects {
-                projects = nextProjects
+            let result = try await service.resolveProject(directory: directory)
+            guard !Task.isCancelled, isCurrentBackendConnection(connection), sessionNavigationGeneration == generation,
+                  !wasPresented || isShowingCreateProjectSheet else { return }
+            projectStore.rememberProjectResolution(result, connectionID: connection.id)
+            if let index = projects.firstIndex(where: { $0.id == result.project.id }) {
+                projects[index] = result.project
             } else {
-                try await refreshProjects()
+                projects.append(result.project)
             }
-
+            currentProject = result.project
             createProjectQuery = ""
             createProjectResults = []
             createProjectSelectedDirectory = nil
             withAnimation(opencodeSelectionAnimation) {
                 isShowingCreateProjectSheet = false
             }
-            await selectDirectory(result.selectedDirectory)
+            await selectDirectory(result.scope.directory)
         } catch {
+            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == generation else { return }
             errorMessage = error.localizedDescription
         }
     }
 
     func canEditProjectPreferences(_ project: OpenCodeProject) -> Bool {
-        project.id != "global" && !project.id.hasPrefix("local:") && !project.worktree.isEmpty
+        projectFacade.allowsProjectMetadataEditing && compatibilityClient(for: .files) != nil
+            && project.id != "global" && !project.id.hasPrefix("local:") && !project.worktree.isEmpty
     }
 
     func setProjectColor(_ color: String, for project: OpenCodeProject) async {
@@ -307,12 +336,14 @@ extension AppViewModel {
     }
 
     func discoverProjectImageCandidates(for project: OpenCodeProject) async -> [ProjectImageCandidate] {
-        guard canEditProjectPreferences(project) else { return [] }
+        guard canEditProjectPreferences(project), let client = compatibilityClient(for: .files) else { return [] }
 
         var paths = Set<String>()
         for query in ["png", "jpg", "jpeg"] {
             do {
-                let results = try await client.findFiles(query: query, directory: project.worktree)
+                let results = try await (connectionStore.apiProfile == .v2
+                    ? client.findV2Files(query: query, directory: project.worktree)
+                    : client.findFiles(query: query, directory: project.worktree))
                 for result in results where isSupportedProjectImagePath(result) {
                     paths.insert(result)
                 }
@@ -339,12 +370,12 @@ extension AppViewModel {
     }
 
     func projectImageDataURL(for candidate: ProjectImageCandidate, project: OpenCodeProject) async -> String? {
-        guard canEditProjectPreferences(project) else { return nil }
+        guard canEditProjectPreferences(project), let client = compatibilityClient(for: .files) else { return nil }
         do {
-            let content = try await client.readFileContent(
-                directory: project.worktree,
-                path: requestPath(forProjectImagePath: candidate.path, directory: project.worktree)
-            )
+            let path = requestPath(forProjectImagePath: candidate.path, directory: project.worktree)
+            let content = try await (connectionStore.apiProfile == .v2
+                ? client.readV2FileContent(directory: project.worktree, path: path)
+                : client.readFileContent(directory: project.worktree, path: path))
             guard content.encoding == "base64" || content.type == "binary" else { return nil }
             let mime = content.mimeType ?? mimeType(forProjectImagePath: candidate.path)
             return "data:\(mime);base64,\(content.content)"
@@ -377,9 +408,29 @@ extension AppViewModel {
                 preservingDraftForSessionID: previousSessionID,
                 animatesChanges: animatesPreparation
             )
-            cachedDirectory = await hydrateDirectoryFromLocalCache(directory)
+            cachedDirectory = if usesLocalCache { await hydrateDirectoryFromLocalCache(directory) } else { nil }
         }
         guard DirectoryStoreRegistry.key(for: effectiveSelectedDirectory) == DirectoryStoreRegistry.key(for: directory) else {
+            return
+        }
+        if let connection = backendConnection {
+            let navigationGeneration = sessionNavigationGeneration
+            do {
+                try await refreshProjects()
+                guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+                try await reloadSessions()
+                guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+                await loadComposerOptions()
+                guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+                errorMessage = nil
+                withAnimation(opencodeSelectionAnimation) {
+                    isShowingProjectPicker = false
+                }
+            } catch {
+                guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+                isLoadingSessions = false
+                errorMessage = error.localizedDescription
+            }
             return
         }
         if isBrowsingLocalCache {
@@ -397,34 +448,24 @@ extension AppViewModel {
                 isShowingProjectPicker = false
             }
         }
-        do {
-            if let directory, !directory.isEmpty {
-                _ = try await client.listSessions(directory: directory, roots: true, limit: 55)
-                try await refreshProjects()
-            } else {
-                try await refreshProjects()
-            }
-            try await reloadSessions()
-            await loadComposerOptions()
-            withAnimation(opencodeSelectionAnimation) {
-                isShowingProjectPicker = false
-            }
-        } catch {
-            isLoadingSessions = false
-            errorMessage = error.localizedDescription
-        }
+        isLoadingSessions = false
+        errorMessage = BackendError.disconnected.localizedDescription
     }
 
     private func updateProjectPreferences(_ project: OpenCodeProject, icon: OpenCodeProject.Icon) async {
+        guard canEditProjectPreferences(project), let connection = backendConnection,
+              let requestClient = connection.openCodeCompatibility?.client else { return }
         do {
-            let updated = try await client.updateProject(
+            let updated = try await requestClient.updateProject(
                 projectID: project.id,
                 directory: project.worktree,
                 name: project.name,
                 icon: icon
             )
+            guard !Task.isCancelled, isCurrentBackendConnection(connection), config == requestClient.config else { return }
             applyUpdatedProject(updated)
         } catch {
+            guard !Task.isCancelled, isCurrentBackendConnection(connection) else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -496,7 +537,9 @@ extension AppViewModel {
     @discardableResult
     func prepareProjectNavigation(_ project: OpenCodeProject) async -> String? {
         let previousSessionID = beginProjectNavigation(project)
-        _ = await hydrateDirectoryFromLocalCache(project.id == "global" ? nil : project.worktree)
+        if usesLocalCache {
+            _ = await hydrateDirectoryFromLocalCache(project.id == "global" ? nil : project.worktree)
+        }
         guard currentProject?.id == project.id else { return nil }
         return previousSessionID
     }
@@ -523,26 +566,50 @@ extension AppViewModel {
     }
 
     func refreshProjects() async throws {
-        let result = try await projectCoordinator.refreshProjects(
-            client: client,
-            currentProjects: projects,
-            currentProject: currentProject,
-            selectedDirectory: selectedDirectory
-        )
-        projects = result.projects
-        currentProject = result.currentProject
-        persistProjectsToLocalCache()
+        if let connection = backendConnection {
+            let selectedProjectID = currentProject?.id
+            let generation = directoryStoreRegistry.generation
+            let projectRevision = directoryStoreRegistry.v2ProjectRevision
+            let snapshot = try await connection.projects.projectsSnapshot()
+            guard isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation,
+                  directoryStoreRegistry.v2ProjectRevision == projectRevision else { return }
+            if connection.openCodeCompatibility?.profile == .legacy {
+                projects = projectCoordinator.bootstrapProjects(
+                    snapshot.projects + projects.filter { $0.id.hasPrefix("local:") },
+                    currentProject: snapshot.currentProject
+                )
+            } else {
+                projects = snapshot.projects
+            }
+            projects = projects.map { projectStore.preservingSelectedDirectory($0, connectionID: connection.id) }
+            projectStore.defaultServerDirectory = snapshot.defaultDirectory
+            if currentProject?.id == selectedProjectID {
+                currentProject = projects.first { $0.id == selectedProjectID }
+            }
+            persistProjectsToLocalCache()
+            return
+        }
+        throw BackendError.disconnected
     }
 
     func refreshProjectList() async {
         guard !isBrowsingLocalCache else { return }
+        guard let connection = try? requireBackendConnection() else { return }
         do {
             try await refreshProjects()
+            guard isCurrentBackendConnection(connection) else { return }
             await loadRecentProjectSessionsAcrossProjects()
+            guard isCurrentBackendConnection(connection) else { return }
             errorMessage = nil
         } catch {
+            guard isCurrentBackendConnection(connection) else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    func refreshV2Projects() async throws {
+        guard backendConnection != nil else { throw BackendError.disconnected }
+        try await refreshProjects()
     }
 
     func searchProjectSessionsAcrossProjects() async {
@@ -554,9 +621,9 @@ extension AppViewModel {
             return
         }
 
-        guard backendMode == .server, isConnected else {
+        guard isConnected, let connection = try? requireBackendConnection() else {
             objectWillChange.send()
-            sessionListStore.projectSessionSearchResults = []
+            sessionListStore.projectSessionSearchResults = isBrowsingLocalCache ? cachedProjectSessionSearchResults(for: query) : []
             sessionListStore.isSearchingProjectSessions = false
             return
         }
@@ -565,15 +632,16 @@ extension AppViewModel {
         sessionListStore.projectSessionSearchResults = cachedProjectSessionSearchResults(for: query)
         sessionListStore.isSearchingProjectSessions = true
 
-        let directories = projectSessionSearchDirectoriesToLoad()
-        let client = client
+        let scopes = homeSessionScopes
+        let sessionsService = connection.sessions
+        let searchStore = SessionListStore(recentSessionsByDirectory: sessionListStore.recentSessionsByDirectory)
 
         await withTaskGroup(of: RecentSessionLoadResult?.self) { group in
-            for directory in directories {
-                group.addTask {
+            for scope in scopes {
+                group.addTask { @Sendable [sessionsService, scope, query] in
                     do {
-                        let sessions = try await client.listSessions(directory: directory, roots: true, limit: 55)
-                        return RecentSessionLoadResult(directory: directory, sessions: sessions)
+                        let sessions = try await sessionsService.searchSessions(query: query, scope: scope, limit: 100)
+                        return RecentSessionLoadResult(directory: scope.directory, sessions: sessions)
                     } catch {
                         return nil
                     }
@@ -582,20 +650,26 @@ extension AppViewModel {
 
             for await result in group {
                 guard let result else { continue }
-                guard projectSessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+                guard isCurrentBackendConnection(connection), projectSessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
                 objectWillChange.send()
-                sessionListStore.setRecentSessions(result.sessions, for: result.directory)
-                sessionListStore.projectSessionSearchResults = cachedProjectSessionSearchResults(for: query)
+                // Search is not a canonical recent-session page. Never replace the home cache with filtered hits.
+                let resultIDs = Set(result.sessions.map(\.id))
+                let existing = searchStore.recentSessionsByDirectory[SessionListStore.recentDirectoryKey(result.directory)] ?? []
+                searchStore.setRecentSessions(existing.filter { !resultIDs.contains($0.id) } + result.sessions, for: result.directory)
+                sessionListStore.projectSessionSearchResults = searchStore.projectSessionSearchResults(
+                    projects: projects, previews: sessionPreviews, statuses: sessionStatuses, query: query, limit: Int.max
+                )
             }
         }
 
-        guard projectSessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+        guard isCurrentBackendConnection(connection), projectSessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
         objectWillChange.send()
-        sessionListStore.projectSessionSearchResults = cachedProjectSessionSearchResults(for: query)
         sessionListStore.isSearchingProjectSessions = false
     }
 
     func isProjectWorkspacesEnabled(for project: OpenCodeProject) -> Bool {
+        guard backendConnection?.isClosed == false, backendConnection?.worktrees != nil else { return false }
+        guard worktreeInventoryKey(for: project) != nil else { return false }
         guard project.id != "global", project.vcs == "git" else { return false }
         return projectWorkspacesEnabledByScope[projectPreferenceScopeKey(forDirectory: project.worktree)] ?? false
     }
@@ -626,12 +700,19 @@ extension AppViewModel {
         workspaceDirectory: String? = nil,
         workspaceSelection: NewSessionWorkspaceSelection? = nil,
         newWorkspaceName: String = "",
-        onSessionCreated: ((OpenCodeSession) -> Void)? = nil
+        newWorkspaceDestinationParent: String? = nil,
+        onSessionCreated: ((OpenCodeSession) -> Void)? = nil,
+        checkpoint: NewProjectChatCheckpoint? = nil,
+        isSubmissionCurrent: () -> Bool = { true },
+        submitInitialPrompt: ((OpenCodeSession, BackendScope, String?) async -> Bool)? = nil,
+        onPromptAccepted: ((OpenCodeSession, String, BackendScope) -> Void)? = nil
     ) async -> Bool {
-        guard backendMode == .server, isConnected else {
+        guard isConnected, let connection = try? requireBackendConnection() else {
             errorMessage = String(localized: "Connect to an OpenCode server before starting a chat.")
             return false
         }
+        guard isSubmissionCurrent(), checkpoint == nil || checkpoint?.connectionID == connection.id else { return false }
+        guard checkpoint?.creationStarted != true || checkpoint?.session != nil else { return false }
 
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return false }
@@ -639,66 +720,137 @@ extension AppViewModel {
             errorMessage = String(localized: "Project is no longer available.")
             return false
         }
-        guard canCreateSessionOrPresentPaywall() else { return false }
+        guard checkpoint?.session != nil || canCreateSessionOrPresentPaywall() else { return false }
         guard reserveUserPromptIfAllowed() else { return false }
+        let reservedPromptDay = hasProUnlock ? nil : usageMeter.promptDay
 
         let routeDirectory = project.id == "global" ? nil : project.worktree
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if backendConnection?.id == connection.id { isLoading = false }
+        }
 
         do {
-            let targetDirectory = try await resolveProjectChatDirectory(
-                for: project,
-                workspaceDirectory: workspaceDirectory,
-                workspaceSelection: workspaceSelection,
-                newWorkspaceName: newWorkspaceName
-            )
-            try Task.checkCancellation()
+            let targetDirectory: String?
+            if let scope = checkpoint?.scope {
+                targetDirectory = scope.directory
+            } else {
+                targetDirectory = try await resolveProjectChatDirectory(
+                    for: project,
+                    workspaceDirectory: workspaceDirectory,
+                    workspaceSelection: workspaceSelection,
+                    newWorkspaceName: newWorkspaceName,
+                    destinationParent: newWorkspaceDestinationParent
+                )
+            }
+            guard isCurrentBackendConnection(connection), isSubmissionCurrent() else { throw CancellationError() }
+            var executionScope = checkpoint?.scope ?? projectExecutionScope(for: project, directory: targetDirectory)
+            checkpoint?.scope = executionScope
             currentProject = project
             prepareDirectorySelection(routeDirectory)
 
-            let createSubmission = sessionCoordinator.prepareCreateSession(title: title, directory: targetDirectory)
-            let session = try await sessionCoordinator.submitCreate(client: client, submission: createSubmission)
-            try Task.checkCancellation()
-            onSessionCreated?(session)
-            recordCreatedSessionForMetering()
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let selection = composerSelection ?? NewProjectChatComposerSelection(
+                agentName: newSessionDefaults.agentName,
+                modelReference: newSessionDefaultModelReference(),
+                reasoningVariant: newSessionDefaults.reasoningVariant
+            )
+            let session: OpenCodeSession
+            if let created = checkpoint?.session {
+                session = created
+            } else {
+                checkpoint?.creationStarted = true
+                session = try await connection.sessions.createSession(.init(
+                    title: trimmedTitle.isEmpty ? nil : trimmedTitle,
+                    scope: executionScope,
+                    agent: selection.agentName,
+                    model: selection.modelReference,
+                    variant: selection.reasoningVariant
+                ))
+                checkpoint?.session = session
+                checkpoint?.appliedSelection = selection
+                guard isCurrentBackendConnection(connection) else { throw CancellationError() }
+                // Talk relies on this early callback, before hydration or the first send.
+                onSessionCreated?(session)
+                recordCreatedSessionForMetering()
+            }
+            guard isCurrentBackendConnection(connection), isSubmissionCurrent() else { throw CancellationError() }
+            if let checkpoint {
+                guard session.projectID == nil || session.projectID == executionScope.projectID,
+                      executionScope.directory == nil || session.directory == executionScope.directory else {
+                    throw BackendError.invalidScope
+                }
+                executionScope.workspaceID = session.workspaceID ?? executionScope.workspaceID
+                checkpoint.scope = executionScope
+            }
             upsertVisibleSession(session)
             try await reloadSessions()
-            try Task.checkCancellation()
-            await loadComposerOptions()
-            try Task.checkCancellation()
+            guard isCurrentBackendConnection(connection) else { throw CancellationError() }
+            if checkpoint == nil { await loadComposerOptions() }
+            guard isCurrentBackendConnection(connection) else { throw CancellationError() }
             if let composerSelection {
                 applyNewProjectChatComposerSelection(composerSelection, to: session)
             } else {
                 seedComposerSelectionsForNewSession(session)
             }
             upsertVisibleSession(session)
-            prepareSessionSelection(session)
+            if connectionStore.apiProfile == .v2 {
+                // Preserve Talk's early navigation and any canonical read already in progress.
+                if selectedSession?.id != session.id || (!chatStore.isHydratingV2Transcript(sessionID: session.id)
+                    && chatStore.preparedSessionID != session.id) {
+                    _ = beginSessionNavigation(session)
+                }
+            } else {
+                prepareSessionSelection(session)
+            }
             await selectSession(session)
-            try Task.checkCancellation()
+            guard isCurrentBackendConnection(connection) else { throw CancellationError() }
 
-            try await waitForWorktreeReadyIfNeeded(directory: targetDirectory)
-            try Task.checkCancellation()
+            if connection.worktrees != nil {
+                try await waitForWorktreeReadyIfNeeded(directory: targetDirectory)
+            }
+            guard isCurrentBackendConnection(connection), isSubmissionCurrent() else { throw CancellationError() }
 
-            let didSend = await sendMessage(
-                text,
-                agentMentions: agentMentions,
-                attachments: attachments,
-                in: session,
-                userVisible: true,
-                messageID: messageID,
-                partID: partID,
-                meterPrompt: false
-            )
+            let submissionMessageID = checkpoint?.messageID ?? messageID
+                ?? (onPromptAccepted == nil ? nil : OpenCodeIdentifier.message())
+            let didSend: Bool
+            if let submitInitialPrompt {
+                didSend = await submitInitialPrompt(session, executionScope, reservedPromptDay)
+            } else {
+                checkpoint?.admission = .submitting
+                didSend = await sendMessage(
+                    text,
+                    agentMentions: agentMentions,
+                    attachments: attachments,
+                    in: session,
+                    userVisible: true,
+                    messageID: submissionMessageID,
+                    partID: checkpoint?.partID ?? partID,
+                    meterPrompt: false,
+                    reservedPromptDay: reservedPromptDay
+                )
+            }
+            // Keep admission evidence even if transcript hydration retires its live ledger entry.
+            if let submissionMessageID {
+                checkpoint?.admission = didSend ? .admitted
+                    : (chatFacade.promptAdmissionPhase(messageID: submissionMessageID, sessionID: session.id) ?? checkpoint?.admission)
+            }
+            guard isCurrentBackendConnection(connection), isSubmissionCurrent() else { return false }
             if !didSend {
                 return false
             }
 
             errorMessage = nil
+            if let submissionMessageID { onPromptAccepted?(session, submissionMessageID, executionScope) }
             return true
         } catch {
-            refundReservedUserPromptIfNeeded()
+            guard backendConnection?.id == connection.id, !connection.isClosed else { return false }
+            if let reservedPromptDay, usageMeter.promptDay == reservedPromptDay,
+               reservedPromptDay == OpenClientUsageMeter.dayString(for: Date()) {
+                refundReservedUserPromptIfNeeded()
+            }
             isLoadingSessions = false
+            guard !Task.isCancelled, isSubmissionCurrent() else { return false }
             errorMessage = error.localizedDescription
             return false
         }
@@ -708,9 +860,13 @@ extension AppViewModel {
         for project: OpenCodeProject,
         workspaceDirectory: String?,
         workspaceSelection: NewSessionWorkspaceSelection?,
-        newWorkspaceName: String
+        newWorkspaceName: String,
+        destinationParent: String?
     ) async throws -> String? {
-        guard project.id != "global" else { return nil }
+        guard project.id != "global" else {
+            // Global listing remains unscoped; execution uses the bootstrap's concrete location.
+            return projectExecutionScope(for: project, directory: workspaceDirectory).directory
+        }
 
         guard let workspaceSelection,
               isProjectWorkspacesEnabled(for: project),
@@ -727,17 +883,7 @@ extension AppViewModel {
         case let .directory(directory):
             return directory.isEmpty ? project.worktree : directory
         case .createNew:
-            let name = newWorkspaceName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let created = try await client.createWorktree(
-                directory: project.worktree,
-                name: name.isEmpty ? nil : name
-            )
-            appendSandboxDirectory(created.directory, to: project)
-            sessionListStore.ensureWorkspaceStateExists(
-                for: created.directory,
-                defaultState: OpenCodeWorkspaceSessionState(isLoading: true)
-            )
-            sessionListStore.setWorkspaceOperation(.preparing, for: created.directory)
+            let created = try await createManagedWorktree(name: newWorkspaceName, destinationParent: destinationParent, project: project)
             return created.directory
         }
     }
@@ -794,11 +940,15 @@ extension AppViewModel {
         projects = navigation.projects
         currentProject = navigation.currentProject
         prepareDirectorySelection(navigation.routeDirectory)
-        prepareSessionSelection(recent.session)
+        if connectionStore.apiProfile == .v2 {
+            _ = beginSessionNavigation(recent.session)
+        } else {
+            prepareSessionSelection(recent.session)
+        }
     }
 
     func loadRecentProjectSessionsAcrossProjects() async {
-        guard backendMode == .server, isConnected else { return }
+        guard isConnected, backendConnection != nil else { return }
         if let recentProjectSessionsLoadTask {
             await recentProjectSessionsLoadTask.value
             return
@@ -816,18 +966,20 @@ extension AppViewModel {
     }
 
     private func performRecentProjectSessionsLoad(generation: Int) async {
-        guard backendMode == .server else { return }
+        guard let connection = try? requireBackendConnection() else { return }
+        let sessionsService = connection.sessions
         if ProcessInfo.processInfo.environment["OPENCLIENT_SCREENSHOT_SCENE"] != nil, !recentProjectSessions.isEmpty {
             sessionListStore.isLoadingRecentProjectSessions = false
             return
         }
 
-        let directories = projectCoordinator.recentSessionDirectories(
-            projects: projects,
-            currentProject: currentProject,
-            selectedDirectory: selectedDirectory
-        )
-        guard !directories.isEmpty else { return }
+        let scopes = homeSessionScopes
+        guard !scopes.isEmpty else { return }
+        let lifecycleSnapshot = directoryStoreRegistry.v2LifecycleSnapshot
+        let registryGeneration = directoryStoreRegistry.generation
+        let sessionSnapshots = Dictionary(uniqueKeysWithValues: scopes.map { scope in
+            (DirectoryStoreRegistry.key(for: scope.directory), directoryStoreRegistry.existingStore(for: scope.directory)?.sessions ?? [])
+        })
 
         objectWillChange.send()
         sessionListStore.isLoadingRecentProjectSessions = true
@@ -838,13 +990,12 @@ extension AppViewModel {
             }
         }
 
-        let client = client
         await withTaskGroup(of: RecentSessionLoadResult?.self) { group in
-            for directory in directories {
-                group.addTask {
+            for scope in scopes {
+                group.addTask { @Sendable [sessionsService, scope] in
                     do {
-                        let sessions = try await client.listSessions(directory: directory, roots: true, limit: 5)
-                        return RecentSessionLoadResult(directory: directory, sessions: sessions)
+                        let page = try await sessionsService.sessions(scope: scope, cursor: nil, limit: 100, roots: true)
+                        return RecentSessionLoadResult(directory: scope.directory, sessions: page.sessions)
                     } catch {
                         return nil
                     }
@@ -853,15 +1004,27 @@ extension AppViewModel {
 
             for await result in group {
                 guard let result else { continue }
-                guard recentProjectSessionsLoadGeneration == generation else { return }
+                guard isCurrentBackendConnection(connection), recentProjectSessionsLoadGeneration == generation,
+                      directoryStoreRegistry.generation == registryGeneration else { return }
                 objectWillChange.send()
-                sessionListStore.setRecentSessions(result.sessions, for: result.directory)
+                let owner = directoryStoreRegistry.store(for: result.directory)
+                let previousSessions = sessionSnapshots[DirectoryStoreRegistry.key(for: result.directory)] ?? []
+                let liveSessions = owner.sessions.filter { current in
+                    !directoryStoreRegistry.isV2SessionDeleted(current.id)
+                        && (current != previousSessions.first(where: { $0.id == current.id })
+                            || directoryStoreRegistry.v2LifecycleRevision(sessionID: current.id) != (lifecycleSnapshot[current.id] ?? 0))
+                }
+                let sessions = directoryStoreRegistry.unchangedV2Sessions(result.sessions, since: lifecycleSnapshot).filter { session in
+                    owner.sessions.first(where: { $0.id == session.id }) == previousSessions.first(where: { $0.id == session.id })
+                } + liveSessions
+                sessionListStore.setRecentSessions(sessions, for: result.directory)
+                _ = owner.upsertSessions(sessions)
             }
         }
     }
 
     func beginRecentProjectSessionsLoadingIfPossible() {
-        guard backendMode == .server, isConnected else { return }
+        guard isConnected, backendConnection != nil else { return }
         guard recentProjectSessionsLoadTask == nil else { return }
 
         let generation = recentProjectSessionsLoadGeneration
@@ -885,6 +1048,7 @@ extension AppViewModel {
     }
 
     func openRecentProjectSession(_ recent: RecentProjectSession) async {
+        guard let connection = try? requireBackendConnection() else { return }
         let recentSession = recent.session
         let navigation = projectCoordinator.recentSessionNavigationResult(for: recentSession, projects: projects)
         pendingRecentSessionOpenID = navigation.shouldPreserveMissingSession ? recentSession.id : nil
@@ -893,23 +1057,27 @@ extension AppViewModel {
         currentProject = navigation.currentProject
 
         if selectedDirectory != navigation.routeDirectory || selectedSession?.id != recentSession.id {
-            prepareDirectorySelection(navigation.routeDirectory)
-            prepareSessionSelection(recentSession)
+            prepareRecentProjectSessionSelection(recent)
         }
 
+        let navigationGeneration = sessionNavigationGeneration
         do {
-            if let directory = recentSession.directory, !directory.isEmpty {
-                _ = try await client.listSessions(directory: directory, roots: true, limit: 55)
-                try await refreshProjects()
-            } else {
-                try await refreshProjects()
-            }
+            let canonical = try await connection.sessions.session(id: recentSession.id, scope: .init(
+                projectID: navigation.currentProject?.id,
+                directory: navigation.routeDirectory,
+                workspaceID: recentSession.workspaceID
+            ))
+            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
             try await reloadSessions()
+            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+            upsertVisibleSession(canonical)
             await loadComposerOptions()
+            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
             withAnimation(opencodeSelectionAnimation) {
                 isShowingProjectPicker = false
             }
         } catch {
+            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
             isLoadingSessions = false
             errorMessage = error.localizedDescription
             return
@@ -929,7 +1097,10 @@ extension AppViewModel {
         if resolution.shouldUpsertVisibleSession {
             upsertVisibleSession(resolved)
         }
-        prepareSessionSelection(resolved)
+        // V2 hydration may already have completed while the home requests were in flight.
+        if connectionStore.apiProfile != .v2 {
+            prepareSessionSelection(resolved)
+        }
         await selectSession(resolved)
     }
 
@@ -1087,7 +1258,8 @@ extension AppViewModel {
     }
 
     func setProjectWorkspacesEnabled(_ isEnabled: Bool, for scopeKey: String? = nil) {
-        let key = scopeKey ?? currentProjectPreferenceScopeKey
+        guard backendConnection?.isClosed == false, backendConnection?.worktrees != nil else { return }
+        let key = scopeKey ?? projectPreferenceScopeKey(forDirectory: currentProject?.worktree)
 
         if isEnabled {
             projectWorkspacesEnabledByScope[key] = true
@@ -1099,7 +1271,17 @@ extension AppViewModel {
     }
 
     var currentProjectActions: [OpenCodeAction] {
-        projectActionsByScope[currentProjectPreferenceScopeKey] ?? []
+        projectActionsByScope[currentProjectActionPreferenceScopeKey] ?? []
+    }
+
+    private var currentProjectActionPreferenceScopeKey: String {
+        // Preserve shipped legacy preferences; new backend contracts get isolated keys.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard backendConnection?.openCodeCompatibility?.profile != .legacy,
+              let scope = currentProjectActionScope,
+              let data = try? encoder.encode(scope) else { return currentProjectPreferenceScopeKey }
+        return "actions|" + data.base64EncodedString()
     }
 
     var actionEligibleCommands: [OpenCodeCommand] {
@@ -1145,31 +1327,43 @@ extension AppViewModel {
     }
 
     func isActionRunning(_ action: OpenCodeAction) -> Bool {
-        pendingActionRunsBySessionID.values.contains { $0.actionID == action.id }
+        actionRunPhase(for: action) != nil
     }
 
     func actionRunPhase(for action: OpenCodeAction) -> OpenCodeActionRunPhase? {
-        pendingActionRunsBySessionID.values.first { $0.actionID == action.id }?.phase
+        guard let scope = currentProjectActionScope else { return nil }
+        return projectActionStore.runs.first { $0.scope == scope && $0.actionID == action.id && $0.state.isRunning }?.phase
     }
 
     func isActionSession(_ session: OpenCodeSession) -> Bool {
-        pendingActionRunsBySessionID[session.id] != nil || Self.isActionSessionTitle(session.title)
+        hiddenProjectActionSessionIDs.contains(session.id)
     }
 
-    static func isActionSessionTitle(_ title: String?) -> Bool {
-        title?.hasPrefix(actionSessionTitlePrefix) == true
+    var hiddenProjectActionSessionIDs: Set<String> {
+        guard let connection = backendConnection, let commands = connection.commands else { return [] }
+        let ownedIDs = projectActionStore.hiddenSessionIDs(backendID: connection.descriptor.id, contractID: commands.actionContractID)
+        return ownedIDs.filter { id in
+            let run = projectActionStore.runs.first {
+                $0.sessionID == id && $0.scope.backendID == connection.descriptor.id && $0.scope.contractID == commands.actionContractID
+            }
+            let owner = directoryStoreRegistry.ownerStore(forSessionID: id)
+                ?? directoryStoreRegistry.existingStore(for: run?.scope.directory)
+            // Hydrated interactions must remain actionable even before the shared
+            // attention signal reaches the run journal, including unsupported forms.
+            return (owner?.syncState.permissionsBySessionID[id]?.isEmpty ?? true)
+                && (owner?.syncState.questionsBySessionID[id]?.isEmpty ?? true)
+                && owner?.sessionFormStore.forms.values.contains(where: { $0.sessionID == id }) != true
+        }
     }
 
-    func hiddenActionSessionTitle(commandName: String, runID: String) -> String {
-        "\(Self.actionSessionTitlePrefix)\(commandName):\(runID)"
-    }
-
-    func actionDebugSessionTitle(commandName: String) -> String {
-        "Debug /\(commandName) action"
+    func refreshProjectActionVisibility() {
+        // Invalidate derived/cached facade snapshots, never the canonical session caches.
+        objectWillChange.send()
+        sessionListStore.objectWillChange.send()
     }
 
     private func setProjectActions(_ actions: [OpenCodeAction], for scopeKey: String? = nil) {
-        let key = scopeKey ?? currentProjectPreferenceScopeKey
+        let key = scopeKey ?? currentProjectActionPreferenceScopeKey
         var deduplicated: [OpenCodeAction] = []
         var seen = Set<String>()
 
@@ -1188,6 +1382,13 @@ extension AppViewModel {
 
     func workspaceDirectories(for project: OpenCodeProject? = nil) -> [String] {
         guard let project = project ?? currentProject, project.id != "global" else { return [] }
+        if let key = worktreeInventoryKey(for: project), let inventory = projectStore.worktreeInventories[key] {
+            return inventory.sorted { lhs, rhs in
+                if lhs.directory == project.worktree { return rhs.directory != project.worktree }
+                if rhs.directory == project.worktree { return false }
+                return lhs.directory < rhs.directory
+            }.map(\.directory)
+        }
         var directories = [project.worktree]
         var seen = Set(directories.map(workspaceKey))
 
@@ -1232,19 +1433,67 @@ extension AppViewModel {
     }
 
     func refreshCurrentProjectWorktreesIfNeeded() async {
-        guard let project = currentProject,
-              project.id != "global",
-              project.vcs == "git" else { return }
+        guard let projectID = currentProject?.id else { return }
+        await refreshProjectWorktreeInventory(projectID: projectID)
+    }
 
+    /// Used by selection, shared inventory invalidations, and reconnect hydration.
+    func refreshProjectWorktreeInventory(projectID: String, discover: Bool = false) async {
+        guard let connection = backendConnection, let service = connection.worktrees,
+              let project = projects.first(where: { $0.id == projectID }).map({ projectStore.preservingSelectedDirectory($0, connectionID: connection.id) }), project.vcs == "git",
+              let key = worktreeInventoryKey(for: project) else { return }
+        let requestID = projectStore.beginWorktreeInventoryRequest(for: key)
+        let scope = BackendScope(projectID: project.id, directory: project.worktree)
         do {
-            let directories = try await client.listWorktrees(directory: project.worktree)
-            replaceSandboxDirectories(directories, for: project)
+            let entries = try await (discover ? service.refresh(scope: scope) : service.inventory(scope: scope))
+            guard isCurrentBackendConnection(connection) else { return }
+            let previous = projectStore.worktreeInventories[key] ?? []
+            guard projectStore.applyWorktreeInventory(entries, for: key, requestID: requestID) else { return }
+            for removed in previous where !entries.contains(where: { $0.directory == removed.directory }) {
+                sessionListStore.removeWorkspacePage(.init(inventory: key, directory: removed.directory))
+            }
+            if currentProject?.id == project.id {
+                replaceSandboxDirectories(entries.map(\.directory), for: project)
+            }
         } catch {
-            appendDebugLog("worktree list failed dir=\(project.worktree) error=\(error.localizedDescription)")
+            guard isCurrentBackendConnection(connection), currentProject?.id == project.id,
+                  projectStore.isWorktreeInventoryRequestCurrent(requestID, for: key) else { return }
+            errorMessage = error.localizedDescription
         }
     }
 
+    /// Feed legacy ready/failed events here, including events received before create returns.
+    func recordWorktreeReadiness(directory: String, error: String? = nil) {
+        guard let connection = backendConnection else { return }
+        projectStore.recordWorktreeReadiness(directory: directory, connectionID: connection.id, error: error)
+        sessionListStore.setWorkspaceOperation(error.map(OpenCodeWorkspaceOperation.failed), for: directory)
+    }
+
+    func worktreeInventoryKey(for project: OpenCodeProject) -> BackendWorktreeInventoryKey? {
+        guard let connection = backendConnection, !connection.isClosed, project.id != "global" else { return nil }
+        let key = BackendWorktreeInventoryKey(connectionID: connection.id, projectID: project.id)
+        guard projectStore.resolvedProjectScopes[key]?.workspaceID == nil else { return nil }
+        return key
+    }
+
+    func workspacePageKey(directory: String) -> BackendWorkspacePageKey? {
+        guard let project = currentProject, let key = worktreeInventoryKey(for: project) else { return nil }
+        return .init(inventory: key, directory: directory)
+    }
+
+    func projectExecutionScope(for project: OpenCodeProject, directory: String? = nil) -> BackendScope {
+        let remembered = backendConnection.flatMap {
+            projectStore.resolvedProjectScopes[.init(connectionID: $0.id, projectID: project.id)]
+        }
+        let target = directory ?? remembered?.directory
+            ?? (project.id == "global" ? projectStore.defaultServerDirectory : project.worktree)
+        return .init(projectID: project.id, directory: target,
+                     workspaceID: remembered?.directory == target ? remembered?.workspaceID : nil)
+    }
+
     private func replaceSandboxDirectories(_ directories: [String], for project: OpenCodeProject) {
+        let latest = projects.first(where: { $0.id == project.id }) ?? project
+        let project = backendConnection.map { projectStore.preservingSelectedDirectory(latest, connectionID: $0.id) } ?? latest
         let rootKey = workspaceKey(project.worktree)
         var seen = Set<String>()
         let sandboxes = directories.compactMap { directory -> String? in
@@ -1287,34 +1536,38 @@ extension AppViewModel {
     }
 
     private func cachedProjectSessionSearchResults(for query: String) -> [RecentProjectSession] {
+        // Keep the backing candidates intact so revealing a run needs no search retry.
         sessionListStore.projectSessionSearchResults(
             projects: projects,
             previews: sessionPreviews,
             statuses: sessionStatuses,
-            query: query
+            query: query,
+            limit: Int.max
         )
     }
 
-    private func projectSessionSearchDirectoriesToLoad() -> [String?] {
-        var directories: [String?] = []
+    var homeSessionScopes: [BackendScope] {
+        var scopes: [BackendScope] = []
         var seen = Set<String>()
 
-        func append(_ directory: String?) {
+        func append(_ directory: String?, projectID: String) {
             let key = directory.map(workspaceKey) ?? "global"
             guard seen.insert(key).inserted else { return }
-            directories.append(directory)
+            scopes.append(.init(projectID: projectID, directory: directory))
         }
 
-        append(nil)
-
-        for project in projects where project.id != "global" {
-            append(project.worktree)
-            for sandbox in project.sandboxes ?? [] {
-                append(sandbox)
+        for project in projects {
+            if project.id == "global" {
+                append(nil, projectID: project.id)
+                continue
+            }
+            append(project.worktree, projectID: project.id)
+            for directory in workspaceDirectories(for: project) {
+                append(directory, projectID: project.id)
             }
         }
 
-        return directories
+        return scopes
     }
 
     private func projectPreferenceScopeKey(forDirectory directory: String?) -> String {

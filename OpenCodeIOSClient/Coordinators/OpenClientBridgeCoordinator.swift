@@ -39,17 +39,19 @@ final class OpenClientBridgeCoordinator {
         self.client = client
         self.reconnectDelay = reconnectDelay
 
-        Publishers.CombineLatest3(
+        Publishers.CombineLatest4(
             connectionStore.$backendMode,
             connectionStore.$isConnected,
-            connectionStore.$connectionPhase
+            connectionStore.$connectionPhase,
+            connectionStore.$apiProfile
         )
-            .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2 }
-            .sink { [weak self] backendMode, isConnected, connectionPhase in
+            .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2 && $0.3 == $1.3 }
+            .sink { [weak self] backendMode, isConnected, connectionPhase, apiProfile in
                 self?.connectionStateChanged(
                     backendMode: backendMode,
                     isConnected: isConnected,
-                    connectionPhase: connectionPhase
+                    connectionPhase: connectionPhase,
+                    apiProfile: apiProfile
                 )
             }
             .store(in: &observations)
@@ -103,16 +105,19 @@ final class OpenClientBridgeCoordinator {
         shouldConnect(
             backendMode: connectionStore.backendMode,
             isConnected: connectionStore.isConnected,
-            connectionPhase: connectionStore.connectionPhase
+            connectionPhase: connectionStore.connectionPhase,
+            apiProfile: connectionStore.apiProfile
         )
     }
 
     private func shouldConnect(
         backendMode: AppBackendMode,
         isConnected: Bool,
-        connectionPhase: OpenClientConnectionPhase
+        connectionPhase: OpenClientConnectionPhase,
+        apiProfile: OpenCodeAPIProfile?
     ) -> Bool {
         guard store.isEnabled else { return false }
+        guard apiProfile != .v2 else { return false }
         if backendMode == .server && isConnected {
             return true
         }
@@ -128,19 +133,22 @@ final class OpenClientBridgeCoordinator {
         connectionStateChanged(
             backendMode: connectionStore.backendMode,
             isConnected: connectionStore.isConnected,
-            connectionPhase: connectionStore.connectionPhase
+            connectionPhase: connectionStore.connectionPhase,
+            apiProfile: connectionStore.apiProfile
         )
     }
 
     private func connectionStateChanged(
         backendMode: AppBackendMode,
         isConnected: Bool,
-        connectionPhase: OpenClientConnectionPhase
+        connectionPhase: OpenClientConnectionPhase,
+        apiProfile: OpenCodeAPIProfile?
     ) {
         let connect = shouldConnect(
             backendMode: backendMode,
             isConnected: isConnected,
-            connectionPhase: connectionPhase
+            connectionPhase: connectionPhase,
+            apiProfile: apiProfile
         )
         guard connect else {
             if store.phase != .idle || lifecycleTask != nil || reconnectTask != nil {

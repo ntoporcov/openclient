@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class TerminalFacade: ObservableObject {
+    typealias ConnectionRunner = @Sendable (
+        OpenCodePTYConnection, URLRequest, Int,
+        @escaping @Sendable (OpenCodePTYSocketEvent) async -> Void
+    ) async throws -> Void
+
     enum SpecialKey {
         case escape
         case tab
@@ -44,26 +49,60 @@ final class TerminalFacade: ObservableObject {
     private let store: TerminalStore
     private let clientProvider: () -> OpenCodeAPIClient?
     private let directoryProvider: () -> String?
+    private let apiProfileProvider: () -> OpenCodeAPIProfile?
+    private let generationProvider: () -> UInt
+    private let workspaceIDProvider: () -> String?
+    private let connectionRunner: ConnectionRunner
+    private struct Identity: Equatable, Sendable {
+        let config: OpenCodeServerConfig?
+        let profile: OpenCodeAPIProfile?
+        let generation: UInt
+    }
+    private struct Context: Equatable, Sendable {
+        let identity: Identity
+        let directory: String
+        let workspaceID: String?
+        let epoch: UInt
+
+        var key: String { TerminalStore.workspaceKey(directory: directory, workspaceID: workspaceID) }
+        var isV2: Bool { identity.profile == .v2 }
+    }
+    private var identity: Identity?
+    private var epoch: UInt = 0
+    private var inventoryRevision: UInt = 0
     private var connection = OpenCodePTYConnection()
     private var observation: AnyCancellable?
     private var connectionTask: Task<Void, Never>?
     private var resizeTask: Task<Void, Never>?
+    private var pendingResize: (id: UUID, terminalID: String, rows: Int, columns: Int)?
     private var rendererOutputHandlers: [UUID: (String) -> Void] = [:]
     private var rendererInput: RendererInput?
     private var attachedTerminalID: String?
     private var attachedRendererID: UUID?
-    private var hydratedDirectories: Set<String> = []
+    private var attachedContext: Context?
+    private var hydratedScopes: Set<String> = []
+    private var removedTerminalKeys: Set<String> = []
     @Published private(set) var isControlModifierActive = false
     @Published private(set) var isAltModifierActive = false
 
     init(
         store: TerminalStore,
         clientProvider: @escaping () -> OpenCodeAPIClient?,
-        directoryProvider: @escaping () -> String?
+        directoryProvider: @escaping () -> String?,
+        apiProfileProvider: @escaping () -> OpenCodeAPIProfile? = { .legacy },
+        generationProvider: @escaping () -> UInt = { 0 },
+        workspaceIDProvider: @escaping () -> String? = { nil },
+        connectionRunner: @escaping ConnectionRunner = { connection, request, cursor, onEvent in
+            try await connection.run(request: request, initialCursor: cursor, onEvent: onEvent)
+        }
     ) {
         self.store = store
         self.clientProvider = clientProvider
         self.directoryProvider = directoryProvider
+        self.apiProfileProvider = apiProfileProvider
+        self.generationProvider = generationProvider
+        self.workspaceIDProvider = workspaceIDProvider
+        self.connectionRunner = connectionRunner
         observation = store.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -101,55 +140,98 @@ final class TerminalFacade: ObservableObject {
     }
 
     func prepareForPresentation() {
-        guard let directory = directoryProvider(), !directory.isEmpty else { return }
-        if store.activeDirectory != directory {
-            detachRenderer()
-            store.activate(directory: directory)
-        }
-        guard !hydratedDirectories.contains(directory) else { return }
+        guard let context = synchronizeScope(), !hydratedScopes.contains(context.key) else { return }
         Task { [weak self] in
-            await self?.refreshTerminals()
+            guard let self, self.isCurrent(context) else { return }
+            await self.refreshTerminals()
         }
     }
 
-    func refreshTerminals() async {
-        guard let client = clientProvider(),
-              let directory = directoryProvider(),
-              !directory.isEmpty,
-              store.beginLoadingTerminals() else { return }
-        if store.activeDirectory != directory {
-            store.activate(directory: directory)
+    func resetForConnectionChange() {
+        epoch &+= 1
+        inventoryRevision &+= 1
+        detachRenderer()
+        identity = nil
+        hydratedScopes.removeAll()
+        removedTerminalKeys.removeAll()
+        store.reset()
+    }
+
+    func refreshAfterEventReconnect() async {
+        hydratedScopes.removeAll()
+        inventoryRevision &+= 1
+        guard store.activeDirectory != nil else { return }
+        await refreshTerminals()
+    }
+
+    private var currentIdentity: Identity {
+        Identity(config: clientProvider()?.config, profile: apiProfileProvider(), generation: generationProvider())
+    }
+
+    private func synchronizeScope() -> Context? {
+        let next = currentIdentity
+        if let identity, identity != next { resetForConnectionChange() }
+        identity = next
+        guard next.profile != nil, let directory = directoryProvider(), !directory.isEmpty else {
+            resetForConnectionChange()
+            return nil
         }
+        let workspaceID = workspaceIDProvider().flatMap { $0.isEmpty ? nil : $0 }
+        if store.activeDirectory != directory || store.activeWorkspaceID != workspaceID {
+            epoch &+= 1
+            detachRenderer()
+            store.activate(directory: directory, workspaceID: workspaceID)
+        }
+        return Context(identity: next, directory: directory, workspaceID: workspaceID, epoch: epoch)
+    }
+
+    private func isCurrent(_ context: Context) -> Bool {
+        context.epoch == epoch && context.identity == currentIdentity
+            && context.directory == directoryProvider()
+            && context.workspaceID == workspaceIDProvider().flatMap { $0.isEmpty ? nil : $0 }
+            && store.activeDirectory == context.directory && store.activeWorkspaceID == context.workspaceID
+    }
+
+    func refreshTerminals() async {
+        guard let context = synchronizeScope(), let client = clientProvider(),
+              store.beginLoadingTerminals() else { return }
         defer {
-            if store.activeDirectory == directory {
+            if isCurrent(context) {
                 store.finishLoadingTerminals()
             }
         }
 #if DEBUG
         if isTerminalScreenshotFixture {
-            hydratedDirectories.insert(directory)
+            hydratedScopes.insert(context.key)
             return
         }
 #endif
         do {
-            let terminals = try await client.listPTYs(directory: directory)
-            guard store.activeDirectory == directory else { return }
-            store.replaceTerminals(terminals, directory: directory)
-            hydratedDirectories.insert(directory)
+            while isCurrent(context), !Task.isCancelled {
+                let revision = inventoryRevision
+                let terminals = try await (context.isV2
+                    ? client.listV2PTYs(directory: context.directory, workspaceID: context.workspaceID)
+                    : client.listPTYs(directory: context.directory, workspaceID: context.workspaceID))
+                guard isCurrent(context), !Task.isCancelled else { return }
+                // An event or reconnect during the read invalidates that snapshot.
+                guard revision == inventoryRevision else { continue }
+                let visible = terminals.filter { !removedTerminalKeys.contains(context.key + "\u{0000}" + $0.id) }
+                store.replaceTerminals(visible, directory: context.directory, workspaceID: context.workspaceID)
+                if let id = attachedTerminalID, !store.activeWorkspace.terminals.contains(where: { $0.id == id }) {
+                    detachRenderer()
+                }
+                hydratedScopes.insert(context.key)
+                return
+            }
         } catch {
-            guard store.activeDirectory == directory else { return }
+            guard isCurrent(context), !Task.isCancelled else { return }
             store.setError(error)
         }
     }
 
     func createTerminal() {
-        guard let client = clientProvider(),
-              let directory = directoryProvider(),
-              !directory.isEmpty,
+        guard let context = synchronizeScope(), let client = clientProvider(),
               store.beginCreatingTerminal() else { return }
-        if store.activeDirectory != directory {
-            store.activate(directory: directory)
-        }
         let title: String
 #if DEBUG
         title = ProcessInfo.processInfo.environment["OPENCODE_UI_TEST_TERMINAL_TITLE"]
@@ -159,33 +241,48 @@ final class TerminalFacade: ObservableObject {
 #endif
 
         Task { [weak self] in
-            guard let self else { return }
-            defer { store.finishCreatingTerminal() }
+            guard let self, isCurrent(context) else { return }
+            defer { if isCurrent(context) { store.finishCreatingTerminal() } }
             do {
-                let terminal = try await client.createPTY(title: title, directory: directory)
-                store.upsert(terminal, directory: directory)
+                let terminal = try await (context.isV2
+                    ? client.createV2PTY(title: title, directory: context.directory, workspaceID: context.workspaceID)
+                    : client.createPTY(title: title, directory: context.directory, workspaceID: context.workspaceID))
+                guard isCurrent(context), !Task.isCancelled,
+                      !removedTerminalKeys.contains(context.key + "\u{0000}" + terminal.id) else { return }
+                _ = apply(.ptyCreated(terminal), directory: context.directory, workspaceID: context.workspaceID)
             } catch {
+                guard isCurrent(context), !Task.isCancelled else { return }
                 store.setError(error)
             }
         }
     }
 
     func selectTerminal(id: String) {
-        guard let directory = store.activeDirectory else { return }
+        guard let context = synchronizeScope() else { return }
         if store.activeWorkspace.activeTerminalID != id {
             detachRenderer()
         }
-        store.select(id: id, directory: directory)
+        store.select(id: id, directory: context.directory, workspaceID: context.workspaceID)
     }
 
     func closeTerminal(id: String) {
-        guard let client = clientProvider(), let directory = store.activeDirectory else { return }
-        let wasActive = store.remove(id: id, directory: directory)
-        if wasActive {
-            detachRenderer()
-        }
-        Task {
-            try? await client.deletePTY(id: id, directory: directory)
+        guard let context = synchronizeScope(), let client = clientProvider() else { return }
+        removeTerminal(id: id, directory: context.directory, workspaceID: context.workspaceID)
+        Task { [weak self] in
+            guard let self, isCurrent(context) else { return }
+            do {
+                if context.isV2 {
+                    try await client.deleteV2PTY(id: id, directory: context.directory, workspaceID: context.workspaceID)
+                } else {
+                    try await client.deletePTY(id: id, directory: context.directory, workspaceID: context.workspaceID)
+                }
+            } catch {
+                guard isCurrent(context), !Task.isCancelled else { return }
+                removedTerminalKeys.remove(context.key + "\u{0000}" + id)
+                hydratedScopes.remove(context.key)
+                inventoryRevision &+= 1
+                store.setError(error)
+            }
         }
     }
 
@@ -195,18 +292,20 @@ final class TerminalFacade: ObservableObject {
         output: @escaping (String) -> Void,
         input: RendererInput
     ) {
-        guard let directory = store.activeDirectory,
+        guard let context = synchronizeScope(),
               store.activeWorkspace.activeTerminalID == terminalID else { return }
 #if DEBUG
         if isTerminalScreenshotFixture {
             attachedTerminalID = terminalID
             attachedRendererID = rendererID
+            attachedContext = context
             rendererOutputHandlers[rendererID] = output
             rendererInput = input
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       self.attachedTerminalID == terminalID,
-                      self.attachedRendererID == rendererID else { return }
+                      self.attachedRendererID == rendererID,
+                      self.isCurrent(context) else { return }
                 self.store.setConnectionState(.connected)
                 self.rendererOutputHandlers.values.forEach { $0(Self.screenshotFixtureTranscript) }
             }
@@ -219,14 +318,14 @@ final class TerminalFacade: ObservableObject {
             return
         }
 
-        let preservesSameTerminalRenderers = attachedTerminalID == terminalID
         let previousConnection = connection
-        disconnectRendererResources(preservingRendererOutputs: preservesSameTerminalRenderers)
+        disconnectRendererResources()
         Task {
             await previousConnection.disconnect()
         }
         attachedTerminalID = terminalID
         attachedRendererID = rendererID
+        attachedContext = context
         rendererOutputHandlers[rendererID] = output
         rendererInput = input
         // A new Ghostty surface has no screen state. Replay the server buffer so
@@ -237,7 +336,7 @@ final class TerminalFacade: ObservableObject {
             await self?.runConnection(
                 terminalID: terminalID,
                 rendererID: rendererID,
-                directory: directory,
+                context: context,
                 initialCursor: initialCursor,
                 connection: rendererConnection
             )
@@ -266,14 +365,19 @@ final class TerminalFacade: ObservableObject {
     @discardableResult
     func send(_ bytes: [UInt8], terminalID: String, rendererID: UUID) -> Bool {
         guard attachedTerminalID == terminalID,
-              rendererOutputHandlers[rendererID] != nil else { return false }
+              attachedRendererID == rendererID,
+              let context = attachedContext, isCurrent(context),
+              store.connectionState == .connected else { return false }
         let activeConnection = connection
         Task { [weak self] in
-            guard let self else { return }
+            guard let self, isCurrent(context), attachedRendererID == rendererID,
+                  connection === activeConnection else { return }
             do {
                 try await activeConnection.send(bytes)
             } catch where error is CancellationError {
             } catch {
+                guard isCurrent(context), attachedRendererID == rendererID,
+                      connection === activeConnection else { return }
                 store.setError(error)
             }
         }
@@ -327,26 +431,39 @@ final class TerminalFacade: ObservableObject {
         }
 #endif
         guard rows > 0, columns > 0,
-              let directory = store.activeDirectory,
+              let context = synchronizeScope(), let client = clientProvider(),
               store.activeWorkspace.activeTerminalID == terminalID else { return }
+        if let pendingResize, pendingResize.terminalID == terminalID,
+           pendingResize.rows == rows, pendingResize.columns == columns { return }
         let terminal = store.activeWorkspace.terminals.first { $0.id == terminalID }
-        guard terminal?.rows != rows || terminal?.columns != columns else { return }
-        store.updateSize(rows: rows, columns: columns, id: terminalID, directory: directory)
-
+        guard pendingResize != nil || terminal?.rows != rows || terminal?.columns != columns else { return }
         resizeTask?.cancel()
+        let resizeID = UUID()
+        pendingResize = (resizeID, terminalID, rows, columns)
+        // A canceled PUT may still reach the server. Treat dimensions as unknown until
+        // the latest request is acknowledged, including across renderer replacement.
+        store.updateSize(rows: nil, columns: nil, id: terminalID, directory: context.directory, workspaceID: context.workspaceID)
         resizeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled, let self, let client = clientProvider() else { return }
+            guard !Task.isCancelled, let self, isCurrent(context),
+                  store.activeWorkspace.activeTerminalID == terminalID else { return }
+            defer {
+                if pendingResize?.id == resizeID {
+                    pendingResize = nil
+                    resizeTask = nil
+                }
+            }
             do {
-                let info = try await client.updatePTY(
-                    id: terminalID,
-                    rows: rows,
-                    columns: columns,
-                    directory: directory
-                )
-                store.update(info: info, directory: directory)
+                let info = try await (context.isV2
+                    ? client.updateV2PTY(id: terminalID, rows: rows, columns: columns, directory: context.directory, workspaceID: context.workspaceID)
+                    : client.updatePTY(id: terminalID, rows: rows, columns: columns, directory: context.directory, workspaceID: context.workspaceID))
+                guard isCurrent(context), !Task.isCancelled,
+                      store.activeWorkspace.activeTerminalID == terminalID else { return }
+                _ = apply(.ptyUpdated(info), directory: context.directory, workspaceID: context.workspaceID)
+                store.updateSize(rows: rows, columns: columns, id: terminalID, directory: context.directory, workspaceID: context.workspaceID)
             } catch where error is CancellationError {
             } catch {
+                guard isCurrent(context), !Task.isCancelled else { return }
                 store.setError(error)
             }
         }
@@ -354,24 +471,76 @@ final class TerminalFacade: ObservableObject {
 
     @discardableResult
     func consume(_ event: OpenCodeManagedEvent) -> Bool {
-        switch event.typed {
+        guard event.envelope.type.hasPrefix("pty."),
+              apiProfileProvider() == .legacy, synchronizeScope() != nil else { return false }
+        return apply(event.typed, directory: event.directory, workspaceID: nil)
+    }
+
+    @discardableResult
+    func consumeV2(_ event: OpenCodeV2ManagedEvent, generation: UInt? = nil) -> Bool {
+        guard apiProfileProvider() == .v2,
+              generation == nil || generation == generationProvider(),
+              ["pty.created", "pty.updated", "pty.exited", "pty.deleted"].contains(event.type),
+              let location = event.location else { return false }
+        struct Payload: Decodable {
+            let info: OpenCodePTY?
+            let id: String?
+            let exitCode: Int?
+        }
+        guard let encoded = try? JSONEncoder().encode(event.data),
+              let payload = try? JSONDecoder().decode(Payload.self, from: encoded),
+              synchronizeScope() != nil else { return false }
+        let typed: OpenCodeTypedEvent
+        switch event.type {
+        case "pty.created":
+            guard let info = payload.info else { return false }
+            typed = .ptyCreated(info)
+        case "pty.updated":
+            guard let info = payload.info else { return false }
+            typed = .ptyUpdated(info)
+        case "pty.exited":
+            guard let id = payload.id, let exitCode = payload.exitCode else { return false }
+            typed = .ptyExited(id: id, exitCode: exitCode)
+        case "pty.deleted":
+            guard let id = payload.id else { return false }
+            typed = .ptyDeleted(id: id)
+        default: return false
+        }
+        return apply(typed, directory: location.directory, workspaceID: location.workspaceID)
+    }
+
+    private func removeTerminal(id: String, directory: String, workspaceID: String?) {
+        inventoryRevision &+= 1
+        removedTerminalKeys.insert(TerminalStore.workspaceKey(directory: directory, workspaceID: workspaceID) + "\u{0000}" + id)
+        if store.remove(id: id, directory: directory, workspaceID: workspaceID) {
+            detachRenderer()
+        }
+    }
+
+    private func apply(_ event: OpenCodeTypedEvent, directory: String, workspaceID: String?) -> Bool {
+        switch event {
         case let .ptyCreated(info):
-            store.upsert(info, directory: event.directory)
+            inventoryRevision &+= 1
+            let key = TerminalStore.workspaceKey(directory: directory, workspaceID: workspaceID) + "\u{0000}" + info.id
+            if info.status == "exited" {
+                removeTerminal(id: info.id, directory: directory, workspaceID: workspaceID)
+            } else if !removedTerminalKeys.contains(key) {
+                store.upsert(info, directory: directory, workspaceID: workspaceID)
+            }
             return true
         case let .ptyUpdated(info):
-            store.update(info: info, directory: event.directory)
+            inventoryRevision &+= 1
+            if info.status == "exited" {
+                removeTerminal(id: info.id, directory: directory, workspaceID: workspaceID)
+            } else {
+                store.update(info: info, directory: directory, workspaceID: workspaceID)
+            }
             return true
         case let .ptyExited(id, _):
-            let removedActive = store.remove(id: id, directory: event.directory)
-            if removedActive {
-                detachRenderer()
-            }
+            removeTerminal(id: id, directory: directory, workspaceID: workspaceID)
             return true
         case let .ptyDeleted(id):
-            let removedActive = store.remove(id: id, directory: event.directory)
-            if removedActive {
-                detachRenderer()
-            }
+            removeTerminal(id: id, directory: directory, workspaceID: workspaceID)
             return true
         default:
             return false
@@ -381,57 +550,82 @@ final class TerminalFacade: ObservableObject {
     private func runConnection(
         terminalID: String,
         rendererID: UUID,
-        directory: String,
+        context: Context,
         initialCursor: Int,
         connection: OpenCodePTYConnection
     ) async {
-        guard let client = clientProvider() else { return }
+        guard isCurrent(context), let client = clientProvider() else { return }
         var attempt = 0
 
         while !Task.isCancelled,
               attachedTerminalID == terminalID,
               attachedRendererID == rendererID,
-              store.activeDirectory == directory {
+              self.connection === connection, isCurrent(context) {
             do {
                 store.setConnectionState(attempt == 0 ? .connecting : .reconnecting)
                 let cursor = Self.connectionCursor(
                     initialCursor: initialCursor,
-                    latestCursor: store.workspaces[directory]?.terminals.first(where: { $0.id == terminalID })?.cursor,
+                    latestCursor: store.activeWorkspace.terminals.first(where: { $0.id == terminalID })?.cursor,
                     attempt: attempt
                 )
-                let request = try client.ptyConnectRequest(id: terminalID, directory: directory, cursor: cursor)
-                try await connection.run(request: request, initialCursor: cursor) { [weak self] event in
+                let request = try (context.isV2
+                    ? client.v2PTYConnectRequest(id: terminalID, directory: context.directory, workspaceID: context.workspaceID, cursor: cursor)
+                    : client.ptyConnectRequest(id: terminalID, directory: context.directory, workspaceID: context.workspaceID, cursor: cursor))
+                try await connectionRunner(connection, request, cursor) { [weak self] event in
                     await MainActor.run {
                         guard let self,
                               self.attachedTerminalID == terminalID,
-                              self.attachedRendererID == rendererID else { return }
+                              self.attachedRendererID == rendererID,
+                              self.connection === connection,
+                              self.isCurrent(context) else { return }
                         switch event {
                         case .connected:
                             self.store.setConnectionState(.connected)
+                        case .closed:
+                            self.store.setConnectionState(.disconnected)
                         case let .output(text, nextCursor):
-                            self.store.updateCursor(nextCursor, id: terminalID, directory: directory)
+                            self.store.updateCursor(nextCursor, id: terminalID, directory: context.directory, workspaceID: context.workspaceID)
                             self.rendererOutputHandlers.values.forEach { $0(text) }
                         case let .cursor(nextCursor):
-                            self.store.updateCursor(nextCursor, id: terminalID, directory: directory)
+                            self.store.updateCursor(nextCursor, id: terminalID, directory: context.directory, workspaceID: context.workspaceID)
                         }
                     }
                 }
+                return
             } catch where error is CancellationError {
                 return
             } catch {
                 guard !Task.isCancelled,
                       attachedTerminalID == terminalID,
-                      attachedRendererID == rendererID else { return }
+                      attachedRendererID == rendererID, self.connection === connection,
+                      isCurrent(context) else { return }
+                store.setConnectionState(.reconnecting)
                 do {
-                    _ = try await client.getPTY(id: terminalID, directory: directory)
+                    let info = try await (context.isV2
+                        ? client.getV2PTY(id: terminalID, directory: context.directory, workspaceID: context.workspaceID)
+                        : client.getPTY(id: terminalID, directory: context.directory, workspaceID: context.workspaceID))
+                    guard !Task.isCancelled, isCurrent(context), attachedRendererID == rendererID,
+                          self.connection === connection else { return }
+                    if info.status == "exited" {
+                        removeTerminal(id: terminalID, directory: context.directory, workspaceID: context.workspaceID)
+                        return
+                    }
                 } catch let OpenCodeAPIError.httpError(code, _) where code == 404 {
-                    await replaceStaleTerminal(id: terminalID, directory: directory, client: client)
+                    guard !Task.isCancelled, isCurrent(context), attachedRendererID == rendererID,
+                          self.connection === connection else { return }
+                    if context.isV2 {
+                        removeTerminal(id: terminalID, directory: context.directory, workspaceID: context.workspaceID)
+                    } else {
+                        await replaceStaleTerminal(id: terminalID, context: context, client: client)
+                    }
                     return
                 } catch {
+                    guard !Task.isCancelled, isCurrent(context), attachedRendererID == rendererID,
+                          self.connection === connection else { return }
                     store.setError(error)
                 }
 
-                attempt = min(attempt + 1, 4)
+                attempt = min(attempt + 1, 5)
                 store.setConnectionState(.reconnecting)
                 let delay = 250 * Int(pow(2.0, Double(attempt - 1)))
                 try? await Task.sleep(for: .milliseconds(min(delay, 4_000)))
@@ -439,26 +633,28 @@ final class TerminalFacade: ObservableObject {
         }
     }
 
-    private func disconnectRendererResources(preservingRendererOutputs: Bool = false) {
+    private func disconnectRendererResources() {
         attachedTerminalID = nil
         attachedRendererID = nil
-        if !preservingRendererOutputs {
-            rendererOutputHandlers.removeAll()
-        }
+        attachedContext = nil
+        rendererOutputHandlers.removeAll()
         rendererInput = nil
         connectionTask?.cancel()
         connectionTask = nil
         resizeTask?.cancel()
         resizeTask = nil
+        pendingResize = nil
         connection = OpenCodePTYConnection()
     }
 
-    private func replaceStaleTerminal(id: String, directory: String, client: OpenCodeAPIClient) async {
-        guard let old = store.workspaces[directory]?.terminals.first(where: { $0.id == id }) else { return }
+    private func replaceStaleTerminal(id: String, context: Context, client: OpenCodeAPIClient) async {
+        guard isCurrent(context), let old = store.activeWorkspace.terminals.first(where: { $0.id == id }) else { return }
         do {
-            let replacement = try await client.createPTY(title: old.title, directory: directory)
-            store.replace(id: id, with: replacement, directory: directory)
+            let replacement = try await client.createPTY(title: old.title, directory: context.directory, workspaceID: context.workspaceID)
+            guard isCurrent(context), !Task.isCancelled else { return }
+            store.replace(id: id, with: replacement, directory: context.directory, workspaceID: context.workspaceID)
         } catch {
+            guard isCurrent(context), !Task.isCancelled else { return }
             store.setError(error)
         }
     }

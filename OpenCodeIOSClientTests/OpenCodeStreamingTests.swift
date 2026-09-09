@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 import SwiftUI
 #if canImport(UIKit)
@@ -6,6 +7,30 @@ import UIKit
 @testable import OpenClient
 
 final class OpenCodeStreamingTests: XCTestCase {
+    func testSSEByteFramingDispatchesWithoutWaitingForAnotherEvent() {
+        for separator in ["\n", "\r\n", "\r"] {
+            var lines = OpenCodeSSELineDecoder()
+            var parser = OpenCodeSSEParser()
+            var events: [OpenCodeServerEvent] = []
+            let payload = #"{"id":"evt_connected","type":"server.connected","data":{}}"#
+            for byte in ("data: " + payload + separator + separator).utf8 {
+                if let line = lines.process(byte: byte) {
+                    events.append(contentsOf: parser.process(line: line))
+                }
+            }
+            XCTAssertEqual(events.count, 1, "Separator: \(separator.debugDescription)")
+            XCTAssertEqual(events.first?.data, payload)
+        }
+    }
+
+    func testSSEByteFramingPreservesBlankLinesAndSplitUTF8() {
+        var decoder = OpenCodeSSELineDecoder()
+        let lines = "\u{FEFF}data: caf\u{E9}\r\n\r\n: heartbeat\n\ndata: end\n\n".utf8.compactMap {
+            decoder.process(byte: $0)
+        }
+        XCTAssertEqual(lines, ["data: caf\u{E9}", "", ": heartbeat", "", "data: end", ""])
+    }
+
     func testSSEParserBuildsEventFromRawLines() {
         var parser = OpenCodeSSEParser()
 
@@ -48,6 +73,332 @@ final class OpenCodeStreamingTests: XCTestCase {
 
         let event = parser.process(line: "").first
         XCTAssertEqual(event?.type, "session.idle")
+    }
+
+    func testSSEParserCarriesEventIDAndRetryMetadata() {
+        var parser = OpenCodeSSEParser()
+
+        XCTAssertTrue(parser.process(line: "id: evt_123").isEmpty)
+        XCTAssertTrue(parser.process(line: "retry: 2500").isEmpty)
+        XCTAssertTrue(parser.process(line: "data: {\"type\":\"session.execution.started\"}").isEmpty)
+
+        let event = parser.process(line: "").first
+        XCTAssertEqual(event?.id, "evt_123")
+        XCTAssertEqual(event?.retry, 2_500)
+    }
+
+    func testV2ManagedEventDecodesExecutionSessionAndLocation() throws {
+        let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"id":"evt_1","created":1234,"type":"session.execution.started","location":{"directory":"/tmp/project","workspaceID":"wrk_1"},"data":{"sessionID":"ses_1"}}"#))
+
+        XCTAssertEqual(event.id, "evt_1")
+        XCTAssertEqual(event.type, "session.execution.started")
+        XCTAssertEqual(event.location?.directory, "/tmp/project")
+        XCTAssertEqual(event.location?.workspaceID, "wrk_1")
+        XCTAssertEqual(event.sessionID, "ses_1")
+        XCTAssertTrue(event.isExecutionStarted)
+        XCTAssertFalse(event.isExecutionTerminal)
+    }
+
+    func testV2ManagedEventRecognizesTerminalExecutionEvents() throws {
+        for type in ["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"] {
+            let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"\#(type)","data":{"sessionID":"ses_1"}}"#))
+            XCTAssertTrue(event.isExecutionTerminal, type)
+        }
+    }
+
+    func testV2MovedEventRoutesToPayloadLocationRatherThanPreviousEnvelopeLocation() throws {
+        let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.moved","location":{"directory":"/old","workspaceID":"wrk_old"},"data":{"sessionID":"ses_1","location":{"directory":"/new"},"projectID":"proj_new"}}"#))
+        XCTAssertEqual(event.routingLocation?.directory, "/new")
+        XCTAssertNil(event.routingLocation?.workspaceID)
+    }
+
+    func testV2InvalidOrdinalsCannotTrapOrTruncate() throws {
+        for ordinal in ["1e100", "0.5", "-0.5"] {
+            let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.text.delta","data":{"sessionID":"ses_1","assistantMessageID":"msg_1","ordinal":\#(ordinal),"delta":"x"}}"#))
+            XCTAssertNil(event.data.objectValue?["ordinal"]?.intValue)
+        }
+    }
+
+    func testV217155InputBoundaryRejectsMixedContractsAndMalformedPayloads() throws {
+        for raw in [
+            #"{"type":"session.input.admitted","data":{"sessionID":"ses_1","inboxID":"msg_1","item":{"type":"user","payload":{"text":"wrong contract"}}}}"#,
+            #"{"type":"session.input.admitted","data":{"sessionID":"ses_1","inputID":"msg_1","input":{"type":"future","data":{"text":"not a user message"}}}}"#,
+            #"{"type":"session.input.admitted","data":{"sessionID":"ses_1","inputID":"msg_1","input":{"type":"user","data":{"text":123}}}}"#,
+            #"{"type":"session.input.admitted","data":{"sessionID":"ses_1","inputID":"msg_1","input":{"type":"user","data":{"text":"File","files":[{"uri":"file:///tmp/a"}]}}}}"#,
+        ] {
+            let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: raw))
+            XCTAssertNil(event.admittedInput)
+        }
+        let unverified = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.input.delivered","data":{"sessionID":"ses_1","inputID":"msg_1"}}"#))
+        XCTAssertNil(unverified.inputID, "Neither next-17155's OpenAPI nor its publisher defines this alias")
+        for type in ["session.input.promoted", "session.input.cancelled", "session.inbox.delivered", "session.inbox.cancelled"] {
+            let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"\#(type)","data":{"sessionID":"ses_1"}}"#))
+            XCTAssertTrue(event.affectsTranscript)
+        }
+    }
+
+    @MainActor
+    func testV217155SSEPublishesInputAndAssistantThroughHandlerWithoutRefresh() async throws {
+        let model = AppViewModel()
+        model.config = OpenCodeServerConfig(baseURL: "https://fixture.invalid", username: "", password: "", apiPreference: .v2)
+        model.localCacheRepository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+        model.connectionStore.applySuccessfulV2Connection(version: "0.0.0-next-17155", healthy: true)
+        let session = OpenCodeSession(id: "ses_1", title: "Streaming", workspaceID: nil,
+            directory: "/tmp/project", projectID: "project", parentID: nil)
+        model.selectedDirectory = session.directory
+        model.allSessions = [session]
+        model.selectedSession = session
+        model.activeChatSessionID = session.id
+        model.chatStore.beginV2TranscriptHydration(sessionID: session.id)
+        model.chatStore.applyInitialV2Transcript([], olderCursor: nil, sessionID: session.id)
+        let facade = model.chatFacade
+        let directory = model.directoryStore
+        let manager = OpenCodeEventManager()
+        defer {
+            manager.stop()
+            model.stopEventStream()
+            model.resetLocalCacheRuntimeState()
+        }
+
+        // Vocabulary/payloads audited in next-17155 schema/session-event.ts and
+        // core/session/runner/publish-llm-event.ts. These are fixtures, not provider execution.
+        let facts: [(String, String)] = [
+            ("session.input.admitted", #""inputID":"msg_user","input":{"type":"user","delivery":"steer","data":{"text":"Hello"}}"#),
+            ("session.input.promoted", #""inputID":"msg_user""#),
+            ("session.step.started", #""assistantMessageID":"msg_assistant","agent":"build","model":{"id":"model","providerID":"provider"}"#),
+            ("session.reasoning.started", #""assistantMessageID":"msg_assistant","ordinal":0"#),
+            ("session.reasoning.delta", #""assistantMessageID":"msg_assistant","ordinal":0,"delta":"Think""#),
+            ("session.reasoning.ended", #""assistantMessageID":"msg_assistant","ordinal":0,"text":"Thought""#),
+            ("session.tool.input.started", #""assistantMessageID":"msg_assistant","id":"call_1","name":"read""#),
+            ("session.tool.input.delta", #""assistantMessageID":"msg_assistant","id":"call_1","delta":"{""#),
+            ("session.tool.input.ended", #""assistantMessageID":"msg_assistant","id":"call_1","text":"{}""#),
+            ("session.tool.called", #""assistantMessageID":"msg_assistant","id":"call_1","input":{},"executed":false"#),
+            ("session.tool.progress", #""assistantMessageID":"msg_assistant","id":"call_1","metadata":{"description":"Reading"}"#),
+            ("session.tool.success", #""assistantMessageID":"msg_assistant","id":"call_1","content":[{"type":"text","text":"Read result"}],"executed":false"#),
+            ("session.text.started", #""assistantMessageID":"msg_assistant","ordinal":0"#),
+            ("session.text.delta", #""assistantMessageID":"msg_assistant","ordinal":0,"delta":"Hello""#),
+            ("session.text.delta", #""assistantMessageID":"msg_assistant","ordinal":0,"delta":" world""#),
+            ("session.text.ended", #""assistantMessageID":"msg_assistant","ordinal":0,"text":"Hello world!""#),
+            ("session.step.ended", #""assistantMessageID":"msg_assistant","finish":"stop","cost":0,"tokens":{"input":1,"output":2,"reasoning":1,"cache":{"read":0,"write":0}}"#),
+        ]
+        let delivered = expectation(description: "All fixture events reach the production handler")
+        delivered.expectedFulfillmentCount = facts.count
+        let streamed = expectation(description: "Visible text arrives before its canonical end")
+        let client = OpenCodeAPIClient(config: model.config)
+        manager.startV2(client: client, onStatus: { _ in }, onDroppedEvent: { message in
+            XCTFail(message)
+        }, consume: { _, _, _, _, emit in
+            var lines = OpenCodeSSELineDecoder()
+            var parser = OpenCodeSSEParser()
+            var seq = 0
+            for (index, fact) in facts.enumerated() {
+                let (type, fields) = fact
+                let ephemeral = type.hasSuffix(".delta") || type == "session.tool.progress"
+                if !ephemeral { seq += 1 }
+                let durable = ephemeral ? "" : #", "durable":{"aggregateID":"ses_1","seq":\#(seq),"version":\#(type == "session.tool.success" ? 2 : 1)}"#
+                let raw = #"{"id":"evt_\#(index)","created":\#(1000 + index),"type":"\#(type)"\#(durable),"location":{"directory":"/tmp/project"},"data":{"sessionID":"ses_1",\#(fields)}}"#
+                for byte in ("data: " + raw + "\n\n").utf8 {
+                    if let line = lines.process(byte: byte) {
+                        for event in parser.process(line: line) { await emit(event) }
+                    }
+                }
+            }
+            try? await Task.sleep(for: .seconds(60))
+        }, onEvent: { event in
+            await MainActor.run {
+                model.handleV2Event(event)
+                if event.type == "session.text.delta", event.data.objectValue?["delta"]?.literalStringValue == " world" {
+                    XCTAssertEqual(facade.messageSource(for: session).last?.parts.last?.text, "Hello world")
+                    streamed.fulfill()
+                }
+                delivered.fulfill()
+            }
+        })
+        await fulfillment(of: [delivered, streamed], timeout: 2)
+        await manager.stopAndWait()
+        XCTAssertNil(model.v2TimelineReconcileTask, "Successfully projected events must not depend on HTTP refresh")
+        XCTAssertFalse(model.isV2TimelineReconcilePending)
+        XCTAssertEqual(model.messages.map(\.id), ["msg_user", "msg_assistant"])
+        let assistant = try XCTUnwrap(model.messages.last)
+        XCTAssertEqual(assistant.parts.map(\.type), ["reasoning", "tool", "text"])
+        XCTAssertEqual(assistant.parts[0].text, "Thought")
+        XCTAssertEqual(assistant.parts[1].state?.status, "completed")
+        XCTAssertEqual(assistant.parts[2].text, "Hello world!")
+        XCTAssertNotNil(assistant.info.time?.completed)
+        XCTAssertEqual(directory.syncStore.messageEnvelopes(forSessionID: session.id, suffix: 2), model.messages)
+        XCTAssertEqual(facade.messageSource(for: session), model.messages)
+    }
+
+    func testHeartbeatOwnershipCancelsAndJoinsConsumerWithParent() async {
+        let started = XCTestExpectation(description: "consumer started")
+        let ended = XCTestExpectation(description: "consumer cancelled")
+        let timeout = XCTestExpectation(description: "no timeout after cancellation")
+        timeout.isInverted = true
+        let task = Task {
+            await OpenCodeEventManager.withHeartbeat(timeout: 60, onTimeout: { timeout.fulfill() }) { activity in
+                await activity()
+                started.fulfill()
+                do { try await Task.sleep(for: .seconds(60)) } catch { ended.fulfill() }
+            }
+        }
+        await fulfillment(of: [started], timeout: 1)
+        task.cancel()
+        await fulfillment(of: [ended], timeout: 1)
+        await task.value
+        await fulfillment(of: [timeout], timeout: 0.02)
+    }
+
+    func testHeartbeatTimeoutCancelsAndJoinsSilentConsumer() async {
+        let timeout = XCTestExpectation(description: "heartbeat timeout")
+        let ended = XCTestExpectation(description: "consumer cancelled")
+        await OpenCodeEventManager.withHeartbeat(timeout: 0.01, onTimeout: { timeout.fulfill() }) { _ in
+            do { try await Task.sleep(for: .seconds(60)) } catch { ended.fulfill() }
+        }
+        await fulfillment(of: [timeout, ended], timeout: 1)
+    }
+
+    @MainActor
+    func testV2ManagerReplacementCancelsOldConsumerAndRejectsItsLateCallbacks() async {
+        actor Recorder {
+            var sessions: [String] = []
+            func append(_ id: String) { sessions.append(id) }
+        }
+        let recorder = Recorder()
+        let firstStarted = XCTestExpectation(description: "first stream started")
+        let firstEnded = XCTestExpectation(description: "first stream cancelled")
+        let secondStarted = XCTestExpectation(description: "replacement stream started")
+        let secondEnded = XCTestExpectation(description: "replacement stream cancelled")
+        let manager = OpenCodeEventManager()
+        let client = OpenCodeAPIClient(config: OpenCodeServerConfig(baseURL: "https://fixture.invalid", username: "", password: ""))
+        manager.startV2(client: client, onStatus: { _ in }, consume: { _, _, status, _, event in
+            firstStarted.fulfill()
+            do { try await Task.sleep(for: .seconds(60)) } catch {
+                await status("stream open event")
+                await event(OpenCodeServerEvent(type: "message", data: #"{"type":"session.execution.started","data":{"sessionID":"ses_old"}}"#, id: nil, retry: nil))
+                firstEnded.fulfill()
+            }
+        }, onEvent: { event in await recorder.append(event.sessionID ?? "missing") })
+        await fulfillment(of: [firstStarted], timeout: 1)
+        manager.startV2(client: client, onStatus: { _ in }, consume: { _, _, _, _, event in
+            await event(OpenCodeServerEvent(type: "message", data: #"{"type":"session.execution.started","data":{"sessionID":"ses_new"}}"#, id: nil, retry: nil))
+            secondStarted.fulfill()
+            do { try await Task.sleep(for: .seconds(60)) } catch { secondEnded.fulfill() }
+        }, onEvent: { event in await recorder.append(event.sessionID ?? "missing") })
+        await fulfillment(of: [firstEnded, secondStarted], timeout: 1)
+        await manager.stopAndWait()
+        await fulfillment(of: [secondEnded], timeout: 1)
+        let sessions = await recorder.sessions
+        XCTAssertEqual(sessions, ["ses_new"])
+    }
+
+    @MainActor
+    func testV2ManagerStopDuringReconnectBackoffDoesNotStartAnotherConsumer() async {
+        actor Recorder {
+            var starts = 0
+            func start() { starts += 1 }
+        }
+        let recorder = Recorder()
+        let reconnecting = XCTestExpectation(description: "reconnect backoff")
+        let manager = OpenCodeEventManager()
+        let client = OpenCodeAPIClient(config: OpenCodeServerConfig(baseURL: "https://fixture.invalid", username: "", password: ""))
+        manager.startV2(client: client, onStatus: { status in
+            if status == "stream v2 reconnecting" {
+                await manager.stop()
+                reconnecting.fulfill()
+            }
+        }, consume: { _, _, _, _, _ in await recorder.start() }, onEvent: { _ in })
+        await fulfillment(of: [reconnecting], timeout: 1)
+        await manager.stopAndWait()
+        let starts = await recorder.starts
+        XCTAssertEqual(starts, 1)
+    }
+
+    func testStoppedLegacyBatcherCannotRescheduleQueuedEvents() async {
+        let delivered = XCTestExpectation(description: "no delivery after stop")
+        delivered.isInverted = true
+        let batcher = OpenCodeManagedEventBatcher { _ in delivered.fulfill() }
+        await batcher.enqueue(managedDeltaEvent(delta: "old"))
+        await batcher.stop()
+        await batcher.enqueue(managedDeltaEvent(delta: "new"))
+        await batcher.flush()
+        await fulfillment(of: [delivered], timeout: 0.03)
+    }
+
+    func testLegacyBatcherTimerDeliversWithoutCancellingMainActorCallbacks() async {
+        let delivered = XCTestExpectation(description: "Timer delivers in a live task")
+        let batcher = OpenCodeManagedEventBatcher { _ in
+            XCTAssertFalse(Task.isCancelled)
+            await MainActor.run {
+                XCTAssertFalse(Task.isCancelled, "The legacy backend rejects cancelled callbacks")
+                delivered.fulfill()
+            }
+        }
+        await batcher.enqueue(managedDeltaEvent(delta: "Hello"))
+        // Do not call flush(): only the scheduled timer reproduced the self-cancellation.
+        await fulfillment(of: [delivered], timeout: 1)
+        await batcher.stop()
+    }
+
+    @MainActor
+    func testLegacyBatchedEventsPublishDirectoryAndActiveTranscriptWithoutRefresh() async throws {
+        let model = AppViewModel()
+        model.config = OpenCodeServerConfig(baseURL: "https://fixture.invalid", username: "", password: "", apiPreference: .legacy)
+        model.localCacheRepository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+        model.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)
+        let connection = try model.requireBackendConnection()
+        defer {
+            model.stopEventStream()
+            model.resetLocalCacheRuntimeState()
+            connection.close()
+        }
+        let session = OpenCodeSession(id: "ses_test", title: "Streaming", workspaceID: nil,
+            directory: "/tmp/project", projectID: "project", parentID: nil)
+        model.selectedDirectory = session.directory
+        model.allSessions = [session]
+        model.selectedSession = session
+        model.streamDirectory = "/tmp/stale-stream-directory"
+        model.activeChatSessionID = session.id
+        let user = message(id: "msg_user", role: "user", text: "Hello", created: 1)
+        model.chatStore.beginSelectingSession(sessionID: session.id, cachedMessages: [user])
+        model.messages = [user]
+        let directory = model.directoryStore
+        let facade = model.chatFacade
+        let published = expectation(description: "Chat facade observes the projected answer")
+        let observation = facade.objectWillChange.first { _ in
+            model.messages.last?.parts.first?.text == "Hello world"
+                && directory.syncStore.messageEnvelopes(forSessionID: session.id, suffix: 2).last?.parts.first?.text == "Hello world"
+        }.sink { _ in published.fulfill() }
+        defer { observation.cancel() }
+
+        let delivered = expectation(description: "Legacy events reach the compatibility sink")
+        delivered.expectedFulfillmentCount = 4
+        let batcher = OpenCodeManagedEventBatcher { event in
+            await MainActor.run {
+                defer { delivered.fulfill() }
+                // This is the production compatibility sink's connection/cancellation gate.
+                guard model.isCurrentBackendConnection(connection) else { return }
+                model.handleManagedEvent(event)
+            }
+        }
+        for payload in [
+            #"{"directory":"/tmp/project","payload":{"type":"message.updated","properties":{"info":{"id":"msg_assistant","role":"assistant","sessionID":"ses_test","time":{"created":2}}}}}"#,
+            #"{"directory":"/tmp/project","payload":{"type":"message.part.updated","properties":{"part":{"id":"part_text","messageID":"msg_assistant","sessionID":"ses_test","type":"text","text":""}}}}"#,
+        ] {
+            guard case let .event(event) = OpenCodeEventManager.decodeManagedEvent(from: payload) else {
+                return XCTFail("Invalid legacy streaming fixture")
+            }
+            await batcher.enqueue(event)
+        }
+        await batcher.enqueue(managedDeltaEvent(delta: "Hello"))
+        await batcher.enqueue(managedDeltaEvent(delta: " world"))
+        await fulfillment(of: [delivered], timeout: 1)
+        await batcher.stop()
+        await fulfillment(of: [published], timeout: 1)
+
+        XCTAssertTrue(model.directoryStoreRegistry.ownerStore(forSessionID: session.id) === directory)
+        XCTAssertEqual(model.messages.last?.parts.first?.text, "Hello world")
+        XCTAssertEqual(directory.syncStore.messageEnvelopes(forSessionID: session.id, suffix: 2), model.messages)
+        XCTAssertEqual(facade.messageSource(for: session), model.messages)
     }
 
     func testSSEParserFlushesConsecutiveJSONDataLinesWithoutBlankSeparator() {
@@ -2071,7 +2422,7 @@ Closing paragraph after the table.
     }
 
     @MainActor
-    func testBoundedMarkdownTablePreservesFullEstimatedHeight() throws {
+    func testStreamingMarkdownTablePreservesFullEstimatedHeight() throws {
         let text = """
 | Feature | Status | Notes |
 | --- | --- | --- |
@@ -2083,6 +2434,7 @@ Closing paragraph after the table.
             text: text,
             isUser: false,
             style: .standard,
+            isStreaming: true,
             tableMaximumWidth: 328
         )
         .frame(width: 360)

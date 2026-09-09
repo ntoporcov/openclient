@@ -1103,6 +1103,33 @@ final class OpenClientBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func testBridgeCoordinatorDoesNotConnectForResolvedV2Profile() async throws {
+        let suiteName = "OpenClientBridgeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let connectionStore = ConnectionStore()
+        let client = FlakyOpenClientBridgeConnection()
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: connectionStore,
+            chatStore: ChatStore(),
+            configProvider: { OpenCodeServerConfig(baseURL: "http://100.64.0.10:4097", apiPreference: .v2) },
+            client: client,
+            reconnectDelay: { _ in .milliseconds(10) }
+        )
+
+        connectionStore.resolveAPIProfile(.v2)
+        connectionStore.updateConnectionPhase(.preparingInterface)
+        try await Task.sleep(for: .milliseconds(50))
+
+        let connectCount = await client.connectCount
+        XCTAssertEqual(connectCount, 0)
+        XCTAssertEqual(store.phase, .idle)
+        withExtendedLifetime(coordinator) {}
+    }
+
+    @MainActor
     func testBridgeCoordinatorAutomaticallyRetriesFailedDiscovery() async throws {
         let suiteName = "OpenClientBridgeTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

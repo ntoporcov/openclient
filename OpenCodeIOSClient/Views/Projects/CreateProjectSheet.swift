@@ -15,9 +15,16 @@ struct CreateProjectSheet: View {
                     ))
                         .opencodeDisableTextAutocapitalization()
                         .autocorrectionDisabled()
-                        .onChange(of: facade.createProjectQuery) { _, _ in
-                            Task { await facade.searchCreateProjectDirectories() }
-                        }
+                        .disabled(snapshot.isLoading)
+                    Text("Select an existing directory on the server. OpenCode may register its project when the directory is opened.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = snapshot.errorMessage {
+                    Section {
+                        Text(error).foregroundStyle(.red)
+                    }
                 }
 
                 if let selectedDirectory = snapshot.selectedDirectory {
@@ -71,12 +78,11 @@ struct CreateProjectSheet: View {
                     }
                 }
             }
-            .navigationTitle("Create Project")
+            .navigationTitle("Add Project")
             .opencodeInlineNavigationTitle()
-            .onAppear {
-                if snapshot.results.isEmpty {
-                    Task { await facade.searchCreateProjectDirectories() }
-                }
+            .task(id: facade.createProjectQuery) {
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+                await facade.searchCreateProjectDirectories()
             }
             .toolbar {
                 ToolbarItem(placement: .opencodeLeading) {

@@ -71,6 +71,28 @@
         }
       }
     },
+    "API Profile": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API Profile"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Perfil da API"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profilo API"
+          }
+        }
+      }
+    },
     "API Server": {
       "localizations": {
         "pt-BR": {
@@ -83,6 +105,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Server API"
+          }
+        }
+      }
+    },
+    "Activity ID": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activity ID"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ID da atividade"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ID attività"
           }
         }
       }

@@ -25,6 +25,7 @@ final class ProjectFacade: ObservableObject {
         let results: [String]
         let selectedDirectory: String?
         let isLoading: Bool
+        let errorMessage: String?
     }
 
     struct ActionSnapshot: Identifiable, Equatable {
@@ -68,6 +69,7 @@ final class ProjectFacade: ObservableObject {
         Publishers.MergeMany([
             viewModel.projectStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.projectPreferencesStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.projectActionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.sessionListStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.modelConfigurationStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.commerceFacade.objectWillChange.eraseToAnyPublisher(),
@@ -108,9 +110,11 @@ final class ProjectFacade: ObservableObject {
             isSearching: viewModel.isSearchingProjectSessions,
             recentLoadKey: [
                 viewModel.config.recentServerID,
+                viewModel.backendConnection?.id.uuidString ?? "disconnected",
                 viewModel.isConnected ? "connected" : "disconnected",
                 viewModel.showsRecentSessionsInProjectList ? "recent-on" : "recent-off",
                 projectIDs,
+                viewModel.homeSessionScopes.map { DirectoryStoreRegistry.key(for: $0.directory) }.sorted().joined(separator: "|"),
             ].joined(separator: "|")
         )
     }
@@ -120,7 +124,8 @@ final class ProjectFacade: ObservableObject {
             defaultSearchRoot: viewModel.defaultSearchRoot,
             results: viewModel.createProjectResults,
             selectedDirectory: viewModel.createProjectSelectedDirectory,
-            isLoading: viewModel.isLoading
+            isLoading: viewModel.isLoading,
+            errorMessage: viewModel.errorMessage
         )
     }
 
@@ -144,7 +149,54 @@ final class ProjectFacade: ObservableObject {
     }
 
     var projects: [OpenCodeProject] { viewModel.projects }
-    var isReadOnly: Bool { viewModel.isBrowsingLocalCache }
+    var isReadOnly: Bool {
+        viewModel.isBrowsingLocalCache
+    }
+    var allowsProjectCreation: Bool {
+        !isReadOnly && viewModel.backendConnection?.isClosed == false && viewModel.backendConnection?.projectLifecycle != nil
+    }
+    var supportsWorkspaceManagement: Bool {
+        !isReadOnly && viewModel.backendConnection?.isClosed == false && viewModel.backendConnection?.worktrees != nil
+    }
+    var allowsProjectMetadataEditing: Bool {
+        // Only the legacy adapter has a verified metadata writer. Lifecycle/files services do not imply one.
+        !isReadOnly && viewModel.backendConnection?.isClosed == false
+            && viewModel.backendConnection?.openCodeCompatibility?.profile == .legacy
+    }
+    var requiresWorktreeDestinationParent: Bool { viewModel.backendConnection?.worktrees?.requiresDestinationParent == true }
+    var worktreeDestinationParent: String {
+        get {
+            currentProject.map { worktreeDestinationParent(for: $0) } ?? ""
+        }
+        set {
+            guard let project = currentProject else { return }
+            setWorktreeDestinationParent(newValue, for: project)
+        }
+    }
+    func worktreeDestinationParent(for project: OpenCodeProject) -> String {
+        guard let key = viewModel.worktreeInventoryKey(for: project) else { return "" }
+        return viewModel.projectStore.worktreeDestinationParents[key] ?? ""
+    }
+    func setWorktreeDestinationParent(_ directory: String, for project: OpenCodeProject) {
+        guard supportsWorkspaceManagement, let key = viewModel.worktreeInventoryKey(for: project) else { return }
+        viewModel.projectStore.worktreeDestinationParents[key] = directory
+    }
+    var supportsProjectActions: Bool { viewModel.supportsProjectActionExecution }
+    var actionRunHistory: [ProjectActionRun] {
+        guard let scope = viewModel.currentProjectActionScope else { return [] }
+        return viewModel.projectActionStore.runs.filter { $0.scope == scope }.reversed()
+    }
+
+    func recoverActionRun(id: String) async {
+        await viewModel.recoverProjectActionRun(id: id)
+    }
+    var allowsActivity: Bool { viewModel.activityFacade.isAvailable }
+    var allowsSessionSearch: Bool { isReadOnly || viewModel.backendConnection != nil || viewModel.backendFactory == nil }
+    var allowsNewChat: Bool { !isReadOnly && (viewModel.backendConnection != nil || viewModel.backendFactory == nil) }
+    var allowsNewTalk: Bool {
+        allowsNewChat && viewModel.isConnected && viewModel.backendConnection?.isClosed == false
+    }
+    var allowsBridge: Bool { !isReadOnly && viewModel.compatibilityClient(for: .bridge) != nil }
     var currentProject: OpenCodeProject? { viewModel.currentProject }
     var isLoading: Bool { viewModel.isLoading }
     var paywallReason: OpenClientPaywallReason? { viewModel.commerceFacade.paywallReason }
@@ -190,7 +242,7 @@ final class ProjectFacade: ObservableObject {
     }
 
     func canEditPreferences(for project: OpenCodeProject) -> Bool {
-        !isReadOnly && viewModel.canEditProjectPreferences(project)
+        allowsProjectMetadataEditing && viewModel.canEditProjectPreferences(project)
     }
 
     func beginSelection(_ project: OpenCodeProject) -> SelectionTicket {
@@ -229,8 +281,13 @@ final class ProjectFacade: ObservableObject {
     }
 
     func refreshList() async { await viewModel.refreshProjectList() }
-    func loadRecentSessions() async { await viewModel.loadRecentProjectSessionsAcrossProjects() }
-    func searchSessions() async { await viewModel.searchProjectSessionsAcrossProjects() }
+    func loadRecentSessions() async {
+        await viewModel.loadRecentProjectSessionsAcrossProjects()
+    }
+
+    func searchSessions() async {
+        await viewModel.searchProjectSessionsAcrossProjects()
+    }
 
     func prepareRecentSessionSelection(_ recent: RecentProjectSession) {
         viewModel.prepareRecentProjectSessionSelection(recent)
@@ -239,30 +296,30 @@ final class ProjectFacade: ObservableObject {
     func openRecentSession(_ recent: RecentProjectSession) async { await viewModel.openRecentProjectSession(recent) }
 
     func presentCreateProject() {
-        guard !isReadOnly else { return }
+        guard allowsProjectCreation else { return }
         viewModel.presentCreateProjectSheet()
     }
     func dismissCreateProject() { viewModel.isShowingCreateProjectSheet = false }
     func searchCreateProjectDirectories() async {
-        guard !isReadOnly else { return }
+        guard allowsProjectCreation else { return }
         await viewModel.searchCreateProjectDirectories()
     }
     func selectCreateProjectDirectory(_ directory: String) async {
-        guard !isReadOnly else { return }
+        guard allowsProjectCreation else { return }
         await viewModel.selectCreateProjectDirectory(directory)
     }
     func createProjectResultPath(_ directory: String) -> String { viewModel.createProjectResultPath(directory) }
     func createProject(from directory: String) async {
-        guard !isReadOnly else { return }
+        guard allowsProjectCreation else { return }
         await viewModel.createProject(from: directory)
     }
 
     func presentNewChat() {
-        guard !isReadOnly else { return }
+        guard allowsNewChat else { return }
         viewModel.presentNewProjectChatSheet()
     }
     func presentNewTalk() {
-        guard !isReadOnly else { return }
+        guard allowsNewTalk else { return }
         viewModel.talkSessionCoordinator.presentProjectSelection()
     }
     func dismissNewChat() { viewModel.dismissNewProjectChatSheet() }
@@ -272,7 +329,10 @@ final class ProjectFacade: ObservableObject {
         viewModel.presentProjectSettingsSheet()
     }
     func dismissSettings() { viewModel.isShowingProjectSettingsSheet = false }
-    func setLiveActivityAutoStartEnabled(_ isEnabled: Bool) { viewModel.setLiveActivityAutoStartEnabled(isEnabled) }
+    func setLiveActivityAutoStartEnabled(_ isEnabled: Bool) {
+        guard viewModel.activityFacade.allowsLiveActivities else { return }
+        viewModel.setLiveActivityAutoStartEnabled(isEnabled)
+    }
     func setSessionCardStyle(_ style: SessionCardStyle) {
         viewModel.appCustomizationStore.setSessionCardStyle(style)
         objectWillChange.send()
@@ -283,7 +343,7 @@ final class ProjectFacade: ObservableObject {
     }
 
     func setWorkspacesEnabled(_ isEnabled: Bool) async {
-        guard !isReadOnly else { return }
+        guard supportsWorkspaceManagement else { return }
         viewModel.setProjectWorkspacesEnabled(isEnabled)
         if isEnabled {
             await viewModel.loadWorkspaceSessionsIfNeeded()
@@ -304,22 +364,22 @@ final class ProjectFacade: ObservableObject {
     func presentActionsPaywall() { viewModel.commerceFacade.presentPaywall(reason: .actions) }
 
     func setColor(_ color: String, for project: OpenCodeProject) async {
-        guard !isReadOnly else { return }
+        guard canEditPreferences(for: project) else { return }
         await viewModel.setProjectColor(color, for: project)
     }
 
     func setImageOverride(_ dataURL: String?, for project: OpenCodeProject) async {
-        guard !isReadOnly else { return }
+        guard canEditPreferences(for: project) else { return }
         await viewModel.setProjectImageOverride(dataURL, for: project)
     }
 
     func discoverImageCandidates(for project: OpenCodeProject) async -> [ProjectImageCandidate] {
-        guard !isReadOnly else { return [] }
+        guard canEditPreferences(for: project) else { return [] }
         return await viewModel.discoverProjectImageCandidates(for: project)
     }
 
     func imageDataURL(for candidate: ProjectImageCandidate, project: OpenCodeProject) async -> String? {
-        guard !isReadOnly else { return nil }
+        guard canEditPreferences(for: project) else { return nil }
         return await viewModel.projectImageDataURL(for: candidate, project: project)
     }
 
@@ -351,7 +411,8 @@ final class ProjectFacade: ObservableObject {
         projectID: String,
         workspaceDirectory: String?,
         workspaceSelection: NewSessionWorkspaceSelection?,
-        newWorkspaceName: String
+        newWorkspaceName: String,
+        newWorkspaceDestinationParent: String? = nil
     ) async -> Bool {
         await viewModel.startNewProjectChat(
             title: title,
@@ -364,7 +425,8 @@ final class ProjectFacade: ObservableObject {
             projectID: projectID,
             workspaceDirectory: workspaceDirectory,
             workspaceSelection: workspaceSelection,
-            newWorkspaceName: newWorkspaceName
+            newWorkspaceName: newWorkspaceName,
+            newWorkspaceDestinationParent: newWorkspaceDestinationParent
         )
     }
 

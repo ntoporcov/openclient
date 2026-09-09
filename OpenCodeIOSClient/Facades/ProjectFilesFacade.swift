@@ -35,6 +35,7 @@ final class ProjectFilesFacade: ObservableObject {
 
     private let store: ProjectFilesStore
     private let clientProvider: () -> OpenCodeAPIClient?
+    private let apiProfileProvider: () -> OpenCodeAPIProfile?
     private let hasGitProjectProvider: () -> Bool
     private let effectiveSelectedDirectoryProvider: () -> String?
     private let currentProjectProvider: () -> OpenCodeProject?
@@ -61,10 +62,12 @@ final class ProjectFilesFacade: ObservableObject {
         isFilesPresentedProvider: @escaping () -> Bool,
         preserveNavigationState: @escaping () -> Void,
         showFilesRoute: @escaping () -> Void,
-        selectedWorkspaceDirectory: String? = nil
+        selectedWorkspaceDirectory: String? = nil,
+        apiProfileProvider: @escaping () -> OpenCodeAPIProfile? = { .legacy }
     ) {
         self.store = store
         self.clientProvider = clientProvider
+        self.apiProfileProvider = apiProfileProvider
         self.hasGitProjectProvider = hasGitProjectProvider
         self.effectiveSelectedDirectoryProvider = effectiveSelectedDirectoryProvider
         self.currentProjectProvider = currentProjectProvider
@@ -111,7 +114,9 @@ final class ProjectFilesFacade: ObservableObject {
     }
 
     var hasGitProject: Bool { hasGitProjectProvider() }
-    var workspaceDirectories: [String] { workspaceDirectoriesProvider() }
+    var workspaceDirectories: [String] {
+        workspaceDirectoriesProvider()
+    }
 
     var effectiveDirectory: String? {
         guard hasGitProject else { return effectiveSelectedDirectoryProvider() }
@@ -226,15 +231,19 @@ final class ProjectFilesFacade: ObservableObject {
     }
 
     func reloadFileTree(force: Bool) async {
-        guard hasGitProject, let directory = effectiveDirectory, let client = clientProvider() else { return }
+        guard hasGitProject, let directory = effectiveDirectory, let client = clientProvider(), let profile = apiProfileProvider() else { return }
         store.isLoadingFileTree = true
         if force { store.fileTreeErrorMessage = nil }
-        defer { store.isLoadingFileTree = false }
+        defer { if isCurrent(client: client, directory: directory, profile: profile) { store.isLoadingFileTree = false } }
 
         do {
-            let nodes = try await client.listFiles(directory: directory, path: "")
+            let nodes = try await (profile == .v2
+                ? client.listV2Files(directory: directory, path: "")
+                : client.listFiles(directory: directory, path: ""))
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.applyLoadedRootNodes(nodes)
         } catch {
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.fileTreeErrorMessage = error.localizedDescription
         }
     }
@@ -261,47 +270,58 @@ final class ProjectFilesFacade: ObservableObject {
     }
 
     func reloadGitViewData(force: Bool) async {
-        guard hasGitProject, let directory = effectiveDirectory, let client = clientProvider() else { return }
+        guard hasGitProject, let directory = effectiveDirectory, let client = clientProvider(), let profile = apiProfileProvider() else { return }
         withAnimation(opencodeSelectionAnimation) {
             store.isLoadingVCS = true
             if force { store.vcsErrorMessage = nil }
         }
-        defer { store.isLoadingVCS = false }
+        defer { if isCurrent(client: client, directory: directory, profile: profile) { store.isLoadingVCS = false } }
 
         do {
-            async let info = client.getVCSInfo(directory: directory)
-            async let status = client.listFileStatus(directory: directory)
+            async let info = profile == .v2 ? client.getV2VCSInfo(directory: directory) : client.getVCSInfo(directory: directory)
+            async let status = profile == .v2 ? client.listV2FileStatus(directory: directory) : client.listFileStatus(directory: directory)
 
             let loadedInfo = try await info
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.applyLoadedVCSInfo(loadedInfo, hasGitProject: hasGitProject)
 
             let loadedStatus = try await status
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.applyLoadedVCSStatus(loadedStatus, relativePath: relativeGitPath)
 
             if force || loadedStatus.isEmpty || store.vcsDiffsByMode[store.selectedVCSMode] != nil {
-                let loadedDiff = try await client.getVCSDiff(mode: store.selectedVCSMode, directory: directory)
-                store.applyLoadedVCSDiff(loadedDiff, mode: store.selectedVCSMode, relativePath: relativeGitPath)
+                let mode = store.selectedVCSMode
+                let loadedDiff = try await (profile == .v2
+                    ? client.getV2VCSDiff(mode: mode, directory: directory)
+                    : client.getVCSDiff(mode: mode, directory: directory))
+                guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
+                store.applyLoadedVCSDiff(loadedDiff, mode: mode, relativePath: relativeGitPath)
             }
             store.vcsErrorMessage = nil
         } catch {
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.vcsErrorMessage = error.localizedDescription
         }
     }
 
     func loadVCSDiff(mode: OpenCodeVCSDiffMode, force: Bool = false) async {
-        guard hasGitProject, let directory = effectiveDirectory, let client = clientProvider() else { return }
+        guard hasGitProject, let directory = effectiveDirectory, let client = clientProvider(), let profile = apiProfileProvider() else { return }
         if !store.needsDiffLoad(mode: mode, force: force) {
             store.selectReasonableVCSFileIfNeeded()
             return
         }
 
         store.isLoadingVCS = true
-        defer { store.isLoadingVCS = false }
+        defer { if isCurrent(client: client, directory: directory, profile: profile) { store.isLoadingVCS = false } }
         do {
-            let diff = try await client.getVCSDiff(mode: mode, directory: directory)
+            let diff = try await (profile == .v2
+                ? client.getV2VCSDiff(mode: mode, directory: directory)
+                : client.getVCSDiff(mode: mode, directory: directory))
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.applyLoadedVCSDiff(diff, mode: mode, relativePath: relativeGitPath)
             store.vcsErrorMessage = nil
         } catch {
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.vcsErrorMessage = error.localizedDescription
         }
     }
@@ -351,13 +371,17 @@ final class ProjectFilesFacade: ObservableObject {
     private func loadFileTreeChildren(for node: OpenCodeFileNode, force: Bool) async {
         guard store.needsChildrenLoad(for: node, force: force),
               let directory = effectiveDirectory,
-              let client = clientProvider() else { return }
+              let client = clientProvider(), let profile = apiProfileProvider() else { return }
         store.isLoadingFileTree = true
-        defer { store.isLoadingFileTree = false }
+        defer { if isCurrent(client: client, directory: directory, profile: profile) { store.isLoadingFileTree = false } }
         do {
-            let nodes = try await client.listFiles(directory: directory, path: node.path)
+            let nodes = try await (profile == .v2
+                ? client.listV2Files(directory: directory, path: node.path)
+                : client.listFiles(directory: directory, path: node.path))
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.applyLoadedChildren(nodes, for: node)
         } catch {
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.fileTreeErrorMessage = error.localizedDescription
         }
     }
@@ -379,15 +403,24 @@ final class ProjectFilesFacade: ObservableObject {
     private func loadFileContent(path: String, requestPath: String, force: Bool) async {
         guard let directory = effectiveDirectory,
               store.needsFileContent(path: path, force: force),
-              let client = clientProvider() else { return }
+              let client = clientProvider(), let profile = apiProfileProvider() else { return }
         store.isLoadingSelectedFileContent = true
-        defer { store.isLoadingSelectedFileContent = false }
+        defer { if isCurrent(client: client, directory: directory, profile: profile) { store.isLoadingSelectedFileContent = false } }
         do {
-            let content = try await client.readFileContent(directory: directory, path: requestPath)
+            let content = try await (profile == .v2
+                ? client.readV2FileContent(directory: directory, path: requestPath)
+                : client.readFileContent(directory: directory, path: requestPath))
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.applyLoadedFileContent(content, path: path)
         } catch {
+            guard !Task.isCancelled, isCurrent(client: client, directory: directory, profile: profile) else { return }
             store.fileContentErrorMessage = error.localizedDescription
         }
+    }
+
+    private func isCurrent(client: OpenCodeAPIClient, directory: String, profile: OpenCodeAPIProfile) -> Bool {
+        clientProvider()?.config == client.config
+            && effectiveDirectory == directory && apiProfileProvider() == profile
     }
 
     private func flattenFileTree(nodes: [OpenCodeFileNode], depth: Int) -> [FileTreeRow] {

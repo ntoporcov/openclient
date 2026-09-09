@@ -26,9 +26,12 @@ final class OpenClientComposition: ObservableObject {
     var liveActivities: LiveActivityFacade { viewModel.liveActivityFacade }
 
     init(
-        viewModel: AppViewModel = AppViewModel(),
-        whatsNew: OpenClientWhatsNewStore? = nil
+        viewModel: AppViewModel? = nil,
+        whatsNew: OpenClientWhatsNewStore? = nil,
+        backendFactory: (any BackendFactory)? = nil
     ) {
+        precondition(viewModel == nil || backendFactory == nil, "Inject a view model or a backend factory, not both")
+        let viewModel = viewModel ?? AppViewModel(backendFactory: backendFactory)
         self.viewModel = viewModel
         let liveActivityBackgroundBridge = LiveActivityBackgroundBridge()
         self.liveActivityBackgroundBridge = liveActivityBackgroundBridge
@@ -48,23 +51,21 @@ final class OpenClientComposition: ObservableObject {
             store: bridgeStore,
             connectionStore: viewModel.connectionStore,
             chatStore: viewModel.chatStore,
-            configProvider: { [weak viewModel] in viewModel?.config ?? OpenCodeServerConfig() },
+            configProvider: { [weak viewModel] in viewModel?.compatibilityClient(for: .bridge)?.config ?? OpenCodeServerConfig() },
             client: bridgeClient
         )
         self.bridgeCoordinator = bridgeCoordinator
-        bridge = OpenClientBridgeFacade(store: bridgeStore) { [weak bridgeCoordinator] in
+        bridge = OpenClientBridgeFacade(store: bridgeStore) { [weak bridgeCoordinator, weak viewModel] in
+            guard viewModel?.compatibilityClient(for: .bridge) != nil else { return }
             bridgeCoordinator?.forceConnect()
-        }
-        viewModel.eventManager.setManagedEventObserver { [weak liveActivityBackgroundBridge] managed in
-            await MainActor.run {
-                liveActivityBackgroundBridge?.consume(managed)
-            }
         }
         viewModel.chatFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
         viewModel.connectionFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
         viewModel.sessionListFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
         viewModel.activityFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
         viewModel.liveActivityFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
-        bridgeCoordinator.start()
+        // The OpenCode device bridge negotiates separately and must not contact a saved server
+        // when composition was built around another harness.
+        if viewModel.backendFactory == nil { bridgeCoordinator.start() }
     }
 }

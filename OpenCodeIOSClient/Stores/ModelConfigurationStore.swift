@@ -355,13 +355,14 @@ final class ModelConfigurationStore: ObservableObject {
     func effectiveModel(for sessionID: String) -> OpenCodeModel? { model(for: effectiveModelReference(for: sessionID)) }
 
     func reasoningVariants(forSessionID sessionID: String) -> [String] {
-        guard let model = effectiveModel(for: sessionID), model.capabilities.reasoning else { return [] }
-        return (model.variants ?? [:]).keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        reasoningVariants(for: effectiveModelReference(for: sessionID))
     }
 
     func reasoningVariants(for reference: OpenCodeModelReference?) -> [String] {
-        guard let model = model(for: reference), model.capabilities.reasoning else { return [] }
-        return (model.variants ?? [:]).keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        guard let model = model(for: reference) else { return [] }
+        let variants = model.catalogVariantIDs
+            ?? (model.capabilities.reasoning ? Array((model.variants ?? [:]).keys) : [])
+        return variants.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     func selectedVariant(for sessionID: String) -> String? { selectedVariantsBySessionID[sessionID] }
@@ -539,11 +540,14 @@ final class ModelConfigurationStore: ObservableObject {
 @MainActor
 final class PluginStore: ObservableObject {
     @Published private(set) var plugins: [OpenCodeConfiguredPlugin]
+    @Published private(set) var v2Plugins: [OpenCodeV2Plugin] = []
     @Published private(set) var isLoading: Bool
     @Published private(set) var isReady: Bool
     @Published private(set) var errorMessage: String?
 
     private var activeScope: String?
+
+    var pluginCount: Int { plugins.count + v2Plugins.count }
 
     init(
         plugins: [OpenCodeConfiguredPlugin] = [],
@@ -560,6 +564,7 @@ final class PluginStore: ObservableObject {
     func beginLoading(scope: String) {
         if activeScope != scope {
             plugins = []
+            v2Plugins = []
             isReady = false
         }
         activeScope = scope
@@ -570,6 +575,15 @@ final class PluginStore: ObservableObject {
     func apply(_ config: OpenCodeResolvedConfig, scope: String) {
         guard activeScope == scope else { return }
         plugins = config.plugins
+        v2Plugins = []
+        isReady = true
+        errorMessage = nil
+    }
+
+    func apply(_ plugins: [OpenCodeV2Plugin], scope: String) {
+        guard activeScope == scope else { return }
+        self.plugins = []
+        v2Plugins = plugins
         isReady = true
         errorMessage = nil
     }
@@ -577,6 +591,7 @@ final class PluginStore: ObservableObject {
     func apply(error: Error, scope: String) {
         guard activeScope == scope else { return }
         plugins = []
+        v2Plugins = []
         isReady = true
         errorMessage = error.localizedDescription
     }
@@ -588,6 +603,7 @@ final class PluginStore: ObservableObject {
 
     func reset() {
         plugins = []
+        v2Plugins = []
         isLoading = false
         isReady = false
         errorMessage = nil

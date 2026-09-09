@@ -44,7 +44,15 @@ final class ConnectionStore: ObservableObject {
     @Published var backendMode: AppBackendMode
     @Published var isConnected: Bool
     @Published var serverVersion: String
-    @Published var errorMessage: String?
+    @Published var apiProfile: OpenCodeAPIProfile?
+    @Published private(set) var v2NoticeConnectionID: UUID?
+    private var noticeSourceConnectionID: UUID?
+    private var dismissedV2NoticeConnectionID: UUID?
+    @Published var errorMessage: String? {
+        didSet { transcriptErrorOwner = nil; promptErrorOwner = nil }
+    }
+    private var transcriptErrorOwner: (connectionID: UUID, sessionID: String)?
+    private var promptErrorOwner: (connectionID: UUID, sessionID: String, messageID: String)?
     @Published var isLoading: Bool
     @Published var connectionPhase: OpenClientConnectionPhase
     @Published var isOfferingCachedServerConnection: Bool
@@ -57,6 +65,7 @@ final class ConnectionStore: ObservableObject {
         backendMode: AppBackendMode = .none,
         isConnected: Bool = false,
         serverVersion: String = "",
+        apiProfile: OpenCodeAPIProfile? = nil,
         errorMessage: String? = nil,
         isLoading: Bool = false,
         connectionPhase: OpenClientConnectionPhase = .idle,
@@ -69,6 +78,7 @@ final class ConnectionStore: ObservableObject {
         self.backendMode = backendMode
         self.isConnected = isConnected
         self.serverVersion = serverVersion
+        self.apiProfile = apiProfile
         self.errorMessage = errorMessage
         self.isLoading = isLoading
         self.connectionPhase = connectionPhase
@@ -80,7 +90,11 @@ final class ConnectionStore: ObservableObject {
     }
 
     func beginConnecting() {
+        bindNoticeConnection(nil)
         isLoading = true
+        isConnected = false
+        serverVersion = ""
+        apiProfile = nil
         errorMessage = nil
         isOfferingCachedServerConnection = false
         connectionPhase = .checkingServer
@@ -88,6 +102,23 @@ final class ConnectionStore: ObservableObject {
 
     func updateConnectionPhase(_ phase: OpenClientConnectionPhase) {
         connectionPhase = phase
+    }
+
+    func resolveAPIProfile(_ profile: OpenCodeAPIProfile) {
+        apiProfile = profile
+    }
+
+    func bindNoticeConnection(_ connectionID: UUID?) {
+        guard noticeSourceConnectionID != connectionID else { return }
+        noticeSourceConnectionID = connectionID
+        v2NoticeConnectionID = nil
+        dismissedV2NoticeConnectionID = nil
+    }
+
+    func dismissV2Notice(connectionID: UUID) {
+        guard v2NoticeConnectionID == connectionID else { return }
+        dismissedV2NoticeConnectionID = connectionID
+        v2NoticeConnectionID = nil
     }
 
     func clearError() {
@@ -98,6 +129,28 @@ final class ConnectionStore: ObservableObject {
         errorMessage = message
     }
 
+    func applyTranscriptError(_ error: Error, connectionID: UUID, sessionID: String) {
+        errorMessage = error.localizedDescription
+        transcriptErrorOwner = (connectionID, sessionID)
+    }
+
+    func applyPromptError(_ message: String, connectionID: UUID, sessionID: String, messageID: String) {
+        errorMessage = message
+        promptErrorOwner = (connectionID, sessionID, messageID)
+    }
+
+    func clearPromptError(connectionID: UUID, sessionID: String, messageID: String) {
+        guard promptErrorOwner?.connectionID == connectionID, promptErrorOwner?.sessionID == sessionID,
+              promptErrorOwner?.messageID == messageID else { return }
+        errorMessage = nil
+    }
+
+    func clearTranscriptError(connectionID: UUID, sessionID: String) {
+        guard transcriptErrorOwner?.connectionID == connectionID,
+              transcriptErrorOwner?.sessionID == sessionID else { return }
+        errorMessage = nil
+    }
+
     func finishConnecting() {
         isLoading = false
         if isConnected == false {
@@ -106,25 +159,46 @@ final class ConnectionStore: ObservableObject {
     }
 
     func applySuccessfulServerConnection(version: String, healthy: Bool) {
+        bindNoticeConnection(nil)
         backendMode = .server
         serverVersion = version
+        apiProfile = .legacy
         errorMessage = nil
         isConnected = healthy
         isOfferingCachedServerConnection = false
         connectionPhase = .idle
     }
 
+    func applySuccessfulV2Connection(version: String, healthy: Bool) {
+        backendMode = .serverV2
+        serverVersion = version
+        apiProfile = .v2
+        errorMessage = nil
+        isConnected = healthy
+        isOfferingCachedServerConnection = false
+        connectionPhase = .idle
+        // Profile detection alone is not success: only post-bootstrap calls arm the notice.
+        v2NoticeConnectionID = healthy && noticeSourceConnectionID != dismissedV2NoticeConnectionID
+            ? noticeSourceConnectionID : nil
+    }
+
     func applyConnectionFailure(_ error: Error) {
+        bindNoticeConnection(nil)
         backendMode = .none
         isConnected = false
+        serverVersion = ""
+        apiProfile = nil
         errorMessage = error.localizedDescription
         isOfferingCachedServerConnection = false
         connectionPhase = .idle
     }
 
     func applyConnectionCancellation() {
+        bindNoticeConnection(nil)
         backendMode = .none
         isConnected = false
+        serverVersion = ""
+        apiProfile = nil
         isLoading = false
         errorMessage = nil
         isOfferingCachedServerConnection = false
@@ -132,8 +206,10 @@ final class ConnectionStore: ObservableObject {
     }
 
     func offerCachedServerConnection() {
+        bindNoticeConnection(nil)
         backendMode = .none
         isConnected = false
+        apiProfile = nil
         isOfferingCachedServerConnection = true
         connectionPhase = .idle
     }
@@ -143,9 +219,11 @@ final class ConnectionStore: ObservableObject {
     }
 
     func applyCachedServerConnection(preservingError: Bool = false) {
+        bindNoticeConnection(nil)
         backendMode = .cachedServer
         isConnected = false
         serverVersion = ""
+        apiProfile = nil
         if preservingError == false {
             errorMessage = nil
         }
@@ -154,9 +232,11 @@ final class ConnectionStore: ObservableObject {
     }
 
     func resetToDisconnected(showPrompt: Bool? = nil) {
+        bindNoticeConnection(nil)
         backendMode = .none
         isConnected = false
         serverVersion = ""
+        apiProfile = nil
         errorMessage = nil
         isOfferingCachedServerConnection = false
         connectionPhase = .idle
@@ -166,9 +246,11 @@ final class ConnectionStore: ObservableObject {
     }
 
     func applyAppleIntelligenceMode() {
+        bindNoticeConnection(nil)
         backendMode = .appleIntelligence
         isConnected = false
         serverVersion = ""
+        apiProfile = nil
         errorMessage = nil
         isOfferingCachedServerConnection = false
     }

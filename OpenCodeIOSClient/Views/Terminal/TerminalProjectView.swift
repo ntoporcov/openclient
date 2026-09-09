@@ -250,13 +250,11 @@ private struct TerminalModifierBar: View {
     @Binding var pasteInvocationCount: Int
 
     var body: some View {
-        ZStack(alignment: .trailing) {
+        HStack(spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
                 modifierGlassContainer
-                    .padding(.trailing, 46)
             }
             .contentShape(Rectangle())
-            .scrollClipDisabled()
 
             Button(action: dismissKeyboard) {
                 Image(systemName: "keyboard.chevron.compact.down")

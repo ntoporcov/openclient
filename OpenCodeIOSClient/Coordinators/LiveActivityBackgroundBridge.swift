@@ -19,6 +19,7 @@ final class LiveActivityBackgroundBridge {
     struct Intent: Hashable {
         fileprivate let id: UUID
         fileprivate let sessionID: String
+        fileprivate let lifetime: LiveActivityStore.Lifetime
     }
 
     private static let logger = Logger(
@@ -34,6 +35,13 @@ final class LiveActivityBackgroundBridge {
     private var terminalSessionIDs: Set<String> = []
     private var taskToken: UUID?
     private var delayedEndTask: Task<Void, Never>?
+    private(set) var lifetime: LiveActivityStore.Lifetime?
+
+    func bind(_ lifetime: LiveActivityStore.Lifetime) {
+        guard self.lifetime != lifetime else { return }
+        cancelAll(reason: "Connection lifetime changed")
+        self.lifetime = lifetime
+    }
 
     init(
         manager: (any LiveActivityBackgroundTaskManaging)? = nil,
@@ -55,11 +63,12 @@ final class LiveActivityBackgroundBridge {
         taskToken != nil
     }
 
-    func arm(sessionID: String) -> Intent {
+    func arm(sessionID: String) -> Intent? {
+        guard let lifetime else { return nil }
         if !activeSessionIDs.contains(sessionID), pendingIntentIDsBySession[sessionID] == nil {
             terminalSessionIDs.remove(sessionID)
         }
-        let intent = Intent(id: UUID(), sessionID: sessionID)
+        let intent = Intent(id: UUID(), sessionID: sessionID, lifetime: lifetime)
         pendingIntentIDsBySession[sessionID, default: []].insert(intent.id)
         log("armed session=\(sessionID)")
         return intent
@@ -67,6 +76,7 @@ final class LiveActivityBackgroundBridge {
 
     func resolve(_ intent: Intent?, accepted: Bool, hasLiveActivity: Bool) {
         guard let intent,
+              intent.lifetime == lifetime,
               pendingIntentIDsBySession[intent.sessionID]?.contains(intent.id) == true else { return }
         removePendingIntent(intent)
 
@@ -82,8 +92,15 @@ final class LiveActivityBackgroundBridge {
         ensureAssertion()
     }
 
-    func consume(_ managed: OpenCodeManagedEvent) {
-        switch managed.typed {
+    func consume(_ managed: OpenCodeManagedEvent, lifetime: LiveActivityStore.Lifetime? = nil) {
+        consume(managed.typed, lifetime: lifetime)
+    }
+
+    // The caller captures the event subscription's lifetime, not the current UI owner.
+    // This remains a finite UIKit assertion, with no push/SSE survival guarantee.
+    func consume(_ event: OpenCodeTypedEvent, lifetime: LiveActivityStore.Lifetime?) {
+        guard let lifetime, self.lifetime == lifetime else { return }
+        switch event {
         case let .sessionIdle(sessionID):
             finish(sessionID: sessionID, reason: "idle")
         case let .sessionStatus(sessionID, status) where status == "idle":
@@ -93,13 +110,14 @@ final class LiveActivityBackgroundBridge {
                 finish(sessionID: sessionID, reason: "error")
             }
         case let .sessionDeleted(session):
-            cancel(sessionID: session.id, reason: "deleted")
+            cancel(sessionID: session.id, reason: "deleted", lifetime: lifetime)
         default:
             break
         }
     }
 
-    func cancel(sessionID: String, reason: String) {
+    func cancel(sessionID: String, reason: String, lifetime: LiveActivityStore.Lifetime? = nil) {
+        guard let lifetime, self.lifetime == lifetime else { return }
         activeSessionIDs.remove(sessionID)
         pendingIntentIDsBySession.removeValue(forKey: sessionID)
         terminalSessionIDs.remove(sessionID)
@@ -108,6 +126,7 @@ final class LiveActivityBackgroundBridge {
     }
 
     func cancelAll(reason: String) {
+        lifetime = nil
         activeSessionIDs.removeAll()
         pendingIntentIDsBySession.removeAll()
         terminalSessionIDs.removeAll()

@@ -18,31 +18,42 @@ final class TalkSessionCoordinator: ObservableObject {
 
     private unowned let viewModel: AppViewModel
     private var workspaceDirectory: String?
-    private var activeSessionID: String?
+    private(set) var activeSessionID: String?
+    private(set) var pendingMessageID: String?
+    private var createdSession: OpenCodeSession?
+    private var connectionID: UUID?
+    private var composerSelection: NewProjectChatComposerSelection?
+    private var submissionContextID: String?
     private var launchID: UUID?
     private var submissionTask: Task<Void, Never>?
-    private var isAwaitingPaywallRecovery = false
-    private var isAwaitingForegroundSubmissionRecovery = false
     private var isApplicationActive = true
     private var observations: Set<AnyCancellable> = []
     private var directoryObservation: AnyCancellable?
 
-    init(viewModel: AppViewModel) {
+    init(viewModel: AppViewModel, conversationController: ConversationModeController? = nil) {
         self.viewModel = viewModel
-        conversationController = ConversationModeController(voiceStore: viewModel.speechVoiceStore)
+        self.conversationController = conversationController ?? ConversationModeController(voiceStore: viewModel.speechVoiceStore)
 
-        conversationController.objectWillChange
+        self.conversationController.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &observations)
 
-        conversationController.$sendRequestToken
+        self.conversationController.$sendRequestToken
             .dropFirst()
             .sink { [weak self] _ in self?.submitCapturedTurn() }
             .store(in: &observations)
 
         viewModel.chatStore.$messages
             .dropFirst()
-            .sink { [weak self] _ in self?.refreshConversationState() }
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.refreshConversationState() }
+            }
+            .store(in: &observations)
+
+        Publishers.Merge(viewModel.connectionStore.objectWillChange, viewModel.chatStore.objectWillChange)
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.refreshConversationState() }
+            }
             .store(in: &observations)
 
         viewModel.sessionInteractionStore.objectWillChange
@@ -52,7 +63,10 @@ final class TalkSessionCoordinator: ObservableObject {
             .store(in: &observations)
 
         viewModel.projectStore.objectWillChange
-            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+                DispatchQueue.main.async { self?.refreshConversationState() }
+            }
             .store(in: &observations)
 
         viewModel.commerceFacade.store.$paywallReason
@@ -81,25 +95,37 @@ final class TalkSessionCoordinator: ObservableObject {
     var projects: [OpenCodeProject] { viewModel.projects }
 
     func presentProjectSelection() {
-        guard viewModel.backendMode == .server, viewModel.isConnected else { return }
+        guard viewModel.projectFacade.allowsNewTalk, isApplicationActive else { return }
         stopCurrentConversation()
         phase = .choosingProject
     }
 
     func start(project: OpenCodeProject, workspaceDirectory: String? = nil) {
-        guard viewModel.backendMode == .server, viewModel.isConnected else { return }
+        guard viewModel.projectFacade.allowsNewTalk, isApplicationActive,
+              viewModel.commerceFacade.paywallReason == nil else { return }
         stopCurrentConversation()
+        connectionID = viewModel.backendConnection?.id
         selectedProjectID = project.id
         self.workspaceDirectory = project.id == "global" ? nil : workspaceDirectory ?? project.worktree
         launchID = UUID()
+        let defaults = viewModel.modelConfigurationStore.newSessionDefaults
+        let model = viewModel.modelConfigurationStore.voiceModeModelReference()
+            ?? defaults.providerID.flatMap { provider in
+                defaults.modelID.map { OpenCodeModelReference(providerID: provider, modelID: $0) }
+            }
+        composerSelection = NewProjectChatComposerSelection(agentName: defaults.agentName,
+            modelReference: model, reasoningVariant: defaults.reasoningVariant)
         phase = .listening
+        conversationController.setAudioAvailable(true)
         conversationController.start(initialTranscript: "")
-        conversationController.startLiveActivity(
-            title: projectTitle(project),
-            directory: self.workspaceDirectory,
-            workspaceID: nil,
-            sessionID: nil
-        )
+        if viewModel.chatFacade.supportsTalkLiveActivities {
+            conversationController.startLiveActivity(
+                title: projectTitle(project),
+                directory: self.workspaceDirectory,
+                workspaceID: nil,
+                sessionID: nil
+            )
+        }
     }
 
     func selectProject(_ project: OpenCodeProject) {
@@ -120,23 +146,7 @@ final class TalkSessionCoordinator: ObservableObject {
 
     func applicationActivityChanged(isActive: Bool) {
         isApplicationActive = isActive
-        guard isPresented, !isChoosingProject else { return }
-        guard isActive else {
-            conversationController.pause()
-            return
-        }
-        guard viewModel.commerceFacade.paywallReason == nil else { return }
-        switch phase {
-        case .listening:
-            conversationController.resume(isSessionBusy: false)
-        case .creatingSession:
-            conversationController.resume(isSessionBusy: true)
-        case .conversation:
-            refreshConversationState()
-        case .inactive, .choosingProject:
-            break
-        }
-        recoverPendingSubmissionIfPossible()
+        refreshConversationState()
     }
 
     func projectTitle(_ project: OpenCodeProject) -> String {
@@ -147,7 +157,13 @@ final class TalkSessionCoordinator: ObservableObject {
     }
 
     private func submitCapturedTurn() {
-        guard conversationController.state == .submitting else { return }
+        guard conversationController.state == .submitting, pendingMessageID == nil, submissionTask == nil,
+              conversationController.submittedMessageID == nil,
+              isApplicationActive, viewModel.commerceFacade.paywallReason == nil,
+              connectionID == viewModel.backendConnection?.id, viewModel.projectFacade.allowsNewTalk else {
+            conversationController.pause()
+            return
+        }
         if let session = activeSession() {
             submitTurn(in: session)
         } else {
@@ -166,16 +182,13 @@ final class TalkSessionCoordinator: ObservableObject {
 
         let prompt = conversationController.transcript
         let baselineMessageIDs: Set<String> = []
-        let defaults = viewModel.modelConfigurationStore.newSessionDefaults
-        let voiceModelReference = defaults.voiceModeProviderID.flatMap { providerID in
-            defaults.voiceModeModelID.map { OpenCodeModelReference(providerID: providerID, modelID: $0) }
-        }
-        let defaultModelReference = defaults.providerID.flatMap { providerID in
-            defaults.modelID.map { OpenCodeModelReference(providerID: providerID, modelID: $0) }
-        }
-        let modelReference = voiceModelReference ?? defaultModelReference
-        let previousSessionID = viewModel.selectedSession?.id
-        var createdSession: OpenCodeSession?
+        let selection = composerSelection
+        let directory = workspaceDirectory
+        let messageID = OpenCodeIdentifier.message()
+        pendingMessageID = messageID
+        let connectionID = connectionID
+        // startNewProjectChat prepares its directory once before creating the session.
+        let preparedNavigationGeneration = viewModel.sessionNavigationGeneration &+ 1
         conversationController.didSubmit(baselineMessageIDs: baselineMessageIDs)
         phase = .creatingSession
 
@@ -183,97 +196,106 @@ final class TalkSessionCoordinator: ObservableObject {
             guard let self else { return }
             let didStart = await self.viewModel.startNewProjectChat(
                 prompt: prompt,
-                composerSelection: NewProjectChatComposerSelection(
-                    agentName: defaults.agentName,
-                    modelReference: modelReference,
-                    reasoningVariant: defaults.reasoningVariant
-                ),
+                messageID: messageID,
+                composerSelection: selection,
                 projectID: project.id,
-                workspaceDirectory: self.workspaceDirectory,
-                onSessionCreated: { createdSession = $0 }
-            )
-            guard !Task.isCancelled, self.launchID == launchID else { return }
-            self.submissionTask = nil
-            guard didStart, let session = self.viewModel.selectedSession else {
-                let reusableSession = createdSession
-                    ?? self.viewModel.selectedSession.flatMap { $0.id != previousSessionID ? $0 : nil }
-                if let createdSession = reusableSession {
-                    if self.viewModel.selectedSession?.id != createdSession.id {
-                        self.viewModel.prepareSessionSelection(createdSession)
-                        await self.viewModel.selectSession(createdSession)
+                workspaceDirectory: directory,
+                onSessionCreated: { [weak self] session in
+                    guard let self, !Task.isCancelled, self.launchID == launchID,
+                          self.viewModel.backendConnection?.id == connectionID else { return }
+                    // The POST can wait for a whole turn, including pending forms.
+                    // Bind the canonical chat before awaiting that first input.
+                    self.createdSession = session
+                    self.activeSessionID = session.id
+                    guard self.viewModel.sessionNavigationGeneration == preparedNavigationGeneration,
+                          self.viewModel.currentProject?.id == project.id,
+                          self.viewModel.selectedSession == nil || self.viewModel.selectedSession?.id == session.id else {
+                        self.launchID = nil
+                        self.submissionTask?.cancel()
+                        self.phase = .conversation
+                        self.conversationController.setAudioAvailable(false)
+                        return
                     }
-                    self.activeSessionID = createdSession.id
-                    self.conversationController.updateLiveActivitySessionID(createdSession.id)
+                    if self.viewModel.connectionStore.apiProfile == .v2 {
+                        _ = self.viewModel.beginSessionNavigation(session)
+                    } else {
+                        self.viewModel.prepareSessionSelection(session)
+                    }
+                    self.viewModel.chatFacade.setActiveChatSessionID(session.id)
+                    self.submissionContextID = self.viewModel.chatFacade.promptContextID
+                    self.bindDirectoryStore(self.viewModel.chatFacade.directoryStore(forSessionID: session.id))
                     self.phase = .conversation
-                    self.bindDirectoryStore(
-                        self.viewModel.directoryStoreRegistry.ownerStore(forSessionID: createdSession.id)
-                            ?? self.viewModel.directoryStoreRegistry.activeStore
-                    )
+                    self.conversationController.updateLiveActivitySessionID(session.id)
                     self.viewModel.appShellFacade.selectProjectContent()
                     self.viewModel.chatDetailPresentationRequest &+= 1
-                    self.recoverFailedSubmission()
-                    return
+                    self.refreshConversationState()
+                },
+                isSubmissionCurrent: { [weak self] in
+                    guard let self, self.launchID == launchID,
+                          self.viewModel.backendConnection?.id == connectionID else { return false }
+                    return self.submissionContextID == nil
+                        || self.submissionContextID == self.viewModel.chatFacade.promptContextID
                 }
-                self.phase = .listening
-                if self.viewModel.commerceFacade.paywallReason != nil {
-                    self.isAwaitingPaywallRecovery = true
-                } else {
-                    self.recoverFailedSubmission(errorMessage: self.viewModel.errorMessage)
-                }
+            )
+            guard !Task.isCancelled, self.launchID == launchID,
+                  self.viewModel.backendConnection?.id == connectionID else { return }
+            self.submissionTask = nil
+            if let activeSessionID = self.activeSessionID,
+               self.viewModel.selectedSession?.id != activeSessionID {
+                self.conversationController.setAudioAvailable(false)
                 return
             }
-
-            self.activeSessionID = session.id
-            self.conversationController.updateLiveActivitySessionID(session.id)
-            self.phase = .conversation
-            self.bindDirectoryStore(
-                self.viewModel.directoryStoreRegistry.ownerStore(forSessionID: session.id)
-                    ?? self.viewModel.directoryStoreRegistry.activeStore
-            )
-            self.viewModel.appShellFacade.selectProjectContent()
-            self.viewModel.chatDetailPresentationRequest &+= 1
+            if !didStart {
+                self.conversationController.submissionAdmissionChanged(isAdmitted: false,
+                    errorMessage: self.viewModel.commerceFacade.paywallReason == nil
+                        ? self.viewModel.errorMessage ?? String(localized: "Prompt admission is uncertain. Refresh the timeline before retrying.")
+                        : nil)
+            }
             self.refreshConversationState()
         }
     }
 
     private func submitTurn(in session: OpenCodeSession) {
-        guard phase == .conversation else {
-            conversationController.submissionDidNotStart()
+        guard phase == .conversation,
+              !viewModel.chatFacade.hasPendingPromptAdmission(sessionID: session.id),
+              viewModel.chatFacade.sessionForms(forSessionID: session.id).isEmpty else {
+            conversationController.submissionAdmissionChanged(isAdmitted: false)
             return
         }
-        let prompt = conversationController.transcript
-        let baselineMessageIDs = Set(
-            (viewModel.directoryStoreRegistry.snapshot(forSessionID: session.id)?.messages ?? []).map(\.id)
-        )
-        guard let launchID else {
-            conversationController.submissionDidNotStart()
-            return
-        }
-        conversationController.didSubmit(baselineMessageIDs: baselineMessageIDs)
-
-        submissionTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let didSend = await self.viewModel.sendMessage(
-                prompt,
-                in: session,
-                userVisible: true
-            )
-            guard !Task.isCancelled, self.launchID == launchID else { return }
-            self.submissionTask = nil
-            if didSend {
-                self.refreshConversationState()
-            } else {
-                self.recoverFailedSubmission(errorMessage: self.viewModel.errorMessage)
-            }
-        }
+        submissionContextID = viewModel.chatFacade.promptContextID
+        conversationController.submitTurn(in: session, chatFacade: viewModel.chatFacade)
     }
 
     private func refreshConversationState() {
+        guard isPresented, !isChoosingProject else { return }
+        guard connectionID == viewModel.backendConnection?.id else {
+            stop()
+            return
+        }
+        let available = isApplicationActive && viewModel.projectFacade.allowsNewTalk
+            && viewModel.commerceFacade.paywallReason == nil
+        conversationController.setAudioAvailable(available)
+        guard available else { return }
+        if phase == .listening || phase == .creatingSession {
+            conversationController.resume(isSessionBusy: phase == .creatingSession)
+            return
+        }
         guard phase == .conversation, let activeSessionID else { return }
+        guard viewModel.selectedSession?.id == activeSessionID,
+              viewModel.currentProject?.id == selectedProjectID else {
+            submissionTask?.cancel()
+            submissionTask = nil
+            conversationController.setAudioAvailable(false)
+            return
+        }
+        if let submissionContextID, submissionContextID != viewModel.chatFacade.promptContextID {
+            conversationController.setAudioAvailable(false)
+            return
+        }
         let store = viewModel.directoryStoreRegistry.ownerStore(forSessionID: activeSessionID)
             ?? viewModel.directoryStoreRegistry.activeStore
         let snapshot = viewModel.directoryStoreRegistry.snapshot(forSessionID: activeSessionID)
-        let isBusy = snapshot?.status == "busy"
+        let isBusy = snapshot?.status == "busy" || submissionTask != nil
         let permissions = SessionInteractionStore.permissions(
             forSessionTreeRootID: activeSessionID,
             sessions: store.sessions,
@@ -285,13 +307,24 @@ final class TalkSessionCoordinator: ObservableObject {
             questionsBySessionID: store.syncState.questionsBySessionID
         )
         let hasBlockingInteraction = !permissions.isEmpty || !questions.isEmpty
+            || !viewModel.chatFacade.sessionForms(forSessionID: activeSessionID).isEmpty
         let messages = snapshot?.messages.isEmpty == false
             ? snapshot?.messages ?? []
             : viewModel.chatStore.messages.filter { $0.info.sessionID == activeSessionID }
 
+        if let pendingMessageID {
+            let admission = viewModel.chatFacade.promptAdmissionPhase(messageID: pendingMessageID, sessionID: activeSessionID)
+            if admission == .admitted {
+                if submissionTask == nil { self.pendingMessageID = nil }
+                conversationController.submissionAdmissionChanged(isAdmitted: true)
+            } else if admission == .uncertain || admission == .rejected {
+                conversationController.submissionAdmissionChanged(isAdmitted: false)
+            }
+        }
         if hasBlockingInteraction {
-            conversationController.pause()
+            conversationController.setAudioAvailable(false)
         } else {
+            conversationController.refreshPromptAdmission(chatFacade: viewModel.chatFacade)
             conversationController.resume(isSessionBusy: isBusy)
             conversationController.update(messages: messages, isSessionBusy: isBusy)
         }
@@ -299,7 +332,7 @@ final class TalkSessionCoordinator: ObservableObject {
 
     private func activeSession() -> OpenCodeSession? {
         guard let activeSessionID else { return nil }
-        return viewModel.directoryStoreRegistry.snapshot(forSessionID: activeSessionID)?.session
+        return viewModel.directoryStoreRegistry.snapshot(forSessionID: activeSessionID)?.session ?? createdSession
     }
 
     private func bindDirectoryStore(_ store: DirectoryStore) {
@@ -313,55 +346,25 @@ final class TalkSessionCoordinator: ObservableObject {
     }
 
     private func stopCurrentConversation() {
+        launchID = nil
+        submissionTask?.cancel()
+        submissionTask = nil
         conversationController.stop()
         activeSessionID = nil
         selectedProjectID = nil
         workspaceDirectory = nil
-        isAwaitingPaywallRecovery = false
-        isAwaitingForegroundSubmissionRecovery = false
+        createdSession = nil
+        pendingMessageID = nil
+        connectionID = nil
+        composerSelection = nil
+        submissionContextID = nil
     }
 
     private func paywallPresentationChanged(_ reason: OpenClientPaywallReason?) {
-        guard isPresented else { return }
         if reason != nil {
-            conversationController.pause()
-            return
-        }
-        guard isApplicationActive else { return }
-        switch phase {
-        case .listening:
-            conversationController.resume(isSessionBusy: false)
-        case .creatingSession:
-            conversationController.resume(isSessionBusy: true)
-        case .conversation:
-            refreshConversationState()
-        case .inactive, .choosingProject:
-            break
-        }
-        recoverPendingSubmissionIfPossible()
-    }
-
-    private func recoverFailedSubmission(errorMessage: String? = nil) {
-        if conversationController.state == .paused {
-            isAwaitingForegroundSubmissionRecovery = true
-            isAwaitingPaywallRecovery = viewModel.commerceFacade.paywallReason != nil
+            conversationController.setAudioAvailable(false)
         } else {
-            conversationController.submissionDidNotStart()
+            DispatchQueue.main.async { [weak self] in self?.refreshConversationState() }
         }
-        if let errorMessage {
-            conversationController.errorMessage = errorMessage
-        }
-    }
-
-    private func recoverPendingSubmissionIfPossible() {
-        guard isAwaitingPaywallRecovery || isAwaitingForegroundSubmissionRecovery,
-              isApplicationActive,
-              viewModel.commerceFacade.paywallReason == nil,
-              conversationController.state != .paused else {
-            return
-        }
-        isAwaitingPaywallRecovery = false
-        isAwaitingForegroundSubmissionRecovery = false
-        conversationController.submissionDidNotStart()
     }
 }

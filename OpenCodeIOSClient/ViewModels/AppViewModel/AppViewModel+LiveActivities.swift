@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 extension AppViewModel {
     func toggleLiveActivity(for session: OpenCodeSession) async {
@@ -47,31 +46,7 @@ extension AppViewModel {
     }
 
     func handleLiveActivityURL(_ url: URL) async {
-        guard let deepLink = LiveActivityCoordinator.deepLink(from: url) else { return }
-        openURLNavigationMessage = String(localized: "Opening chat...")
-        defer { openURLNavigationMessage = nil }
-        appendDebugLog("live activity deep link session=\(deepLink.sessionID) dir=\(debugDirectoryLabel(deepLink.directory)) action=\(deepLink.action)")
-
-        if !isConnected {
-            guard hasSavedServer else { return }
-            await connect()
-            guard isConnected else { return }
-        }
-
-        await openLiveActivitySession(deepLink)
-
-        switch deepLink.action {
-        case .open:
-            return
-        case let .permission(requestID, reply):
-            guard let permission = permissions(for: deepLink.sessionID).first(where: { $0.id == requestID }) else { return }
-            await respondToPermission(permission, response: reply)
-            liveActivityFacade.refresh(sessionID: deepLink.sessionID)
-        case let .question(requestID, answer):
-            guard let question = questions(for: deepLink.sessionID).first(where: { $0.id == requestID }) else { return }
-            await respondToQuestion(question, answers: [[answer]])
-            liveActivityFacade.refresh(sessionID: deepLink.sessionID)
-        }
+        await liveActivityFacade.handleDeepLink(url)
     }
 
     func isLiveActivityActive(for session: OpenCodeSession) -> Bool {
@@ -84,53 +59,65 @@ extension AppViewModel {
     }
     #endif
 
-    @discardableResult
-    private func openLiveActivitySession(_ deepLink: LiveActivityDeepLink) async -> OpenCodeSession? {
-        if session(matching: deepLink.sessionID) == nil {
-            await ensureAllSessionsLoaded()
+    func openLiveActivitySession(
+        _ deepLink: LiveActivityDeepLink,
+        lifetime: LiveActivityStore.Lifetime,
+        isCurrentRequest: @MainActor () -> Bool
+    ) async {
+        guard isCurrentRequest(), let connection = backendConnection,
+              let adapter = connection.openCodeCompatibility else { return }
+        let navigationGeneration = sessionNavigationGeneration
+        guard let scope = liveActivityFacade.restorationScope(for: deepLink) else { return }
+        let client = adapter.client
+        func isCurrent() -> Bool {
+            isCurrentRequest() && isCurrentBackendConnection(connection)
+                && liveActivityFacade.currentLifetime == lifetime && sessionNavigationGeneration == navigationGeneration
         }
-
-        #if canImport(ActivityKit) && os(iOS) && !targetEnvironment(macCatalyst)
-        let activitySnapshot = LiveActivityCoordinator.sessionSnapshot(for: deepLink.sessionID)
-        #else
-        let activitySnapshot: LiveActivitySessionSnapshot? = nil
-        #endif
-
-        let resolution = LiveActivityCoordinator.resolveSession(
-            sessionID: deepLink.sessionID,
-            directory: deepLink.directory,
-            workspaceID: deepLink.workspaceID,
-            knownSessions: allSessions,
-            selectedSession: selectedSession,
-            activitySnapshot: activitySnapshot
-        )
-        let openedSession = resolution.session
-        let resolvedDirectory = openedSession.directory ?? deepLink.directory
-        let shouldSwitchDirectory = !isUsingAppleIntelligence && (currentProject == nil || effectiveSelectedDirectory != resolvedDirectory)
-        let routeProject = resolvedDirectory.flatMap(projectContainingDirectory)
-        if let routeProject {
-            withAnimation(opencodeSelectionAnimation) {
-                currentProject = routeProject
-                selectedProjectContentTab = .sessions
-            }
-        }
-
-        if shouldSwitchDirectory {
-            await selectDirectory(resolvedDirectory)
-            if let routeProject {
-                withAnimation(opencodeSelectionAnimation) {
-                    currentProject = routeProject
-                    selectedProjectContentTab = .sessions
+        do {
+            // OS attributes locate a session; they never seed canonical navigation or authorize a reply.
+            let session = try await connection.sessions.session(id: deepLink.sessionID, scope: scope)
+            guard isCurrent(), liveActivityFacade.matchesRestoredSession(session, link: deepLink) else { return }
+            let requestDirectory = lifetime.owner.profile == .legacy && session.projectID == "global" ? nil : session.directory
+            switch deepLink.action {
+            case .open:
+                break
+            case let .permission(requestID, reply):
+                guard ["once", "always", "reject"].contains(reply) else { return }
+                let permissions: [OpenCodePermission]
+                if lifetime.owner.profile == .v2 {
+                    permissions = try await client.listV2SessionPermissions(sessionID: session.id)
+                } else {
+                    permissions = try await client.listPermissions(directory: requestDirectory, workspaceID: session.workspaceID)
                 }
+                guard isCurrent(), permissions.contains(where: { $0.id == requestID && $0.sessionID == session.id }) else { return }
+                if lifetime.owner.profile == .v2 {
+                    try await client.replyToV2Permission(sessionID: session.id, requestID: requestID, reply: reply)
+                } else {
+                    try await client.replyToPermission(requestID: requestID, reply: reply, directory: requestDirectory, workspaceID: session.workspaceID)
+                }
+            case let .question(requestID, answer):
+                guard lifetime.owner.profile == .legacy else { return }
+                let questions = try await client.listQuestions(directory: requestDirectory, workspaceID: session.workspaceID)
+                guard isCurrent(), questions.contains(where: { $0.id == requestID && $0.sessionID == session.id }) else { return }
+                try await client.replyToQuestion(requestID: requestID, answers: [[answer]], directory: requestDirectory, workspaceID: session.workspaceID)
             }
+            guard isCurrent() else { return }
+            if let navigate = liveActivityFacade.navigateForRestoration {
+                await navigate(session)
+                return
+            }
+            // Commit the explicit route synchronously while the request still owns this lifetime.
+            currentProject = projects.first { $0.id == session.projectID }
+                ?? session.directory.flatMap(projectContainingDirectory)
+            selectedProjectContentTab = .sessions
+            prepareDirectorySelection(session.directory)
+            upsertVisibleSession(session)
+            chatDetailPresentationRequest &+= 1
+            await selectSession(session)
+        } catch {
+            guard isCurrent() else { return }
+            errorMessage = error.localizedDescription
         }
-
-        if case .fallback = resolution {
-            upsertVisibleSession(openedSession)
-        }
-        await selectSession(openedSession)
-        chatDetailPresentationRequest &+= 1
-        return openedSession
     }
 
     private func projectContainingDirectory(_ directory: String) -> OpenCodeProject? {

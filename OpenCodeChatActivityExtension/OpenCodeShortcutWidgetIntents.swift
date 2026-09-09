@@ -9,6 +9,8 @@ struct OpenCodeWidgetServerEntity: AppEntity, Identifiable, Hashable {
     let displayName: String
     let baseURL: String
     let username: String
+    var profile: OpenCodeProfileIdentity = .legacy
+    var rawServerID: String? = nil
 
     var displayRepresentation: DisplayRepresentation {
         let subtitle = username.isEmpty ? baseURL : "\(username) · \(baseURL)"
@@ -25,6 +27,8 @@ struct OpenCodeWidgetProjectEntity: AppEntity, Identifiable, Hashable {
     let projectID: String
     let title: String
     let directory: String?
+    var profile: OpenCodeProfileIdentity = .legacy
+    var rawServerID: String? = nil
 
     var displayRepresentation: DisplayRepresentation {
         if let directory {
@@ -101,7 +105,7 @@ struct OpenCodeWidgetProjectQuery: EntityQuery {
     }
 
     func defaultResult() async -> OpenCodeWidgetProjectEntity? {
-        OpenCodeWidgetOptions.defaultProject(server: nil)
+        nil
     }
 }
 
@@ -302,6 +306,7 @@ enum OpenCodeWidgetOptions {
     static func servers() -> [OpenCodeWidgetServerEntity] {
         let payload = OpenCodeWidgetStore().load()
         return payload.servers
+            .filter { $0.offersNewSession || $0.offersCommands }
             .sorted { lhs, rhs in
                 if lhs.isLastConnected != rhs.isLastConnected {
                     return lhs.isLastConnected
@@ -314,10 +319,12 @@ enum OpenCodeWidgetOptions {
             }
             .map { server in
                 OpenCodeWidgetServerEntity(
-                    id: server.id,
+                    id: server.entityID,
                     displayName: server.displayName,
                     baseURL: server.baseURL,
-                    username: server.username
+                    username: server.username,
+                    profile: server.owner.profile,
+                    rawServerID: server.id
                 )
             }
     }
@@ -335,20 +342,14 @@ enum OpenCodeWidgetOptions {
         return projectEntities(serverID: serverID)
     }
 
-    static func defaultProject(server: OpenCodeWidgetServerEntity?) -> OpenCodeWidgetProjectEntity? {
-        let values = projects(server: server)
-        return values.first { $0.projectID != "global" } ?? values.first
-    }
-
     static func allCommands() -> [OpenCodeWidgetCommandEntity] {
         commandEntities(serverID: nil, projectID: nil)
     }
 
     static func commands(server: OpenCodeWidgetServerEntity?, project: OpenCodeWidgetProjectEntity?) -> [OpenCodeWidgetCommandEntity] {
         guard let serverID = resolvedServerID(server, fallbackServerID: project?.serverID) else { return [] }
-        let projectID = project?.serverID == serverID ? project?.projectID : nil
-        let scopedCommands = commandEntities(serverID: serverID, projectID: projectID)
-        return scopedCommands.isEmpty ? commandEntities(serverID: serverID, projectID: nil) : scopedCommands
+        if let project, project.serverID != serverID { return [] }
+        return commandEntities(serverID: serverID, projectID: project?.projectID)
     }
 
     static func allModels() -> [OpenCodeWidgetModelEntity] {
@@ -365,28 +366,33 @@ enum OpenCodeWidgetOptions {
     }
 
     static func normalizedDirectory(_ directory: String?) -> String? {
-        guard let directory, !directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, directory != "/" else {
+        guard let directory, !directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
         return directory
     }
 
     private static func resolvedServerID(_ server: OpenCodeWidgetServerEntity?, fallbackServerID: String? = nil) -> String? {
-        server?.id ?? fallbackServerID ?? OpenCodeWidgetStore().load().lastConnectedServerID()
+        let candidate = server?.id ?? fallbackServerID ?? defaultServer()?.id
+        return servers().contains(where: { $0.id == candidate }) ? candidate : nil
     }
 
     private static func projectEntities(serverID: String?) -> [OpenCodeWidgetProjectEntity] {
         let payload = OpenCodeWidgetStore().load()
         return payload.projects
-            .filter { serverID == nil || $0.serverID == serverID }
+            .filter { $0.offersNewSession ?? ($0.owner.profile == .legacy) }
+            .filter { project in payload.servers.contains { $0.owner == project.owner && $0.offersNewSession } }
+            .filter { serverID == nil || $0.owner.entityID() == serverID }
             .sorted { $0.sortTitle.localizedCaseInsensitiveCompare($1.sortTitle) == .orderedAscending }
             .map { project in
                 OpenCodeWidgetProjectEntity(
-                    id: entityID(serverID: project.serverID, value: project.id),
-                    serverID: project.serverID,
+                    id: project.entityID,
+                    serverID: project.owner.entityID(),
                     projectID: project.id,
                     title: project.title,
-                    directory: normalizedDirectory(project.worktree)
+                    directory: project.owner.profile == .v2 ? project.executionDirectory : (project.id == "global" ? nil : normalizedDirectory(project.worktree)),
+                    profile: project.owner.profile,
+                    rawServerID: project.serverID
                 )
             }
     }
@@ -394,13 +400,17 @@ enum OpenCodeWidgetOptions {
     private static func commandEntities(serverID: String?, projectID: String?) -> [OpenCodeWidgetCommandEntity] {
         let payload = OpenCodeWidgetStore().load()
         return payload.commands
-            .filter { serverID == nil || $0.serverID == serverID }
+            .filter { command in
+                payload.servers.contains { $0.owner == command.owner && $0.offersCommands }
+                    && payload.projects.contains { $0.owner == command.owner && $0.id == command.projectID }
+            }
+            .filter { serverID == nil || $0.owner.entityID() == serverID }
             .filter { projectID == nil || $0.projectID == projectID }
             .sorted { $0.sortTitle.localizedCaseInsensitiveCompare($1.sortTitle) == .orderedAscending }
             .map { command in
                 OpenCodeWidgetCommandEntity(
-                    id: command.id,
-                    serverID: command.serverID,
+                    id: command.entityID,
+                    serverID: command.owner.entityID(),
                     projectID: command.projectID,
                     directory: normalizedDirectory(command.directory),
                     name: command.name,
@@ -412,12 +422,13 @@ enum OpenCodeWidgetOptions {
     private static func modelEntities(serverID: String?) -> [OpenCodeWidgetModelEntity] {
         let payload = OpenCodeWidgetStore().load()
         return payload.models
-            .filter { serverID == nil || $0.serverID == serverID }
+            .filter { model in payload.servers.contains { $0.owner == model.owner && $0.offersNewSession } }
+            .filter { serverID == nil || $0.owner.entityID() == serverID }
             .sorted { $0.sortTitle.localizedCaseInsensitiveCompare($1.sortTitle) == .orderedAscending }
             .map { model in
                 OpenCodeWidgetModelEntity(
-                    id: model.id,
-                    serverID: model.serverID,
+                    id: model.entityID,
+                    serverID: model.owner.entityID(),
                     providerID: model.providerID,
                     providerName: model.providerName,
                     modelID: model.modelID,
@@ -427,7 +438,4 @@ enum OpenCodeWidgetOptions {
             }
     }
 
-    private static func entityID(serverID: String, value: String) -> String {
-        [serverID, value].joined(separator: "|")
-    }
 }

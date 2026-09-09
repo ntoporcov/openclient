@@ -371,7 +371,6 @@ struct TalkSessionOverlay: View {
             ) {
                 Button("OK", role: .cancel) {
                     conversationController.errorMessage = nil
-                    coordinator.stop()
                 }
             } message: {
                 Text(conversationController.errorMessage ?? "")

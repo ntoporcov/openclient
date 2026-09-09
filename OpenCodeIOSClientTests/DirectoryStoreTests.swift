@@ -4,6 +4,223 @@ import XCTest
 
 @MainActor
 final class DirectoryStoreTests: XCTestCase {
+    func testV2GlobalListedSessionKeepsOwnerAndSelectionAcrossFetchAndLocatedEvents() throws {
+        let registry = DirectoryStoreRegistry()
+        let global = registry.activeStore
+        let original = OpenCodeSession(id: "ses_global", title: "Original", workspaceID: nil, directory: "/tmp/project", projectID: "global", parentID: nil)
+        global.insertV2Session(original)
+        global.selectedSession = original
+        let fetched = OpenCodeSession(id: original.id, title: "Renamed", workspaceID: nil, directory: "/tmp/project/", projectID: "global", parentID: nil)
+        let owner = registry.targetStore(forV2Session: fetched)
+        XCTAssertTrue(owner === global)
+        owner.insertV2Session(fetched)
+        let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.execution.started","location":{"directory":"/tmp/project"},"data":{"sessionID":"ses_global"}}"#))
+        XCTAssertTrue(registry.targetStore(forV2Event: event) === global)
+        XCTAssertTrue(global.applyV2Event(event))
+        XCTAssertEqual(global.selectedSession?.id, original.id)
+        XCTAssertEqual(global.selectedSession?.title, "Renamed")
+        XCTAssertEqual(registry.activeKey, DirectoryStoreRegistry.globalKey)
+        XCTAssertNil(registry.existingStore(for: "/tmp/project"))
+    }
+
+    func testV2GlobalOwnerChangesOnlyForActualSessionLocationChange() throws {
+        let registry = DirectoryStoreRegistry()
+        let original = OpenCodeSession(id: "ses_global", title: nil, workspaceID: nil, directory: "/old", projectID: "global", parentID: nil)
+        registry.activeStore.insertV2Session(original)
+        let moved = OpenCodeSession(id: original.id, title: nil, workspaceID: nil, directory: "/new", projectID: "global", parentID: nil)
+        XCTAssertTrue(registry.targetStore(forV2Session: moved) === registry.store(for: "/new"))
+        let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.moved","location":{"directory":"/old"},"data":{"sessionID":"ses_global","location":{"directory":"/new"},"projectID":"global"}}"#))
+        XCTAssertTrue(registry.targetStore(forV2Event: event) === registry.store(for: "/new"))
+        let workspaceMove = OpenCodeSession(id: original.id, title: nil, workspaceID: "wrk_new", directory: "/old", projectID: "global", parentID: nil)
+        XCTAssertFalse(registry.targetStore(forV2Session: workspaceMove) === registry.activeStore)
+    }
+
+    func testV2DiscoveredChildSharesGlobalParentOwnerAndSurvivesRootRefresh() throws {
+        let registry = DirectoryStoreRegistry()
+        let root = OpenCodeSession(id: "ses_root", title: nil, workspaceID: nil, directory: "/project", projectID: "global", parentID: nil)
+        let child = OpenCodeSession(id: "ses_child", title: nil, workspaceID: nil, directory: "/project", projectID: "global", parentID: root.id)
+        let store = registry.activeStore
+        store.insertV2Session(root)
+        store.selectedSession = root
+        XCTAssertTrue(registry.targetStore(forV2Session: child) === store)
+        store.insertV2Session(child)
+        let formEvent = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"form.created","location":{"directory":"/project"},"data":{"form":{"id":"frm_child","sessionID":"ses_child","title":"Child question","fields":[{"key":"answer","type":"string","required":true}]}}}"#))
+        XCTAssertTrue(registry.targetStore(forV2Event: formEvent) === store)
+        XCTAssertTrue(store.applyV2Event(formEvent))
+        store.applyV2SessionPage(.init(sessions: [root], nextCursor: nil), replacing: true, requestedCursor: nil, limit: 50)
+        XCTAssertEqual(store.sessions.map(\.id), [root.id, child.id])
+        XCTAssertEqual(store.sessionTotal, 1)
+        let visible = SessionInteractionStore.forms(forSessionTreeRootID: root.id, sessions: store.sessions,
+            forms: Array(store.sessionFormStore.forms.values))
+        XCTAssertEqual(visible.map(\.id), ["frm_child"])
+        let form = try XCTUnwrap(store.sessionFormStore.forms[.init(sessionID: child.id, formID: "frm_child")])
+        XCTAssertEqual(visible, [form])
+        XCTAssertEqual(form.fields.map(\.raw), [["key": .string("answer"), "type": .string("string"), "required": .bool(true)]])
+        XCTAssertTrue(store.syncState.questionsBySessionID.isEmpty)
+    }
+
+    func testV2LocationWinsOverActiveAndUnknownUnscopedEventsUseGlobalStore() throws {
+        let registry = DirectoryStoreRegistry(activeDirectory: "/tmp/active")
+        let located = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.execution.started","location":{"directory":"/tmp/other/","workspaceID":"wrk_other"},"data":{"sessionID":"ses_unknown"}}"#))
+        XCTAssertTrue(registry.targetStore(forV2Event: located) === registry.store(for: "/tmp/other"))
+        let unscoped = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.execution.started","data":{"sessionID":"ses_unknown"}}"#))
+        XCTAssertTrue(registry.targetStore(forV2Event: unscoped) === registry.store(for: nil))
+        XCTAssertFalse(registry.targetStore(forV2Event: unscoped) === registry.activeStore)
+    }
+
+    func testV2LifecycleAndStatusHydrationPreserveNewerLiveTransitions() throws {
+        let store = DirectoryStore()
+        let created = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"created":1000,"type":"session.created","data":{"sessionID":"ses_new","title":"First","projectID":"proj_1","location":{"directory":"/tmp/project"},"slug":"slug","version":"2"}}"#))
+        XCTAssertTrue(store.applyV2Event(created))
+        let revision = store.statusRevision
+        store.applySessionStatus("busy", forSessionID: "ses_new")
+        store.applyV2ActiveStatuses([:], requestedAtRevision: revision)
+        XCTAssertEqual(store.sessionStatuses["ses_new"], "busy")
+        store.applyV2ActiveStatuses([:], requestedAtRevision: store.statusRevision)
+        XCTAssertEqual(store.sessionStatuses["ses_new"], "idle")
+        let renamed = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"created":2000,"type":"session.renamed","data":{"sessionID":"ses_new","title":"Renamed"}}"#))
+        XCTAssertTrue(store.applyV2Event(renamed))
+        XCTAssertEqual(store.sessions.first?.title, "Renamed")
+        XCTAssertEqual(store.sessions.first?.time?.created, 1000)
+        let deleted = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.deleted","data":{"sessionID":"ses_new"}}"#))
+        XCTAssertTrue(store.applyV2Event(deleted))
+        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertNil(store.sessionStatuses["ses_new"])
+    }
+
+    func testV2FormsUseNestedSessionIdentityAndRevisionsPreventResurrection() throws {
+        let store = DirectoryStore()
+        let created = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"form.created","data":{"form":{"id":"frm_1","sessionID":"ses_1","title":"Choose","fields":[{"key":"color","type":"string","required":true,"options":[{"label":"Blue","value":"blue-value"}]}]}}}"#))
+        XCTAssertEqual(created.sessionID, "ses_1")
+        XCTAssertTrue(store.applyV2Event(created))
+        let form = try XCTUnwrap(store.v2FormsByID["frm_1"])
+        XCTAssertEqual(try form.answer(from: [["Blue"]]), ["color": .string("blue-value")])
+        let native = try XCTUnwrap(store.sessionFormStore.forms[form.backendForm.key])
+        XCTAssertEqual(native, form.backendForm)
+        XCTAssertEqual(try native.contract.answer(values: ["color": .string("blue-value")]), ["color": .string("blue-value")])
+        XCTAssertTrue(store.syncState.questionsBySessionID.isEmpty)
+        let revision = store.questionRevision
+        let cancelled = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"form.cancelled","data":{"id":"frm_1","sessionID":"ses_1"}}"#))
+        XCTAssertTrue(store.applyV2Event(cancelled))
+        store.applyV2SessionInteractions(sessionID: "ses_1", permissions: [], forms: [form], permissionRevisionAtRequestStart: store.permissionRevision, questionRevisionAtRequestStart: revision)
+        XCTAssertNil(store.v2FormsByID["frm_1"])
+        XCTAssertNil(store.sessionFormStore.forms[native.key])
+        XCTAssertNil(store.syncState.questionsBySessionID["ses_1"])
+    }
+
+    func testV2FormSettlementFromZeroQuestionRevisionInvalidatesDraftAndOperation() throws {
+        for eventType in ["form.replied", "form.cancelled"] {
+            let registry = DirectoryStoreRegistry()
+            let store = registry.activeStore
+            let form = BackendForm(id: "frm_1", sessionID: "ses_1", title: "Confirm",
+                fields: [.init(raw: ["key": .string("confirm"), "type": .string("boolean"), "required": .bool(true)])])
+            store.sessionFormStore.upsert(form)
+            store.sessionFormStore.setValue(.bool(false), fieldID: "confirm", for: form.key)
+            let reference = BackendFormReference(key: form.key)
+            let connectionID = UUID()
+            let generation = store.sessionFormStore.generation
+            let token = try XCTUnwrap(store.sessionFormStore.begin(.submitting, reference: reference, connectionID: connectionID))
+            XCTAssertEqual(store.questionRevision, 0)
+            XCTAssertEqual(registry.v2LifecycleRevision(sessionID: form.sessionID), 0)
+            XCTAssertTrue(store.syncState.questionsBySessionID.isEmpty)
+            let answer = eventType == "form.replied" ? ",\"answer\":{\"confirm\":false}" : ""
+            let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from:
+                "{\"type\":\"\(eventType)\",\"data\":{\"id\":\"frm_1\",\"sessionID\":\"ses_1\"\(answer)}}"))
+
+            XCTAssertTrue(store.applyV2Event(event))
+
+            XCTAssertEqual(store.questionRevision, 1)
+            XCTAssertEqual(registry.v2LifecycleRevision(sessionID: form.sessionID), 0)
+            XCTAssertTrue(store.sessionFormStore.forms.isEmpty)
+            XCTAssertTrue(store.sessionFormStore.editing.isEmpty)
+            XCTAssertFalse(store.sessionFormStore.owns(token, reference: reference, connectionID: connectionID, generation: generation))
+            let dto = OpenCodeV2Form(id: form.id, sessionID: form.sessionID, title: form.title, metadata: nil, fields: form.fields.map(\.raw))
+            store.applyV2SessionInteractions(sessionID: form.sessionID, permissions: [], forms: [dto],
+                permissionRevisionAtRequestStart: store.permissionRevision, questionRevisionAtRequestStart: 0)
+            XCTAssertTrue(store.sessionFormStore.forms.isEmpty)
+            XCTAssertTrue(store.syncState.questionsBySessionID.isEmpty)
+        }
+    }
+
+    func testV2FormSettlementBeforeInitialHydrationCannotBeResurrected() {
+        let store = DirectoryStore()
+        let form = BackendForm(id: "frm_1", sessionID: "ses_1", title: "Confirm",
+            fields: [.init(raw: ["key": .string("confirm"), "type": .string("boolean")])])
+        let initialRevision = store.sessionFormStore.revision
+        XCTAssertEqual(store.questionRevision, 0)
+        store.applySessionFormSettled(form.key)
+        XCTAssertEqual(store.questionRevision, 1)
+        store.applySessionForms([form], sessionID: form.sessionID, ifUnchangedSince: initialRevision)
+        store.applySessionFormCreated(form)
+        XCTAssertTrue(store.sessionFormStore.forms.isEmpty)
+        XCTAssertTrue(store.syncState.questionsBySessionID.isEmpty)
+    }
+
+    func testV2ReconnectQueuesEveryKnownDirectoryAndBackgroundTimeline() {
+        let registry = DirectoryStoreRegistry(activeDirectory: "/tmp/active")
+        registry.activeStore.insertV2Session(session(id: "ses_active", directory: "/tmp/active"))
+        registry.store(for: "/tmp/background").insertV2Session(session(id: "ses_background", directory: "/tmp/background"))
+        registry.requestV2Reconciliation(reconnect: true)
+        let work = registry.takeV2Reconciliation()
+        XCTAssertTrue(work.reconnect)
+        XCTAssertEqual(work.sessionIDs, ["ses_active", "ses_background"])
+        XCTAssertTrue(registry.takeV2Reconciliation().sessionIDs.isEmpty)
+    }
+
+    func testV2UnknownSessionDeletionInvalidatesInFlightDiscovery() throws {
+        let registry = DirectoryStoreRegistry()
+        let revision = registry.v2LifecycleRevision(sessionID: "ses_unknown")
+        let deleted = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.deleted","data":{"sessionID":"ses_unknown"}}"#))
+        registry.recordV2LifecycleEvent(deleted)
+        XCTAssertNotEqual(registry.v2LifecycleRevision(sessionID: "ses_unknown"), revision)
+        XCTAssertNil(registry.ownerStore(forSessionID: "ses_unknown"))
+        XCTAssertTrue(registry.isV2SessionDeleted("ses_unknown"))
+        registry.requestV2Reconciliation(sessionID: "ses_unknown")
+        XCTAssertTrue(registry.takeV2Reconciliation().sessionIDs.isEmpty)
+    }
+
+    func testV2SessionListSnapshotCannotResurrectUnknownSessionDeletedInFlight() throws {
+        let registry = DirectoryStoreRegistry(activeDirectory: "/project")
+        let snapshot = registry.v2LifecycleSnapshot
+        let removed = session(id: "ses_removed", directory: "/project")
+        let retained = session(id: "ses_retained", directory: "/project")
+        let deleted = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.deleted","data":{"sessionID":"ses_removed"}}"#))
+        registry.recordV2LifecycleEvent(deleted)
+        registry.activeStore.applyV2DiscoveredSessions(registry.unchangedV2Sessions([removed, retained], since: snapshot))
+        XCTAssertEqual(registry.activeStore.sessions.map(\.id), [retained.id])
+    }
+
+    func testV2CanonicalSessionRefreshClearsWorkspaceAndPreservesLiveRenameDuringListRequest() {
+        let original = OpenCodeSession(id: "ses_1", title: "Original", workspaceID: "wrk_old", directory: "/project", projectID: "project", parentID: nil)
+        let renamed = OpenCodeSession(id: "ses_1", title: "Renamed", workspaceID: nil, directory: "/project", projectID: "project", parentID: nil)
+        let store = DirectoryStore(sessions: [original])
+        let snapshot = store.sessions
+        store.insertV2Session(renamed)
+        store.applyV2DiscoveredSessions([original], ifUnchangedSince: snapshot)
+        XCTAssertEqual(store.sessions, [renamed])
+        XCTAssertNil(store.sessions[0].workspaceID)
+    }
+
+    func testV2OlderStatusResponseCannotOverwriteAlreadyAcceptedSnapshot() {
+        let store = DirectoryStore(sessions: [session(id: "ses_1", directory: "/project")])
+        let revision = store.statusRevision
+        store.applyV2ActiveStatuses([:], requestedAtRevision: revision)
+        store.applyV2ActiveStatuses(["ses_1": "busy"], requestedAtRevision: revision)
+        XCTAssertEqual(store.sessionStatuses["ses_1"], "idle")
+    }
+
+    func testV2LocatedBackgroundEventUpdatesOnlyItsDirectoryCache() throws {
+        let registry = DirectoryStoreRegistry(activeDirectory: "/selected")
+        let chat = ChatStore(preparedSessionID: "ses_selected")
+        let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"id":"evt_start","created":1000,"type":"session.step.started","durable":{"aggregateID":"ses_other","seq":1,"version":1},"location":{"directory":"/other","workspaceID":"wrk_other"},"data":{"sessionID":"ses_other","assistantMessageID":"msg_other","agent":"build","model":{"providerID":"provider","id":"model"}}}"#))
+        let owner = registry.targetStore(forV2Event: event)
+        XCTAssertTrue(chat.applyV2StreamEvent(event, sessionID: "ses_other"))
+        owner.applyV2Messages(chat.cachedMessagesBySessionID["ses_other"] ?? [], forSessionID: "ses_other")
+        XCTAssertEqual(owner.syncState.messageEnvelopes(forSessionID: "ses_other").map(\.id), ["msg_other"])
+        XCTAssertTrue(registry.activeStore.syncState.messagesBySessionID.isEmpty)
+        XCTAssertTrue(chat.messages.isEmpty)
+    }
+
     func testPreviouslyOpenedSessionUsesMostRecentAvailableSelection() {
         let first = session(id: "ses_first", directory: "/tmp/project")
         let second = session(id: "ses_second", directory: "/tmp/project")
@@ -49,6 +266,30 @@ final class DirectoryStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions.map(\.id), [existing.id, added.id])
         XCTAssertEqual(store.sessions.first?.title, "Updated")
         XCTAssertEqual(store.sessionTotal, 2)
+    }
+
+    func testApplySessionStatusUpdatesPublishedAndSyncState() {
+        let store = DirectoryStore()
+
+        store.applySessionStatus("busy", forSessionID: "ses_1")
+
+        XCTAssertEqual(store.sessionStatuses["ses_1"], "busy")
+        XCTAssertEqual(store.syncState.sessionStatusesBySessionID["ses_1"], "busy")
+    }
+
+    func testV2InteractionReplacementAndRemovalStaySessionScoped() {
+        let store = DirectoryStore()
+        let permission = permission(id: "per_1", sessionID: "ses_1")
+        let question = questionRequest(id: "que_1", sessionID: "ses_1")
+
+        store.applyV2Interactions(permissions: [permission], questions: [question])
+
+        XCTAssertEqual(store.syncState.permissionsBySessionID["ses_1"], [permission])
+        XCTAssertEqual(store.syncState.questionsBySessionID["ses_1"], [question])
+        store.removeV2Permission(id: permission.id, sessionID: permission.sessionID)
+        store.removeV2Question(id: question.id, sessionID: question.sessionID)
+        XCTAssertNil(store.syncState.permissionsBySessionID["ses_1"])
+        XCTAssertNil(store.syncState.questionsBySessionID["ses_1"])
     }
 
     func testApplyDirectoryReloadOwnsSessionsCommandsStatusesAndInteractionSyncMaps() {
@@ -119,6 +360,70 @@ final class DirectoryStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions.map(\.id), [root.id, child.id])
         XCTAssertEqual(store.sessionTotal, 1)
         XCTAssertFalse(store.hasMoreSessions)
+    }
+
+    func testV2SessionPagesReplaceAppendDeduplicateAndStopAtBoundary() {
+        let first = session(id: "ses_first", directory: "/tmp/project")
+        let duplicate = session(id: "ses_duplicate", directory: "/tmp/project")
+        let replacement = OpenCodeSession(
+            id: duplicate.id,
+            title: "Updated",
+            workspaceID: nil,
+            directory: "/tmp/project",
+            projectID: "project-1",
+            parentID: nil
+        )
+        let store = DirectoryStore(isLoadingSessions: true)
+
+        store.applyV2SessionPage(
+            OpenCodeV2SessionPage(sessions: [first, duplicate], nextCursor: "next"),
+            replacing: true,
+            requestedCursor: nil,
+            limit: 50
+        )
+
+        XCTAssertEqual(store.sessions.map(\.id), [first.id, duplicate.id])
+        XCTAssertEqual(store.nextSessionCursor, "next")
+        XCTAssertTrue(store.hasMoreSessions)
+        XCTAssertFalse(store.isLoadingSessions)
+
+        store.applyV2SessionPage(
+            OpenCodeV2SessionPage(sessions: [replacement], nextCursor: nil),
+            replacing: false,
+            requestedCursor: "next",
+            limit: 50
+        )
+
+        XCTAssertEqual(store.sessions.map(\.id), [first.id, duplicate.id])
+        XCTAssertEqual(store.sessions[1].title, "Updated")
+        XCTAssertNil(store.nextSessionCursor)
+        XCTAssertFalse(store.hasMoreSessions)
+    }
+
+    func testV2SessionPageRejectsUnchangedNextCursor() {
+        let store = DirectoryStore()
+
+        store.applyV2SessionPage(
+            OpenCodeV2SessionPage(sessions: [session(id: "ses_1", directory: nil)], nextCursor: "same"),
+            replacing: false,
+            requestedCursor: "same",
+            limit: 50
+        )
+
+        XCTAssertNil(store.nextSessionCursor)
+        XCTAssertFalse(store.hasMoreSessions)
+    }
+
+    func testV2MessagesPreserveProjectedTimelineOrder() {
+        let store = DirectoryStore()
+        let messages = [
+            message(id: "msg_z", role: "user", text: "Older", sessionID: "ses_v2"),
+            message(id: "msg_a", role: "assistant", text: "Newer", sessionID: "ses_v2"),
+        ]
+
+        store.applyV2Messages(messages, forSessionID: "ses_v2")
+
+        XCTAssertEqual(store.syncState.messageEnvelopes(forSessionID: "ses_v2").map(\.id), ["msg_z", "msg_a"])
     }
 
     func testStaleDirectoryBootstrapDoesNotEraseNewerPermissionOrQuestionEvents() {

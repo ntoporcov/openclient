@@ -15,10 +15,11 @@ public enum OpenClientSharePayloadStore {
     public static func load(id: String, deletesAfterLoad: Bool = true) throws -> OpenClientSharePayload {
         let url = try payloadDirectory().appendingPathComponent(id).appendingPathExtension("json")
         let data = try Data(contentsOf: url)
+        let payload = try JSONDecoder().decode(OpenClientSharePayload.self, from: data)
         if deletesAfterLoad {
-            try? FileManager.default.removeItem(at: url)
+            try FileManager.default.removeItem(at: url)
         }
-        return try JSONDecoder().decode(OpenClientSharePayload.self, from: data)
+        return payload
     }
 
     public static func recentSavedServers() -> [OpenClientShareSavedServer] {

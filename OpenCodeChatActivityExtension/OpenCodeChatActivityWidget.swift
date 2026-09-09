@@ -11,7 +11,9 @@ struct OpenCodeChatActivityWidget: Widget {
                     OpenCodeChatActivityDeepLink.openAppURL(
                         sessionID: context.attributes.sessionID,
                         directory: context.attributes.directory,
-                        workspaceID: context.attributes.workspaceID
+                        workspaceID: context.attributes.workspaceID,
+                        owner: context.attributes.identity?.owner,
+                        activityID: context.activityID
                     )
                 )
                 .activityBackgroundTint(.clear)
@@ -54,7 +56,9 @@ struct OpenCodeChatActivityWidget: Widget {
                 OpenCodeChatActivityDeepLink.openAppURL(
                     sessionID: context.attributes.sessionID,
                     directory: context.attributes.directory,
-                    workspaceID: context.attributes.workspaceID
+                    workspaceID: context.attributes.workspaceID,
+                    owner: context.attributes.identity?.owner,
+                    activityID: context.activityID
                 )
             )
             .keylineTint(displayStatus(for: context).color)
@@ -275,7 +279,7 @@ private struct OpenCodeChatActivityView: View {
     private var primaryContent: some View {
         if context.state.pendingInteractionKind == "permission" {
             OpenCodeChatActivityPermissionContent(context: context)
-        } else if context.state.pendingInteractionKind == "question" {
+        } else if context.state.pendingInteractionKind == "question" || context.state.pendingInteractionKind == "form" {
             OpenCodeChatActivityQuestionContent(context: context)
         } else {
             OpenCodeChatActivityTranscriptContent(context: context)
@@ -351,7 +355,8 @@ private struct OpenCodeChatActivityActions: View {
     let context: ActivityViewContext<OpenCodeChatActivityAttributes>
 
     var body: some View {
-        if context.state.pendingInteractionKind == "permission",
+        if context.attributes.identity != nil,
+           context.state.pendingInteractionKind == "permission",
            let requestID = context.state.interactionID {
             HStack(spacing: 8) {
                 permissionButton(
@@ -371,6 +376,7 @@ private struct OpenCodeChatActivityActions: View {
                 .frame(maxWidth: .infinity)
             }
         } else if context.state.pendingInteractionKind == "question",
+                  context.attributes.identity?.owner.profile == .legacy,
                   let requestID = context.state.interactionID,
                   context.state.canReplyToQuestionInline {
             HStack(spacing: 8) {
@@ -384,13 +390,15 @@ private struct OpenCodeChatActivityActions: View {
                     .frame(maxWidth: .infinity)
                 }
             }
-        } else if context.state.pendingInteractionKind == "question" {
+        } else if context.state.pendingInteractionKind != nil {
             actionLink(
                 title: "Open App",
                 destination: OpenCodeChatActivityDeepLink.openAppURL(
                     sessionID: context.attributes.sessionID,
                     directory: context.attributes.directory,
-                    workspaceID: context.attributes.workspaceID
+                    workspaceID: context.attributes.workspaceID,
+                    owner: context.attributes.identity?.owner,
+                    activityID: context.activityID
                 ),
                 tint: .white.opacity(0.16)
             )
@@ -424,7 +432,9 @@ private struct OpenCodeChatActivityActions: View {
             baseURL: context.attributes.serverBaseURL,
             username: context.attributes.serverUsername,
             directory: context.attributes.directory,
-            workspaceID: context.attributes.workspaceID
+            workspaceID: context.attributes.workspaceID,
+            activityID: context.activityID,
+            profile: context.attributes.profile
         )) {
             actionLabel(title: title, tint: tint)
         }
@@ -440,7 +450,9 @@ private struct OpenCodeChatActivityActions: View {
             baseURL: context.attributes.serverBaseURL,
             username: context.attributes.serverUsername,
             directory: context.attributes.directory,
-            workspaceID: context.attributes.workspaceID
+            workspaceID: context.attributes.workspaceID,
+            activityID: context.activityID,
+            profile: context.attributes.profile
         )) {
             Text(title)
                 .font(.caption.weight(.semibold))

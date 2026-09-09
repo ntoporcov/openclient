@@ -137,15 +137,15 @@ struct OpenCodeShortcutModelEntity: AppEntity, Identifiable, Hashable, Sendable 
 struct OpenCodeShortcutConnectionQuery: EntityQuery {
     func entities(for identifiers: [OpenCodeShortcutConnectionEntity.ID]) async throws -> [OpenCodeShortcutConnectionEntity] {
         let requested = Set(identifiers)
-        return OpenCodeShortcutService().connections().filter { requested.contains($0.id) }
+        return await OpenCodeShortcutService().connections().filter { requested.contains($0.id) }
     }
 
     func suggestedEntities() async throws -> [OpenCodeShortcutConnectionEntity] {
-        OpenCodeShortcutService().connections()
+        await OpenCodeShortcutService().connections()
     }
 
     func defaultResult() async -> OpenCodeShortcutConnectionEntity? {
-        OpenCodeShortcutService().connections().first
+        await OpenCodeShortcutService().connections().first
     }
 }
 

@@ -1,6 +1,27 @@
 import Foundation
 
+enum OpenCodeLocalCacheIdentity {
+    // recentServerID is entirely lowercased. This uppercase tag cannot be a legacy
+    // ID; length framing keeps arbitrary URL/user text unambiguous. Never hash or
+    // change the legacy ID (it is also used outside this cache).
+    static func namespace(serverID: String, profile: OpenCodeAPIProfile) -> String {
+        profile == .legacy ? serverID : "OpenCodeCacheV2:s\(serverID.utf8.count):\(serverID)"
+    }
+
+    static func isV2(_ namespace: String) -> Bool {
+        namespace.hasPrefix("OpenCodeCacheV2:")
+    }
+
+    static func directory(_ directory: String?, workspaceID: String?, namespace: String) -> String? {
+        guard isV2(namespace) else { return directory }
+        return [directory, workspaceID].map { value in
+            value.map { "s\($0.utf8.count):\($0)" } ?? "n"
+        }.joined()
+    }
+}
+
 /// A best-effort read-through cache. OpenCode server responses remain canonical.
+/// serverID is the captured cache namespace, not necessarily a recent-server ID.
 protocol OpenCodeLocalCacheRepository: Sendable {
     func loadProjects(serverID: String) async throws -> OpenCodeCachedProjectsSnapshot?
     func saveProjects(
@@ -40,7 +61,8 @@ protocol OpenCodeLocalCacheRepository: Sendable {
         serverID: String,
         sessionID: String,
         refreshedAt: Date,
-        writtenAt: Date
+        writtenAt: Date,
+        coverage: OpenCodeLocalCacheTranscriptCoverage
     ) async throws
     func saveTodos(
         _ todos: [OpenCodeTodo],
@@ -52,6 +74,12 @@ protocol OpenCodeLocalCacheRepository: Sendable {
 
     func removeSession(serverID: String, sessionID: String, removedAt: Date) async throws
     func clear(serverID: String) async throws
+}
+
+enum OpenCodeLocalCacheTranscriptCoverage: Sendable {
+    case partial
+    case newestPage(hasOlder: Bool)
+    case olderPage(beforeMessageID: String)
 }
 
 enum OpenCodeLocalCacheEventWritePolicy {
@@ -73,6 +101,14 @@ enum OpenCodeLocalCacheEventWritePolicy {
 }
 
 extension OpenCodeLocalCacheRepository {
+    func saveChatMessages(
+        _ messages: [OpenCodeMessageEnvelope], serverID: String, sessionID: String,
+        refreshedAt: Date, writtenAt: Date
+    ) async throws {
+        try await saveChatMessages(messages, serverID: serverID, sessionID: sessionID,
+            refreshedAt: refreshedAt, writtenAt: writtenAt, coverage: .partial)
+    }
+
     func saveProjects(_ projects: [OpenCodeProject], serverID: String) async throws {
         let now = Date()
         try await saveProjects(projects, serverID: serverID, refreshedAt: now, writtenAt: now)
@@ -244,9 +280,13 @@ struct OpenCodeCachedMessageState: Sendable {
         }
     }
 
-    init(envelopes: [OpenCodeMessageEnvelope], sessionID: String) {
+    init(envelopes: [OpenCodeMessageEnvelope], sessionID: String, preservingOrder: Bool = false) {
         var state = OpenCodeDirectorySyncState()
-        state.replaceMessages(envelopes, forSessionID: sessionID)
+        if preservingOrder {
+            state.replaceMessagesPreservingOrder(envelopes, forSessionID: sessionID)
+        } else {
+            state.replaceMessages(envelopes, forSessionID: sessionID)
+        }
         messages = state.messagesBySessionID[sessionID] ?? []
         partsByMessageID = state.partsByMessageID
         immediateMessages = Self.immediateTranscript(in: state.messageEnvelopes(forSessionID: sessionID))

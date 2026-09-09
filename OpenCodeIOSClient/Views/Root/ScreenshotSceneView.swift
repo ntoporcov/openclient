@@ -46,6 +46,16 @@ struct ScreenshotSceneView: View {
             }
         case .visualTools:
             OpenClientVisualToolsScreenshotView()
+        case .submissionRecovery:
+            #if canImport(UIKit)
+            if TranscriptContinuityDiagnostics.enabled {
+                TranscriptContinuityFixture()
+            } else {
+                recoveryScreenshotContent
+            }
+            #else
+            recoveryScreenshotContent
+            #endif
         case .terminalShowcase:
             NavigationStack {
                 TerminalDetailView(
@@ -93,6 +103,23 @@ struct ScreenshotSceneView: View {
         }
     }
 
+    private var recoveryScreenshotContent: some View {
+        VStack(spacing: 0) {
+            if ProcessInfo.processInfo.environment["OPENCLIENT_RECOVERY_WINDOW"] == "1" {
+                V2RecoveryWindowScreenshot(viewModel: viewModel)
+            } else {
+                rootView
+            }
+            if ProcessInfo.processInfo.environment["OPENCLIENT_RECOVERY_ADMISSION_CONTROLS"] == "1" {
+                Button {
+                    viewModel.chatStore.confirmSubmissionAdmission(messageID: "recovery-local-input",
+                        sessionID: OpenClientScreenshotData.releaseSession.id)
+                } label: { Text(verbatim: "Admit fixture") }
+                .accessibilityIdentifier("screenshot.recovery.admit")
+            }
+        }
+    }
+
     private var rootView: some View {
         RootView(shell: viewModel.appShellFacade) { sessionID, presentationRequest in
             ChatView(
@@ -104,6 +131,25 @@ struct ScreenshotSceneView: View {
         }
     }
 
+}
+
+private struct V2RecoveryWindowScreenshot: View {
+    @State private var facade: ChatFacade
+
+    init(viewModel: AppViewModel) {
+        let session = OpenClientScreenshotData.releaseSession
+        let context = ChatWindowContext(model: viewModel, connection: viewModel.backendConnection!, session: session,
+            owner: viewModel.directoryStore)
+        _facade = State(initialValue: ChatFacade(viewModel: viewModel, windowContext: context))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ChatView(chatFacade: facade, browser: facade.windowContext!.browser,
+                sessionID: OpenClientScreenshotData.releaseSession.id)
+        }
+        .onDisappear { facade.windowContext?.close() }
+    }
 }
 
 private struct BrowserScreenshotSceneContent<Content: View>: View {

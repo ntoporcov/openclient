@@ -46,24 +46,35 @@ enum OpenCodeWidgetSummaryKind: String, Codable, Hashable, Sendable {
     }
 }
 
-struct OpenCodeWidgetServerSnapshot: Codable, Identifiable, Hashable, Sendable {
+struct OpenCodeWidgetServerSnapshot: Codable, Identifiable, Hashable, Sendable, OpenCodeWidgetOwnedSnapshot {
     let id: String
     let displayName: String
     let baseURL: String
     let username: String
     let generatedAt: Date
     let isLastConnected: Bool
+    var profile: OpenCodeProfileIdentity? = nil
+    var serverID: String { id }
+    var entityID: String { owner.entityID() }
+    var supportsNewSession: Bool? = nil
+    var supportsCommands: Bool? = nil
+    var offersNewSession: Bool { supportsNewSession ?? (owner.profile == .legacy) }
+    var offersCommands: Bool { supportsCommands ?? (owner.profile == .legacy) }
 }
 
-struct OpenCodeWidgetProjectSnapshot: Codable, Identifiable, Hashable, Sendable {
+struct OpenCodeWidgetProjectSnapshot: Codable, Identifiable, Hashable, Sendable, OpenCodeWidgetOwnedSnapshot {
     let id: String
     let serverID: String
     let title: String
     let worktree: String?
     let sortTitle: String
+    var profile: OpenCodeProfileIdentity? = nil
+    var entityID: String { owner.entityID([id]) }
+    var executionDirectory: String? = nil
+    var offersNewSession: Bool? = nil
 }
 
-struct OpenCodeWidgetSessionSnapshot: Codable, Identifiable, Hashable, Sendable {
+struct OpenCodeWidgetSessionSnapshot: Codable, Identifiable, Hashable, Sendable, OpenCodeWidgetOwnedSnapshot {
     let id: String
     let serverID: String
     let projectID: String
@@ -78,9 +89,11 @@ struct OpenCodeWidgetSessionSnapshot: Codable, Identifiable, Hashable, Sendable 
     let lastActiveAt: Date
     let isPinned: Bool
     let pinOrder: Int?
+    var profile: OpenCodeProfileIdentity? = nil
+    var entityID: String { owner.entityID([id]) }
 }
 
-struct OpenCodeWidgetCommandSnapshot: Codable, Identifiable, Hashable, Sendable {
+struct OpenCodeWidgetCommandSnapshot: Codable, Identifiable, Hashable, Sendable, OpenCodeWidgetOwnedSnapshot {
     let id: String
     let serverID: String
     let projectID: String
@@ -88,9 +101,11 @@ struct OpenCodeWidgetCommandSnapshot: Codable, Identifiable, Hashable, Sendable 
     let name: String
     let summary: String?
     let sortTitle: String
+    var profile: OpenCodeProfileIdentity? = nil
+    var entityID: String { owner.profile == .legacy ? id : owner.entityID([projectID, name]) }
 }
 
-struct OpenCodeWidgetModelSnapshot: Codable, Identifiable, Hashable, Sendable {
+struct OpenCodeWidgetModelSnapshot: Codable, Identifiable, Hashable, Sendable, OpenCodeWidgetOwnedSnapshot {
     let id: String
     let serverID: String
     let providerID: String
@@ -99,6 +114,8 @@ struct OpenCodeWidgetModelSnapshot: Codable, Identifiable, Hashable, Sendable {
     let modelName: String
     let reasoningVariants: [String]
     let sortTitle: String
+    var profile: OpenCodeProfileIdentity? = nil
+    var entityID: String { owner.profile == .legacy ? id : owner.entityID([providerID, modelID]) }
 }
 
 struct OpenCodeWidgetSnapshotPayload: Codable, Hashable, Sendable {
@@ -154,12 +171,17 @@ struct OpenCodeWidgetSnapshotPayload: Codable, Hashable, Sendable {
     }
 
     func lastConnectedServerID() -> String? {
-        servers.first(where: \.isLastConnected)?.id ?? servers.sorted { $0.generatedAt > $1.generatedAt }.first?.id
+        lastConnectedServer()?.id
+    }
+
+    func lastConnectedServer() -> OpenCodeWidgetServerSnapshot? {
+        servers.first(where: \.isLastConnected) ?? servers.sorted { $0.generatedAt > $1.generatedAt }.first
     }
 }
 
 enum OpenCodeWidgetDeepLink {
     enum Kind: Equatable, Sendable {
+        case session(sessionID: String)
         case action(commandName: String)
         case newSession
     }
@@ -172,10 +194,32 @@ enum OpenCodeWidgetDeepLink {
         var providerID: String?
         var modelID: String?
         var reasoningVariant: String?
+        var profile: OpenCodeProfileIdentity = .legacy
+        var workspaceID: String? = nil
     }
 
     static let scheme = "openclient"
     static let host = "widget"
+
+    static func sessionURL(_ session: OpenCodeWidgetSessionSnapshot) -> URL? {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        components.path = "/session"
+        components.queryItems = [
+            URLQueryItem(name: "profile", value: session.owner.profile.rawValue),
+            URLQueryItem(name: "serverID", value: session.serverID),
+            URLQueryItem(name: "sessionID", value: session.id),
+            URLQueryItem(name: "projectID", value: session.projectID)
+        ]
+        if let directory = normalizedDirectory(session.directory), session.owner.profile == .v2 || directory != "/" {
+            components.queryItems?.append(URLQueryItem(name: "directory", value: directory))
+        }
+        if let workspaceID = session.workspaceID {
+            components.queryItems?.append(URLQueryItem(name: "workspaceID", value: workspaceID))
+        }
+        return components.url
+    }
 
     static func actionURL(
         serverID: String?,
@@ -184,9 +228,11 @@ enum OpenCodeWidgetDeepLink {
         commandName: String?,
         providerID: String?,
         modelID: String?,
-        reasoningVariant: String?
+        reasoningVariant: String?,
+        profile: OpenCodeProfileIdentity = .legacy
     ) -> URL? {
-        guard let commandName, !commandName.isEmpty else { return nil }
+        guard let commandName, !commandName.isEmpty,
+              serverID?.isEmpty == false, projectID?.isEmpty == false else { return nil }
         return url(
             path: "/action",
             serverID: serverID,
@@ -195,7 +241,8 @@ enum OpenCodeWidgetDeepLink {
             commandName: commandName,
             providerID: providerID,
             modelID: modelID,
-            reasoningVariant: reasoningVariant
+            reasoningVariant: reasoningVariant,
+            profile: profile
         )
     }
 
@@ -205,9 +252,11 @@ enum OpenCodeWidgetDeepLink {
         directory: String?,
         providerID: String?,
         modelID: String?,
-        reasoningVariant: String?
+        reasoningVariant: String?,
+        profile: OpenCodeProfileIdentity = .legacy
     ) -> URL? {
-        url(
+        guard let serverID, !serverID.isEmpty, let projectID, !projectID.isEmpty else { return nil }
+        return url(
             path: "/new-session",
             serverID: serverID,
             projectID: projectID,
@@ -215,7 +264,8 @@ enum OpenCodeWidgetDeepLink {
             commandName: nil,
             providerID: providerID,
             modelID: modelID,
-            reasoningVariant: reasoningVariant
+            reasoningVariant: reasoningVariant,
+            profile: profile
         )
     }
 
@@ -223,9 +273,23 @@ enum OpenCodeWidgetDeepLink {
         guard url.scheme == scheme, url.host == host else { return nil }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let queryItems = components?.queryItems ?? []
+        guard Set(queryItems.map(\.name)).count == queryItems.count else { return nil }
+        let profile: OpenCodeProfileIdentity
+        if queryItems.contains(where: { $0.name == "profile" }) {
+            guard let raw = queryItems.value(named: "profile"),
+                  let decoded = OpenCodeProfileIdentity(rawValue: raw) else { return nil }
+            profile = decoded
+        } else {
+            profile = .legacy
+        }
 
         let kind: Kind
         switch url.path {
+        case "/session":
+            guard let sessionID = queryItems.value(named: "sessionID"), !sessionID.isEmpty,
+                  let serverID = queryItems.value(named: "serverID"), !serverID.isEmpty,
+                  let projectID = queryItems.value(named: "projectID"), !projectID.isEmpty else { return nil }
+            kind = .session(sessionID: sessionID)
         case "/action":
             guard let commandName = queryItems.value(named: "command"), !commandName.isEmpty else { return nil }
             kind = .action(commandName: commandName)
@@ -239,10 +303,12 @@ enum OpenCodeWidgetDeepLink {
             kind: kind,
             serverID: queryItems.value(named: "serverID"),
             projectID: queryItems.value(named: "projectID"),
-            directory: normalizedDirectory(queryItems.value(named: "directory")),
+            directory: profile == .legacy && queryItems.value(named: "directory") == "/" ? nil : normalizedDirectory(queryItems.value(named: "directory")),
             providerID: queryItems.value(named: "providerID"),
             modelID: queryItems.value(named: "modelID"),
-            reasoningVariant: queryItems.value(named: "reasoning")
+            reasoningVariant: queryItems.value(named: "reasoning"),
+            profile: profile,
+            workspaceID: queryItems.value(named: "workspaceID")
         )
     }
 
@@ -254,16 +320,18 @@ enum OpenCodeWidgetDeepLink {
         commandName: String?,
         providerID: String?,
         modelID: String?,
-        reasoningVariant: String?
+        reasoningVariant: String?,
+        profile: OpenCodeProfileIdentity
     ) -> URL? {
         var components = URLComponents()
         components.scheme = scheme
         components.host = host
         components.path = path
         var queryItems: [URLQueryItem] = []
+        appendQueryItem(name: "profile", value: profile.rawValue, to: &queryItems)
         appendQueryItem(name: "serverID", value: serverID, to: &queryItems)
         appendQueryItem(name: "projectID", value: projectID, to: &queryItems)
-        appendQueryItem(name: "directory", value: normalizedDirectory(directory), to: &queryItems)
+        appendQueryItem(name: "directory", value: profile == .legacy && directory == "/" ? nil : normalizedDirectory(directory), to: &queryItems)
         appendQueryItem(name: "command", value: commandName, to: &queryItems)
         appendQueryItem(name: "providerID", value: providerID, to: &queryItems)
         appendQueryItem(name: "modelID", value: modelID, to: &queryItems)
@@ -278,7 +346,7 @@ enum OpenCodeWidgetDeepLink {
     }
 
     private static func normalizedDirectory(_ directory: String?) -> String? {
-        guard let directory, !directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, directory != "/" else {
+        guard let directory, !directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
         return directory

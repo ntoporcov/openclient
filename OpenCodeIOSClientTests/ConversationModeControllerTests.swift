@@ -80,6 +80,83 @@ final class ConversationModeControllerTests: XCTestCase {
         XCTAssertEqual(text, "New response with details.")
     }
 
+    func testWireSyntheticRecordsAndReasoningAreNeverSpokenByInjectedSpeaker() {
+        var spoken: [String] = []
+        let controller = ConversationModeController(usesNativeAudio: false, responseSpeaker: { spoken.append($0) })
+        controller.setHoldToTalkEnabled(true)
+        controller.start(initialTranscript: "")
+        controller.receiveFinalTranscript("Question")
+        controller.didSubmit(baselineMessageIDs: [])
+        var records = ["synthetic", "system", "skill", "agent-switched", "model-switched", "location-switched"].map { origin in
+            responseMessage(parts: [responsePart(id: origin, text: "Wire metadata", completed: true, synthetic: true)])
+        }
+        records.append(responseMessage(parts: [responsePart(id: "reasoning", text: "Private thought", type: "reasoning", completed: true)]))
+        records.append(responseMessage(parts: [responsePart(id: "answer", text: "Public answer", completed: true)]))
+        controller.update(messages: records, isSessionBusy: true)
+        XCTAssertEqual(spoken, ["Public answer"])
+        XCTAssertFalse(controller.hasStartedLiveActivity)
+        controller.stop()
+    }
+
+    func testBackgroundAdmissionAndCanonicalUpdatesCannotResumeAudio() {
+        var spoken: [String] = []
+        let controller = ConversationModeController(usesNativeAudio: false, responseSpeaker: { spoken.append($0) })
+        controller.setHoldToTalkEnabled(true)
+        controller.start(initialTranscript: "")
+        controller.receiveFinalTranscript("Question")
+        controller.didSubmit(baselineMessageIDs: [])
+        controller.submissionAdmissionChanged(isAdmitted: false)
+        controller.setAudioAvailable(false)
+        controller.submissionAdmissionChanged(isAdmitted: true)
+        controller.resume(isSessionBusy: false)
+        let answer = responseMessage(parts: [responsePart(id: "answer", text: "Answer", completed: true)])
+        controller.update(messages: [answer], isSessionBusy: false)
+        XCTAssertEqual(controller.state, .paused)
+        XCTAssertTrue(spoken.isEmpty)
+        controller.setAudioAvailable(true)
+        controller.resume(isSessionBusy: true)
+        controller.update(messages: [answer], isSessionBusy: true)
+        XCTAssertEqual(spoken, ["Answer"])
+        controller.stop()
+    }
+
+    func testUncertainSubmissionCannotBeRestartedByFailureOrForegroundRecovery() {
+        let controller = ConversationModeController(usesNativeAudio: false)
+        controller.setHoldToTalkEnabled(true)
+        controller.start(initialTranscript: "")
+        controller.receiveFinalTranscript("Original")
+        controller.didSubmit(baselineMessageIDs: [])
+        let token = controller.sendRequestToken
+        controller.submissionAdmissionChanged(isAdmitted: false)
+        controller.submissionDidNotStart()
+        controller.setAudioAvailable(false)
+        controller.setAudioAvailable(true)
+        controller.resume(isSessionBusy: false)
+        controller.receiveFinalTranscript("Duplicate")
+        XCTAssertEqual(controller.state, .paused)
+        XCTAssertEqual(controller.sendRequestToken, token)
+        controller.stop()
+    }
+
+    func testFormSettlementCannotResumeDuringAudioInterruption() async {
+        let controller = ConversationModeController(usesNativeAudio: false)
+        controller.setHoldToTalkEnabled(true)
+        controller.start(initialTranscript: "")
+        controller.setAudioAvailable(false)
+        NotificationCenter.default.post(name: AVAudioSession.interruptionNotification, object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue])
+        await Task.yield()
+        controller.setAudioAvailable(true)
+        controller.resume(isSessionBusy: false)
+        XCTAssertEqual(controller.state, .paused)
+        NotificationCenter.default.post(name: AVAudioSession.interruptionNotification, object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+                AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue])
+        await Task.yield()
+        XCTAssertEqual(controller.state, .ready)
+        controller.stop()
+    }
+
     func testSpeakableTextDropsFencedCode() {
         let text = ConversationModeController.speakableText(
             from: "Here is the result.\n```swift\nprint(\"Hello\")\n```\nUse it carefully."
@@ -272,7 +349,8 @@ final class ConversationModeControllerTests: XCTestCase {
         id: String,
         text: String,
         type: String = "text",
-        completed: Bool
+        completed: Bool,
+        synthetic: Bool? = nil
     ) -> OpenCodePart {
         OpenCodePart(
             id: id,
@@ -287,6 +365,7 @@ final class ConversationModeControllerTests: XCTestCase {
             callID: nil,
             state: nil,
             text: text,
+            synthetic: synthetic,
             time: OpenCodePartTime(start: 1, end: completed ? 2 : nil)
         )
     }

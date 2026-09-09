@@ -19,9 +19,20 @@ final class ConnectionFacade: ObservableObject {
             viewModel.funAndGamesStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.$config.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$isShowingConnectionOverlay.map { _ in () }.eraseToAnyPublisher(),
+            viewModel.$backendConnection.map { _ in () }.eraseToAnyPublisher(),
         ])
         .sink { [weak self] _ in self?.objectWillChange.send() }
         .store(in: &observations)
+
+        // Bind the actual backend before bootstrap succeeds, never the editable server config.
+        viewModel.$backendConnection
+            .sink { [weak store = viewModel.connectionStore] connection in
+                store?.bindNoticeConnection(
+                    connection?.isClosed == false && connection?.openCodeCompatibility?.profile == .v2
+                        ? connection?.id : nil
+                )
+            }
+            .store(in: &observations)
 
         bindActiveDirectoryStore(viewModel.directoryStoreRegistry.activeStore)
         viewModel.directoryStoreRegistry.$activeStore
@@ -59,6 +70,11 @@ final class ConnectionFacade: ObservableObject {
     }
 
     var isConnected: Bool { viewModel.isConnected }
+    var backendDescriptor: BackendDescriptor? { viewModel.backendConnection?.descriptor }
+    var backendConnectionID: UUID? { viewModel.backendConnection?.id }
+    var backendCapabilities: Set<BackendCapability> { viewModel.backendConnection?.capabilities ?? [] }
+
+    func connect() async { await viewModel.connect() }
     var isShowingConnectionOverlay: Bool { viewModel.isShowingConnectionOverlay }
     var connectionPhase: OpenClientConnectionPhase { viewModel.connectionPhase }
     var isUsingAppleIntelligence: Bool { viewModel.isUsingAppleIntelligence }
@@ -77,6 +93,20 @@ final class ConnectionFacade: ObservableObject {
     }
     var isBrowsingLocalCache: Bool { viewModel.backendMode == .cachedServer }
     var isOfferingCachedServerConnection: Bool { viewModel.connectionStore.isOfferingCachedServerConnection }
+    var isV2Connection: Bool { viewModel.connectionStore.apiProfile == .v2 && viewModel.isConnected }
+    var v2NoticeConnectionID: UUID? {
+        guard isV2Connection, !isLoading, !isShowingConnectionOverlay,
+              let connection = viewModel.backendConnection, !connection.isClosed,
+              connection.openCodeCompatibility?.profile == .v2,
+              viewModel.connectionStore.v2NoticeConnectionID == connection.id else { return nil }
+        return connection.id
+    }
+
+    func dismissV2Notice(connectionID: UUID) {
+        guard v2NoticeConnectionID == connectionID else { return }
+        viewModel.connectionStore.dismissV2Notice(connectionID: connectionID)
+    }
+    var serverVersion: String { viewModel.connectionStore.serverVersion }
     var errorMessage: String? { viewModel.errorMessage }
     var isLoading: Bool { viewModel.isLoading }
     var isEditingSavedServer: Bool { viewModel.isEditingSavedServer }

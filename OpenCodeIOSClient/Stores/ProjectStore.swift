@@ -8,6 +8,7 @@ final class ProjectStore: ObservableObject {
     @Published var projects: [OpenCodeProject]
     @Published var currentProject: OpenCodeProject?
     @Published var selectedDirectory: String?
+    @Published var defaultServerDirectory: String?
     @Published var selectedContentTab: OpenClientProjectContentTab
     @Published var isShowingProjectPicker: Bool
     @Published var searchQuery: String
@@ -17,6 +18,84 @@ final class ProjectStore: ObservableObject {
     @Published var createProjectResults: [String]
     @Published var createProjectSelectedDirectory: String?
     @Published private var listPreferencesByScope: [String: ListPreferences]
+    @Published private(set) var worktreeInventories: [BackendWorktreeInventoryKey: [BackendWorktree]] = [:]
+    @Published var worktreeDestinationParents: [BackendWorktreeInventoryKey: String] = [:]
+    @Published private(set) var creatingWorktrees: Set<BackendWorktreeInventoryKey> = []
+    private var worktreeInventoryRequests: [BackendWorktreeInventoryKey: UUID] = [:]
+    private(set) var worktreeReadinessRevision: UInt = 0
+    private var worktreeReadiness: [String: (connectionID: UUID, revision: UInt, error: String?)] = [:]
+    private(set) var resolvedProjectScopes: [BackendWorktreeInventoryKey: BackendScope] = [:]
+    private(set) var canonicalProjectDirectories: [BackendWorktreeInventoryKey: String] = [:]
+    private var selectedProjectDirectories: [BackendWorktreeInventoryKey: String] = [:]
+    var directorySearchRequestID: UUID?
+
+    func rememberProjectResolution(_ resolution: BackendProjectResolution, connectionID: UUID) {
+        let key = BackendWorktreeInventoryKey(connectionID: connectionID, projectID: resolution.project.id)
+        resolvedProjectScopes[key] = resolution.scope
+        canonicalProjectDirectories[key] = resolution.canonicalDirectory
+        selectedProjectDirectories[key] = resolution.project.worktree
+    }
+
+    func preservingSelectedDirectory(_ project: OpenCodeProject, connectionID: UUID) -> OpenCodeProject {
+        let key = BackendWorktreeInventoryKey(connectionID: connectionID, projectID: project.id)
+        guard let directory = selectedProjectDirectories[key], directory != project.worktree else { return project }
+        return OpenCodeProject(id: project.id, worktree: directory, vcs: project.vcs, name: project.name,
+                               sandboxes: project.sandboxes, icon: project.icon, time: project.time)
+    }
+
+    func beginWorktreeInventoryRequest(for key: BackendWorktreeInventoryKey) -> UUID {
+        let request = UUID()
+        worktreeInventoryRequests[key] = request
+        return request
+    }
+
+    func isWorktreeInventoryRequestCurrent(_ requestID: UUID, for key: BackendWorktreeInventoryKey) -> Bool {
+        worktreeInventoryRequests[key] == requestID
+    }
+
+    func recordWorktreeReadiness(directory: String, connectionID: UUID, error: String?) {
+        worktreeReadinessRevision &+= 1
+        worktreeReadiness[directory] = (connectionID, worktreeReadinessRevision, error)
+    }
+
+    func worktreeReadinessEvent(directory: String, connectionID: UUID, after revision: UInt) -> (error: String?, revision: UInt)? {
+        guard let event = worktreeReadiness[directory], event.connectionID == connectionID, event.revision > revision else { return nil }
+        return (event.error, event.revision)
+    }
+
+    @discardableResult
+    func applyWorktreeInventory(_ entries: [BackendWorktree], for key: BackendWorktreeInventoryKey, requestID: UUID) -> Bool {
+        guard worktreeInventoryRequests[key] == requestID else { return false }
+        setWorktreeInventory(entries, for: key)
+        return true
+    }
+
+    func setWorktreeInventory(_ entries: [BackendWorktree], for key: BackendWorktreeInventoryKey) {
+        worktreeInventoryRequests[key] = UUID()
+        var seen = Set<String>()
+        worktreeInventories[key] = entries.filter { seen.insert($0.directory).inserted }
+    }
+
+    func beginWorktreeCreation(for key: BackendWorktreeInventoryKey) -> Bool {
+        creatingWorktrees.insert(key).inserted
+    }
+
+    func finishWorktreeCreation(for key: BackendWorktreeInventoryKey) {
+        creatingWorktrees.remove(key)
+    }
+
+    func resetWorktreeInventory() {
+        worktreeInventories = [:]
+        worktreeInventoryRequests = [:]
+        worktreeDestinationParents = [:]
+        creatingWorktrees = []
+        resolvedProjectScopes = [:]
+        canonicalProjectDirectories = [:]
+        selectedProjectDirectories = [:]
+        worktreeReadiness = [:]
+        worktreeReadinessRevision &+= 1
+        directorySearchRequestID = nil
+    }
 
     private let userDefaults: UserDefaults
 

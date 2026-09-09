@@ -101,6 +101,22 @@ private extension View {
     }
 }
 
+struct MessageComposerInputPolicy {
+    var blocksNewInput: Bool
+    var isBusy: Bool
+    var hasDraftContent: Bool
+    var isDictating: Bool
+    var isConversationActive: Bool
+    var attachmentCount: Int
+
+    var canSend: Bool { !blocksNewInput && hasDraftContent }
+    var canStop: Bool { isBusy }
+    var canToggleDictation: Bool { isDictating || !blocksNewInput }
+    var canToggleConversation: Bool {
+        isConversationActive || (!blocksNewInput && !isBusy && attachmentCount == 0 && !isDictating)
+    }
+}
+
 struct MessageComposer: View {
     private enum AccessoryDestination: Hashable {
         case fork
@@ -145,6 +161,7 @@ struct MessageComposer: View {
     let onAddAttachments: ([OpenCodeComposerAttachment]) -> Void
     let onOpenBrowser: (() -> Void)?
     let glassNamespace: Namespace.ID
+    var blocksNewInput = false
     var allowsTextTools = true
     var allowsSessionTools = true
     var autoFocus = false
@@ -215,11 +232,16 @@ struct MessageComposer: View {
     }
 
     private var canSend: Bool {
-        hasDraftContent
+        inputPolicy.canSend
     }
 
     private var canStop: Bool {
-        isBusy
+        inputPolicy.canStop
+    }
+
+    private var inputPolicy: MessageComposerInputPolicy {
+        .init(blocksNewInput: blocksNewInput, isBusy: isBusy, hasDraftContent: hasDraftContent,
+              isDictating: isDictating, isConversationActive: isConversationModeActive, attachmentCount: attachmentCount)
     }
 
     private var isDictating: Bool {
@@ -239,7 +261,7 @@ struct MessageComposer: View {
     }
 
     private var isSendActionButtonEnabled: Bool {
-        showsSendActionButton
+        showsSendActionButton && canSend
     }
 
     private var showsMicActionButton: Bool {
@@ -267,7 +289,7 @@ struct MessageComposer: View {
     }
 
     private var canToggleConversationMode: Bool {
-        isConversationModeActive || (!isBusy && attachmentCount == 0 && !isDictating)
+        inputPolicy.canToggleConversation
     }
 
     private var conversationStatus: LocalizedStringResource {
@@ -373,7 +395,7 @@ struct MessageComposer: View {
         case .stop:
             canStop
         case .dictate, .stopDictation:
-            true
+            inputPolicy.canToggleDictation
         }
     }
 
@@ -636,6 +658,7 @@ struct MessageComposer: View {
                 .padding(.vertical, 13)
                 .frame(minHeight: 46)
                 .accessibilityIdentifier("chat.input")
+                .disabled(blocksNewInput)
 
             Button(action: showsSendAction ? onSend : onStop) {
                 Image(systemName: showsSendAction ? "arrow.up" : "stop.fill")
@@ -661,7 +684,6 @@ struct MessageComposer: View {
                     .opacity((showsSendAction ? canSend : canStop) ? 1 : 0.6)
             }
             .buttonStyle(.plain)
-            .disabled(isBusy)
             .disabled(showsSendAction ? !canSend : !canStop)
             .accessibilityLabel(showsSendAction ? LocalizedStringResource("Send") : LocalizedStringResource("Stop"))
             .accessibilityIdentifier(showsSendAction ? "chat.send" : "chat.stop")
@@ -710,6 +732,7 @@ struct MessageComposer: View {
     private var mobileComposer: some View {
         HStack(alignment: .bottom, spacing: 5) {
             accessoryContainer
+                .disabled(blocksNewInput)
                 .zIndex(3)
 
             composerInputGlassContainer
@@ -753,6 +776,7 @@ struct MessageComposer: View {
     private var catalystComposerControlBar: some View {
         HStack(spacing: 4) {
             catalystAccessoryButton
+                .disabled(blocksNewInput)
 
             catalystSelectorMenuRow
 
@@ -928,7 +952,7 @@ struct MessageComposer: View {
         }
         .buttonStyle(.plain)
         .buttonBorderShape(.circle)
-        .disabled(!showsMicActionButton)
+        .disabled(!showsMicActionButton || !inputPolicy.canToggleDictation)
         .accessibilityLabel(micActionAccessibilityLabel)
         .accessibilityIdentifier(micActionAccessibilityIdentifier)
     }
@@ -1038,7 +1062,7 @@ struct MessageComposer: View {
     #endif
 
     private func startDictation() {
-        guard !hasDraftContent else { return }
+        guard !blocksNewInput, !hasDraftContent else { return }
         dismissAccessoryMenu()
         OpenCodeHaptics.impact(.soft)
         #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
@@ -1135,7 +1159,7 @@ struct MessageComposer: View {
             onFocusChange: onFocusChange
         )
         .frame(minHeight: usesCatalystComposerLayout ? ComposerTextViewMetrics.compactMinimumHeight : ComposerTextViewMetrics.minimumHeight)
-        .disabled(isConversationModeActive)
+        .disabled(isConversationModeActive || blocksNewInput)
         .accessibilityIdentifier("chat.input")
         #else
         TextField("Message", text: textBinding, axis: .vertical)
@@ -1143,7 +1167,7 @@ struct MessageComposer: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .frame(minHeight: composerActionSlotHeight)
-            .disabled(isConversationModeActive)
+            .disabled(isConversationModeActive || blocksNewInput)
             .accessibilityIdentifier("chat.input")
             .simultaneousGesture(TapGesture().onEnded {
                 dismissAccessoryMenu()
@@ -1209,7 +1233,7 @@ struct MessageComposer: View {
         .buttonStyle(.plain)
         .buttonBorderShape(.circle)
         .contentShape(Circle())
-        .disabled(!showsMicActionButton)
+        .disabled(!showsMicActionButton || !inputPolicy.canToggleDictation)
         .accessibilityLabel(micActionAccessibilityLabel)
         .accessibilityIdentifier(micActionAccessibilityIdentifier)
     }

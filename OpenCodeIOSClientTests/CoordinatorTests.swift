@@ -27,7 +27,11 @@ final class CoordinatorTests: XCTestCase {
 
         await coordinator.connect(
             client: makeClient(),
-            applyBootstrap: { _ in appliedBootstrap = true },
+            applyLegacyBootstrap: { _ in
+                XCTAssertEqual(store.apiProfile, .legacy)
+                appliedBootstrap = true
+            },
+            applyV2Connection: { XCTFail("Legacy connection must not bootstrap v2") },
             handleFailure: { XCTFail("Connection should succeed") }
         )
 
@@ -62,7 +66,8 @@ final class CoordinatorTests: XCTestCase {
                 }
                 return true
             },
-            applyBootstrap: { _ in XCTFail("Stale attempt should not bootstrap") },
+            applyLegacyBootstrap: { _ in XCTFail("Stale attempt should not bootstrap") },
+            applyV2Connection: { XCTFail("Stale attempt should not bootstrap") },
             handleFailure: { handledFailure = true }
         )
 
@@ -109,6 +114,302 @@ final class CoordinatorTests: XCTestCase {
 
         XCTAssertFalse(store.isOfferingCachedServerConnection)
         XCTAssertTrue(store.isLoading)
+    }
+
+    func testConnectionCoordinatorForcedV2SkipsLegacyBootstrap() async {
+        let store = ConnectionStore()
+        let coordinator = ConnectionCoordinator(connectionStore: store)
+        let client = makeClient(apiPreference: .v2)
+        var appliedLegacyBootstrap = false
+        var appliedV2Connection = false
+        var failed = false
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/health")
+            return try jsonResponse(
+                for: request,
+                body: #"{"healthy":true,"version":"0.0.0-next-17055","pid":42}"#
+            )
+        }
+
+        await coordinator.connect(
+            client: client,
+            applyLegacyBootstrap: { _ in appliedLegacyBootstrap = true },
+            applyV2Connection: {
+                XCTAssertEqual(store.apiProfile, .v2)
+                appliedV2Connection = true
+            },
+            handleFailure: { failed = true }
+        )
+
+        XCTAssertFalse(appliedLegacyBootstrap)
+        XCTAssertTrue(appliedV2Connection)
+        XCTAssertFalse(failed)
+        XCTAssertEqual(store.backendMode, .serverV2)
+        XCTAssertEqual(store.apiProfile, .v2)
+        XCTAssertTrue(store.isConnected)
+    }
+
+    func testConnectionCoordinatorFailsWhenV2NavigationBootstrapFails() async {
+        struct NavigationError: Error {}
+
+        let store = ConnectionStore()
+        let coordinator = ConnectionCoordinator(connectionStore: store)
+        let client = makeClient(apiPreference: .v2)
+        var appliedLegacyBootstrap = false
+        var failed = false
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/health")
+            return try jsonResponse(
+                for: request,
+                body: #"{"healthy":true,"version":"0.0.0-next-17055","pid":42}"#
+            )
+        }
+
+        await coordinator.connect(
+            client: client,
+            applyLegacyBootstrap: { _ in appliedLegacyBootstrap = true },
+            applyV2Connection: { throw NavigationError() },
+            handleFailure: { failed = true }
+        )
+
+        XCTAssertFalse(appliedLegacyBootstrap)
+        XCTAssertTrue(failed)
+        XCTAssertEqual(store.backendMode, .none)
+        XCTAssertNil(store.apiProfile)
+        XCTAssertFalse(store.isConnected)
+    }
+
+    func testConnectionCoordinatorAutomaticFallsBackForLegacyHealthShape() async {
+        let store = ConnectionStore()
+        let coordinator = ConnectionCoordinator(connectionStore: store)
+        let client = makeClient(apiPreference: .automatic)
+        var appliedLegacyBootstrap = false
+        var appliedV2Connection = false
+        var failed = false
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/api/health":
+                return try jsonResponse(for: request, body: #"{"healthy":true}"#)
+            case "/global/health":
+                return try jsonResponse(for: request, body: #"{"healthy":true,"version":"1.18.7"}"#)
+            case "/project":
+                return try jsonResponse(for: request, body: "[]")
+            case "/project/current":
+                return try jsonResponse(for: request, statusCode: 404, body: "{}")
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "nil")")
+                return try jsonResponse(for: request, statusCode: 404, body: "{}")
+            }
+        }
+
+        await coordinator.connect(
+            client: client,
+            applyLegacyBootstrap: { _ in appliedLegacyBootstrap = true },
+            applyV2Connection: { appliedV2Connection = true },
+            handleFailure: { failed = true }
+        )
+
+        XCTAssertTrue(appliedLegacyBootstrap)
+        XCTAssertFalse(appliedV2Connection)
+        XCTAssertFalse(failed)
+        XCTAssertEqual(store.backendMode, .server)
+        XCTAssertEqual(store.apiProfile, .legacy)
+        XCTAssertTrue(store.isConnected)
+    }
+
+    func testConnectionCoordinatorAutomaticDoesNotFallbackAfterAuthenticationFailure() async {
+        let store = ConnectionStore()
+        let coordinator = ConnectionCoordinator(connectionStore: store)
+        let client = makeClient(apiPreference: .automatic)
+        var appliedSuccess = false
+        var failed = false
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/health")
+            return try jsonResponse(for: request, statusCode: 401, body: "{}")
+        }
+
+        await coordinator.connect(
+            client: client,
+            applyLegacyBootstrap: { _ in appliedSuccess = true },
+            applyV2Connection: { appliedSuccess = true },
+            handleFailure: { failed = true }
+        )
+
+        XCTAssertFalse(appliedSuccess)
+        XCTAssertTrue(failed)
+        XCTAssertEqual(store.backendMode, .none)
+        XCTAssertNil(store.apiProfile)
+        XCTAssertFalse(store.isConnected)
+    }
+
+    func testV2BootstrapCancellationClearsResolvedProfile() async {
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/health")
+            return try jsonResponse(for: request, body: #"{"healthy":true,"version":"next","pid":42}"#)
+        }
+        let store = ConnectionStore()
+        let coordinator = ConnectionCoordinator(connectionStore: store)
+        var handledFailure = false
+
+        await coordinator.connect(
+            client: makeClient(apiPreference: .v2),
+            applyLegacyBootstrap: { _ in XCTFail("Must not use legacy bootstrap") },
+            applyV2Connection: {
+                XCTAssertEqual(store.apiProfile, .v2)
+                throw CancellationError()
+            },
+            handleFailure: { handledFailure = true }
+        )
+
+        XCTAssertTrue(handledFailure)
+        XCTAssertNil(store.apiProfile)
+        XCTAssertNil(store.errorMessage)
+        XCTAssertEqual(store.backendMode, .none)
+        XCTAssertFalse(store.isConnected)
+        XCTAssertFalse(store.isLoading)
+    }
+
+    func testInvalidatedV2BootstrapCannotOverwriteNewerConnection() async {
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/health")
+            return try jsonResponse(for: request, body: #"{"healthy":true,"version":"old","pid":42}"#)
+        }
+        let store = ConnectionStore()
+        let coordinator = ConnectionCoordinator(connectionStore: store)
+        var isCurrent = true
+
+        await coordinator.connect(
+            client: makeClient(apiPreference: .v2),
+            isCurrentAttempt: { isCurrent },
+            applyLegacyBootstrap: { _ in XCTFail("Must not use legacy bootstrap") },
+            applyV2Connection: {
+                isCurrent = false
+                store.applySuccessfulServerConnection(version: "new", healthy: true)
+                store.finishConnecting()
+            },
+            handleFailure: { XCTFail("Stale attempt must not handle failure") }
+        )
+
+        XCTAssertEqual(store.apiProfile, .legacy)
+        XCTAssertEqual(store.backendMode, .server)
+        XCTAssertEqual(store.serverVersion, "new")
+        XCTAssertTrue(store.isConnected)
+        XCTAssertFalse(store.isLoading)
+    }
+
+    func testForcedV2UnavailableDoesNotFallBackToLegacy() async {
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/health")
+            return try jsonResponse(for: request, statusCode: 404, body: "{}")
+        }
+        let store = ConnectionStore()
+        let coordinator = ConnectionCoordinator(connectionStore: store)
+
+        await coordinator.connect(
+            client: makeClient(apiPreference: .v2),
+            applyLegacyBootstrap: { _ in XCTFail("Forced v2 must not fall back") },
+            applyV2Connection: { XCTFail("Unavailable v2 must not bootstrap") },
+            handleFailure: {}
+        )
+
+        XCTAssertEqual(store.errorMessage, OpenCodeAPIError.v2Unavailable.localizedDescription)
+        XCTAssertNil(store.apiProfile)
+        XCTAssertFalse(store.isConnected)
+    }
+
+    func testStartingConnectionClearsPreviousV2ProfileAndVersion() {
+        let store = ConnectionStore()
+        store.applySuccessfulV2Connection(version: "old", healthy: true)
+
+        store.beginConnecting()
+
+        XCTAssertNil(store.apiProfile)
+        XCTAssertEqual(store.serverVersion, "")
+        XCTAssertFalse(store.isConnected)
+        XCTAssertTrue(store.isLoading)
+    }
+
+    func testMCPFacadeUsesNegotiatedV2RoutesForAutomaticConnections() async {
+        let disconnected = expectation(description: "v2 MCP disconnect")
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/api/mcp":
+                return try jsonResponse(for: request, body: #"{"data":[{"name":"tools","status":{"status":"connected"}}]}"#)
+            case "/api/mcp/tools/disconnect":
+                XCTAssertEqual(request.httpMethod, "POST")
+                disconnected.fulfill()
+                return try jsonResponse(for: request, statusCode: 204, body: "")
+            default:
+                XCTFail("Unexpected legacy request: \(request.url?.path ?? "nil")")
+                throw OpenCodeAPIError.invalidURL
+            }
+        }
+        let store = MCPStore()
+        let client = makeClient(apiPreference: .automatic)
+        let facade = MCPFacade(store: store, clientProvider: { client }, directoryProvider: { "/repo" }, apiProfileProvider: { .v2 })
+
+        await facade.reload()
+        XCTAssertEqual(facade.snapshot.connectedServerCount, 1)
+        await facade.toggleServer(name: "tools")
+
+        await fulfillment(of: [disconnected], timeout: 1)
+        XCTAssertNil(facade.snapshot.errorMessage)
+        XCTAssertTrue(facade.snapshot.togglingServerNames.isEmpty)
+    }
+
+    func testMCPFacadeDoesNotHydrateBeforeProfileNegotiation() async {
+        CoordinatorMockURLProtocol.requestHandler = { _ in
+            XCTFail("No API request is allowed before negotiation")
+            throw OpenCodeAPIError.invalidURL
+        }
+        let client = makeClient(apiPreference: .automatic)
+        let facade = MCPFacade(store: MCPStore(), clientProvider: { client }, directoryProvider: { "/repo" }, apiProfileProvider: { nil })
+
+        await facade.reload()
+        await facade.toggleServer(name: "tools")
+
+        XCTAssertFalse(facade.snapshot.isLoading)
+        XCTAssertTrue(facade.snapshot.servers.isEmpty)
+    }
+
+    func testProjectFilesFacadeUsesV2ForTreeContentAndGit() async throws {
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            let body: String
+            switch request.url?.path {
+            case "/api/fs/list":
+                body = #"{"location":{"directory":"/repo","project":{"id":"p","directory":"/repo","canonical":"/repo"}},"data":[{"path":"main.swift","type":"file"}]}"#
+            case "/api/fs/read/main.swift": body = "let value = 1"
+            case "/api/vcs": body = #"{"data":{"branch":{"current":"feature","default":"main"}}}"#
+            case "/api/vcs/status": body = #"{"data":[]}"#
+            case "/api/vcs/diff": body = #"{"data":[]}"#
+            default:
+                XCTFail("Unexpected legacy request: \(request.url?.path ?? "nil")")
+                throw OpenCodeAPIError.invalidURL
+            }
+            return try jsonResponse(for: request, body: body)
+        }
+        let client = makeClient(apiPreference: .automatic)
+        let store = ProjectFilesStore()
+        let facade = ProjectFilesFacade(
+            store: store, clientProvider: { client }, hasGitProjectProvider: { true },
+            effectiveSelectedDirectoryProvider: { "/repo" }, currentProjectProvider: { nil },
+            workspaceDirectoriesProvider: { ["/unsupported-worktree"] }, workspaceDisplayNameProvider: { $0 },
+            workspaceKeyProvider: { $0 }, isFilesPresentedProvider: { true }, preserveNavigationState: {},
+            showFilesRoute: {}, apiProfileProvider: { .v2 }
+        )
+
+        await facade.reloadGitViewData(force: true)
+        await facade.reloadFileTree(force: true)
+        let node = try XCTUnwrap(facade.snapshot.visibleRows.first?.node)
+        store.selectProjectFile(node, isChanged: false)
+        await facade.loadSelectedFileContentIfNeeded()
+
+        XCTAssertEqual(facade.snapshot.vcsInfo?.branch, "feature")
+        XCTAssertEqual(facade.snapshot.selectedFileContent?.content, "let value = 1")
+        XCTAssertEqual(facade.workspaceDirectories, ["/unsupported-worktree"])
+        XCTAssertNil(facade.snapshot.vcsErrorMessage)
+        XCTAssertNil(facade.snapshot.fileTreeErrorMessage)
+        XCTAssertNil(facade.snapshot.fileContentErrorMessage)
     }
 
     func testEventSyncCoordinatorMatchesSelectedSessionEvents() {
@@ -1974,7 +2275,7 @@ final class CoordinatorTests: XCTestCase {
         XCTAssertTrue(result.projects.contains { $0.id == "global" })
     }
 
-    func testProjectCoordinatorRecentSessionNavigationUsesProjectIDWhenAvailable() {
+    func testProjectCoordinatorRecentSessionNavigationPrefersExactDirectoryOverProjectID() {
         let coordinator = ProjectCoordinator()
         let project = makeProject(id: "proj_1", worktree: "/tmp/project")
         let other = makeProject(id: "proj_2", worktree: "/tmp/other")
@@ -1982,7 +2283,8 @@ final class CoordinatorTests: XCTestCase {
 
         let result = coordinator.recentSessionNavigationResult(for: session, projects: [other, project])
 
-        XCTAssertEqual(result.currentProject?.id, "proj_1")
+        // Non-global sessions resolve an exact worktree match before falling back to projectID.
+        XCTAssertEqual(result.currentProject?.id, "proj_2")
         XCTAssertEqual(result.routeDirectory, "/tmp/other")
         XCTAssertFalse(result.shouldPreserveMissingSession)
         XCTAssertEqual(result.projects.map(\.id), ["proj_2", "proj_1"])
@@ -2196,11 +2498,16 @@ final class CoordinatorTests: XCTestCase {
     }
 }
 
-private func makeClient() -> OpenCodeAPIClient {
+private func makeClient(apiPreference: OpenCodeAPIPreference = .legacy) -> OpenCodeAPIClient {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [CoordinatorMockURLProtocol.self]
     return OpenCodeAPIClient(
-        config: OpenCodeServerConfig(baseURL: "http://127.0.0.1:4096", username: "opencode", password: "pw"),
+        config: OpenCodeServerConfig(
+            baseURL: "http://127.0.0.1:4096",
+            username: "opencode",
+            password: "pw",
+            apiPreference: apiPreference
+        ),
         session: URLSession(configuration: configuration)
     )
 }

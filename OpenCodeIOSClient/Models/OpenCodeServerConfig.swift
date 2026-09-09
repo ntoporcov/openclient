@@ -1,5 +1,18 @@
 import Foundation
 
+enum OpenCodeAPIPreference: String, Codable, CaseIterable, Identifiable, Sendable {
+    case automatic
+    case legacy
+    case v2
+
+    var id: Self { self }
+}
+
+enum OpenCodeAPIProfile: String, Codable, Sendable {
+    case legacy
+    case v2
+}
+
 enum OpenCodeInsecureConnectionKind: Sendable {
     case localNetwork
     case nonLocal
@@ -11,6 +24,49 @@ struct OpenCodeServerConfig: Equatable, Codable, Sendable {
     var baseURL: String = ""
     var username: String = "opencode"
     var password: String = ""
+    var apiPreference: OpenCodeAPIPreference = .automatic
+
+    init(
+        name: String = "",
+        iconName: String = "server.rack",
+        baseURL: String = "",
+        username: String = "opencode",
+        password: String = "",
+        apiPreference: OpenCodeAPIPreference = .automatic
+    ) {
+        self.name = name
+        self.iconName = iconName
+        self.baseURL = baseURL
+        self.username = username
+        self.password = password
+        self.apiPreference = apiPreference
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case iconName
+        case baseURL
+        case username
+        case password
+        case apiPreference
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        iconName = try container.decodeIfPresent(String.self, forKey: .iconName) ?? "server.rack"
+        baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
+        username = try container.decodeIfPresent(String.self, forKey: .username) ?? "opencode"
+        password = try container.decodeIfPresent(String.self, forKey: .password) ?? ""
+        apiPreference = try container.decodeIfPresent(OpenCodeAPIPreference.self, forKey: .apiPreference) ?? .automatic
+    }
+
+    // Public saved preferences never pin a protocol. Captured API profiles remain separate.
+    var publicConnectionConfig: Self {
+        var config = self
+        config.apiPreference = .automatic
+        return config
+    }
 
     var sanitizedBaseURL: URL? {
         URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines))

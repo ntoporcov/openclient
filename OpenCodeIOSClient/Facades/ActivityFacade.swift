@@ -76,6 +76,7 @@ final class ActivityFacade: ObservableObject {
         let statuses: [String: String]?
         let permissions: [OpenCodePermission]?
         let questions: [OpenCodeQuestionRequest]?
+        var forms: [OpenCodeV2Form]? = nil
     }
 
     private struct CachedChatHydrationResult: Sendable {
@@ -98,12 +99,22 @@ final class ActivityFacade: ObservableObject {
     private var hydrationGeneration = 0
     private var directoryMetadataTasks: [String: Task<DirectoryMetadataResult, Never>] = [:]
 
+    // Status hydration is still an OpenCode compatibility service, not a core backend contract.
+    var isAvailable: Bool {
+        viewModel.isBrowsingLocalCache || viewModel.compatibilityClient(for: .interactions) != nil
+    }
+    var allowsLiveActivities: Bool {
+        !viewModel.isBrowsingLocalCache && viewModel.liveActivityFacade.supportsLiveActivities
+    }
+    var allowsNewTalk: Bool { viewModel.projectFacade.allowsNewTalk }
+
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
         snapshot = makeSnapshot()
 
         Publishers.MergeMany([
             viewModel.sessionListStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.projectActionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.projectStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.liveActivityStore.objectWillChange.eraseToAnyPublisher(),
@@ -124,12 +135,15 @@ final class ActivityFacade: ObservableObject {
     }
 
     func prepareForPresentation(force: Bool = false) async {
+        guard isAvailable else { return }
         if !force, let preparationTask {
             await preparationTask.value
             return
         }
 
         hydrationGeneration &+= 1
+        let generation = hydrationGeneration
+        preparationTask?.cancel()
         hydratedSessionIDs = []
         hydratingSessionIDs = []
         directoryMetadataTasks.values.forEach { $0.cancel() }
@@ -139,12 +153,15 @@ final class ActivityFacade: ObservableObject {
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await hydrateFromLocalCache()
+            guard generation == hydrationGeneration, !Task.isCancelled else { return }
             hasCompletedInitialCacheHydration = true
             bindMonitoredStores()
             refreshSnapshot()
 
             await viewModel.loadRecentProjectSessionsAcrossProjects()
-            guard viewModel.backendMode == .server, viewModel.isConnected else {
+            guard generation == hydrationGeneration, !Task.isCancelled,
+                  viewModel.isConnected,
+                  let connection = try? viewModel.requireBackendConnection() else {
                 refreshSnapshot()
                 return
             }
@@ -157,9 +174,39 @@ final class ActivityFacade: ObservableObject {
             }
             bindMonitoredStores()
             refreshSnapshot()
+
+            for scope in viewModel.homeSessionScopes {
+                let store = viewModel.directoryStoreRegistry.store(for: scope.directory)
+                let statusRevision = store.statusRevision
+                let permissionRevision = store.permissionRevision
+                let questionRevision = store.questionRevision
+                let metadata = await directoryMetadata(directory: scope.directory, connection: connection)
+                guard viewModel.isCurrentBackendConnection(connection), generation == hydrationGeneration,
+                      viewModel.directoryStoreRegistry.key(for: store) != nil else { return }
+                // Active or blocked sessions can be older than the first recent-session page.
+                let pendingIDs = Set(metadata.statuses?.filter { $0.value != "idle" }.map(\.key) ?? [])
+                    .union(metadata.permissions?.map(\.sessionID) ?? [])
+                    .union(metadata.forms?.map(\.sessionID) ?? [])
+                    .union(metadata.questions?.map(\.sessionID) ?? [])
+                for id in pendingIDs where viewModel.directoryStoreRegistry.snapshot(forSessionID: id)?.session == nil {
+                    let lifecycleRevision = viewModel.directoryStoreRegistry.v2LifecycleRevision(sessionID: id)
+                    guard let session = try? await connection.sessions.session(id: id, scope: scope) else { continue }
+                    guard viewModel.isCurrentBackendConnection(connection), generation == hydrationGeneration else { return }
+                    guard viewModel.directoryStoreRegistry.v2LifecycleRevision(sessionID: id) == lifecycleRevision,
+                          !viewModel.directoryStoreRegistry.isV2SessionDeleted(id), project(for: session) != nil else { continue }
+                    let directory = monitoringDirectory(for: session)
+                    _ = viewModel.directoryStoreRegistry.store(for: directory).upsertSessions([session])
+                    let recent = viewModel.sessionListStore.recentSessionsByDirectory[SessionListStore.recentDirectoryKey(directory)] ?? []
+                    viewModel.sessionListStore.setRecentSessions(recent.filter { $0.id != id } + [session], for: directory)
+                }
+                applyMetadata(metadata, to: store, statusRevision: statusRevision,
+                    permissionRevision: permissionRevision, questionRevision: questionRevision)
+            }
+            bindMonitoredStores()
         }
         preparationTask = task
         await task.value
+        guard generation == hydrationGeneration else { return }
         preparationTask = nil
         isPreparing = false
         refreshSnapshot()
@@ -231,8 +278,9 @@ final class ActivityFacade: ObservableObject {
 
     func delete(_ row: RowSnapshot) async {
         guard !viewModel.isBrowsingLocalCache else { return }
+        let lifetime = viewModel.liveActivityFacade.currentLifetime
         if await viewModel.deleteSession(row.recent.session) {
-            liveActivityBackgroundBridge?.cancel(sessionID: row.recent.session.id, reason: "Session deleted")
+            liveActivityBackgroundBridge?.cancel(sessionID: row.recent.session.id, reason: "Session deleted", lifetime: lifetime)
         }
     }
 
@@ -242,18 +290,16 @@ final class ActivityFacade: ObservableObject {
     }
 
     func toggleLiveActivity(_ row: RowSnapshot) async {
-        guard !viewModel.isBrowsingLocalCache else { return }
+        guard allowsLiveActivities else { return }
         await viewModel.liveActivityFacade.toggle(session: row.recent.session)
     }
 
     func presentNewChat() {
-        guard !viewModel.isBrowsingLocalCache else { return }
-        viewModel.presentNewProjectChatSheet()
+        viewModel.projectFacade.presentNewChat()
     }
 
     func presentNewTalk() {
-        guard !viewModel.isBrowsingLocalCache else { return }
-        viewModel.talkSessionCoordinator.presentProjectSelection()
+        viewModel.projectFacade.presentNewTalk()
     }
 
     var showsLastUserMessage: Bool {
@@ -272,47 +318,59 @@ final class ActivityFacade: ObservableObject {
               hydratingSessionIDs.insert(session.id).inserted else { return }
         refreshSnapshot()
         defer {
-            hydratingSessionIDs.remove(session.id)
-            refreshSnapshot()
+            if row.hydrationGeneration == hydrationGeneration {
+                hydratingSessionIDs.remove(session.id)
+                refreshSnapshot()
+            }
         }
 
-        guard viewModel.backendMode == .server, viewModel.isConnected else { return }
+        guard isAvailable, viewModel.isConnected,
+              let connection = try? viewModel.requireBackendConnection(),
+              let client = try? connection.requireOpenCodeClient(for: .interactions) else { return }
         let directory = monitoringDirectory(for: session)
         let store = viewModel.directoryStoreRegistry.store(for: directory)
         let permissionRevision = store.permissionRevision
         let questionRevision = store.questionRevision
-        let client = viewModel.client
+        let statusRevision = store.statusRevision
+        let lifecycleRevision = viewModel.directoryStoreRegistry.v2LifecycleRevision(sessionID: session.id)
+        let streamRevision = viewModel.chatStore.v2StreamRevision(sessionID: session.id)
+        let previousMessages = store.syncState.messageEnvelopes(forSessionID: session.id)
+        let scope = BackendScope(projectID: project(for: session)?.id, directory: directory, workspaceID: session.workspaceID)
+        let isV2 = connection.openCodeCompatibility?.profile == .v2
 
-        async let canonicalSession = try? await client.getSession(sessionID: session.id, directory: directory)
-        async let messages = try? await client.listMessages(sessionID: session.id, limit: 20, directory: directory)
-        async let todos = try? await client.getTodos(sessionID: session.id)
-        async let metadata = directoryMetadata(directory: directory)
+        async let canonicalSession = try? await connection.sessions.session(id: session.id, scope: scope)
+        async let messages = try? await connection.chat.transcript(sessionID: session.id, scope: scope, cursor: nil, limit: 20)
+        async let todos: [OpenCodeTodo]? = isV2 ? nil : try? await client.getTodos(sessionID: session.id)
+        async let metadata = directoryMetadata(directory: directory, connection: connection)
         let result = await (canonicalSession, messages, todos, metadata)
 
-        guard !Task.isCancelled,
+        guard viewModel.isCurrentBackendConnection(connection),
               row.hydrationGeneration == hydrationGeneration,
+              viewModel.directoryStoreRegistry.v2LifecycleRevision(sessionID: session.id) == lifecycleRevision,
+              !viewModel.directoryStoreRegistry.isV2SessionDeleted(session.id),
               viewModel.directoryStoreRegistry.key(for: store) != nil else { return }
         if let canonicalSession = result.0 {
             _ = store.upsertSessions([canonicalSession])
         }
-        if let messages = result.1 {
-            let existingMessages = store.syncState.messageEnvelopes(forSessionID: session.id)
-            let mergedMessages = ChatStore.mergingCanonicalMessagePage(messages, into: existingMessages)
-            store.applyCanonicalMessages(mergedMessages, forSessionID: session.id)
+        if let page = result.1,
+           viewModel.chatStore.v2StreamRevision(sessionID: session.id) == streamRevision,
+           store.syncState.messageEnvelopes(forSessionID: session.id) == previousMessages {
+            let mergedMessages = ChatStore.mergingCanonicalMessagePage(page.messages, into: previousMessages)
+            if isV2 {
+                store.applyV2Messages(mergedMessages, forSessionID: session.id)
+                viewModel.inferFunAndGames(from: mergedMessages, forSessionID: session.id)
+            } else {
+                store.applyCanonicalMessages(mergedMessages, forSessionID: session.id)
+            }
+            viewModel.refreshSessionPreview(for: session.id, messages: mergedMessages)
         }
         if let todos = result.2 {
             store.applyTodos(todos, forSessionID: session.id)
             viewModel.persistLoadedTodosToLocalCache(todos, sessionID: session.id)
         }
-        if let statuses = result.3.statuses {
-            _ = store.applySessionStatuses(statuses)
-        }
-        if let permissions = result.3.permissions {
-            _ = store.applyPermissions(permissions, ifUnchangedSince: permissionRevision)
-        }
-        if let questions = result.3.questions {
-            _ = store.applyQuestions(questions, ifUnchangedSince: questionRevision)
-        }
+        applyMetadata(result.3, to: store, statusRevision: statusRevision,
+            permissionRevision: permissionRevision, questionRevision: questionRevision)
+        viewModel.liveActivityFacade.reducerDidCommit(sessionIDs: [session.id])
         if result.3.statuses != nil || result.3.permissions != nil || result.3.questions != nil {
             viewModel.persistDirectoryToLocalCache(
                 store,
@@ -325,14 +383,28 @@ final class ActivityFacade: ObservableObject {
         hydratedSessionIDs.insert(session.id)
     }
 
-    private func directoryMetadata(directory: String?) async -> DirectoryMetadataResult {
-        let key = DirectoryStoreRegistry.key(for: directory)
+    private func directoryMetadata(directory: String?, connection: BackendConnection) async -> DirectoryMetadataResult {
+        let key = "\(connection.id)|\(hydrationGeneration)|\(DirectoryStoreRegistry.key(for: directory))"
         if let task = directoryMetadataTasks[key] {
             return await task.value
         }
 
-        let client = viewModel.client
+        guard let client = try? connection.requireOpenCodeClient(for: .interactions) else {
+            return DirectoryMetadataResult(statuses: nil, permissions: nil, questions: nil)
+        }
+        let isV2 = connection.openCodeCompatibility?.profile == .v2
         let task = Task {
+            if isV2 {
+                async let statuses = try? await client.listV2SessionStatuses()
+                async let permissions = try? await client.listV2PendingPermissions(directory: directory)
+                async let forms = try? await client.listV2PendingForms(directory: directory)
+                return await DirectoryMetadataResult(
+                    statuses: statuses,
+                    permissions: permissions,
+                    questions: nil,
+                    forms: forms
+                )
+            }
             async let statuses = try? await client.listSessionStatuses(directory: directory)
             async let permissions = try? await client.listPermissions(directory: directory)
             async let questions = try? await client.listQuestions(directory: directory)
@@ -348,13 +420,53 @@ final class ActivityFacade: ObservableObject {
         return result
     }
 
+    private func applyMetadata(
+        _ metadata: DirectoryMetadataResult, to store: DirectoryStore,
+        statusRevision: UInt, permissionRevision: UInt, questionRevision: UInt
+    ) {
+        let knownSessionIDs = Set(store.sessions.map(\.id))
+        if let statuses = metadata.statuses {
+            store.applyV2ActiveStatuses(statuses, requestedAtRevision: statusRevision)
+        }
+        if let permissions = metadata.permissions {
+            _ = store.applyPermissions(permissions.filter { knownSessionIDs.contains($0.sessionID) }, ifUnchangedSince: permissionRevision)
+        }
+        if let forms = metadata.forms, store.questionRevision == questionRevision {
+            let sessionIDs = knownSessionIDs
+                .union(store.v2FormsByID.values.map(\.sessionID))
+            for id in sessionIDs {
+                store.applyV2SessionInteractions(sessionID: id,
+                    permissions: store.syncState.permissionsBySessionID[id] ?? [], forms: forms.filter { knownSessionIDs.contains($0.sessionID) },
+                    permissionRevisionAtRequestStart: store.permissionRevision,
+                    questionRevisionAtRequestStart: store.questionRevision)
+            }
+        } else if let questions = metadata.questions {
+            _ = store.applyQuestions(questions.filter { knownSessionIDs.contains($0.sessionID) }, ifUnchangedSince: questionRevision)
+        }
+    }
+
     private func recentCandidates() -> [RecentProjectSession] {
-        viewModel.sessionListStore.recentProjectSessions(
+        let hiddenIDs = viewModel.hiddenProjectActionSessionIDs
+        let recent = viewModel.sessionListStore.recentProjectSessions(
             projects: viewModel.projects,
             previews: viewModel.sessionPreviews,
             statuses: [:],
-            limit: 100
+            hiddenActionSessionIDs: hiddenIDs,
+            limit: Int.max
         )
+        var candidates = Dictionary(recent.map { ($0.session.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for scope in viewModel.homeSessionScopes {
+            guard let store = viewModel.directoryStoreRegistry.existingStore(for: scope.directory),
+                  let project = viewModel.projects.first(where: { $0.id == scope.projectID }) else { continue }
+            for session in store.sessions where session.isRootSession && !session.isArchived {
+                let attributed = candidates[session.id].map { self.session(session, preservingAttributionFrom: $0.session) } ?? session
+                candidates[session.id] = RecentProjectSession(session: attributed, projectTitle: projectTitle(project),
+                    preview: viewModel.sessionPreviews[session.id], isBusy: false)
+            }
+        }
+        return candidates.values.filter {
+            !hiddenIDs.contains($0.session.id) && !viewModel.directoryStoreRegistry.isV2SessionDeleted($0.session.id)
+        }
     }
 
     private func makeSnapshot() -> Snapshot {
@@ -399,7 +511,12 @@ final class ActivityFacade: ObservableObject {
         let runningTools = runningToolSnapshots(in: messages)
         let todos = directorySnapshot?.todos ?? []
         let project = project(for: session)
-        let pendingInteractionCount = (directorySnapshot?.permissions.count ?? 0) + (directorySnapshot?.questions.count ?? 0)
+        let formOwner = viewModel.directoryStoreRegistry.ownerStore(forSessionID: session.id)
+            ?? viewModel.directoryStoreRegistry.existingStore(for: monitoringDirectory(for: session))
+        let sessionForms = formOwner?.sessionFormStore.forms.values.filter { $0.sessionID == session.id } ?? []
+        let formIDs = Set(sessionForms.map(\.id))
+        let questionCount = (directorySnapshot?.questions.filter { !formIDs.contains($0.id) }.count ?? 0) + sessionForms.count
+        let pendingInteractionCount = (directorySnapshot?.permissions.count ?? 0) + questionCount
 
         return RowSnapshot(
             recent: liveRecent,
@@ -411,7 +528,7 @@ final class ActivityFacade: ObservableObject {
             statusTitle: statusTitle(
                 status: status,
                 permissionCount: directorySnapshot?.permissions.count ?? 0,
-                questionCount: directorySnapshot?.questions.count ?? 0
+                questionCount: questionCount
             ),
             latestUserText: latestUserText,
             latestAssistantText: latestAssistantText,
@@ -583,7 +700,8 @@ final class ActivityFacade: ObservableObject {
 
     private func bindMonitoredStores() {
         monitoredStoreObservations.removeAll()
-        let keys = Set(recentCandidates().map { DirectoryStoreRegistry.key(for: monitoringDirectory(for: $0.session)) })
+        let keys = Set(viewModel.homeSessionScopes.map { DirectoryStoreRegistry.key(for: $0.directory) })
+            .union(recentCandidates().map { DirectoryStoreRegistry.key(for: monitoringDirectory(for: $0.session)) })
         for key in keys {
             guard let store = viewModel.directoryStoreRegistry.existingStore(
                 for: DirectoryStoreRegistry.directory(forKey: key)

@@ -68,16 +68,17 @@ struct OpenCodeActionShortcutTimelineProvider: AppIntentTimelineProvider {
         let command = resolvedCommand(configuration.command, server: server, project: project)
         let model = resolvedModel(configuration.model, server: server)
         let reasoning = resolvedReasoning(configuration.reasoning, model: model)
-        let serverID = server?.id ?? project?.serverID ?? command?.serverID ?? model?.serverID
+        let serverID = server?.rawServerID ?? server?.id
         let directory = project?.directory ?? command?.directory
-        let url = OpenCodeWidgetDeepLink.actionURL(
+        let url = (configuration.model != nil && model == nil) || (configuration.reasoning != nil && reasoning == nil) ? nil : OpenCodeWidgetDeepLink.actionURL(
             serverID: serverID,
             projectID: project?.projectID ?? command?.projectID,
             directory: directory,
             commandName: command?.name,
             providerID: model?.providerID,
             modelID: model?.modelID,
-            reasoningVariant: reasoning
+            reasoningVariant: reasoning,
+            profile: server?.profile ?? .legacy
         )
         return OpenCodeActionShortcutEntry(date: Date(), project: project, command: command, model: model, reasoning: reasoning, url: url)
     }
@@ -99,17 +100,20 @@ struct OpenCodeNewSessionShortcutTimelineProvider: AppIntentTimelineProvider {
     private func entry(for configuration: OpenCodeNewSessionWidgetConfiguration) -> OpenCodeNewSessionShortcutEntry {
         let server = resolvedServer(configuration.server, fallbackServerID: configuration.project?.serverID ?? configuration.model?.serverID)
         let project = resolvedProject(configuration.project, server: server)
-        let projectChoices = orderedProjects(selected: project, server: server)
         let model = resolvedModel(configuration.model, server: server)
         let reasoning = resolvedReasoning(configuration.reasoning, model: model)
-        let serverID = server?.id ?? project?.serverID ?? model?.serverID
-        let url = OpenCodeWidgetDeepLink.newSessionURL(
+        let invalidSelection = (configuration.project != nil && project == nil)
+            || (configuration.model != nil && model == nil) || (configuration.reasoning != nil && reasoning == nil)
+        let projectChoices = invalidSelection ? [] : orderedProjects(selected: project, server: server)
+        let serverID = server?.rawServerID ?? server?.id
+        let url = (configuration.model != nil && model == nil) || (configuration.reasoning != nil && reasoning == nil) ? nil : OpenCodeWidgetDeepLink.newSessionURL(
             serverID: serverID,
             projectID: project?.projectID,
             directory: project?.directory,
             providerID: model?.providerID,
             modelID: model?.modelID,
-            reasoningVariant: reasoning
+            reasoningVariant: reasoning,
+            profile: server?.profile ?? .legacy
         )
         return OpenCodeNewSessionShortcutEntry(date: Date(), project: project, projectChoices: projectChoices, model: model, reasoning: reasoning, url: url)
     }
@@ -250,12 +254,13 @@ private struct OpenCodeNewSessionShortcutWidgetView: View {
     @ViewBuilder
     private func projectLink(project: OpenCodeWidgetProjectEntity, compact: Bool) -> some View {
         let url = OpenCodeWidgetDeepLink.newSessionURL(
-            serverID: project.serverID,
+            serverID: project.rawServerID ?? project.serverID,
             projectID: project.projectID,
             directory: project.directory,
             providerID: entry.model?.providerID,
             modelID: entry.model?.modelID,
-            reasoningVariant: entry.reasoning
+            reasoningVariant: entry.reasoning,
+            profile: project.profile
         )
 
         if let url {
@@ -387,24 +392,24 @@ private func shortcutEmptyState(title: LocalizedStringResource, subtitle: Locali
 
 func resolvedServer(_ selected: OpenCodeWidgetServerEntity?, fallbackServerID: String?) -> OpenCodeWidgetServerEntity? {
     let servers = OpenCodeWidgetOptions.servers()
-    if let selected, servers.contains(where: { $0.id == selected.id }) {
-        return selected
+    if let selected {
+        return servers.first { $0.id == selected.id }
     }
-    if let fallbackServerID, let fallback = servers.first(where: { $0.id == fallbackServerID }) {
-        return fallback
+    if let fallbackServerID {
+        return servers.first { $0.id == fallbackServerID }
     }
     return OpenCodeWidgetOptions.defaultServer()
 }
 
 func resolvedProject(_ selected: OpenCodeWidgetProjectEntity?, server: OpenCodeWidgetServerEntity?) -> OpenCodeWidgetProjectEntity? {
+    guard server != nil else { return nil }
     let projects = OpenCodeWidgetOptions.projects(server: server)
-    if let selected, selected.serverID == server?.id, projects.contains(where: { $0.id == selected.id }) {
-        return selected
-    }
-    return OpenCodeWidgetOptions.defaultProject(server: server)
+    guard let selected, selected.serverID == server?.id else { return nil }
+    return projects.first { $0.id == selected.id }
 }
 
 func orderedProjects(selected: OpenCodeWidgetProjectEntity?, server: OpenCodeWidgetServerEntity?) -> [OpenCodeWidgetProjectEntity] {
+    guard server != nil else { return [] }
     var projects = OpenCodeWidgetOptions.projects(server: server)
     guard let selected, let selectedIndex = projects.firstIndex(where: { $0.id == selected.id }) else {
         return projects
@@ -415,10 +420,9 @@ func orderedProjects(selected: OpenCodeWidgetProjectEntity?, server: OpenCodeWid
 
 func resolvedCommand(_ selected: OpenCodeWidgetCommandEntity?, server: OpenCodeWidgetServerEntity?, project: OpenCodeWidgetProjectEntity?) -> OpenCodeWidgetCommandEntity? {
     let commands = OpenCodeWidgetOptions.commands(server: server, project: project)
-    if let selected, selected.serverID == server?.id, commands.contains(where: { $0.id == selected.id }) {
-        return selected
-    }
-    return commands.first
+    guard let selected, selected.serverID == server?.id, let project,
+          selected.projectID == project.projectID else { return nil }
+    return commands.first { $0.id == selected.id }
 }
 
 func resolvedModel(_ selected: OpenCodeWidgetModelEntity?, server: OpenCodeWidgetServerEntity?) -> OpenCodeWidgetModelEntity? {

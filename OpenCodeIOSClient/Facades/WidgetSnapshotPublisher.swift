@@ -8,6 +8,7 @@ import WidgetKit
 protocol WidgetSnapshotWriting {
     func update(_ publication: WidgetServerPublication)
     func removeSession(serverID: String, sessionID: String)
+    func removeSession(owner: OpenCodeWidgetOwner, sessionID: String)
 }
 
 protocol WidgetTimelineReloading {
@@ -25,7 +26,9 @@ extension OpenCodeWidgetStore: WidgetSnapshotWriting {
             replacingSessionIDs: publication.replacingSessionIDs,
             commands: publication.commands,
             replacingCommandProjectIDs: publication.replacingCommandProjectIDs,
-            models: publication.models
+            models: publication.models,
+            projectsAreAuthoritative: publication.projectsAreAuthoritative,
+            modelsAreAuthoritative: publication.modelsAreAuthoritative
         )
     }
 }
@@ -85,12 +88,19 @@ final class WidgetSnapshotPublisher {
             let includeModelOptions = pendingIncludesModelOptions
             pendingIncludesModelOptions = false
             await publishNow(includeModelOptions: includeModelOptions)
+            guard !Task.isCancelled else { return }
             publishTask = nil
         }
     }
 
-    func publishNow(includeModelOptions: Bool = false) async {
-        guard let input = inputProvider(includeModelOptions) else { return }
+    func publishNow(
+        includeModelOptions: Bool = false,
+        commandsAreAuthoritative: Bool = false,
+        modelsAreAuthoritative: Bool = false
+    ) async {
+        guard !Task.isCancelled, var input = inputProvider(includeModelOptions) else { return }
+        input.commandsAreAuthoritative = input.commandsAreAuthoritative || commandsAreAuthoritative
+        input.modelsAreAuthoritative = input.modelsAreAuthoritative || modelsAreAuthoritative
         guard let publication = WidgetSnapshotBuilder.build(
             from: input,
             includeModelOptions: includeModelOptions
@@ -98,15 +108,17 @@ final class WidgetSnapshotPublisher {
         await writer.update(publication)
         guard !Task.isCancelled else { return }
         timelineReloader.reloadContentTimelines()
-        if includeModelOptions {
-            timelineReloader.reloadShortcutTimelines()
-        }
+        timelineReloader.reloadShortcutTimelines()
     }
 
     func removeSession(serverID: String, sessionID: String) {
+        removeSession(owner: .init(profile: .legacy, serverID: serverID), sessionID: sessionID)
+    }
+
+    func removeSession(owner: OpenCodeWidgetOwner, sessionID: String) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await writer.removeSession(serverID: serverID, sessionID: sessionID)
+            await writer.removeSession(owner: owner, sessionID: sessionID)
             guard !Task.isCancelled else { return }
             timelineReloader.reloadAllTimelines()
         }
@@ -136,10 +148,10 @@ private final class WidgetSnapshotWriterQueue: @unchecked Sendable {
         }
     }
 
-    func removeSession(serverID: String, sessionID: String) async {
+    func removeSession(owner: OpenCodeWidgetOwner, sessionID: String) async {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
-                writer.removeSession(serverID: serverID, sessionID: sessionID)
+                writer.removeSession(owner: owner, sessionID: sessionID)
                 continuation.resume()
             }
         }

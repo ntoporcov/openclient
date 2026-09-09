@@ -60,66 +60,164 @@ extension AppViewModel {
 
     private func connect(attemptID: UUID) async {
         guard isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
+        liveActivityFacade.connectionWillStart(config: config)
         let wasBrowsingLocalCache = backendMode == .cachedServer
+        stopEventStream()
+        backendConnection?.close()
+        backendConnection = nil
+        terminalFacade.resetForConnectionChange()
+        projectStore.defaultServerDirectory = nil
+        projectStore.resetWorktreeInventory()
+        sessionListStore.resetWorkspacePages()
+        connectionStore.beginConnecting()
         resetRecentProjectSessionsForConnectionChange()
         resetLocalCacheRuntimeState()
         let cacheServerID = config.recentServerID
-        let cachedProjects = await loadCachedProjectsIfEnabled()
-        guard isCurrentConnectionAttempt(attemptID), Task.isCancelled == false, config.recentServerID == cacheServerID else { return }
+        let cachedProjects: OpenCodeCachedProjectsSnapshot? = if backendFactory == nil && config.apiPreference == .legacy {
+            await loadCachedProjectsIfEnabled()
+        } else {
+            nil
+        }
+        guard isCurrentConnectionAttempt(attemptID) else { return }
+        guard Task.isCancelled == false, config.recentServerID == cacheServerID else {
+            liveActivityFacade.discardPendingDeepLink()
+            connectionStore.applyConnectionCancellation()
+            return
+        }
         if let cachedProjects {
             projects = projectCoordinator.bootstrapProjects(cachedProjects.projects, currentProject: nil)
         }
+        var didLoadBootstrapCatalog = false
+        var didPersistConfig = true
         await connectionCoordinator.connect(
-            client: client,
+            factory: backendFactory ?? OpenCodeBackendFactory(client: OpenCodeAPIClient(config: config), eventManager: eventManager),
             isCurrentAttempt: { [weak self] in
                 self?.isCurrentConnectionAttempt(attemptID) == true
             },
-            applyBootstrap: { bootstrap in
+            applyConnection: { connection in
                 guard self.isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
-                persistConfigAfterSuccessfulConnection()
-                loadNewSessionDefaults()
-                loadFunAndGamesPreferences()
-                projects = projectCoordinator.bootstrapProjects(bootstrap.projects, currentProject: bootstrap.currentProject)
-                persistProjectsToLocalCache()
-                currentProject = nil
-                selectedDirectory = nil
-                selectedProjectContentTab = .sessions
-                directoryStoreRegistry.reset()
-                streamDirectory = nil
-                reconcileLiveActivities()
-                loadProjectListPreferences()
-                connectionCoordinator.updateConnectionPhase(.preparingInterface)
-                await loadComposerOptions()
-                guard self.isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
-                connectionCoordinator.updateConnectionPhase(.startingLiveUpdates)
-                startEventStream()
-                await runUITestBootstrapIfNeeded()
+                backendConnection = connection
+                if connection.openCodeCompatibility == nil {
+                    directoryStoreRegistry.reset()
+                    modelConfigurationStore.reset()
+                    projects = []
+                    currentProject = nil
+                    selectedDirectory = nil
+                    selectedProjectContentTab = .sessions
+                    streamDirectory = nil
+                    let snapshot = try await connection.projects.projectsSnapshot()
+                    try Task.checkCancellation()
+                    guard self.isCurrentConnectionAttempt(attemptID), self.isCurrentBackendConnection(connection) else { return }
+                    projects = snapshot.projects
+                    projectStore.defaultServerDirectory = snapshot.defaultDirectory
+                    let catalog = try await connection.models.modelCatalog(scope: .init())
+                    try Task.checkCancellation()
+                    guard self.isCurrentConnectionAttempt(attemptID), self.isCurrentBackendConnection(connection) else { return }
+                    modelConfigurationStore.applyComposerOptions(agents: catalog.agents, providers: catalog.providers, defaults: catalog.defaults)
+                    return
+                }
+                if connection.openCodeCompatibility?.profile == .legacy {
+                    let bootstrap = try await connection.projects.projectsSnapshot()
+                    try Task.checkCancellation()
+                    guard self.isCurrentConnectionAttempt(attemptID), self.isCurrentBackendConnection(connection) else { return }
+                    didPersistConfig = persistConfigAfterSuccessfulConnection()
+                    loadNewSessionDefaults()
+                    loadFunAndGamesPreferences()
+                    projects = projectCoordinator.bootstrapProjects(bootstrap.projects, currentProject: bootstrap.currentProject)
+                    persistProjectsToLocalCache()
+                    currentProject = nil
+                    selectedDirectory = nil
+                    selectedProjectContentTab = .sessions
+                    directoryStoreRegistry.reset()
+                    streamDirectory = nil
+                    loadProjectListPreferences()
+                    connectionCoordinator.updateConnectionPhase(.preparingInterface)
+                    didLoadBootstrapCatalog = await loadComposerOptions()
+                    guard self.isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
+                    connectionCoordinator.updateConnectionPhase(.startingLiveUpdates)
+                    startEventStream()
+                    await runUITestBootstrapIfNeeded()
+                } else {
+                    guard self.isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
+                    stopEventStream()
+                    projects = []
+                    currentProject = nil
+                    selectedDirectory = nil
+                    selectedProjectContentTab = .sessions
+                    projectSearchQuery = ""
+                    projectSearchResults = []
+                    projectSessionSearchQuery = ""
+                    resetRecentProjectSessionsForConnectionChange()
+                    directoryStoreRegistry.reset()
+                    modelConfigurationStore.reset()
+                    streamDirectory = nil
+                    try Task.checkCancellation()
+                    guard self.isCurrentConnectionAttempt(attemptID), self.isCurrentBackendConnection(connection) else { return }
+                    if let cached = await loadCachedProjectsIfEnabled() {
+                        projects = cached.projects
+                    }
+                    guard self.isCurrentConnectionAttempt(attemptID), self.isCurrentBackendConnection(connection) else { return }
+                    let bootstrap = try await connection.projects.projectsSnapshot()
+                    try Task.checkCancellation()
+                    guard self.isCurrentConnectionAttempt(attemptID), self.isCurrentBackendConnection(connection) else { return }
+                    projects = bootstrap.projects
+                    projectStore.defaultServerDirectory = bootstrap.defaultDirectory
+                    persistProjectsToLocalCache()
+                    didLoadBootstrapCatalog = await loadComposerOptions()
+                    try Task.checkCancellation()
+                    guard self.isCurrentConnectionAttempt(attemptID) else { return }
+                    loadFunAndGamesPreferences()
+                    loadProjectListPreferences()
+                    didPersistConfig = persistConfigAfterSuccessfulConnection()
+                }
             },
             handleFailure: {
                 guard self.isCurrentConnectionAttempt(attemptID) else { return }
+                liveActivityFacade.discardPendingDeepLink()
                 stopEventStream()
+                backendConnection?.close()
+                backendConnection = nil
                 if wasBrowsingLocalCache == false {
                     directoryStoreRegistry.reset()
                 }
             }
         )
         guard isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
-        if !isConnected, wasBrowsingLocalCache, usesLocalCache {
+        if !isConnected, backendFactory == nil, config.apiPreference == .legacy, wasBrowsingLocalCache, usesLocalCache {
             connectionStore.applyCachedServerConnection(preservingError: wasBrowsingLocalCache)
-            await liveActivityFacade.stopAll()
         } else if !isConnected,
+                  backendFactory == nil,
+                  config.apiPreference == .legacy,
                   cachedProjects?.projects.isEmpty == false,
                   usesLocalCache {
             connectionStore.offerCachedServerConnection()
-            await liveActivityFacade.stopAll()
         }
         guard isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
         if isConnected {
-            beginRecentProjectSessionsLoadingIfPossible()
+            // Both profiles restore the OS inventory under the newly established connection lifetime.
+            if backendConnection?.isClosed == false { reconcileLiveActivities() }
+            scheduleWidgetSnapshotPublication(includeModelOptions: true)
+            globalFormsFacade.request(nil)
+            if backendConnection?.openCodeCompatibility == nil {
+                startEventStream()
+            } else if connectionStore.apiProfile == .v2 {
+                startV2EventStream()
+            } else {
+                beginRecentProjectSessionsLoadingIfPossible()
+            }
             automaticConnectionRetryAttempt = 0
             cancelAutomaticConnectionRetryTask()
+            await widgetSnapshotPublisher.publishNow(includeModelOptions: true,
+                commandsAreAuthoritative: didLoadBootstrapCatalog && backendConnection?.capabilities.contains(.commands) == true,
+                modelsAreAuthoritative: didLoadBootstrapCatalog)
         } else {
+            liveActivityFacade.discardPendingDeepLink()
             scheduleAutomaticConnectionRetryIfNeeded()
+        }
+        guard isCurrentConnectionAttempt(attemptID), !Task.isCancelled else { return }
+        await liveActivityFacade.resumePendingDeepLink()
+        if isCurrentConnectionAttempt(attemptID), isConnected, !didPersistConfig {
+            connectionStore.applyErrorMessage(OpenCodeSavedServer.PersistenceError.credentialsUnavailable.localizedDescription)
         }
     }
 
@@ -203,7 +301,7 @@ extension AppViewModel {
 
     @discardableResult
     func startAutomaticConnectionIfConfigured() -> Bool {
-        guard !hasAttemptedAutomaticConnection else { return false }
+        guard backendFactory == nil, !hasAttemptedAutomaticConnection else { return false }
 
         let environment = ProcessInfo.processInfo.environment
         guard environment["OPENCODE_UI_TEST_MODE"] != "1",
@@ -222,6 +320,8 @@ extension AppViewModel {
     func applicationActivityChanged(isActive: Bool) {
         isApplicationActive = isActive
         guard isActive else {
+            chatFacade.foregroundChatRefreshCoordinator.invalidate()
+            foregroundChatCatchUpTask = nil
             cancelAutomaticConnectionRetryTask()
             return
         }
@@ -294,6 +394,7 @@ extension AppViewModel {
     }
 
     func cancelConnectionAttempt() {
+        liveActivityFacade.discardPendingDeepLink()
         stopAutomaticConnectionRetries()
         connectionAttemptID = nil
         connectionAttemptTask?.cancel()
@@ -301,6 +402,8 @@ extension AppViewModel {
         connectionOverlayStartedAt = nil
         isShowingConnectionOverlay = false
         stopEventStream()
+        backendConnection?.close()
+        backendConnection = nil
         directoryStoreRegistry.reset()
         resetRecentProjectSessionsForConnectionChange()
         connectionStore.applyConnectionCancellation()
@@ -344,11 +447,16 @@ extension AppViewModel {
             return
         }
         connectionStore.clearError()
-        upsertSavedServer(config: config, replacingServerID: originalServerID)
+        guard upsertSavedServer(config: config, replacingServerID: originalServerID) else { return }
         dismissAddServerSheet()
     }
 
     func startConnectionFromEditor() {
+        config = config.publicConnectionConfig
+        if backendFactory != nil {
+            startConnection()
+            return
+        }
         if let validationMessage = config.connectionValidationMessage {
             connectionStore.applyErrorMessage(validationMessage)
             return
@@ -358,6 +466,11 @@ extension AppViewModel {
     }
 
     func disconnect() {
+        liveActivityFacade.discardPendingDeepLink()
+        terminalFacade.resetForConnectionChange()
+        projectStore.defaultServerDirectory = nil
+        projectStore.resetWorktreeInventory()
+        sessionListStore.resetWorkspacePages()
         stopAutomaticConnectionRetries()
         connectionAttemptID = nil
         connectionAttemptTask?.cancel()
@@ -373,6 +486,8 @@ extension AppViewModel {
             },
             stopEventStream: {
                 stopEventStream()
+                backendConnection?.close()
+                backendConnection = nil
             },
             resetAppState: {
                 activeAppleIntelligenceWorkspaceID = nil
@@ -476,6 +591,8 @@ extension AppViewModel {
         appleIntelligenceResponseTask?.cancel()
         stopAutomaticConnectionRetries()
         stopEventStream()
+        backendConnection?.close()
+        backendConnection = nil
         connectionStore.applyAppleIntelligenceMode()
         activeAppleIntelligenceWorkspaceID = workspace.id
         currentAppleIntelligenceWorkspace = AppleIntelligenceWorkspaceRecord(
@@ -608,7 +725,8 @@ extension AppViewModel {
             iconName: serverConfig.iconName,
             baseURL: serverConfig.baseURL,
             username: serverConfig.username,
-            password: password
+            password: password,
+            apiPreference: serverConfig.apiPreference
         )
     }
 
@@ -616,56 +734,23 @@ extension AppViewModel {
         connectionStore.markSavedServerPromptDismissed()
     }
 
-    func persistConfigAfterSuccessfulConnection() {
+    @discardableResult
+    func persistConfigAfterSuccessfulConnection() -> Bool {
         switch savedServerEditorMode {
         case .add:
-            upsertSavedServer(config: config)
+            guard upsertSavedServer(config: config) else { return false }
         case let .edit(originalServerID):
-            upsertSavedServer(config: config, replacingServerID: originalServerID)
+            guard upsertSavedServer(config: config, replacingServerID: originalServerID) else { return false }
         }
         connectionStore.markSavedServerPersistenceComplete()
+        return true
     }
 
     func loadRecentServerConfigs() -> [OpenCodeServerConfig] {
-        if let data = UserDefaults.standard.data(forKey: StorageKey.recentServerConfigs),
-           let savedServers = loadSavedServers(from: data) {
-            OpenClientSharePayloadStore.mirrorRecentServersData(data)
-            return savedServers.map { savedServer in
-                let password = passwordStore.loadPassword(for: savedServer.recentServerID) ?? ""
-                return savedServer.serverConfig(password: password)
-            }
+        OpenCodeSavedServer.loadPublicSavedServers().map { savedServer in
+            let password = passwordStore.loadPassword(for: savedServer.recentServerID) ?? ""
+            return savedServer.serverConfig(password: password)
         }
-
-        return []
-    }
-
-    private func loadSavedServers(from data: Data) -> [OpenCodeSavedServer]? {
-        if let savedServers = try? JSONDecoder().decode([OpenCodeSavedServer].self, from: data) {
-            return savedServers
-        }
-
-        guard let rawEntries = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else {
-            return nil
-        }
-
-        let recoveredServers = rawEntries.compactMap { entry -> OpenCodeSavedServer? in
-            guard JSONSerialization.isValidJSONObject(entry),
-                  let entryData = try? JSONSerialization.data(withJSONObject: entry) else {
-                return nil
-            }
-
-            return try? JSONDecoder().decode(OpenCodeSavedServer.self, from: entryData)
-        }
-
-        guard recoveredServers.isEmpty == false else { return nil }
-
-        // Rewrite the cleaned payload so a single bad entry does not keep wiping recents on launch.
-        if let cleanedData = try? JSONEncoder().encode(recoveredServers) {
-            UserDefaults.standard.set(cleanedData, forKey: StorageKey.recentServerConfigs)
-            OpenClientSharePayloadStore.mirrorRecentServersData(cleanedData)
-        }
-
-        return recoveredServers
     }
 
     func loadAppleIntelligenceWorkspaces() -> [AppleIntelligenceWorkspaceRecord] {
@@ -684,84 +769,46 @@ extension AppViewModel {
 
     func removeRecentServer(_ serverConfig: OpenCodeServerConfig) {
         let removedServerID = serverConfig.recentServerID
-        let cacheRepository = localCacheRepository
-        Task {
-            try? await cacheRepository.clear(serverID: removedServerID)
-        }
+        guard persistSavedServerChange(.remove(removedServerID)) else { return }
         connectionStore.removeRecentServer(serverConfig)
+        Task {
+            await clearLocalCache(serverID: removedServerID)
+        }
         appCustomizationStore.reconcileAutoConnectServer(in: recentServerConfigs)
 
         if config.recentServerID == serverConfig.recentServerID,
            let replacement = recentServerConfigs.first {
             config = replacement
         }
-
-        if recentServerConfigs.isEmpty {
-            UserDefaults.standard.removeObject(forKey: StorageKey.recentServerConfigs)
-            OpenClientSharePayloadStore.mirrorRecentServersData(nil)
-            passwordStore.deletePassword(for: serverConfig.recentServerID)
-            return
-        }
-
-        passwordStore.deletePassword(for: serverConfig.recentServerID)
-
-        let savedServers = recentServerConfigs.map(OpenCodeSavedServer.init)
-        guard let recentData = try? JSONEncoder().encode(savedServers) else {
-            return
-        }
-
-        UserDefaults.standard.set(recentData, forKey: StorageKey.recentServerConfigs)
-        OpenClientSharePayloadStore.mirrorRecentServersData(recentData)
     }
 
-    private func upsertSavedServer(config: OpenCodeServerConfig, replacingServerID originalServerID: String? = nil) {
-        guard config.hasRequiredConnectionFields else { return }
-
-        let updatedConfig = config
-        let updatedID = updatedConfig.recentServerID
-        let replacedConfig = connectionStore.upsertRecentServerConfig(
-            updatedConfig,
-            replacingServerID: originalServerID
-        )
+    private func upsertSavedServer(config: OpenCodeServerConfig, replacingServerID originalServerID: String? = nil) -> Bool {
+        guard config.hasRequiredConnectionFields,
+              persistSavedServerChange(.save(config, replacingServerID: originalServerID)) else { return false }
+        let updatedID = config.recentServerID
         if let originalServerID, originalServerID != updatedID {
             appCustomizationStore.migrateAutoConnectServerID(from: originalServerID, to: updatedID)
         }
         appCustomizationStore.reconcileAutoConnectServer(in: recentServerConfigs)
-        let migratedPassword: String?
-        if let replacedConfig, replacedConfig.recentServerID != updatedID, updatedConfig.password.isEmpty {
-            migratedPassword = passwordStore.loadPassword(for: replacedConfig.recentServerID) ?? replacedConfig.password
-        } else {
-            migratedPassword = nil
-        }
-
         if let originalServerID, originalServerID != updatedID {
-            passwordStore.deletePassword(for: originalServerID)
-            let cacheRepository = localCacheRepository
             Task {
-                try? await cacheRepository.clear(serverID: originalServerID)
+                await clearLocalCache(serverID: originalServerID)
             }
         }
 
-        if let migratedPassword, migratedPassword.isEmpty == false {
-            passwordStore.savePassword(migratedPassword, for: updatedID)
-            connectionStore.updateRecentServerPassword(for: updatedID, password: migratedPassword)
-        }
-
-        for serverConfig in recentServerConfigs {
-            passwordStore.savePassword(serverConfig.password, for: serverConfig.recentServerID)
-        }
-
-        persistRecentServers()
+        return true
     }
 
-    private func persistRecentServers() {
-        let savedServers = recentServerConfigs.map(OpenCodeSavedServer.init)
-        guard let recentData = try? JSONEncoder().encode(savedServers) else {
-            return
+    private func persistSavedServerChange(_ change: OpenCodeSavedServer.Change) -> Bool {
+        do {
+            let configs = try OpenCodeSavedServer.persistPublicSavedServers(recentServerConfigs, change: change)
+            connectionStore.setRecentServerConfigs(configs)
+            connectionStore.clearError()
+            return true
+        } catch {
+            connectionStore.applyErrorMessage(OpenCodeSavedServer.PersistenceError.credentialsUnavailable.localizedDescription)
+            return false
         }
-
-        UserDefaults.standard.set(recentData, forKey: StorageKey.recentServerConfigs)
-        OpenClientSharePayloadStore.mirrorRecentServersData(recentData)
     }
 
     func configureUITestEnvironmentIfNeeded() -> Bool {

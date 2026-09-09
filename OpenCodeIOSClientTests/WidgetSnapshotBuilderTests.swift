@@ -178,7 +178,7 @@ final class WidgetSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(input.visibleModelsByProviderID.values.reduce(0) { $0 + $1.count }, 120)
     }
 
-    func testPublisherWritesAndReloadsOnlyRelevantTimelines() async {
+    func testPublisherRefreshesShortcutDestinationsEvenWithoutModelOptions() async {
         let writer = WidgetWriterSpy()
         let reloader = WidgetTimelineReloaderSpy()
         let publisher = WidgetSnapshotPublisher(
@@ -190,12 +190,97 @@ final class WidgetSnapshotBuilderTests: XCTestCase {
         await publisher.publishNow()
         XCTAssertEqual(writer.updateCount, 1)
         XCTAssertEqual(reloader.contentReloadCount, 1)
-        XCTAssertEqual(reloader.shortcutReloadCount, 0)
+        XCTAssertEqual(reloader.shortcutReloadCount, 1)
 
         await publisher.publishNow(includeModelOptions: true)
         XCTAssertEqual(writer.updateCount, 2)
         XCTAssertEqual(reloader.contentReloadCount, 2)
-        XCTAssertEqual(reloader.shortcutReloadCount, 1)
+        XCTAssertEqual(reloader.shortcutReloadCount, 2)
+    }
+
+    func testV2BuilderPublishesReadOnlySnapshotsWithFixedOwner() throws {
+        let model = AppViewModel()
+        model.config = .init(baseURL: "https://v2.invalid", password: "test", apiPreference: .automatic)
+        model.connectionStore.applySuccessfulV2Connection(version: "2", healthy: true)
+        let project = OpenCodeProject(id: "project", worktree: "/project", vcs: nil, name: "Project", sandboxes: nil, icon: nil, time: nil)
+        model.projects = [project]
+        model.currentProject = project
+        model.allSessions = [.init(id: "session", title: "Canonical", workspaceID: "workspace", directory: "/project",
+            projectID: "project", parentID: nil)]
+        model.directoryCommands = [.init(name: "test", description: nil, agent: nil, model: nil, source: "project",
+            template: "test", subtask: nil, hints: [])]
+        let input = model.widgetSnapshotInput(includeModelOptions: true)
+        let publication = try XCTUnwrap(WidgetSnapshotBuilder.build(from: input, includeModelOptions: true))
+        XCTAssertEqual(publication.server.owner.profile, .v2)
+        XCTAssertEqual(publication.server.id, model.config.recentServerID)
+        XCTAssertEqual(publication.projects.first?.owner, publication.server.owner)
+        XCTAssertEqual(publication.sessions.first?.owner, publication.server.owner)
+        XCTAssertEqual(publication.sessions.first?.workspaceID, "workspace")
+        XCTAssertTrue(publication.commands.isEmpty)
+        XCTAssertTrue(publication.models.isEmpty)
+        XCTAssertEqual(model.config.apiPreference, .automatic)
+    }
+
+    func testUnresolvedOrDisconnectedProfileCannotPublishAsLegacy() {
+        let model = AppViewModel()
+        model.config = .init(baseURL: "https://v2.invalid", password: "test", apiPreference: .automatic)
+        XCTAssertNil(WidgetSnapshotBuilder.build(from: model.widgetSnapshotInput(), includeModelOptions: false))
+        var input = emptyInput()
+        input.profile = nil
+        XCTAssertNil(WidgetSnapshotBuilder.build(from: input, includeModelOptions: false))
+    }
+
+    func testV2ActionMenusRequireTypedServicesAndExplicitGlobalExecutionDirectory() throws {
+        let model = AppViewModel()
+        model.config = .init(baseURL: "https://widget.invalid", password: "test", apiPreference: .v2)
+        model.connectionStore.applySuccessfulV2Connection(version: "2", healthy: true)
+        model.projects = [.init(id: "global", worktree: "/", vcs: nil, name: nil, sandboxes: nil, icon: nil, time: nil)]
+        model.currentProject = model.projects.first
+        model.directoryCommands = [.init(name: "test", description: nil, agent: nil, model: nil, source: "project",
+            template: "test", subtask: nil, hints: [])]
+        var input = model.widgetSnapshotInput()
+        let unsupported = try XCTUnwrap(WidgetSnapshotBuilder.build(from: input, includeModelOptions: false))
+        XCTAssertFalse(unsupported.server.offersNewSession)
+        XCTAssertFalse(unsupported.server.offersCommands)
+        XCTAssertEqual(unsupported.projects.first?.offersNewSession, false)
+        input.supportsNewSession = true
+        input.supportsCommands = true
+        let unresolved = try XCTUnwrap(WidgetSnapshotBuilder.build(from: input, includeModelOptions: false))
+        XCTAssertEqual(unresolved.projects.first?.offersNewSession, false)
+        XCTAssertTrue(unresolved.commands.isEmpty)
+        input.defaultDirectory = "/"
+        input.commandsAreAuthoritative = true
+        let supported = try XCTUnwrap(WidgetSnapshotBuilder.build(from: input, includeModelOptions: false))
+        XCTAssertTrue(supported.server.offersNewSession)
+        XCTAssertTrue(supported.server.offersCommands)
+        XCTAssertEqual(supported.projects.first?.offersNewSession, true)
+        XCTAssertEqual(supported.projects.first?.executionDirectory, "/")
+        XCTAssertEqual(supported.commands.first?.directory, "/")
+        XCTAssertEqual(supported.commands.first?.owner, supported.server.owner)
+        XCTAssertEqual(supported.replacingCommandProjectIDs, ["global"])
+        model.directoryCommands = []
+        input = model.widgetSnapshotInput()
+        input.supportsNewSession = true
+        input.supportsCommands = true
+        input.defaultDirectory = "/"
+        input.commandsAreAuthoritative = true
+        let empty = try XCTUnwrap(WidgetSnapshotBuilder.build(from: input, includeModelOptions: false))
+        XCTAssertTrue(empty.commands.isEmpty)
+        XCTAssertEqual(empty.replacingCommandProjectIDs, ["global"])
+    }
+
+    func testEmptyCatalogPublicationDistinguishesNotRefreshedFromAuthoritative() throws {
+        var input = emptyInput()
+        input.projectsAreAuthoritative = false
+        let stale = try XCTUnwrap(WidgetSnapshotBuilder.build(from: input, includeModelOptions: true))
+        XCTAssertFalse(stale.projectsAreAuthoritative)
+        XCTAssertFalse(stale.modelsAreAuthoritative)
+        XCTAssertTrue(stale.replacingCommandProjectIDs.isEmpty)
+        input.projectsAreAuthoritative = true
+        input.modelsAreAuthoritative = true
+        let fresh = try XCTUnwrap(WidgetSnapshotBuilder.build(from: input, includeModelOptions: true))
+        XCTAssertTrue(fresh.projectsAreAuthoritative)
+        XCTAssertTrue(fresh.modelsAreAuthoritative)
     }
 
     private func emptyInput() -> WidgetSnapshotInput {
@@ -229,6 +314,10 @@ private final class WidgetWriterSpy: WidgetSnapshotWriting {
 
     func removeSession(serverID: String, sessionID: String) {
         removedSessions.append((serverID, sessionID))
+    }
+
+    func removeSession(owner: OpenCodeWidgetOwner, sessionID: String) {
+        removedSessions.append((owner.entityID(), sessionID))
     }
 }
 

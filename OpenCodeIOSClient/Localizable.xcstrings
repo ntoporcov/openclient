@@ -1,6 +1,2173 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Unable to safely update saved servers. Unlock your device and try again. If this continues, contact support.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Unable to safely update saved servers. Unlock your device and try again. If this continues, contact support." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Impossibile aggiornare in sicurezza i server salvati. Sblocca il dispositivo e riprova. Se il problema persiste, contatta l'assistenza." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Não foi possível atualizar os servidores salvos com segurança. Desbloqueie o dispositivo e tente novamente. Se o problema persistir, entre em contato com o suporte." } }
+      }
+    },
+    "Show status": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show status" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Mostra stato" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Mostrar status" } }
+      }
+    },
+    "Queued": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Queued" } },
+        "it": { "stringUnit": { "state": "translated", "value": "In coda" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Na fila" } }
+      }
+    },
+    "Sending": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sending" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Enviando" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Invio in corso" } }
+      }
+    },
+    "Submission unconfirmed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Submission unconfirmed" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Envio não confirmado" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Invio non confermato" } }
+      }
+    },
+    "Submitted, waiting": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Submitted, waiting" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Enviado, aguardando" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Inviato, in attesa" } }
+      }
+    },
+    "Submission status unknown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Submission status unknown" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Status do envio desconhecido" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Stato dell'invio sconosciuto" } }
+      }
+    },
+    "Submission cancelled": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Submission cancelled" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Envio cancelado" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Invio annullato" } }
+      }
+    },
+    "Submission details": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Submission details" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Detalhes do envio" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Dettagli dell'invio" } }
+      }
+    },
+    "Check status": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Check status" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Verificar status" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Verifica stato" } }
+      }
+    },
+    "Checking status does not resend this submission.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Checking status does not resend this submission." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Verificar o status não reenvia esta mensagem." } },
+        "it": { "stringUnit": { "state": "translated", "value": "La verifica dello stato non invia di nuovo questo messaggio." } }
+      }
+    },
+    "Project Input Required": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Project Input Required" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "O projeto precisa de uma resposta" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Il progetto richiede una risposta" } }
+      }
+    },
+    "Project Requests": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Project Requests" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Solicitações do projeto" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Richieste del progetto" } }
+      }
+    },
+    "Check Project Requests": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Check Project Requests" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Verificar solicitações do projeto" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Controlla le richieste del progetto" } }
+      }
+    },
+    "No Pending Project Requests": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No Pending Project Requests" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Nenhuma solicitação pendente do projeto" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Nessuna richiesta del progetto in sospeso" } }
+      }
+    },
+    "Choose an explicit agent before retrying this shared chat.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an explicit agent before retrying this shared chat."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha um agente explicitamente antes de tentar novamente este chat compartilhado."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scegli esplicitamente un agente prima di riprovare questa chat condivisa."
+          }
+        }
+      }
+    },
+    "Choose an explicit model before retrying this shared chat.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an explicit model before retrying this shared chat."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha um modelo explicitamente antes de tentar novamente este chat compartilhado."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scegli esplicitamente un modello prima di riprovare questa chat condivisa."
+          }
+        }
+      }
+    },
+    "The shared content and link specify different connections.": {
+      "comment": "Share handoff error when the saved connection in the payload differs from the connection in the deep link.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared content and link specify different connections."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O conteúdo compartilhado e o link especificam conexões diferentes."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il contenuto condiviso e il link specificano connessioni diverse."
+          }
+        }
+      }
+    },
+    "Reconnect this saved connection before sharing. Its credentials are unavailable.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnect this saved connection before sharing. Its credentials are unavailable."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restabeleça esta conexão salva antes de compartilhar. As credenciais dela estão indisponíveis."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ristabilisci questa connessione salvata prima di condividere. Le sue credenziali non sono disponibili."
+          }
+        }
+      }
+    },
+    "The shared chat has already been created in another destination.": {
+      "comment": "Share retry error when the chat was already created for a different project or workspace destination.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shared chat has already been created in another destination."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O chat compartilhado já foi criado em outro destino."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La chat condivisa è già stata creata in un'altra destinazione."
+          }
+        }
+      }
+    },
+    "Session creation is uncertain. Check your sessions before trying again.": {
+      "comment": "Share retry warning: session creation may have succeeded on the server, so the user should check before retrying.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session creation is uncertain. Check your sessions before trying again."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível confirmar a criação da sessão. Verifique suas sessões antes de tentar novamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non è certo che la sessione sia stata creata. Controlla le tue sessioni prima di riprovare."
+          }
+        }
+      }
+    },
+    "%lld pending forms": {
+      "comment": "Number of pending native session forms. The argument is an integer count from SwiftUI Text interpolation.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld pending form"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld pending forms"
+                }
+              }
+            }
+          }
+        },
+        "pt-BR": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld formulário pendente"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld formulários pendentes"
+                }
+              }
+            }
+          }
+        },
+        "it": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld modulo in attesa"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld moduli in attesa"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Required": {
+      "comment": "A form field that requires an answer or acknowledgment.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Required"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obrigatório"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obbligatorio"
+          }
+        }
+      }
+    },
+    "Optional": {
+      "comment": "A form field that may be left unset.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optional"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opcional"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Facoltativo"
+          }
+        }
+      }
+    },
+    "This form contains unsupported fields. You can cancel the request.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This form contains unsupported fields. You can cancel the request."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este formulário contém campos não compatíveis. Você pode cancelar a solicitação."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo modulo contiene campi non supportati. Puoi annullare la richiesta."
+          }
+        }
+      }
+    },
+    "The form status is unknown. Check status before trying again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The form status is unknown. Check status before trying again."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O status do formulário é desconhecido. Verifique o status antes de tentar novamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lo stato del modulo è sconosciuto. Verifica lo stato prima di riprovare."
+          }
+        }
+      }
+    },
+    "Form actions are unavailable on this connection.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Form actions are unavailable on this connection."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As ações de formulário não estão disponíveis nesta conexão."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le azioni dei moduli non sono disponibili con questa connessione."
+          }
+        }
+      }
+    },
+    "Check Status": {
+      "comment": "Button that reads the form's current status without resubmitting an answer.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check Status"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verificar status"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifica stato"
+          }
+        }
+      }
+    },
+    "I completed this step": {
+      "comment": "Acknowledgment that the user completed an external form step in a browser.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I completed this step"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Concluí esta etapa"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ho completato questo passaggio"
+          }
+        }
+      }
+    },
+    "This link cannot be opened safely. You can cancel the request.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This link cannot be opened safely. You can cancel the request."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este link não pode ser aberto com segurança. Você pode cancelar a solicitação."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo link non può essere aperto in sicurezza. Puoi annullare la richiesta."
+          }
+        }
+      }
+    },
+    "Add": {
+      "comment": "Button that adds a custom selection to a form answer.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicionar"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aggiungi"
+          }
+        }
+      }
+    },
+    "This form is no longer available. Refresh its status.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This form is no longer available. Refresh its status."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este formulário não está mais disponível. Atualize o status dele."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo modulo non è più disponibile. Aggiorna il suo stato."
+          }
+        }
+      }
+    },
+    "The form is still pending. Review your answers before trying again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The form is still pending. Review your answers before trying again."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O formulário ainda está pendente. Revise suas respostas antes de tentar novamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il modulo è ancora in attesa. Rivedi le risposte prima di riprovare."
+          }
+        }
+      }
+    },
+    "The server rejected the answer format or pattern. Check the field values.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The server rejected the answer format or pattern. Check the field values."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O servidor rejeitou o formato ou padrão da resposta. Verifique os valores dos campos."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il server ha rifiutato il formato o il pattern della risposta. Verifica i valori dei campi."
+          }
+        }
+      }
+    },
+    "The server requires an answer or acknowledgment for every required field.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The server requires an answer or acknowledgment for every required field."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O servidor exige uma resposta ou confirmação para cada campo obrigatório."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il server richiede una risposta o una conferma per ogni campo obbligatorio."
+          }
+        }
+      }
+    },
+    "The server rejected this answer. Check the field values and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The server rejected this answer. Check the field values and try again."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O servidor rejeitou esta resposta. Verifique os valores dos campos e tente novamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il server ha rifiutato questa risposta. Verifica i valori dei campi e riprova."
+          }
+        }
+      }
+    },
+    "Workspace management is unavailable on this server.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workspace management is unavailable on this server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O gerenciamento de espaços de trabalho não está disponível neste servidor."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La gestione degli spazi di lavoro non è disponibile su questo server."
+          }
+        }
+      }
+    },
+    "Choose an absolute destination parent directory on the server.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an absolute destination parent directory on the server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha um caminho absoluto no servidor para o diretório pai de destino."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scegli un percorso assoluto sul server per la cartella padre di destinazione."
+          }
+        }
+      }
+    },
+    "Use a workspace name without path separators or dot components.": {
+      "comment": "Workspace name validation. Dot components refer to filesystem path components such as . and .., not punctuation in ordinary names.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use a workspace name without path separators or dot components."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use um nome de espaço de trabalho sem separadores de caminho nem componentes como '.' ou '..'."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa un nome per lo spazio di lavoro senza separatori di percorso né componenti come '.' o '..'."
+          }
+        }
+      }
+    },
+    "Worktree management requires a local Git project.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Worktree management requires a local Git project."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O gerenciamento de worktrees requer um projeto Git local."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La gestione dei worktree richiede un progetto Git locale."
+          }
+        }
+      }
+    },
+    "OpenCode did not remove this worktree.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode did not remove this worktree."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O OpenCode não removeu este worktree."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode non ha rimosso questo worktree."
+          }
+        }
+      }
+    },
+    "OpenCode did not reset this worktree.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode did not reset this worktree."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O OpenCode não redefiniu este worktree."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode non ha reimpostato questo worktree."
+          }
+        }
+      }
+    },
+    "Destination Parent Directory": {
+      "comment": "Absolute server directory inside which a new worktree will be created.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destination Parent Directory"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diretório pai de destino"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cartella padre di destinazione"
+          }
+        }
+      }
+    },
+    "Choose an absolute path on the server. New worktrees are created inside this directory.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an absolute path on the server. New worktrees are created inside this directory."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha um caminho absoluto no servidor. Novos worktrees são criados dentro deste diretório."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scegli un percorso assoluto sul server. I nuovi worktree vengono creati all'interno di questa cartella."
+          }
+        }
+      }
+    },
+    "Discard Changes and Remove Workspace?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard Changes and Remove Workspace?"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descartar alterações e remover espaço de trabalho?"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scartare le modifiche e rimuovere lo spazio di lavoro?"
+          }
+        }
+      }
+    },
+    "Discard Changes and Remove": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard Changes and Remove"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descartar alterações e remover"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scarta modifiche e rimuovi"
+          }
+        }
+      }
+    },
+    "This permanently discards local changes in %@. Session history is not deleted.": {
+      "comment": "Force-removal warning. The argument is the server worktree directory. Session history is retained, not deleted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This permanently discards local changes in %@. Session history is not deleted."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isso descarta permanentemente as alterações locais em %@. O histórico de sessões não é excluído."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questa azione scarta definitivamente le modifiche locali in %@. La cronologia delle sessioni non viene eliminata."
+          }
+        }
+      }
+    },
+    "Remove the %@ worktree from the server. Session history is not deleted. This cannot be undone.": {
+      "comment": "Destructive worktree removal warning. The argument is the workspace name. Session history is retained, not deleted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove the %@ worktree from the server. Session history is not deleted. This cannot be undone."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remova o worktree %@ do servidor. O histórico de sessões não é excluído. Esta ação não pode ser desfeita."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rimuovi il worktree %@ dal server. La cronologia delle sessioni non viene eliminata. Questa azione non può essere annullata."
+          }
+        }
+      }
+    },
+    "Refresh Workspaces": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Workspaces"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atualizar espaços de trabalho"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aggiorna spazi di lavoro"
+          }
+        }
+      }
+    },
+    "Select an existing directory on the server. OpenCode may register its project when the directory is opened.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select an existing directory on the server. OpenCode may register its project when the directory is opened."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecione um diretório existente no servidor. O OpenCode pode registrar o projeto ao abrir o diretório."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seleziona una cartella esistente sul server. OpenCode potrebbe registrare il progetto all'apertura della cartella."
+          }
+        }
+      }
+    },
+    "Add Project": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Project"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicionar projeto"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aggiungi progetto"
+          }
+        }
+      }
+    },
+    "Action Run History": {
+      "comment": "Project Actions history, including runs hidden only on this device. Their sessions remain on the server.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Action Run History"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Histórico de execução de ações"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cronologia delle esecuzioni delle azioni"
+          }
+        }
+      }
+    },
+    "Show Session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Session"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar sessão"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostra sessione"
+          }
+        }
+      }
+    },
+    "Session creation could not be confirmed. Check the server before running this action again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session creation could not be confirmed. Check the server before running this action again."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível confirmar a criação da sessão. Verifique o servidor antes de executar esta ação novamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non è stato possibile confermare la creazione della sessione. Controlla il server prima di eseguire nuovamente questa azione."
+          }
+        }
+      }
+    },
+    "Project Appearance": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Project Appearance"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aparência do projeto"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aspetto del progetto"
+          }
+        }
+      }
+    },
+    "Project colors and images are read-only on this server.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Project colors and images are read-only on this server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As cores e imagens do projeto são somente leitura neste servidor."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I colori e le immagini del progetto sono di sola lettura su questo server."
+          }
+        }
+      }
+    },
+    "Configure commands as quick Actions. Sessions stay on the server. Successful runs are hidden locally and can be restored from Action Run History.": {
+      "comment": "Project Actions explanation. Hidden locally does not mean archived or deleted on the server.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure commands as quick Actions. Sessions stay on the server. Successful runs are hidden locally and can be restored from Action Run History."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure comandos como ações rápidas. As sessões permanecem no servidor. Execuções bem-sucedidas ficam ocultas localmente e podem ser restauradas pelo Histórico de execução de ações."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configura i comandi come azioni rapide. Le sessioni restano sul server. Le esecuzioni riuscite vengono nascoste localmente e possono essere ripristinate dalla Cronologia delle esecuzioni delle azioni."
+          }
+        }
+      }
+    },
+    "Run project commands in dedicated sessions. Successful runs are hidden locally, never deleted, and remain recoverable.": {
+      "comment": "Pro feature description. Action sessions are retained on the server, not archived or deleted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run project commands in dedicated sessions. Successful runs are hidden locally, never deleted, and remain recoverable."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Execute comandos do projeto em sessões dedicadas. Execuções bem-sucedidas ficam ocultas localmente, nunca são excluídas e continuam recuperáveis."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esegui i comandi del progetto in sessioni dedicate. Le esecuzioni riuscite vengono nascoste localmente, mai eliminate, e restano recuperabili."
+          }
+        }
+      }
+    },
+    "Needs Attention": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs Attention"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Requer atenção"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Richiede attenzione"
+          }
+        }
+      }
+    },
+    "Creating Session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Creating Session"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Criando sessão"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Creazione della sessione"
+          }
+        }
+      }
+    },
+    "Running Command": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running Command"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Executando comando"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esecuzione del comando"
+          }
+        }
+      }
+    },
+    "Checking Result": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking Result"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verificando resultado"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifica del risultato"
+          }
+        }
+      }
+    },
+    "Succeeded, Hidden Locally": {
+      "comment": "Successful Project Action run whose session is hidden locally, not archived or deleted on the server.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Succeeded, Hidden Locally"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Concluído com sucesso, oculto localmente"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riuscita, nascosta localmente"
+          }
+        }
+      }
+    },
+    "Succeeded": {
+      "comment": "Status of a successful Project Action run.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Succeeded"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Concluído com sucesso"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riuscita"
+          }
+        }
+      }
+    },
+    "Failed or Unconfirmed": {
+      "comment": "Project Action run status; a failed request does not prove the action failed on the server.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed or Unconfirmed"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Falhou ou não confirmado"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non riuscita o non confermata"
+          }
+        }
+      }
+    },
+    "Interrupted or Unconfirmed": {
+      "comment": "Project Action run status after interruption, when completion could not be confirmed.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrupted or Unconfirmed"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrompido ou não confirmado"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrotta o non confermata"
+          }
+        }
+      }
+    },
+    "No Providers": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Providers"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhum provedor"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessun provider"
+          }
+        }
+      }
+    },
+    "No stored credentials.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No stored credentials."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma credencial armazenada."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessuna credenziale memorizzata."
+          }
+        }
+      }
+    },
+    "Connection details available": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection details available"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detalhes da conexão disponíveis"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dettagli della connessione disponibili"
+          }
+        }
+      }
+    },
+    "Custom provider configuration is unavailable on this v2 server. Configure it on the server instead.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom provider configuration is unavailable on this v2 server. Configure it on the server instead."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A configuração de provedores personalizados não está disponível neste servidor v2. Configure-os diretamente no servidor."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La configurazione dei provider personalizzati non è disponibile su questo server v2. Configurali direttamente sul server."
+          }
+        }
+      }
+    },
+    "Provider Connections": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Provider Connections"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conexões com provedores"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connessioni ai provider"
+          }
+        }
+      }
+    },
+    "Credentials": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credentials"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credenciais"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credenziali"
+          }
+        }
+      }
+    },
+    "Stored Credential": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stored Credential"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credencial armazenada"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credenziale memorizzata"
+          }
+        }
+      }
+    },
+    "Remove Credential?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove Credential?"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remover credencial?"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rimuovere la credenziale?"
+          }
+        }
+      }
+    },
+    "This removes the stored credential from the OpenCode server. Environment credentials are not changed.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This removes the stored credential from the OpenCode server. Environment credentials are not changed."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isso remove a credencial armazenada no servidor OpenCode. As credenciais de ambiente não são alteradas."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questa azione rimuove la credenziale memorizzata sul server OpenCode. Le credenziali d'ambiente non vengono modificate."
+          }
+        }
+      }
+    },
+    "Credentials are stored on the OpenCode server, not on this device.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credentials are stored on the OpenCode server, not on this device."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As credenciais são armazenadas no servidor OpenCode, não neste dispositivo."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le credenziali vengono memorizzate sul server OpenCode, non su questo dispositivo."
+          }
+        }
+      }
+    },
+    "Configure these environment variables on the machine running OpenCode.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure these environment variables on the machine running OpenCode."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure estas variáveis de ambiente na máquina que executa o OpenCode."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configura queste variabili d'ambiente sulla macchina che esegue OpenCode."
+          }
+        }
+      }
+    },
+    "Command authentication is not supported in OpenClient. Complete it on the server.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command authentication is not supported in OpenClient. Complete it on the server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A autenticação por comando não é compatível com o OpenClient. Conclua-a no servidor."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'autenticazione tramite comando non è supportata in OpenClient. Completala sul server."
+          }
+        }
+      }
+    },
+    "This authentication form is not supported in OpenClient. Use the OpenCode web app.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This authentication form is not supported in OpenClient. Use the OpenCode web app."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este formulário de autenticação não é compatível com o OpenClient. Use o app web do OpenCode."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo modulo di autenticazione non è supportato in OpenClient. Usa l'app web di OpenCode."
+          }
+        }
+      }
+    },
+    "Expires": {
+      "comment": "Label for the relative expiration time of a provider OAuth authorization attempt.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expires"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expira em"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scade tra"
+          }
+        }
+      }
+    },
+    "Cancel Authorization": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Authorization"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelar autorização"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annulla autorizzazione"
+          }
+        }
+      }
+    },
+    "If authorization uses a localhost callback, complete it on the machine running OpenCode. Leaving this screen stops waiting; the server attempt expires automatically.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If authorization uses a localhost callback, complete it on the machine running OpenCode. Leaving this screen stops waiting; the server attempt expires automatically."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se a autorização usar um callback de localhost, conclua-a na máquina que executa o OpenCode. Sair desta tela interrompe a espera; a tentativa no servidor expira automaticamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se l'autorizzazione usa un callback localhost, completala sulla macchina che esegue OpenCode. Uscendo da questa schermata si interrompe l'attesa; il tentativo sul server scade automaticamente."
+          }
+        }
+      }
+    },
+    "Not Set": {
+      "comment": "Provider or session form field with no value selected.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Set"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não definido"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non impostato"
+          }
+        }
+      }
+    },
+    "Yes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yes"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sim"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sì"
+          }
+        }
+      }
+    },
+    "No": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No"
+          }
+        }
+      }
+    },
+    "Active": {
+      "comment": "Status of an active configured plugin.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativo"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attivo"
+          }
+        }
+      }
+    },
+    "Status Unknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status Unknown"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status desconhecido"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stato sconosciuto"
+          }
+        }
+      }
+    },
+    "Check the value for %@.": {
+      "comment": "Provider authentication or session form validation error. The placeholder is the server-provided field title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check the value for %@."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifique o valor de %@."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifica il valore di %@."
+          }
+        }
+      }
+    },
+    "This authorization attempt expired. Start a new connection.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This authorization attempt expired. Start a new connection."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta tentativa de autorização expirou. Inicie uma nova conexão."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo tentativo di autorizzazione è scaduto. Avvia una nuova connessione."
+          }
+        }
+      }
+    },
+    "The provider request failed. Refresh connection status before trying again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The provider request failed. Refresh connection status before trying again."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A solicitação ao provedor falhou. Atualize o status da conexão antes de tentar novamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La richiesta al provider non è riuscita. Aggiorna lo stato della connessione prima di riprovare."
+          }
+        }
+      }
+    },
+    "The server returned an invalid integration identifier.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The server returned an invalid integration identifier."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O servidor retornou um identificador de integração inválido."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il server ha restituito un identificatore di integrazione non valido."
+          }
+        }
+      }
+    },
+    "OpenCode v2 detected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode v2 detected"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode v2 detectado"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode v2 rilevato"
+          }
+        }
+      }
+    },
+    "Report a Bug": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Report a Bug"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relatar um bug"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Segnala un bug"
+          }
+        }
+      }
+    },
+    "No projects found.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No projects found."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhum projeto encontrado."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessun progetto trovato."
+          }
+        }
+      }
+    },
+    "Cancel Request": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Request"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelar solicitação"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annulla richiesta"
+          }
+        }
+      }
+    },
+    "Manage provider connections in the OpenCode web app for this v2 server.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage provider connections in the OpenCode web app for this v2 server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gerencie as conexões com provedores no app web do OpenCode para este servidor v2."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gestisci le connessioni ai provider nell'app web di OpenCode per questo server v2."
+          }
+        }
+      }
+    },
+    "Workspace management is unavailable for OpenCode v2. Manage worktrees in the OpenCode web app.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workspace management is unavailable for OpenCode v2. Manage worktrees in the OpenCode web app."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O gerenciamento de espaços de trabalho não está disponível para o OpenCode v2. Gerencie os worktrees no app web do OpenCode."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La gestione degli spazi di lavoro non è disponibile per OpenCode v2. Gestisci i worktree nell'app web di OpenCode."
+          }
+        }
+      }
+    },
+    "This form uses fields that OpenClient cannot display. Complete it in the OpenCode web app, or cancel the request.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This form uses fields that OpenClient cannot display. Complete it in the OpenCode web app, or cancel the request."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este formulário usa campos que o OpenClient não consegue exibir. Preencha-o no app web do OpenCode ou cancele a solicitação."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo modulo usa campi che OpenClient non può visualizzare. Compilalo nell'app web di OpenCode oppure annulla la richiesta."
+          }
+        }
+      }
+    },
+    "OpenClient is using experimental v2 support. If something doesn’t work as expected, please report a bug.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenClient is using experimental v2 support. If something doesn’t work as expected, please report a bug."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O OpenClient está usando suporte experimental à v2. Se algo não funcionar como esperado, relate um bug."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenClient sta usando il supporto sperimentale alla v2. Se qualcosa non funziona come previsto, segnala un bug."
+          }
+        }
+      }
+    },
+    "OpenCode rejected the prompt.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode rejected the prompt."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O OpenCode rejeitou o prompt."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode ha rifiutato il prompt."
+          }
+        }
+      }
+    },
+    "Prompt admission is uncertain. Refresh the timeline before retrying.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prompt admission is uncertain. Refresh the timeline before retrying."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível confirmar se o prompt foi aceito. Atualize a linha do tempo antes de tentar novamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non è certo che il prompt sia stato accettato. Aggiorna la cronologia prima di riprovare."
+          }
+        }
+      }
+    },
+    "Prompt was admitted, but the timeline could not be reconciled yet.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prompt was admitted, but the timeline could not be reconciled yet."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O prompt foi aceito, mas ainda não foi possível sincronizar a linha do tempo."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il prompt è stato accettato, ma non è stato ancora possibile sincronizzare la cronologia."
+          }
+        }
+      }
+    },
+    "Shortcuts are not available for this OpenCode API yet. Open the connection in OpenClient instead.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shortcuts are not available for this OpenCode API yet. Open the connection in OpenClient instead."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os Atalhos ainda não estão disponíveis para esta API do OpenCode. Abra a conexão no OpenClient."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comandi Rapidi non è ancora disponibile per questa API di OpenCode. Apri invece la connessione in OpenClient."
+          }
+        }
+      }
+    },
+    "This server does not expose the OpenCode v2 API. Choose Legacy or Automatic and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This server does not expose the OpenCode v2 API. Choose Legacy or Automatic and try again."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este servidor não disponibiliza a API v2 do OpenCode. Escolha Legado ou Automático e tente novamente."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo server non espone l'API v2 di OpenCode. Scegli Legacy o Automatico e riprova."
+          }
+        }
+      }
+    },
+    "Sharing into OpenCode v2 will be enabled in a later adoption slice.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sharing into OpenCode v2 will be enabled in a later adoption slice."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O compartilhamento com o OpenCode v2 será habilitado em uma etapa posterior da integração."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La condivisione con OpenCode v2 verrà abilitata in una fase successiva dell'integrazione."
+          }
+        }
+      }
+    },
+    "Widget actions are not available for OpenCode v2 yet.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Widget actions are not available for OpenCode v2 yet."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As ações dos widgets ainda não estão disponíveis para o OpenCode v2."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le azioni dei widget non sono ancora disponibili per OpenCode v2."
+          }
+        }
+      }
+    },
     "": {
       "localizations": {
         "pt-BR": {
@@ -4259,6 +6426,28 @@
         }
       }
     },
+    "Command is no longer available. Open the app to sync widget settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command is no longer available. Open the app to sync widget settings."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O comando não está mais disponível. Abra o app para sincronizar as configurações do widget."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il comando non è più disponibile. Apri l'app per sincronizzare le impostazioni del widget."
+          }
+        }
+      }
+    },
     "Command unavailable": {
       "localizations": {
         "pt-BR": {
@@ -4961,7 +7150,7 @@
       }
     },
     "Copy": {
-      "comment": "UIKit toolbar button that copies selected terminal text.",
+      "comment": "Copies selected terminal text or the assistant response as plain text.",
       "localizations": {
         "pt-BR": {
           "stringUnit": {
@@ -4973,6 +7162,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copia"
+          }
+        }
+      }
+    },
+    "Completed at %@": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Concluído às %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completato alle %@"
+          }
+        }
+      }
+    },
+    "Copy as Markdown": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar como Markdown"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copia come Markdown"
+          }
+        }
+      }
+    },
+    "Message Actions": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ações da mensagem"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Azioni del messaggio"
+          }
+        }
+      }
+    },
+    "Select Text": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecionar texto"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seleziona testo"
           }
         }
       }
@@ -16975,6 +19228,12 @@
     },
     "The terminal is not connected.": {
       "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The terminal is not connected."
+          }
+        },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",

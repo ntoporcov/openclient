@@ -36,12 +36,14 @@ struct ConfigurationsSheet: View {
                         configurationRow(title: "Model", value: viewModel.configurationModelTitle)
                     }
 
-                    NavigationLink {
-                        VoiceModeModelSelectionView(viewModel: viewModel)
-                    } label: {
-                        configurationRow(title: "Talk Model", value: viewModel.configurationVoiceModeModelTitle)
+                    if viewModel.supportsProviderManagement && !viewModel.isV2Connection {
+                        NavigationLink {
+                            VoiceModeModelSelectionView(viewModel: viewModel)
+                        } label: {
+                            configurationRow(title: "Talk Model", value: viewModel.configurationVoiceModeModelTitle)
+                        }
+                        .accessibilityIdentifier("configurations.talk-model")
                     }
-                    .accessibilityIdentifier("configurations.talk-model")
 
                     NavigationLink {
                         ReasoningDefaultSelectionView(viewModel: viewModel)
@@ -56,10 +58,14 @@ struct ConfigurationsSheet: View {
                 }
 
                 Section("Providers") {
-                    if viewModel.isLoadingProviders && connectedProviders.isEmpty {
+                    if let error = viewModel.providerErrorMessage {
+                        Text(error).foregroundStyle(.red)
+                        Button("Try Again") { Task { await viewModel.loadProvidersForConfiguration() } }
+                    }
+                    if connectedProviders.isEmpty && (viewModel.isLoadingProviders || (viewModel.isV2Connection && !viewModel.isProviderCatalogReady && viewModel.providerErrorMessage == nil)) {
                         ProgressView("Loading providers")
-                    } else if connectedProviders.isEmpty {
-                        Text("No connected providers.")
+                    } else if connectedProviders.isEmpty, viewModel.providerErrorMessage == nil {
+                        Text(viewModel.isV2Connection ? LocalizedStringResource("No Providers") : LocalizedStringResource("No connected providers."))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
@@ -75,27 +81,33 @@ struct ConfigurationsSheet: View {
                                 )
                             }
                             .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await viewModel.disconnectProvider(provider) }
-                                } label: {
-                                    Label("Disconnect", systemImage: "trash")
+                                if viewModel.supportsProviderManagement && !viewModel.isV2Connection {
+                                    Button(role: .destructive) {
+                                        Task { await viewModel.disconnectProvider(provider) }
+                                    } label: {
+                                        Label("Disconnect", systemImage: "trash")
+                                    }
+                                    .disabled(!viewModel.canDisconnectProvider(provider) || viewModel.modelConfigurationStore.disconnectingProviderID == provider.id)
                                 }
-                                .disabled(!viewModel.canDisconnectProvider(provider) || viewModel.modelConfigurationStore.disconnectingProviderID == provider.id)
                             }
                         }
                     }
 
-                    NavigationLink(value: ConfigurationRoute.addProvider) {
-                        Label("Add Provider", systemImage: "plus.circle.fill")
+                    if viewModel.supportsProviderManagement {
+                        NavigationLink(value: ConfigurationRoute.addProvider) {
+                            Label("Add Provider", systemImage: "plus.circle.fill")
+                        }
+                        .accessibilityIdentifier("configurations.addProvider")
                     }
-                    .accessibilityIdentifier("configurations.addProvider")
                 }
 
-                Section("Server") {
-                    NavigationLink(value: ConfigurationRoute.plugins) {
-                        Label("Plugins", systemImage: "puzzlepiece.extension")
+                if viewModel.supportsProviderManagement {
+                    Section("Server") {
+                        NavigationLink(value: ConfigurationRoute.plugins) {
+                            Label("Plugins", systemImage: "puzzlepiece.extension")
+                        }
+                        .accessibilityIdentifier("configurations.plugins")
                     }
-                    .accessibilityIdentifier("configurations.plugins")
                 }
 
             }
@@ -108,9 +120,11 @@ struct ConfigurationsSheet: View {
                     }
                 }
             }
-            .task {
+            .task(id: viewModel.configurationRevision) {
                 await viewModel.loadProvidersForConfigurationIfNeeded()
             }
+            .onChange(of: viewModel.configurationRevision) { _, _ in navigationPath = NavigationPath() }
+            .onDisappear { viewModel.v2ProviderStore.stopAttempt() }
             .onAppear {
                 #if DEBUG
                 if OpenClientScreenshotScene.current == .providerSetup, navigationPath.isEmpty {
@@ -119,40 +133,53 @@ struct ConfigurationsSheet: View {
                 #endif
             }
             .navigationDestination(for: ConfigurationRoute.self) { route in
-                switch route {
-                case .plugins:
-                    PluginsConfigurationView(
-                        viewModel: viewModel,
-                        store: viewModel.pluginStore,
-                        bridge: bridge
-                    )
-                case .addProvider:
-                    AddProviderView(viewModel: viewModel)
-                case .customProvider:
-                    CustomProviderView(viewModel: viewModel)
-                case .providerConnect(let providerID):
-                    if let provider = viewModel.modelConfigurationStore.provider(id: providerID) {
-                        ProviderConnectView(viewModel: viewModel, provider: provider) {
-                            navigationPath = NavigationPath()
+                if route.requiresProviderManagement && !viewModel.supportsProviderManagement {
+                    ContentUnavailableView("Provider Unavailable", systemImage: "server.rack")
+                } else {
+                    switch route {
+                    case .plugins:
+                        PluginsConfigurationView(
+                            viewModel: viewModel,
+                            store: viewModel.pluginStore,
+                            bridge: bridge
+                        )
+                    case .addProvider:
+                        if viewModel.isV2Connection {
+                            V2ProvidersConfigurationView(facade: viewModel, store: viewModel.v2ProviderStore)
+                        } else {
+                            AddProviderView(viewModel: viewModel)
                         }
-                    } else {
-                        ContentUnavailableView("Provider Unavailable", systemImage: "server.rack")
-                    }
-                case .providerMethod(let providerID, let methodIndex):
-                    if let provider = viewModel.modelConfigurationStore.provider(id: providerID),
-                       viewModel.authMethods(for: provider).indices.contains(methodIndex) {
-                        let method = viewModel.authMethods(for: provider)[methodIndex]
-                        ProviderConnectMethodView(viewModel: viewModel, provider: provider, method: method, methodIndex: methodIndex) {
-                            navigationPath = NavigationPath()
+                    case .customProvider:
+                        if viewModel.isV2Connection {
+                            Text("Custom provider configuration is unavailable on this v2 server. Configure it on the server instead.")
+                        } else {
+                            CustomProviderView(viewModel: viewModel)
                         }
-                    } else {
-                        ContentUnavailableView("Auth Method Unavailable", systemImage: "person.badge.key")
+                    case .providerConnect(let providerID):
+                        if !viewModel.isV2Connection, let provider = viewModel.modelConfigurationStore.provider(id: providerID) {
+                            ProviderConnectView(viewModel: viewModel, provider: provider) {
+                                navigationPath = NavigationPath()
+                            }
+                        } else {
+                            ContentUnavailableView("Provider Unavailable", systemImage: "server.rack")
+                        }
+                    case .providerMethod(let providerID, let methodIndex):
+                        if !viewModel.isV2Connection, let provider = viewModel.modelConfigurationStore.provider(id: providerID),
+                           viewModel.authMethods(for: provider).indices.contains(methodIndex) {
+                            let method = viewModel.authMethods(for: provider)[methodIndex]
+                            ProviderConnectMethodView(viewModel: viewModel, provider: provider, method: method, methodIndex: methodIndex) {
+                                navigationPath = NavigationPath()
+                            }
+                        } else {
+                            ContentUnavailableView("Auth Method Unavailable", systemImage: "person.badge.key")
+                        }
+                    case .providerVisibility(let providerID):
+                        ProviderModelVisibilityView(viewModel: viewModel, providerID: providerID)
                     }
-                case .providerVisibility(let providerID):
-                    ProviderModelVisibilityView(viewModel: viewModel, providerID: providerID)
                 }
             }
         }
+        .id(viewModel.configurationRevision)
         .presentationDetents([.medium, .large])
     }
 
@@ -174,6 +201,11 @@ private enum ConfigurationRoute: Hashable {
     case providerConnect(String)
     case providerMethod(String, Int)
     case providerVisibility(String)
+
+    var requiresProviderManagement: Bool {
+        if case .providerVisibility = self { return false }
+        return true
+    }
 }
 
 private struct PluginsConfigurationView: View {
@@ -183,10 +215,10 @@ private struct PluginsConfigurationView: View {
 
     var body: some View {
         Group {
-            if store.isLoading && store.plugins.isEmpty {
+            if store.isLoading && store.pluginCount == 0 {
                 ProgressView("Loading plugins")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if store.errorMessage != nil, store.plugins.isEmpty {
+            } else if store.errorMessage != nil, store.pluginCount == 0 {
                 ContentUnavailableView {
                     Label("Plugins Unavailable", systemImage: "exclamationmark.triangle")
                 } description: {
@@ -196,7 +228,7 @@ private struct PluginsConfigurationView: View {
                         Task { await viewModel.loadPluginsForConfiguration() }
                     }
                 }
-            } else if store.plugins.isEmpty {
+            } else if store.pluginCount == 0 {
                 ContentUnavailableView(
                     "No Plugins",
                     systemImage: "puzzlepiece.extension",
@@ -204,7 +236,10 @@ private struct PluginsConfigurationView: View {
                 )
             } else {
                 List {
-                    Section(pluginCountTitle(store.plugins.count)) {
+                    Section(pluginCountTitle(store.pluginCount)) {
+                        ForEach(Array(store.v2Plugins.enumerated()), id: \.offset) { _, plugin in
+                            V2ConfiguredPluginRow(plugin: plugin)
+                        }
                         ForEach(store.plugins) { plugin in
                             if let bridge, isOpenClientPlugin(plugin.specifier) {
                                 NavigationLink {
@@ -238,9 +273,8 @@ private struct ConfiguredPluginRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle()
-                .fill(.green)
-                .frame(width: 7, height: 7)
+            Image(systemName: "puzzlepiece.extension")
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
 
             Text(specifier)
@@ -252,7 +286,7 @@ private struct ConfiguredPluginRow: View {
     }
 }
 
-private struct ProviderConfigurationRow: View {
+struct ProviderConfigurationRow: View {
     let providerID: String
     let providerName: String
     let subtitle: String
@@ -263,9 +297,11 @@ private struct ProviderConfigurationRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(providerName)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -420,7 +456,6 @@ private struct ProviderModelVisibilityView: View {
     @State private var query = ""
     @State private var modelItems: [ModelConfigurationModelEntry] = []
     @State private var visibilityStates: [String: Bool] = [:]
-    @State private var hasLoadedSnapshot = false
 
     private var provider: OpenCodeProvider? {
         viewModel.modelConfigurationStore.provider(id: providerID)
@@ -428,7 +463,8 @@ private struct ProviderModelVisibilityView: View {
 
     var body: some View {
         List {
-            if viewModel.isLoadingProviders && !hasLoadedSnapshot {
+            if let error = viewModel.providerErrorMessage { Text(error).foregroundStyle(.red) }
+            if viewModel.isLoadingProviders && modelItems.isEmpty {
                 Section {
                     HStack(spacing: 12) {
                         ProgressView()
@@ -453,11 +489,7 @@ private struct ProviderModelVisibilityView: View {
 
                 Section("Models") {
                     if modelItems.isEmpty {
-                        HStack(spacing: 12) {
-                            ProgressView()
-                            Text("Loading models...")
-                                .foregroundStyle(.secondary)
-                        }
+                        ContentUnavailableView("No Models", systemImage: "magnifyingglass")
                     } else if filteredModelItems.isEmpty {
                         ContentUnavailableView("No Models", systemImage: "magnifyingglass")
                     } else {
@@ -486,6 +518,8 @@ private struct ProviderModelVisibilityView: View {
         .task(id: providerID) {
             reloadSnapshot()
         }
+        .onChange(of: provider) { _, _ in reloadSnapshot() }
+        .onChange(of: viewModel.modelConfigurationStore.modelVisibilityPreferences) { _, _ in reloadSnapshot() }
         .searchable(text: $query, prompt: "Search models")
         .navigationTitle(provider?.name ?? String(localized: "Provider"))
         .opencodeInlineNavigationTitle()
@@ -503,12 +537,10 @@ private struct ProviderModelVisibilityView: View {
         guard let provider else {
             modelItems = []
             visibilityStates = [:]
-            hasLoadedSnapshot = true
             return
         }
         modelItems = viewModel.modelEntries(for: provider)
         visibilityStates = viewModel.modelVisibilityStates(for: provider)
-        hasLoadedSnapshot = true
     }
 }
 
@@ -563,8 +595,7 @@ private struct AddProviderView: View {
             if method.type == "oauth" { return method.label.isEmpty ? String(localized: "OAuth") : method.label }
             return method.label.isEmpty ? method.type.capitalized : method.label
         }
-        let unique = Array(NSOrderedSet(array: labels)) as? [String] ?? labels
-        return providerSummary(source: unique.formatted(), modelCount: provider.models.count)
+        return providerSummary(source: ConfigurationsFacade.providerAuthenticationSummary(labels), modelCount: provider.models.count)
     }
 }
 

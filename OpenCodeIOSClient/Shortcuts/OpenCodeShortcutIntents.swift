@@ -11,7 +11,7 @@ struct OpenCodeGetConnectionShortcutIntent: AppIntent {
     init() {}
 
     func perform() async throws -> some IntentResult & ReturnsValue<OpenCodeShortcutConnectionEntity> & ProvidesDialog {
-        let resolved = try OpenCodeShortcutService().resolveConnection(connection)
+        let resolved = try await OpenCodeShortcutService().resolveConnection(connection)
         return .result(value: resolved.entity, dialog: IntentDialog("Using \(resolved.entity.displayName)."))
     }
 }

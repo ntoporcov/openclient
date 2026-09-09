@@ -16,6 +16,13 @@ struct WidgetSnapshotInput {
     let commands: [OpenCodeCommand]
     let providers: [OpenCodeProvider]
     let visibleModelsByProviderID: [String: [OpenCodeModel]]
+    var profile: OpenCodeProfileIdentity? = .legacy
+    var projectsAreAuthoritative = true
+    var commandsAreAuthoritative = false
+    var modelsAreAuthoritative = false
+    var supportsNewSession = false
+    var supportsCommands = false
+    var defaultDirectory: String? = nil
 }
 
 struct WidgetServerPublication: Sendable {
@@ -26,6 +33,8 @@ struct WidgetServerPublication: Sendable {
     let commands: [OpenCodeWidgetCommandSnapshot]
     let replacingCommandProjectIDs: Set<String>
     let models: [OpenCodeWidgetModelSnapshot]
+    let projectsAreAuthoritative: Bool
+    let modelsAreAuthoritative: Bool
 }
 
 enum WidgetSnapshotBuilder {
@@ -37,7 +46,9 @@ enum WidgetSnapshotBuilder {
         includeModelOptions: Bool,
         now: Date = .now
     ) -> WidgetServerPublication? {
-        guard input.backendMode == .server, input.config.hasCredentials else { return nil }
+        guard input.backendMode == .server || input.backendMode == .serverV2,
+              input.config.hasCredentials, let profile = input.profile else { return nil }
+        guard (input.backendMode == .serverV2) == (profile == .v2) else { return nil }
 
         let serverID = input.config.recentServerID
         let server = OpenCodeWidgetServerSnapshot(
@@ -46,7 +57,10 @@ enum WidgetSnapshotBuilder {
             baseURL: input.config.trimmedBaseURL,
             username: input.config.trimmedUsername,
             generatedAt: now,
-            isLastConnected: true
+            isLastConnected: true,
+            profile: profile,
+            supportsNewSession: profile == .legacy || input.supportsNewSession,
+            supportsCommands: profile == .legacy || input.supportsCommands
         )
         let projects = input.projects.map { project in
             let title = projectTitle(project)
@@ -55,7 +69,11 @@ enum WidgetSnapshotBuilder {
                 serverID: serverID,
                 title: title,
                 worktree: project.worktree,
-                sortTitle: title.localizedLowercase
+                sortTitle: title.localizedLowercase,
+                profile: profile,
+                executionDirectory: project.id == "global" ? input.defaultDirectory : project.worktree,
+                offersNewSession: profile == .legacy || (input.supportsNewSession
+                    && (project.id != "global" || input.defaultDirectory?.isEmpty == false))
             )
         }
         let rootSessions = input.sessions.filter(\.isRootSession)
@@ -79,11 +97,13 @@ enum WidgetSnapshotBuilder {
                 updatedAt: summary.updatedAt,
                 lastActiveAt: summary.updatedAt ?? input.previews[session.id]?.date ?? .distantPast,
                 isPinned: pinnedOrder[session.id] != nil,
-                pinOrder: pinnedOrder[session.id]
+                pinOrder: pinnedOrder[session.id],
+                profile: profile
             )
         }
-        let commands = commandSnapshots(input: input, serverID: serverID)
-        let models = includeModelOptions ? modelSnapshots(input: input, serverID: serverID) : []
+        let commands = profile == .legacy || input.supportsCommands ? commandSnapshots(input: input, serverID: serverID) : []
+        let models = (profile == .legacy || input.supportsNewSession) && includeModelOptions ? modelSnapshots(input: input, serverID: serverID) : []
+        let commandProjects = input.commandsAreAuthoritative ? Set([input.currentProject?.id].compactMap { $0 }) : Set(commands.map(\.projectID))
 
         return WidgetServerPublication(
             server: server,
@@ -91,14 +111,17 @@ enum WidgetSnapshotBuilder {
             sessions: sessions,
             replacingSessionIDs: Set(rootSessions.map(\.id)),
             commands: commands,
-            replacingCommandProjectIDs: Set(commands.map(\.projectID)),
-            models: models
+            replacingCommandProjectIDs: commandProjects,
+            models: models,
+            projectsAreAuthoritative: input.projectsAreAuthoritative,
+            modelsAreAuthoritative: includeModelOptions && input.modelsAreAuthoritative
         )
     }
 
     private static func commandSnapshots(input: WidgetSnapshotInput, serverID: String) -> [OpenCodeWidgetCommandSnapshot] {
         guard let project = input.currentProject else { return [] }
-        let directory = project.id == "global" ? nil : (input.effectiveDirectory ?? project.worktree)
+        let directory = project.id == "global" ? (input.profile == .v2 ? input.defaultDirectory : nil) : (input.effectiveDirectory ?? project.worktree)
+        if input.profile == .v2, project.id == "global", directory?.isEmpty != false { return [] }
         var seen = Set<String>()
         return input.commands
             .filter { $0.source != "client" && seen.insert($0.name).inserted }
@@ -110,7 +133,8 @@ enum WidgetSnapshotBuilder {
                     directory: directory,
                     name: command.name,
                     summary: command.description,
-                    sortTitle: command.name.localizedLowercase
+                    sortTitle: command.name.localizedLowercase,
+                    profile: input.profile
                 )
             }
             .sorted { $0.sortTitle.localizedCaseInsensitiveCompare($1.sortTitle) == .orderedAscending }
@@ -132,7 +156,8 @@ enum WidgetSnapshotBuilder {
                     modelID: model.id,
                     modelName: model.name,
                     reasoningVariants: variants,
-                    sortTitle: "\(provider.name) \(model.name)".localizedLowercase
+                    sortTitle: "\(provider.name) \(model.name)".localizedLowercase,
+                    profile: input.profile
                 ))
             }
             if result.count >= modelLimit { break }

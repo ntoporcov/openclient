@@ -33,7 +33,8 @@ extension AppViewModel {
     }
 
     func canDisconnectProvider(_ provider: OpenCodeProvider) -> Bool {
-        modelConfigurationStore.canDisconnect(provider)
+        compatibilityClient(for: .providerConfiguration) != nil
+            && connectionStore.apiProfile != .v2 && modelConfigurationStore.canDisconnect(provider)
     }
 
     func models(for provider: OpenCodeProvider) -> [OpenCodeModel] {
@@ -41,7 +42,8 @@ extension AppViewModel {
     }
 
     func authMethods(for provider: OpenCodeProvider) -> [OpenCodeProviderAuthMethod] {
-        modelConfigurationStore.providerAuthMethodsByProviderID[provider.id] ?? [OpenCodeProviderAuthMethod(type: "api", label: "API Key", prompts: nil)]
+        guard compatibilityClient(for: .providerConfiguration) != nil, connectionStore.apiProfile != .v2 else { return [] }
+        return modelConfigurationStore.providerAuthMethodsByProviderID[provider.id] ?? [OpenCodeProviderAuthMethod(type: "api", label: "API Key", prompts: nil)]
     }
 
     func modelEntries(for provider: OpenCodeProvider) -> [ModelConfigurationModelEntry] {
@@ -87,8 +89,15 @@ extension AppViewModel {
     }
 
     func loadProvidersForConfiguration(ifNeeded: Bool = false) async {
+        guard !Task.isCancelled else { return }
+        guard connectionStore.apiProfile != .v2, let requestClient = compatibilityClient(for: .providerConfiguration) else {
+            await loadComposerOptions()
+            return
+        }
+        guard connectionStore.apiProfile != nil || config.apiPreference == .legacy else { return }
         let directory = effectiveSelectedDirectory
         let scope = providerConfigurationScope(directory: directory)
+        let profile = connectionStore.apiProfile
         if ifNeeded, !modelConfigurationStore.shouldLoadProviders(for: scope) {
             return
         }
@@ -104,22 +113,28 @@ extension AppViewModel {
         modelConfigurationStore.isLoadingProviders = true
         modelConfigurationStore.providerErrorMessage = nil
         do {
-            async let providerState = client.providerState(directory: directory)
-            async let authMethods = client.providerAuthMethods(directory: directory)
+            async let providerState = requestClient.providerState(directory: directory)
+            async let authMethods = requestClient.providerAuthMethods(directory: directory)
             let loadedState = try await providerState
             let loadedAuthMethods = try await authMethods
-            if try await repairAccidentallyDisabledAuthProviders(providerState: loadedState, authMethods: loadedAuthMethods) {
+            guard !Task.isCancelled, connectionStore.apiProfile == profile,
+                  config == requestClient.config, effectiveSelectedDirectory == directory else { return }
+            if try await repairAccidentallyDisabledAuthProviders(providerState: loadedState, authMethods: loadedAuthMethods, client: requestClient) {
                 await loadProvidersForConfiguration()
                 return
             }
+            guard !Task.isCancelled, connectionStore.apiProfile == profile,
+                  config == requestClient.config, effectiveSelectedDirectory == directory else { return }
             objectWillChange.send()
             modelConfigurationStore.applyProviderState(loadedState)
             modelConfigurationStore.applyProviderAuthMethods(loadedAuthMethods)
             modelConfigurationStore.markProvidersLoaded(for: scope)
             modelConfigurationStore.isLoadingProviders = false
             sanitizeComposerSelections()
-            scheduleWidgetSnapshotPublication(includeModelOptions: true)
+            await widgetSnapshotPublisher.publishNow(includeModelOptions: true, modelsAreAuthoritative: true)
         } catch {
+            guard !Task.isCancelled, connectionStore.apiProfile == profile,
+                  config == requestClient.config, effectiveSelectedDirectory == directory else { return }
             objectWillChange.send()
             modelConfigurationStore.isLoadingProviders = false
             modelConfigurationStore.providerErrorMessage = error.localizedDescription
@@ -127,6 +142,7 @@ extension AppViewModel {
     }
 
     func connectProviderWithAPIKey(providerID: String, key: String) async -> Bool {
+        guard allowsProviderMutation, let client = compatibilityClient(for: .providerConfiguration) else { return false }
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             errorMessage = String(localized: "API key is required.")
@@ -151,6 +167,7 @@ extension AppViewModel {
     }
 
     func authorizeProviderOAuth(providerID: String, methodIndex: Int, inputs: [String: String]) async -> OpenCodeProviderAuthAuthorization? {
+        guard allowsProviderMutation, let client = compatibilityClient(for: .providerConfiguration) else { return nil }
         objectWillChange.send()
         modelConfigurationStore.connectingProviderID = providerID
         do {
@@ -172,6 +189,7 @@ extension AppViewModel {
     }
 
     func completeProviderOAuth(providerID: String, methodIndex: Int, code: String? = nil) async -> Bool {
+        guard allowsProviderMutation, let client = compatibilityClient(for: .providerConfiguration) else { return false }
         let trimmedCode = code?.trimmingCharacters(in: .whitespacesAndNewlines)
         objectWillChange.send()
         modelConfigurationStore.connectingProviderID = providerID
@@ -202,6 +220,7 @@ extension AppViewModel {
     }
 
     func disconnectProvider(_ provider: OpenCodeProvider) async -> Bool {
+        guard allowsProviderMutation, let client = compatibilityClient(for: .providerConfiguration) else { return false }
         guard canDisconnectProvider(provider) else {
             errorMessage = String(localized: "\(provider.name) is managed by environment variables on the server.")
             return false
@@ -213,7 +232,7 @@ extension AppViewModel {
         do {
             if modelConfigurationStore.isConfigCustomProvider(provider) {
                 try? await client.removeProviderAuth(providerID: provider.id)
-                try await disableProviderInGlobalConfig(providerID: provider.id)
+                try await disableProviderInGlobalConfig(providerID: provider.id, client: client)
             } else {
                 try await client.removeProviderAuth(providerID: provider.id)
                 try? await client.disposeGlobal()
@@ -231,6 +250,11 @@ extension AppViewModel {
     }
 
     func saveCustomProvider(_ draft: OpenCodeCustomProviderDraft) async -> Bool {
+        if connectionStore.apiProfile == .v2 {
+            errorMessage = String(localized: "Custom provider configuration is unavailable on this v2 server. Configure it on the server instead.")
+            return false
+        }
+        guard allowsProviderMutation, let client = compatibilityClient(for: .providerConfiguration) else { return false }
         let providerID = draft.providerID.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseURL = draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -256,7 +280,7 @@ extension AppViewModel {
         guard Set(headers.map { $0.0.lowercased() }).count == headers.count else { errorMessage = String(localized: "Custom header keys must be unique."); return false }
 
         do {
-            let disabled = try await disabledProviders().filter { $0 != providerID }
+            let disabled = try await disabledProviders(client: client).filter { $0 != providerID }
             let env = apiKey.matchingEnvironmentReference
             var options: [String: OpenCodeJSONValue] = ["baseURL": .string(baseURL)]
             if !headers.isEmpty {
@@ -282,18 +306,32 @@ extension AppViewModel {
         }
     }
 
-    private func disableProviderInGlobalConfig(providerID: String) async throws {
-        let before = try await disabledProviders()
+    private var allowsProviderMutation: Bool {
+        guard compatibilityClient(for: .providerConfiguration) != nil else {
+            errorMessage = String(localized: "Provider Unavailable")
+            return false
+        }
+        guard connectionStore.apiProfile == .legacy || (connectionStore.apiProfile == nil && config.apiPreference == .legacy) else {
+            errorMessage = String(localized: "Manage provider connections in the OpenCode web app for this v2 server.")
+            return false
+        }
+        return true
+    }
+
+    private func disableProviderInGlobalConfig(providerID: String, client: OpenCodeAPIClient) async throws {
+        let before = try await disabledProviders(client: client)
         let next = before.contains(providerID) ? before : before + [providerID]
         try await client.updateGlobalConfig(OpenCodeGlobalConfigPatch(provider: nil, disabledProviders: next))
     }
 
-    private func repairAccidentallyDisabledAuthProviders(providerState: OpenCodeProviderListResponse, authMethods: [String: [OpenCodeProviderAuthMethod]]) async throws -> Bool {
+    private func repairAccidentallyDisabledAuthProviders(providerState: OpenCodeProviderListResponse, authMethods: [String: [OpenCodeProviderAuthMethod]], client: OpenCodeAPIClient) async throws -> Bool {
+        guard allowsProviderMutation else { return false }
         let providerIDs = Set(providerState.all.map(\.id))
         let hiddenAuthProviderIDs = Set(authMethods.keys).subtracting(providerIDs)
         guard !hiddenAuthProviderIDs.isEmpty else { return false }
 
-        let disabled = try await disabledProviders()
+        let disabled = try await disabledProviders(client: client)
+        guard allowsProviderMutation, config == client.config else { return false }
         let repaired = disabled.filter { !hiddenAuthProviderIDs.contains($0) }
         guard repaired.count != disabled.count else { return false }
         try await client.updateGlobalConfig(OpenCodeGlobalConfigPatch(provider: nil, disabledProviders: repaired))
@@ -301,7 +339,7 @@ extension AppViewModel {
         return true
     }
 
-    private func disabledProviders() async throws -> [String] {
+    private func disabledProviders(client: OpenCodeAPIClient) async throws -> [String] {
         let config = try await client.globalConfig()
         guard let values = config.objectValue?["disabled_providers"]?.arrayValue else { return [] }
         return values.compactMap(\.stringValue)

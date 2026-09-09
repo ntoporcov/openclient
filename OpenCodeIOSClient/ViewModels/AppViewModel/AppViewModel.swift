@@ -47,6 +47,7 @@ final class AppViewModel: ObservableObject {
     var localCachePrefetchedChatsByKey: [String: OpenCodeCachedChatSnapshot] = [:]
     var localCachePrefetchedChatKeys: [String] = []
     var sessionNavigationGeneration: UInt = 0
+    var windowSessionInterests: [UUID: String] = [:]
     lazy var connectionFacade = ConnectionFacade(viewModel: self)
     lazy var connectionCoordinator = ConnectionCoordinator(connectionStore: connectionStore)
     let eventSyncCoordinator = EventSyncCoordinator()
@@ -113,19 +114,25 @@ final class AppViewModel: ObservableObject {
     let mcpStore = MCPStore()
     lazy var mcpFacade = MCPFacade(
         store: mcpStore,
-        clientProvider: { [weak self] in self?.client },
-        directoryProvider: { [weak self] in self?.effectiveSelectedDirectory }
+        clientProvider: { [weak self] in self?.compatibilityClient(for: .mcp) },
+        directoryProvider: { [weak self] in self?.effectiveSelectedDirectory },
+        apiProfileProvider: { [weak self] in self?.connectionStore.apiProfile }
     )
     let terminalStore = TerminalStore()
     lazy var terminalFacade = TerminalFacade(
         store: terminalStore,
-        clientProvider: { [weak self] in self?.client },
-        directoryProvider: { [weak self] in self?.effectiveSelectedDirectory }
+        clientProvider: { [weak self] in self?.compatibilityClient(for: .terminal) },
+        directoryProvider: { [weak self] in self?.effectiveTerminalDirectory },
+        apiProfileProvider: { [weak self] in self?.connectionStore.apiProfile },
+        generationProvider: { [weak self] in UInt(bitPattern: self?.directoryStoreRegistry.generation ?? 0) }
     )
+    var effectiveTerminalDirectory: String? {
+        effectiveSelectedDirectory ?? (connectionStore.apiProfile == .v2 ? projectStore.defaultServerDirectory : nil)
+    }
     let projectFilesStore = ProjectFilesStore()
     lazy var projectFilesFacade = ProjectFilesFacade(
         store: projectFilesStore,
-        clientProvider: { [weak self] in self?.client },
+        clientProvider: { [weak self] in self?.compatibilityClient(for: .files) },
         hasGitProjectProvider: { [weak self] in
             self?.currentProject?.vcs == "git" && self?.effectiveSelectedDirectory != nil
         },
@@ -139,10 +146,13 @@ final class AppViewModel: ObservableObject {
         showFilesRoute: { [weak self] in
             self?.selectedProjectContentTab = .git
             self?.selectedSession = nil
-        }
+        },
+        apiProfileProvider: { [weak self] in self?.connectionStore.apiProfile }
     )
     let sessionInteractionStore = SessionInteractionStore()
     let projectStore = ProjectStore()
+    let projectActionStore = ProjectActionStore()
+    lazy var projectActionCoordinator = ProjectActionCoordinator(store: projectActionStore)
     var projects: [OpenCodeProject] {
         get { projectStore.projects }
         set {
@@ -742,8 +752,28 @@ final class AppViewModel: ObservableObject {
     var purchaseManager: OpenClientPurchaseManager { commerceFacade.purchaseManager }
 
     let eventManager = OpenCodeEventManager()
+    let globalFormsFacade = GlobalFormsFacade()
+    let backendFactory: (any BackendFactory)?
+    @Published var backendConnection: BackendConnection? {
+        didSet {
+            guard oldValue?.id != backendConnection?.id else { return }
+            let recoveryOwner = backendConnection.flatMap { connection in
+                guard let adapter = connection.openCodeCompatibility else { return nil as String? }
+                return OpenCodeLocalCacheIdentity.namespace(serverID: adapter.client.config.recentServerID, profile: adapter.profile)
+            }
+            chatStore.selectSubmissionOwner(recoveryOwner, connectionID: recoveryOwner == nil ? nil : backendConnection?.id)
+            globalFormsFacade.configure(backendConnection)
+            if let oldValue { projectActionCoordinator.cancel(connectionID: oldValue.id) }
+            refreshProjectActionVisibility()
+        }
+    }
+    var backendEventTask: Task<Void, Never>?
     let eventInterestSnapshot = OpenCodeEventInterestSnapshot()
     var eventStreamRestartTask: Task<Void, Never>?
+    var v2TimelineReconcileTask: Task<Void, Never>?
+    var v2InteractionRefreshTask: Task<Void, Never>?
+    var v2TimelineReconcileGeneration = 0
+    var isV2TimelineReconcilePending = false
     var foregroundChatCatchUpTask: Task<Void, Never>?
     var lastForegroundChatCatchUpScheduledAt = Date.distantPast
     var reloadTask: Task<Void, Never>?
@@ -809,8 +839,13 @@ final class AppViewModel: ObservableObject {
     let defaultSearchRoot = NSHomeDirectory()
     static let actionSessionTitlePrefix = "__openclient_action__:"
 
-    init() {
+    init(backendFactory: (any BackendFactory)? = nil) {
+        self.backendFactory = backendFactory
+        bindFunAndGamesScope()
         observeStores()
+
+        // Injected harnesses own their configuration, not the saved OpenCode/Keychain state.
+        if backendFactory != nil { return }
 
         if configureUITestEnvironmentIfNeeded() {
             return
@@ -840,6 +875,12 @@ final class AppViewModel: ObservableObject {
     }
 
     private func observeStores() {
+        projectActionStore.$runs
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshProjectActionVisibility() }
+            .store(in: &storeObservationCancellables)
+
         [
             // Most store-backed AppViewModel facades send objectWillChange explicitly.
             // Observing all stores here doubles invalidations during hot paths like send.
@@ -862,7 +903,40 @@ final class AppViewModel: ObservableObject {
     }
 
     var client: OpenCodeAPIClient {
-        OpenCodeAPIClient(config: config)
+        if let compatibility = backendConnection?.openCodeCompatibility {
+            return compatibility.client
+        }
+        // Compatibility-only callers must capability-gate before asking for an OpenCode client.
+        // Never silently send a third harness's intent to a previously saved OpenCode server.
+        precondition(backendFactory == nil, "Use backendConnection services for an injected backend")
+        return OpenCodeAPIClient(config: config)
+    }
+
+    func requireBackendConnection() throws -> BackendConnection {
+        if let backendConnection {
+            guard !backendConnection.isClosed else { throw BackendError.disconnected }
+            return backendConnection
+        }
+        // Existing hydrated/screenshot states can precede retained backend ownership.
+        // Never synthesize a connection for an injected harness or a disconnected server.
+        guard backendFactory == nil, isConnected, !isUsingAppleIntelligence, !isBrowsingLocalCache,
+              let profile = connectionStore.apiProfile ?? (config.apiPreference == .legacy ? .legacy : nil) else {
+            throw BackendError.disconnected
+        }
+        let connection = OpenCodeBackendFactory(client: OpenCodeAPIClient(config: config), eventManager: eventManager)
+            .makeConnection(profile: profile, version: serverVersion, healthy: true)
+        backendConnection = connection
+        return connection
+    }
+
+    func isCurrentBackendConnection(_ connection: BackendConnection) -> Bool {
+        backendConnection?.id == connection.id && !connection.isClosed && !Task.isCancelled
+    }
+
+    func compatibilityClient(for capability: BackendCapability) -> OpenCodeAPIClient? {
+        if let backendConnection { return try? backendConnection.requireOpenCodeClient(for: capability) }
+        guard backendFactory == nil else { return nil }
+        return client
     }
 
     var isUsingAppleIntelligence: Bool {
@@ -885,7 +959,8 @@ final class AppViewModel: ObservableObject {
     var sessions: [OpenCodeSession] { allSessions.filter { $0.isRootSession && !isActionSession($0) } }
 
     var isProjectWorkspacesEnabled: Bool {
-        projectWorkspacesEnabledByScope[currentProjectPreferenceScopeKey] ?? false
+        guard let currentProject else { return false }
+        return isProjectWorkspacesEnabled(for: currentProject)
     }
 
     var pinnedSessionIDs: [String] {
@@ -943,6 +1018,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func commands(canFork: Bool) -> [OpenCodeCommand] {
+        if let backendConnection, !backendConnection.capabilities.contains(.commands) { return [] }
         var result = directoryCommands
         if selectedSession != nil, !result.contains(where: { $0.name == "compact" }) {
             result.append(OpenClientChatCommands.compact)

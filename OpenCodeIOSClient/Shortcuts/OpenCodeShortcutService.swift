@@ -10,6 +10,9 @@ enum OpenCodeShortcutError: LocalizedError {
     case emptyMessage
     case sessionLimitReached
     case promptLimitReached
+    case uncertainAdmission
+    case uncertainCreation
+    case rejected
 
     var errorDescription: String? {
         switch self {
@@ -29,6 +32,12 @@ enum OpenCodeShortcutError: LocalizedError {
             return String(localized: "Free users can create one session. Open OpenClient to upgrade for unlimited sessions.")
         case .promptLimitReached:
             return String(localized: "The daily free prompt limit has been reached. Open OpenClient to upgrade for unlimited prompts.")
+        case .uncertainAdmission:
+            return String(localized: "Prompt admission is uncertain. Refresh the timeline before retrying.")
+        case .uncertainCreation:
+            return String(localized: "Session creation could not be confirmed. Check the server before running this action again.")
+        case .rejected:
+            return String(localized: "OpenCode rejected the prompt.")
         }
     }
 }
@@ -38,8 +47,11 @@ enum OpenCodeShortcutPromptReservation: Sendable {
     case reserved
 }
 
+@MainActor
 struct OpenCodeShortcutUsageGate: Sendable {
     var isProUnlocked: @Sendable () async -> Bool = { await OpenCodeShortcutUsageGate.currentProUnlock() }
+    var loadMeter: @MainActor @Sendable () -> OpenClientUsageMeter = { OpenClientUsageStore().load() }
+    var saveMeter: @MainActor @Sendable (OpenClientUsageMeter) -> Void = { OpenClientUsageStore().save($0) }
 
     func ensureCanCreateSession() async throws {
         guard !(await isProUnlocked()) else { return }
@@ -53,7 +65,7 @@ struct OpenCodeShortcutUsageGate: Sendable {
         guard !(await isProUnlocked()) else { return }
         var meter = normalizedMeter()
         meter.createdSessionCount += 1
-        OpenClientUsageStore().save(meter)
+        saveMeter(meter)
     }
 
     func reservePrompt() async throws -> OpenCodeShortcutPromptReservation {
@@ -63,7 +75,7 @@ struct OpenCodeShortcutUsageGate: Sendable {
             throw OpenCodeShortcutError.promptLimitReached
         }
         meter.dailyPromptCount += 1
-        OpenClientUsageStore().save(meter)
+        saveMeter(meter)
         return .reserved
     }
 
@@ -73,15 +85,15 @@ struct OpenCodeShortcutUsageGate: Sendable {
         var meter = normalizedMeter()
         guard meter.dailyPromptCount > 0 else { return }
         meter.dailyPromptCount -= 1
-        OpenClientUsageStore().save(meter)
+        saveMeter(meter)
     }
 
     private func normalizedMeter() -> OpenClientUsageMeter {
-        var meter = OpenClientUsageStore().load()
+        var meter = loadMeter()
         let original = meter
         meter.normalize()
         if meter != original {
-            OpenClientUsageStore().save(meter)
+            saveMeter(meter)
         }
         return meter
     }
@@ -102,11 +114,12 @@ struct OpenCodeShortcutResolvedConnection: Sendable {
     let config: OpenCodeServerConfig
 }
 
+@MainActor
 struct OpenCodeShortcutService {
-    private static let recentServerConfigsKey = "recentServerConfigs"
-
     var session: URLSession = .shared
     var usageGate = OpenCodeShortcutUsageGate()
+    var makeBackend: (@MainActor (OpenCodeServerConfig, URLSession) async throws -> BackendConnection)?
+    var pendingOperations = ShortcutPendingOperationStore()
 
     private let passwordStore = OpenCodeServerPasswordStore()
 
@@ -129,7 +142,9 @@ struct OpenCodeShortcutService {
 
     func projects(connection selectedConnection: OpenCodeShortcutConnectionEntity?) async throws -> [OpenCodeShortcutProjectEntity] {
         let resolved = try resolveConnection(selectedConnection)
-        let projects = try await client(for: resolved).listProjects()
+        let backend = try await backend(for: resolved)
+        defer { backend.close() }
+        let projects = try await backend.projects.projectsSnapshot().projects
         return projects.map { projectEntity(from: $0, connectionID: resolved.entity.id) }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
@@ -152,32 +167,56 @@ struct OpenCodeShortcutService {
     ) async throws -> [OpenCodeShortcutSessionEntity] {
         let resolved = try resolveConnection(selectedConnection, fallbackConnectionID: project.connectionID)
         try validate(project: project, connection: resolved.entity)
-        let sessions = try await client(for: resolved).listSessions(directory: project.directory, roots: true, limit: 100)
-        return sessions.filter(\.isRootSession).map { session in
-            sessionEntity(from: session, connectionID: resolved.entity.id, projectID: project.projectID, model: nil, reasoning: nil)
-        }
+        let backend = try await backend(for: resolved)
+        defer { backend.close() }
+        return try await sessionEntities(backend: backend, project: project, connectionID: resolved.entity.id)
     }
 
     func sessions(matching identifiers: [OpenCodeShortcutSessionEntity.ID]) async throws -> [OpenCodeShortcutSessionEntity] {
         let requested = Set(identifiers)
+        let components = identifiers.compactMap { OpenCodeShortcutEntityID.components(from: $0, kind: "session") }
+            .filter { $0.count == 3 }
         var values: [OpenCodeShortcutSessionEntity] = []
-        for identifier in identifiers {
-            guard let components = OpenCodeShortcutEntityID.components(from: identifier, kind: "session"),
-                  components.count == 3 else { continue }
-            let connectionID = components[0]
-            let projectID = components[1]
-            guard let connection = connections().first(where: { $0.id == connectionID }),
-                  let project = try await projects(connection: connection).first(where: { $0.projectID == projectID }) else { continue }
-            values.append(contentsOf: try await sessions(connection: connection, project: project).filter { requested.contains($0.id) })
+        for connection in connections() {
+            let projectIDs = Set(components.filter { $0[0] == connection.id }.map { $0[1] })
+            guard !projectIDs.isEmpty else { continue }
+            let resolved = try resolveConnection(connection)
+            let backend = try await backend(for: resolved)
+            defer { backend.close() }
+            let projects = try await backend.projects.projectsSnapshot().projects
+            for project in projects where projectIDs.contains(project.id) {
+                let entity = projectEntity(from: project, connectionID: connection.id)
+                values.append(contentsOf: try await sessionEntities(backend: backend, project: entity, connectionID: connection.id)
+                    .filter { requested.contains($0.id) })
+            }
         }
+        return values
+    }
+
+    private func sessionEntities(backend: BackendConnection, project: OpenCodeShortcutProjectEntity,
+                                 connectionID: String) async throws -> [OpenCodeShortcutSessionEntity] {
+        var values: [OpenCodeShortcutSessionEntity] = []
+        var cursor: String?
+        var cursors = Set<String>()
+        var ids = Set<String>()
+        repeat {
+            try Task.checkCancellation()
+            let page = try await backend.sessions.sessions(scope: scope(project: project), cursor: cursor, limit: 100, roots: true)
+            for session in page.sessions where session.isRootSession && session.projectID == project.projectID {
+                guard ids.insert(session.id).inserted else { continue }
+                values.append(sessionEntity(from: session, connectionID: connectionID, projectID: project.projectID, model: nil, reasoning: nil))
+            }
+            guard let next = page.nextCursor, cursors.insert(next).inserted else { break }
+            cursor = next
+        } while true
         return values
     }
 
     func models(connection selectedConnection: OpenCodeShortcutConnectionEntity?) async throws -> [OpenCodeShortcutModelEntity] {
         let resolved = try resolveConnection(selectedConnection)
-        let providerState = try await client(for: resolved).providerState()
-        let connectedProviderIDs = Set(providerState.connected)
-        let providers = providerState.all.filter { connectedProviderIDs.contains($0.id) }
+        let backend = try await backend(for: resolved)
+        defer { backend.close() }
+        let providers = try await backend.models.modelCatalog(scope: .init()).providers
         return providers.flatMap { provider in
             provider.models.values
                 .filter { $0.status != "deprecated" }
@@ -212,13 +251,27 @@ struct OpenCodeShortcutService {
         let resolved = try resolveConnection(selectedConnection, fallbackConnectionID: project.connectionID)
         try validate(project: project, connection: resolved.entity)
         try validate(model: model, connection: resolved.entity)
-        try await usageGate.ensureCanCreateSession()
-
-        let created = try await client(for: resolved).createSession(
-            title: normalizedTitle(title),
-            directory: project.directory
-        )
-        await usageGate.recordCreatedSession()
+        let backend = try await backend(for: resolved)
+        defer { backend.close() }
+        let identity = operationIdentity(resolved: resolved, backend: backend)
+        let hash = try operationHash("create", identity: identity, project: project, title: title, model: model, reasoning: reasoning)
+        if let pending = try pendingOperations.record(for: hash) {
+            let wasActive = pendingOperations.isActive(pending)
+            guard let sessionID = pending.sessionID else { throw OpenCodeShortcutError.uncertainCreation }
+            let created = try await backend.sessions.session(id: sessionID, scope: scope(project: project, pending: pending))
+            guard created.id == sessionID else { throw OpenCodeShortcutError.uncertainCreation }
+            guard try pendingOperations.confirm(pending), !wasActive else { throw OpenCodeShortcutError.uncertainCreation }
+            return sessionEntity(from: created, connectionID: resolved.entity.id, projectID: project.projectID, model: model, reasoning: reasoning)
+        }
+        let creation = try await creationRequest(backend: backend, project: project, title: title, model: model, reasoning: reasoning)
+        // Claim again after suspension so concurrent invocations cannot both create.
+        guard try pendingOperations.record(for: hash) == nil else { throw OpenCodeShortcutError.uncertainCreation }
+        var pending = ShortcutPendingOperationStore.Record(requestHash: hash,
+            serverNamespace: try ShortcutPendingOperationStore.requestHash(identity), directory: creation.scope.directory)
+        guard try pendingOperations.claim(pending) else { throw OpenCodeShortcutError.uncertainCreation }
+        defer { pendingOperations.finishInvocation(pending) }
+        let created = try await create(creation, backend: backend, pending: &pending)
+        guard try pendingOperations.remove(pending) || pendingOperations.isConfirmed(pending) else { throw OpenCodeShortcutError.uncertainCreation }
         return sessionEntity(
             from: created,
             connectionID: resolved.entity.id,
@@ -245,20 +298,51 @@ struct OpenCodeShortcutService {
         guard !trimmedMessage.isEmpty else { throw OpenCodeShortcutError.emptyMessage }
 
         let outputSession = selectedSession.applying(model: model, reasoning: reasoning)
-        let reservation = try await usageGate.reservePrompt()
-        do {
-            try await client(for: resolved).sendMessageAsync(
-                sessionID: selectedSession.sessionID,
-                text: trimmedMessage,
-                directory: messageDirectory(session: selectedSession, project: project),
-                model: model?.modelReference ?? selectedSession.modelReference,
-                variant: Self.normalizedReasoning(reasoning) ?? selectedSession.reasoningVariant
-            )
+        let backend = try await backend(for: resolved)
+        defer { backend.close() }
+        let identity = operationIdentity(resolved: resolved, backend: backend)
+        let hash = try operationHash("send", identity: identity, project: project, selectedSession: outputSession, message: trimmedMessage)
+        if let pending = try pendingOperations.record(for: hash) {
+            try await reconcile(pending, backend: backend, project: project)
             return outputSession
+        }
+        let scope = scope(project: project, session: selectedSession)
+        let pending = ShortcutPendingOperationStore.Record(requestHash: hash,
+            serverNamespace: try ShortcutPendingOperationStore.requestHash(identity), sessionID: selectedSession.sessionID,
+            messageID: OpenCodeIdentifier.message(), directory: scope.directory, workspaceID: scope.workspaceID)
+        try await pendingOperations.acquireSession(pending)
+        defer { pendingOperations.finishInvocation(pending) }
+        // A previous invocation may have become uncertain while this one waited for the lock.
+        if let previous = try pendingOperations.record(for: hash) {
+            try await reconcile(previous, backend: backend, project: project)
+            return outputSession
+        }
+        try await checkSessionPending(pending, backend: backend, project: project)
+        guard try pendingOperations.claim(pending) else { throw OpenCodeShortcutError.uncertainAdmission }
+        var reservation: OpenCodeShortcutPromptReservation = .none
+        do {
+            reservation = try await usageGate.reservePrompt()
+            guard try pendingOperations.isCurrent(pending), pendingOperations.ownsSession(pending) else { throw OpenCodeShortcutError.uncertainAdmission }
+            if let selection = backend.sessionSelection,
+               outputSession.modelReference != nil || outputSession.reasoningVariant != nil {
+                let latest = try await revalidate(selectedSession, backend: backend, project: project)
+                var reference = outputSession.modelReference
+                if reference == nil {
+                    reference = latest.model.map { .init(providerID: $0.providerID, modelID: $0.modelID) }
+                }
+                guard let reference else { throw BackendError.invalidScope }
+                guard try pendingOperations.isCurrent(pending), pendingOperations.ownsSession(pending) else { throw OpenCodeShortcutError.uncertainAdmission }
+                try await selection.setModel(sessionID: selectedSession.sessionID, model: reference,
+                    variant: outputSession.reasoningVariant, scope: scope)
+            }
+            try Task.checkCancellation()
         } catch {
-            await usageGate.refundPrompt(reservation)
+            if try pendingOperations.remove(pending) { await usageGate.refundPrompt(reservation) }
             throw error
         }
+        try await submit(pending, text: trimmedMessage, model: outputSession.modelReference, variant: outputSession.reasoningVariant,
+            backend: backend, project: project, target: selectedSession, reservation: reservation)
+        return outputSession
     }
 
     func createSessionAndSendMessage(
@@ -276,33 +360,47 @@ struct OpenCodeShortcutService {
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessage.isEmpty else { throw OpenCodeShortcutError.emptyMessage }
 
-        try await usageGate.ensureCanCreateSession()
-        let reservation = try await usageGate.reservePrompt()
+        let backend = try await backend(for: resolved)
+        defer { backend.close() }
+        let identity = operationIdentity(resolved: resolved, backend: backend)
+        let hash = try operationHash("create-send", identity: identity, project: project, title: title,
+            message: trimmedMessage, model: model, reasoning: reasoning)
+        if let pending = try pendingOperations.record(for: hash) {
+            guard let sessionID = pending.sessionID else { throw OpenCodeShortcutError.uncertainCreation }
+            let created = try await backend.sessions.session(id: sessionID, scope: scope(project: project, pending: pending))
+            guard created.id == sessionID else { throw OpenCodeShortcutError.uncertainCreation }
+            try await reconcile(pending, backend: backend, project: project)
+            return sessionEntity(from: created, connectionID: resolved.entity.id, projectID: project.projectID, model: model, reasoning: reasoning)
+        }
+        let creation = try await creationRequest(backend: backend, project: project, title: title, model: model, reasoning: reasoning)
+        guard try pendingOperations.record(for: hash) == nil else { throw OpenCodeShortcutError.uncertainCreation }
+        var pending = ShortcutPendingOperationStore.Record(requestHash: hash,
+            serverNamespace: try ShortcutPendingOperationStore.requestHash(identity),
+            messageID: OpenCodeIdentifier.message(), directory: creation.scope.directory)
+        guard try pendingOperations.claim(pending) else { throw OpenCodeShortcutError.uncertainCreation }
+        defer { pendingOperations.finishInvocation(pending) }
+        let reservation: OpenCodeShortcutPromptReservation
         do {
-            let created = try await client(for: resolved).createSession(
-                title: normalizedTitle(title),
-                directory: project.directory
-            )
-            await usageGate.recordCreatedSession()
-            let sessionEntity = sessionEntity(
-                from: created,
-                connectionID: resolved.entity.id,
-                projectID: project.projectID,
-                model: model,
-                reasoning: reasoning
-            )
-            try await client(for: resolved).sendMessageAsync(
-                sessionID: sessionEntity.sessionID,
-                text: trimmedMessage,
-                directory: messageDirectory(session: sessionEntity, project: project),
-                model: model?.modelReference,
-                variant: Self.normalizedReasoning(reasoning)
-            )
-            return sessionEntity
+            reservation = try await usageGate.reservePrompt()
         } catch {
+            try pendingOperations.remove(pending)
+            throw error
+        }
+        let created: OpenCodeSession
+        do {
+            created = try await create(creation, backend: backend, pending: &pending)
+        } catch {
+            // No prompt was transmitted, even if session creation itself is uncertain.
             await usageGate.refundPrompt(reservation)
             throw error
         }
+        try await pendingOperations.acquireSession(pending)
+        try await checkSessionPending(pending, backend: backend, project: project)
+        try await submit(pending, text: trimmedMessage, model: model?.modelReference, variant: Self.normalizedReasoning(reasoning),
+            backend: backend, project: project,
+            target: sessionEntity(from: created, connectionID: resolved.entity.id, projectID: project.projectID, model: model, reasoning: reasoning),
+            reservation: reservation)
+        return sessionEntity(from: created, connectionID: resolved.entity.id, projectID: project.projectID, model: model, reasoning: reasoning)
     }
 
     func resolveConnection(
@@ -319,27 +417,186 @@ struct OpenCodeShortcutService {
             throw OpenCodeShortcutError.mismatchedConnection
         }
 
+        guard let savedServer = loadSavedServers().first(where: { $0.recentServerID == entity.id }) else {
+            throw OpenCodeShortcutError.missingConnection
+        }
         let password = passwordStore.loadPassword(for: entity.id)
-        guard let password, !password.isEmpty else {
+        guard let password else {
             throw OpenCodeShortcutError.missingCredentials(entity.displayName)
         }
 
-        let config = OpenCodeServerConfig(
-            name: entity.displayName,
-            baseURL: entity.baseURL,
-            username: entity.username,
-            password: password
-        )
+        let config = savedServer.serverConfig(password: password)
         return OpenCodeShortcutResolvedConnection(entity: entity, config: config)
     }
 
-    static func normalizedReasoning(_ reasoning: String?) -> String? {
+    nonisolated static func normalizedReasoning(_ reasoning: String?) -> String? {
         let trimmed = reasoning?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func client(for connection: OpenCodeShortcutResolvedConnection) -> OpenCodeAPIClient {
-        OpenCodeAPIClient(config: connection.config, session: session)
+    private func backend(for connection: OpenCodeShortcutResolvedConnection) async throws -> BackendConnection {
+        if let makeBackend { return try await makeBackend(connection.config, session) }
+        let factory = OpenCodeBackendFactory(client: OpenCodeAPIClient(config: connection.config, session: session),
+            eventManager: OpenCodeEventManager())
+        if connection.config.apiPreference == .legacy {
+            // Known preference, not a health assertion. Shortcuts never publish connection UI state.
+            return factory.makeConnection(profile: .legacy, version: "", healthy: false)
+        }
+        return try await factory.connect()
+    }
+
+    private func scope(project: OpenCodeShortcutProjectEntity, session: OpenCodeShortcutSessionEntity? = nil,
+                       pending: ShortcutPendingOperationStore.Record? = nil) -> BackendScope {
+        if let pending {
+            return .init(projectID: project.projectID, directory: project.projectID == "global" ? nil : pending.directory, workspaceID: pending.workspaceID)
+        }
+        if let session {
+            return .init(projectID: project.projectID, directory: messageDirectory(session: session, project: project), workspaceID: session.workspaceID)
+        }
+        return .init(projectID: project.projectID, directory: project.projectID == "global" ? nil : project.directory)
+    }
+
+    private func creationRequest(backend: BackendConnection, project: OpenCodeShortcutProjectEntity, title: String?,
+                                 model: OpenCodeShortcutModelEntity?, reasoning: String?) async throws -> BackendSessionCreation {
+        try await usageGate.ensureCanCreateSession()
+        var scope = scope(project: project)
+        if backend.sessionSelection != nil, scope.directory == nil {
+            let snapshot = try await backend.projects.projectsSnapshot()
+            let candidate = project.projectID == "global"
+                ? snapshot.defaultDirectory
+                : snapshot.projects.first(where: { $0.id == project.projectID })?.worktree
+            guard let directory = Self.normalizedDirectory(candidate) else { throw BackendError.invalidScope }
+            scope.directory = directory
+        }
+        var reference = model?.modelReference
+        if backend.sessionSelection != nil, reference == nil, Self.normalizedReasoning(reasoning) != nil {
+            let catalog = try await backend.models.modelCatalog(scope: scope)
+            guard catalog.defaults.count == 1, let value = catalog.defaults.first else { throw BackendError.invalidScope }
+            reference = .init(providerID: value.key, modelID: value.value)
+        }
+        return .init(title: normalizedTitle(title), scope: scope, model: reference, variant: Self.normalizedReasoning(reasoning))
+    }
+
+    private func create(_ request: BackendSessionCreation, backend: BackendConnection,
+                        pending: inout ShortcutPendingOperationStore.Record) async throws -> OpenCodeSession {
+        do { try Task.checkCancellation() } catch {
+            try pendingOperations.remove(pending)
+            throw error
+        }
+        guard try pendingOperations.isCurrent(pending) else { throw OpenCodeShortcutError.uncertainCreation }
+        let created: OpenCodeSession
+        do {
+            created = try await backend.sessions.createSession(request)
+        } catch let OpenCodeAPIError.httpError(status, body) where (400..<500).contains(status) && status != 408 && status != 409 {
+            try pendingOperations.remove(pending)
+            throw OpenCodeAPIError.httpError(status, body)
+        } catch {
+            throw OpenCodeShortcutError.uncertainCreation
+        }
+        pending.sessionID = created.id
+        pending.directory = Self.normalizedDirectory(created.directory) ?? request.scope.directory
+        pending.workspaceID = created.workspaceID ?? request.scope.workspaceID
+        let saved = try pendingOperations.save(pending)
+        await usageGate.recordCreatedSession()
+        guard saved else { throw OpenCodeShortcutError.uncertainCreation }
+        return created
+    }
+
+    private func submit(_ pending: ShortcutPendingOperationStore.Record, text: String, model: OpenCodeModelReference?, variant: String?,
+                         backend: BackendConnection, project: OpenCodeShortcutProjectEntity,
+                         target: OpenCodeShortcutSessionEntity,
+                         reservation: OpenCodeShortcutPromptReservation) async throws {
+        guard let sessionID = pending.sessionID, let messageID = pending.messageID else { throw OpenCodeShortcutError.uncertainAdmission }
+        guard try pendingOperations.isCurrent(pending), pendingOperations.ownsSession(pending) else { throw OpenCodeShortcutError.uncertainAdmission }
+        do {
+            _ = try await revalidate(target, backend: backend, project: project)
+            try Task.checkCancellation()
+        } catch {
+            // No prompt reached the transport, so this invocation can safely release its reservation.
+            if try pendingOperations.remove(pending) { await usageGate.refundPrompt(reservation) }
+            throw error
+        }
+        guard try pendingOperations.isCurrent(pending), pendingOperations.ownsSession(pending) else { throw OpenCodeShortcutError.uncertainAdmission }
+        let admission: BackendAdmission
+        do {
+            admission = try await backend.chat.submit(.init(sessionID: sessionID, messageID: messageID, text: text,
+                scope: scope(project: project, pending: pending), model: model, variant: variant))
+        } catch {
+            // Once handed to the transport, thrown errors do not prove rejection.
+            if pendingOperations.isConfirmed(pending) { return }
+            throw OpenCodeShortcutError.uncertainAdmission
+        }
+        // A read-only reconciler can confirm this input while its POST receipt is delayed.
+        // That evidence belongs to this invocation, not to a newer record with the same hash.
+        if pendingOperations.isConfirmed(pending) { return }
+        switch admission {
+        case .accepted(let admittedSession, let admittedMessage) where admittedSession == sessionID && admittedMessage == messageID:
+            guard try pendingOperations.remove(pending) else { throw OpenCodeShortcutError.uncertainAdmission }
+        case .rejected(let rejectedSession, let rejectedMessage) where rejectedSession == sessionID && rejectedMessage == messageID:
+            guard try pendingOperations.remove(pending) else { throw OpenCodeShortcutError.uncertainAdmission }
+            await usageGate.refundPrompt(reservation)
+            throw OpenCodeShortcutError.rejected
+        default:
+            throw OpenCodeShortcutError.uncertainAdmission
+        }
+    }
+
+    private func reconcile(_ pending: ShortcutPendingOperationStore.Record, backend: BackendConnection,
+                           project: OpenCodeShortcutProjectEntity) async throws {
+        guard try pendingOperations.isCurrent(pending) else { throw OpenCodeShortcutError.uncertainAdmission }
+        // Confirmation can unblock the session, but only the active original invocation
+        // returns its success. An abandoned operation instead returns recovery to this caller.
+        let wasActive = pendingOperations.isActive(pending)
+        guard let sessionID = pending.sessionID, let messageID = pending.messageID else { throw OpenCodeShortcutError.uncertainAdmission }
+        let scope = scope(project: project, pending: pending)
+        if let reader = backend.sessionSelection as? any BackendPendingInputReading,
+           let ids = try? await reader.pendingInputIDs(sessionID: sessionID, scope: scope), ids.contains(messageID) {
+            guard try pendingOperations.confirm(pending), !wasActive else { throw OpenCodeShortcutError.uncertainAdmission }
+            return
+        }
+        var cursor: String?
+        var seen = Set<String>()
+        repeat {
+            let page = try await backend.chat.transcript(sessionID: sessionID, scope: scope, cursor: cursor, limit: 200)
+            if page.messages.contains(where: { $0.id == messageID && $0.info.sessionID == sessionID && $0.info.role == "user" }) {
+                guard try pendingOperations.confirm(pending), !wasActive else { throw OpenCodeShortcutError.uncertainAdmission }
+                return
+            }
+            cursor = page.olderCursor
+            if let cursor, !seen.insert(cursor).inserted { break }
+        } while cursor != nil
+        throw OpenCodeShortcutError.uncertainAdmission
+    }
+
+    private func checkSessionPending(_ candidate: ShortcutPendingOperationStore.Record, backend: BackendConnection,
+                                     project: OpenCodeShortcutProjectEntity) async throws {
+        guard let sessionID = candidate.sessionID else { throw OpenCodeShortcutError.uncertainCreation }
+        for pending in try pendingOperations.records(serverNamespace: candidate.serverNamespace, sessionID: sessionID)
+            where pending.operationID != candidate.operationID {
+            try await reconcile(pending, backend: backend, project: project)
+            // Resolving a different input is a read-only recovery invocation, never an
+            // instruction to automatically change selection and POST the new input too.
+            throw OpenCodeShortcutError.uncertainAdmission
+        }
+    }
+
+    private func operationIdentity(resolved: OpenCodeShortcutResolvedConnection, backend: BackendConnection) -> [String?] {
+        if let profile = backend.openCodeCompatibility?.profile {
+            // Shipped profile-less records belong to legacy. Preserve that exact hash format
+            // for legacy recovery only; negotiation preference is never a persisted owner.
+            return profile == .legacy ? [resolved.entity.id] : [resolved.entity.id, "profile", profile.rawValue]
+        }
+        return [resolved.entity.id, "backend", backend.descriptor.id]
+    }
+
+    private func operationHash(_ operation: String, identity: [String?], project: OpenCodeShortcutProjectEntity,
+                               selectedSession: OpenCodeShortcutSessionEntity? = nil, title: String? = nil, message: String? = nil,
+                               model: OpenCodeShortcutModelEntity? = nil, reasoning: String? = nil) throws -> String {
+        let fields: [String?] = [project.projectID, project.directory,
+            selectedSession?.sessionID, selectedSession?.directory, selectedSession?.workspaceID, normalizedTitle(title), message,
+            model?.providerID ?? selectedSession?.providerID, model?.modelID ?? selectedSession?.modelID,
+            Self.normalizedReasoning(reasoning) ?? selectedSession?.reasoningVariant]
+        return try ShortcutPendingOperationStore.requestHash([operation] + identity + fields)
     }
 
     private func validate(project: OpenCodeShortcutProjectEntity, connection: OpenCodeShortcutConnectionEntity) throws {
@@ -349,6 +606,17 @@ struct OpenCodeShortcutService {
     private func validate(session: OpenCodeShortcutSessionEntity, project: OpenCodeShortcutProjectEntity, connection: OpenCodeShortcutConnectionEntity) throws {
         guard session.connectionID == connection.id else { throw OpenCodeShortcutError.mismatchedConnection }
         guard session.projectID == project.projectID else { throw OpenCodeShortcutError.mismatchedProject }
+    }
+
+    private func revalidate(_ target: OpenCodeShortcutSessionEntity, backend: BackendConnection,
+                            project: OpenCodeShortcutProjectEntity) async throws -> OpenCodeSession {
+        let latest = try await backend.sessions.session(id: target.sessionID, scope: scope(project: project, session: target))
+        guard latest.id == target.sessionID, latest.isRootSession,
+              latest.projectID == project.projectID,
+              project.projectID == "global" || Self.normalizedDirectory(target.directory) != nil,
+              Self.normalizedDirectory(latest.directory) == Self.normalizedDirectory(target.directory),
+              latest.workspaceID == target.workspaceID else { throw OpenCodeShortcutError.mismatchedSession }
+        return latest
     }
 
     private func validate(model: OpenCodeShortcutModelEntity?, connection: OpenCodeShortcutConnectionEntity) throws {
@@ -362,11 +630,8 @@ struct OpenCodeShortcutService {
     }
 
     private func messageDirectory(session: OpenCodeShortcutSessionEntity, project: OpenCodeShortcutProjectEntity) -> String? {
-        if session.directory == "/" { return nil }
-        if let directory = Self.normalizedDirectory(session.directory) {
-            return directory
-        }
-        return project.projectID == "global" ? nil : project.directory
+        if project.projectID == "global" { return nil }
+        return Self.normalizedDirectory(session.directory)
     }
 
     private func projectEntity(from project: OpenCodeProject, connectionID: String) -> OpenCodeShortcutProjectEntity {
@@ -439,21 +704,6 @@ struct OpenCodeShortcutService {
     }
 
     private func loadSavedServers() -> [OpenCodeSavedServer] {
-        guard let data = UserDefaults.standard.data(forKey: Self.recentServerConfigsKey) else {
-            return []
-        }
-        if let savedServers = try? JSONDecoder().decode([OpenCodeSavedServer].self, from: data) {
-            return savedServers
-        }
-        guard let rawEntries = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else {
-            return []
-        }
-        return rawEntries.compactMap { entry -> OpenCodeSavedServer? in
-            guard JSONSerialization.isValidJSONObject(entry),
-                  let entryData = try? JSONSerialization.data(withJSONObject: entry) else {
-                return nil
-            }
-            return try? JSONDecoder().decode(OpenCodeSavedServer.self, from: entryData)
-        }
+        OpenCodeSavedServer.loadPublicSavedServers()
     }
 }

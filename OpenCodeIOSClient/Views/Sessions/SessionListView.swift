@@ -25,16 +25,19 @@ struct SessionListView: View {
             onSessionChosen: onSessionChosen
         )
         .equatable()
+        .modifier(WorktreeRemovalConfirmationModifier(facade: facade))
         .safeAreaInset(edge: .bottom) {
-            if !facade.snapshot.isReadOnly {
+            if facade.snapshot.canCreateSession {
                 HStack(spacing: 8) {
                     Spacer()
-                    SessionListActionButton(
-                        title: "Talk",
-                        systemImage: "waveform",
-                        accessibilityIdentifier: "sessions.newTalk",
-                        action: onNewTalk
-                    )
+                    if facade.snapshot.allowsNewTalk {
+                        SessionListActionButton(
+                            title: "Talk",
+                            systemImage: "waveform",
+                            accessibilityIdentifier: "sessions.newTalk",
+                            action: onNewTalk
+                        )
+                    }
                     SessionListActionButton(
                         title: "Chat",
                         systemImage: "square.and.pencil",
@@ -88,8 +91,7 @@ private struct SessionListContent: View, Equatable {
     let snapshot: SessionListFacade.Snapshot
     @State private var renamingSession: OpenCodeSession?
     @State private var renameTitle = ""
-    @State private var isShowingCreateWorkspaceAlert = false
-    @State private var createWorkspaceName = ""
+    @State private var isShowingCreateWorkspaceSheet = false
     let onSessionChosen: () -> Void
 
     nonisolated static func == (lhs: SessionListContent, rhs: SessionListContent) -> Bool {
@@ -162,7 +164,7 @@ private struct SessionListContent: View, Equatable {
                     } else if snapshot.unpinnedRows.isEmpty {
                         Group {
                             if snapshot.isEmpty {
-                                if snapshot.isReadOnly {
+                                if !snapshot.canCreateSession {
                                     Text("No downloaded sessions.")
                                 } else {
                                     Text("Create a session to start chatting.")
@@ -229,10 +231,45 @@ private struct SessionListContent: View, Equatable {
         .background(OpenCodePlatformColor.groupedBackground)
         .opencodeInteractiveKeyboardDismiss()
         .refreshable {
-            await facade.refresh()
+            if snapshot.showsWorkspaces {
+                await facade.refreshWorkspaceInventory()
+            } else {
+                await facade.refresh()
+            }
+        }
+        .toolbar {
+            if snapshot.showsWorkspaces && !snapshot.isReadOnly {
+                ToolbarItem(placement: .opencodeTrailing) {
+                    Menu {
+                        Button("New Workspace", systemImage: "plus.square") {
+                            isShowingCreateWorkspaceSheet = true
+                        }
+                        .disabled(!facade.allowsWorkspaceCreation)
+                        Button("Refresh Workspaces", systemImage: "arrow.clockwise") {
+                            let context = snapshot.workspaceContextID
+                            Task {
+                                guard facade.workspaceCreationContextID == context else { return }
+                                await facade.refreshWorkspaceInventory()
+                            }
+                        }
+                    } label: {
+                        Label("Workspaces", systemImage: "arrow.triangle.branch")
+                    }
+                    .disabled(snapshot.workspaceSections.contains { $0.isWorkspaceOperationBusy })
+                    .accessibilityIdentifier("workspace.toolbar")
+                }
+            }
         }
         .task(id: snapshot.cardStyle) {
             await facade.prepareActivityCardsIfNeeded()
+        }
+        .onChange(of: snapshot.workspaceTaskID, initial: true) { _, _ in
+            guard snapshot.showsWorkspaces else { return }
+            let context = snapshot.workspaceContextID
+            Task {
+                guard facade.workspaceCreationContextID == context else { return }
+                await facade.loadWorkspaceSessionsIfNeeded()
+            }
         }
         .transaction { transaction in
             if snapshot.hasBusySession {
@@ -256,24 +293,19 @@ private struct SessionListContent: View, Equatable {
         } message: {
             Text("Enter a new title for this session.")
         }
-        .alert("New Workspace", isPresented: $isShowingCreateWorkspaceAlert) {
-            TextField("Name (optional)", text: $createWorkspaceName)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-
-            Button("Cancel", role: .cancel) {
-                createWorkspaceName = ""
-            }
-
-            Button("Create Workspace") {
-                let name = createWorkspaceName
-                createWorkspaceName = ""
-                Task { await facade.createWorkspace(name: name) }
-            }
-        } message: {
-            Text("OpenCode will create a separate git worktree for this project.")
+        .sheet(isPresented: $isShowingCreateWorkspaceSheet) {
+            CreateWorkspaceSheet(facade: facade)
         }
-        .animation(opencodeSelectionAnimation, value: snapshot.selectedSessionID)
+        .onChange(of: snapshot.workspaceContextID) { _, _ in
+            isShowingCreateWorkspaceSheet = false
+            facade.cancelForceWorktreeRemoval()
+        }
+        .onChange(of: snapshot.showsWorkspaces) { _, shows in
+            if !shows {
+                isShowingCreateWorkspaceSheet = false
+                facade.cancelForceWorktreeRemoval()
+            }
+        }
     }
 
     private var renameAlertBinding: Binding<Bool> {
@@ -343,24 +375,40 @@ private struct SessionListContent: View, Equatable {
         } header: {
             WorkspaceSectionHeader(
                 section: section,
+                contextID: snapshot.workspaceContextID,
+                allowsCreation: facade.allowsWorkspaceCreation,
                 onNewSession: {
                     facade.presentNewSession(inWorkspace: section.directory)
                 },
                 onCreateWorkspace: {
-                    createWorkspaceName = ""
-                    isShowingCreateWorkspaceAlert = true
+                    guard facade.allowsWorkspaceCreation else { return }
+                    isShowingCreateWorkspaceSheet = true
                 },
                 onRefresh: {
-                    Task { await facade.refreshWorkspaceSessions(directory: section.directory) }
+                    let context = snapshot.workspaceContextID
+                    Task {
+                        guard facade.workspaceCreationContextID == context else { return }
+                        await facade.refreshWorkspaceInventory()
+                        guard facade.workspaceCreationContextID == context else { return }
+                        await facade.refreshWorkspaceSessions(directory: section.directory)
+                    }
                 },
                 onResetConfirmed: { directory in
-                    Task { await facade.resetWorktree(directory: directory) }
+                    let context = snapshot.workspaceContextID
+                    Task {
+                        guard facade.workspaceCreationContextID == context else { return }
+                        await facade.resetWorktree(directory: directory)
+                    }
                 },
                 onDeleteConfirmed: { directory in
-                    Task { await facade.deleteWorktree(directory: directory) }
+                    let context = snapshot.workspaceContextID
+                    Task {
+                        guard facade.workspaceCreationContextID == context else { return }
+                        await facade.deleteWorktree(directory: directory)
+                    }
                 }
             )
-            .id(section.directory)
+            .id(snapshot.workspaceContextID + "|" + section.directory)
         }
     }
 
@@ -384,6 +432,7 @@ private struct SessionListContent: View, Equatable {
             }
         } label: {
             sessionRowLabel(for: row)
+                .animation(opencodeSelectionAnimation, value: row.isSelected)
         }
         .buttonStyle(SessionRowButtonStyle())
         .contentShape(Rectangle())
@@ -497,7 +546,9 @@ private struct SessionListContent: View, Equatable {
         .tint(.blue)
     }
 
+    @ViewBuilder
     private func liveActivityButton(for session: OpenCodeSession) -> some View {
+        if snapshot.supportsLiveActivities {
         Button {
             Task { await facade.toggleLiveActivity(for: session) }
         } label: {
@@ -507,6 +558,7 @@ private struct SessionListContent: View, Equatable {
             )
         }
         .tint(.indigo)
+        }
     }
 }
 
@@ -728,7 +780,7 @@ private enum WorkspaceActionConfirmation: Identifiable, Equatable {
             )
         case let .delete(_, title):
             return LocalizedStringResource(
-                "Delete \(title), remove its git worktree, and delete its branch. This cannot be undone.",
+                "Remove the \(title) worktree from the server. Session history is not deleted. This cannot be undone.",
                 comment: "Destructive worktree deletion warning. The variable is the user-visible workspace name."
             )
         }
@@ -765,6 +817,8 @@ private struct WorkspaceSectionHeader: View {
     @State private var actionConfirmation: WorkspaceActionConfirmation?
 
     let section: SessionListFacade.WorkspaceSection
+    let contextID: String
+    let allowsCreation: Bool
     let onNewSession: () -> Void
     let onCreateWorkspace: () -> Void
     let onRefresh: () -> Void
@@ -802,23 +856,25 @@ private struct WorkspaceSectionHeader: View {
                 Button(action: onCreateWorkspace) {
                     Label("New Workspace", systemImage: "plus.square")
                 }
-                .disabled(section.isWorkspaceOperationBusy)
+                .disabled(section.isWorkspaceOperationBusy || !allowsCreation)
 
                 Button(action: onRefresh) {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(section.isBusy)
 
-                if !section.isMain {
+                if section.canReset || section.canRemove {
                     Divider()
-
+                }
+                if section.canReset {
                     Button {
                         actionConfirmation = .reset(directory: section.directory, title: section.title)
                     } label: {
                         Label("Reset Worktree", systemImage: "arrow.counterclockwise")
                     }
                     .disabled(section.isWorkspaceOperationBusy)
-
+                }
+                if section.canRemove {
                     Button(role: .destructive) {
                         actionConfirmation = .delete(directory: section.directory, title: section.title)
                     } label: {
@@ -851,6 +907,13 @@ private struct WorkspaceSectionHeader: View {
             }
         }
         .textCase(nil)
+        .onChange(of: contextID) { _, _ in actionConfirmation = nil }
+        .onChange(of: section.canReset) { _, allowed in
+            if !allowed, case .reset? = actionConfirmation { actionConfirmation = nil }
+        }
+        .onChange(of: section.canRemove) { _, allowed in
+            if !allowed, case .delete? = actionConfirmation { actionConfirmation = nil }
+        }
     }
 
     private var actionConfirmationBinding: Binding<Bool> {
@@ -870,11 +933,13 @@ private struct WorkspaceSectionHeader: View {
         case let .reset(directory, _):
             Button("Reset Worktree", role: .destructive) {
                 actionConfirmation = nil
+                guard section.canReset else { return }
                 onResetConfirmed(directory)
             }
         case let .delete(directory, _):
             Button("Delete Worktree", role: .destructive) {
                 actionConfirmation = nil
+                guard section.canRemove else { return }
                 onDeleteConfirmed(directory)
             }
         }

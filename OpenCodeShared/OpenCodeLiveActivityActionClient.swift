@@ -9,33 +9,57 @@ private struct OpenCodeLiveActivityQuestionReplyRequest: Encodable {
     let answers: [[String]]
 }
 
-struct OpenCodeLiveActivityActionClient {
+struct OpenCodeLiveActivityActionClient: Sendable {
     let baseURL: String
     let username: String
     let credentialID: String
     var session: URLSession = .shared
+    var profile: OpenCodeProfileIdentity = .legacy
+    var sessionID: String? = nil
+    var loadPassword: @Sendable (String) -> String? = { OpenCodeServerPasswordStore().loadPassword(for: $0) }
 
-    private let passwordStore = OpenCodeServerPasswordStore()
+    func replyToPermission(requestID: String, reply: String, directory: String?, workspaceID: String?, message: String? = nil) async throws {
+        let request = try permissionRequest(requestID: requestID, reply: reply, directory: directory, workspaceID: workspaceID, message: message)
+        try await send(request)
+    }
 
-    func replyToPermission(requestID: String, reply: String, directory: String?, workspaceID: String?) async throws {
-        try await sendNoContent(
-            path: "/permission/\(requestID)/reply",
-            body: OpenCodeLiveActivityPermissionReplyRequest(reply: reply, message: nil),
-            directory: directory,
-            workspaceID: workspaceID
-        )
+    func permissionRequest(requestID: String, reply: String, directory: String?, workspaceID: String?, message: String? = nil) throws -> URLRequest {
+        guard ["once", "always", "reject"].contains(reply) else { throw OpenCodeLiveActivityActionError.requestFailed }
+        let path: String
+        switch profile {
+        case .legacy:
+            path = "/permission/\(try pathComponent(requestID))/reply"
+        case .v2:
+            guard let sessionID else { throw OpenCodeLiveActivityActionError.requestFailed }
+            path = "/api/session/\(try pathComponent(sessionID))/permission/\(try pathComponent(requestID))/reply"
+        }
+        return try makeRequest(path: path, body: OpenCodeLiveActivityPermissionReplyRequest(reply: reply, message: message), directory: directory, workspaceID: workspaceID)
     }
 
     func replyToQuestion(requestID: String, answers: [[String]], directory: String?, workspaceID: String?) async throws {
-        try await sendNoContent(
-            path: "/question/\(requestID)/reply",
+        try await send(questionRequest(requestID: requestID, answers: answers, directory: directory, workspaceID: workspaceID))
+    }
+
+    func questionRequest(requestID: String, answers: [[String]], directory: String?, workspaceID: String?) throws -> URLRequest {
+        // V2 forms require a typed field-keyed contract, not legacy question answers.
+        guard profile == .legacy else { throw OpenCodeLiveActivityActionError.requestFailed }
+        return try makeRequest(
+            path: "/question/\(try pathComponent(requestID))/reply",
             body: OpenCodeLiveActivityQuestionReplyRequest(answers: answers),
             directory: directory,
             workspaceID: workspaceID
         )
     }
 
-    private func sendNoContent<Body: Encodable>(path: String, body: Body, directory: String?, workspaceID: String?) async throws {
+    private func pathComponent(_ value: String) throws -> String {
+        guard !value.isEmpty, value != ".", value != "..",
+              let encoded = value.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_~")) else {
+            throw OpenCodeLiveActivityActionError.invalidURL
+        }
+        return encoded
+    }
+
+    private func makeRequest<Body: Encodable>(path: String, body: Body, directory: String?, workspaceID: String?) throws -> URLRequest {
         guard let url = requestURL(path: path, directory: directory, workspaceID: workspaceID) else {
             throw OpenCodeLiveActivityActionError.invalidURL
         }
@@ -44,14 +68,18 @@ struct OpenCodeLiveActivityActionClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(try basicAuthHeader(), forHTTPHeaderField: "Authorization")
 
         if let directoryHeader = encodedDirectoryHeader(directory) {
             request.setValue(directoryHeader, forHTTPHeaderField: "x-opencode-directory")
         }
 
         request.httpBody = try JSONEncoder().encode(body)
+        return request
+    }
 
+    private func send(_ unsignedRequest: URLRequest) async throws {
+        var request = unsignedRequest
+        request.setValue(try basicAuthHeader(), forHTTPHeaderField: "Authorization")
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, 200 ..< 300 ~= http.statusCode else {
             throw OpenCodeLiveActivityActionError.requestFailed
@@ -59,14 +87,15 @@ struct OpenCodeLiveActivityActionClient {
     }
 
     private func requestURL(path: String, directory: String?, workspaceID: String?) -> URL? {
-        guard let base = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        guard var components = URLComponents(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              components.host?.isEmpty == false, components.user == nil, components.password == nil else {
             return nil
         }
 
-        let url = base.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
+        components.percentEncodedPath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+            ? path : "/" + components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path
+        components.fragment = nil
 
         var queryItems: [URLQueryItem] = []
         if let directory, !directory.isEmpty {
@@ -88,7 +117,7 @@ struct OpenCodeLiveActivityActionClient {
     }
 
     private func basicAuthHeader() throws -> String {
-        guard let password = passwordStore.loadPassword(for: credentialID) else {
+        guard let password = loadPassword(credentialID) else {
             throw OpenCodeLiveActivityActionError.missingCredentials
         }
         let credentials = "\(username):\(password)"

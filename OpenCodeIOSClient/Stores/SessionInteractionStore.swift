@@ -151,6 +151,12 @@ final class SessionInteractionStore: ObservableObject {
         )
     }
 
+    static func forms(forSessionTreeRootID sessionID: String, sessions: [OpenCodeSession], forms: [BackendForm]) -> [BackendForm] {
+        requests(forSessionTreeRootID: sessionID, sessions: sessions,
+            requestsBySessionID: Dictionary(grouping: forms.filter { $0.sessionID != "global" }, by: \.sessionID))
+            .sorted { $0.id < $1.id }
+    }
+
     static func sessionTreeRootIDsWithRequests<Request>(
         sessions: [OpenCodeSession],
         requestsBySessionID: [String: [Request]]

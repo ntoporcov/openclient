@@ -504,7 +504,7 @@ extension HelpArticle {
             gradient: [Color(red: 0.84, green: 0.31, blue: 0.27), Color(red: 0.95, green: 0.54, blue: 0.25)],
             content: .webEmbed(
                 WebEmbed(
-                    url: URL(string: "https://github.com/ntoporcov/opencode-ios-client/issues")!,
+                    url: AppSupportURLs.issues,
                     note: "This embedded page opens this app's repository issues list so you can file bugs, request features, or follow existing reports without leaving the article flow."
                 )
             )

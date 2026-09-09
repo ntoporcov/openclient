@@ -11,45 +11,68 @@ final class ConnectionCoordinator {
     func connect(
         client: OpenCodeAPIClient,
         isCurrentAttempt: @MainActor () -> Bool = { true },
-        applyBootstrap: @MainActor (OpenCodeGlobalBootstrap) async -> Void,
+        applyLegacyBootstrap: @MainActor (OpenCodeGlobalBootstrap) async -> Void,
+        applyV2Connection: @MainActor () async throws -> Void,
+        handleFailure: @MainActor () -> Void
+    ) async {
+        await connect(
+            factory: OpenCodeBackendFactory(client: client, eventManager: OpenCodeEventManager()),
+            isCurrentAttempt: isCurrentAttempt,
+            applyConnection: { connection in
+                if connection.openCodeCompatibility?.profile == .v2 {
+                    try await applyV2Connection()
+                } else {
+                    let snapshot = try await connection.projects.projectsSnapshot()
+                    try Task.checkCancellation()
+                    guard isCurrentAttempt() else { return }
+                    self.connectionStore.updateConnectionPhase(.preparingInterface)
+                    await applyLegacyBootstrap(.init(
+                        health: .init(healthy: connection.healthy, version: connection.descriptor.version),
+                        projects: snapshot.projects, currentProject: snapshot.currentProject
+                    ))
+                }
+            },
+            handleFailure: handleFailure
+        )
+    }
+
+    func connect(
+        factory: any BackendFactory,
+        isCurrentAttempt: @MainActor () -> Bool = { true },
+        applyConnection: @MainActor (BackendConnection) async throws -> Void,
         handleFailure: @MainActor () -> Void
     ) async {
         guard isCurrentAttempt() else { return }
         connectionStore.beginConnecting()
+        var opened: BackendConnection?
+        var retained = false
         defer {
+            if !retained { opened?.close() }
             if isCurrentAttempt() {
                 connectionStore.finishConnecting()
             }
         }
 
         do {
-            connectionStore.updateConnectionPhase(.checkingServer)
-            let health = try await Self.withTimeout(seconds: 8) {
-                try await client.health()
-            }
+            let connection = try await factory.connect()
+            opened = connection
             try Task.checkCancellation()
             guard isCurrentAttempt() else { return }
-
+            if let profile = connection.openCodeCompatibility?.profile {
+                connectionStore.resolveAPIProfile(profile)
+            }
             connectionStore.updateConnectionPhase(.loadingWorkspace)
-            let bootstrap = try await Self.withTimeout(seconds: 10) {
-                async let projects = client.listProjects()
-                async let currentProject = try? client.currentProject()
-                return try await OpenCodeGlobalBootstrap(
-                    health: health,
-                    projects: projects,
-                    currentProject: currentProject
-                )
+            try await applyConnection(connection)
+            try Task.checkCancellation()
+            guard isCurrentAttempt() else { return }
+            if connection.openCodeCompatibility?.profile == .v2 {
+                connectionStore.applySuccessfulV2Connection(version: connection.descriptor.version, healthy: connection.healthy)
+            } else {
+                connectionStore.applySuccessfulServerConnection(version: connection.descriptor.version, healthy: connection.healthy)
+                // A third backend is a remote connection, not an OpenCode legacy connection.
+                connectionStore.apiProfile = connection.openCodeCompatibility?.profile
             }
-            try Task.checkCancellation()
-            guard isCurrentAttempt() else { return }
-            connectionStore.updateConnectionPhase(.preparingInterface)
-            await applyBootstrap(bootstrap)
-            try Task.checkCancellation()
-            guard isCurrentAttempt() else { return }
-            connectionStore.applySuccessfulServerConnection(
-                version: bootstrap.health.version,
-                healthy: bootstrap.health.healthy
-            )
+            retained = connection.healthy
         } catch is CancellationError {
             guard isCurrentAttempt() else { return }
             handleFailure()
@@ -63,27 +86,6 @@ final class ConnectionCoordinator {
 
     func updateConnectionPhase(_ phase: OpenClientConnectionPhase) {
         connectionStore.updateConnectionPhase(phase)
-    }
-
-    private nonisolated static func withTimeout<T: Sendable>(
-        seconds: UInt64,
-        operation: @escaping @Sendable () async throws -> T
-    ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await operation()
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(seconds))
-                throw OpenCodeAPIError.timedOut
-            }
-
-            guard let result = try await group.next() else {
-                throw OpenCodeAPIError.timedOut
-            }
-            group.cancelAll()
-            return result
-        }
     }
 
     func disconnect(

@@ -30,9 +30,17 @@ struct BrowserAutomationSnapshot: Codable, Equatable, Sendable {
     let visibleText: String
 }
 
-struct BrowserAutomationActivityToken: Hashable, Sendable {
+fileprivate struct BrowserContext: Hashable, Sendable {
+    let connectionID: UUID?
     let projectID: String
+    let directory: String?
+}
+
+struct BrowserAutomationActivityToken: Hashable, Sendable {
+    fileprivate let context: BrowserContext
     let id: UUID
+
+    var projectID: String { context.projectID }
 }
 
 enum BrowserAutomationError: LocalizedError, Equatable {
@@ -309,7 +317,11 @@ enum BrowserWelcomeDocument {
 final class BrowserStore: ObservableObject {
     @Published private(set) var activeProjectID: String?
 
-    private var sessions: [String: BrowserSession] = [:]
+    private var connectionID: UUID?
+    private var directory: String?
+    private var sessions: [BrowserContext: BrowserSession] = [:]
+    // Deliberate privacy change: cookies are shared within a connection, never across reconnects.
+    private var websiteDataStore: WKWebsiteDataStore?
     private var activeSessionObservation: AnyCancellable?
 
     init(projectID: String? = nil) {
@@ -385,14 +397,36 @@ final class BrowserStore: ObservableObject {
     }
 
     func selectProject(_ projectID: String?) {
-        guard projectID != activeProjectID else { return }
+        selectContext(connectionID: connectionID, projectID: projectID, directory: nil)
+    }
+
+    func selectContext(connectionID: UUID?, projectID: String?, directory: String?) {
+        if self.connectionID != connectionID {
+            clearAllBrowserSessions()
+        }
+        guard self.connectionID != connectionID || projectID != activeProjectID || self.directory != directory else { return }
         if activeSession?.presentation == .expanded {
             activeSession?.collapse()
         }
 
         activeSessionObservation = nil
+        self.connectionID = connectionID
+        self.directory = directory
         activeProjectID = projectID
-        bindActiveSession(sessions[projectID ?? ""])
+        bindActiveSession(activeSession)
+    }
+
+    func clearAllBrowserSessions() {
+        guard connectionID != nil || activeProjectID != nil || !sessions.isEmpty else { return }
+        activeSessionObservation = nil
+        for session in sessions.values {
+            session.invalidate()
+        }
+        sessions.removeAll()
+        websiteDataStore = nil
+        connectionID = nil
+        directory = nil
+        activeProjectID = nil
     }
 
     func openAddressBar() {
@@ -451,16 +485,16 @@ final class BrowserStore: ObservableObject {
     }
 
     func beginAutomationActivity(_ status: String) throws -> BrowserAutomationActivityToken {
-        guard let projectID = activeProjectID,
+        guard let context = activeContext,
               let session = activeSession(createIfNeeded: true) else {
             throw BrowserAutomationError.noActiveProject
         }
         let id = session.beginAutomationActivity(status)
-        return BrowserAutomationActivityToken(projectID: projectID, id: id)
+        return BrowserAutomationActivityToken(context: context, id: id)
     }
 
     func endAutomationActivity(_ token: BrowserAutomationActivityToken) {
-        sessions[token.projectID]?.endAutomationActivity(token.id)
+        sessions[token.context]?.endAutomationActivity(token.id)
     }
 
     func automationNavigate(to address: String) async throws -> BrowserAutomationPageState {
@@ -503,14 +537,19 @@ final class BrowserStore: ObservableObject {
         return try await session.automationHistory(action: action)
     }
 
-    private var activeSession: BrowserSession? {
+    private var activeContext: BrowserContext? {
         guard let activeProjectID else { return nil }
-        return sessions[activeProjectID]
+        return BrowserContext(connectionID: connectionID, projectID: activeProjectID, directory: directory)
+    }
+
+    private var activeSession: BrowserSession? {
+        guard let activeContext else { return nil }
+        return sessions[activeContext]
     }
 
     private func activeSession(createIfNeeded: Bool) -> BrowserSession? {
-        guard let activeProjectID else { return nil }
-        if let session = sessions[activeProjectID] {
+        guard let activeContext else { return nil }
+        if let session = sessions[activeContext] {
             if activeSessionObservation == nil {
                 bindActiveSession(session)
             }
@@ -518,8 +557,10 @@ final class BrowserStore: ObservableObject {
         }
         guard createIfNeeded else { return nil }
 
-        let session = BrowserSession()
-        sessions[activeProjectID] = session
+        let dataStore = websiteDataStore ?? WKWebsiteDataStore.nonPersistent()
+        websiteDataStore = dataStore
+        let session = BrowserSession(websiteDataStore: dataStore)
+        sessions[activeContext] = session
         bindActiveSession(session)
         objectWillChange.send()
         return session
@@ -548,11 +589,14 @@ private final class BrowserSession: NSObject, ObservableObject {
     @Published private(set) var automationStatus: String?
     private var consumedAddressFocusRequest = 0
     private var automationActivities: [(id: UUID, status: String)] = []
+    private var isInvalidated = false
+    private var titleObservation: AnyCancellable?
 
     let webView: WKWebView
 
-    override init() {
+    init(websiteDataStore: WKWebsiteDataStore) {
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = websiteDataStore
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
@@ -560,6 +604,15 @@ private final class BrowserSession: NSObject, ObservableObject {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+
+        // WebKit can publish the title after didFinish, or change it without navigating.
+        titleObservation = webView.publisher(for: \.title)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, !self.isInvalidated else { return }
+                self.synchronizePageTitle()
+            }
 
         #if canImport(UIKit)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -626,6 +679,16 @@ private final class BrowserSession: NSObject, ObservableObject {
         userInstruction = nil
     }
 
+    func invalidate() {
+        isInvalidated = true
+        titleObservation = nil
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        close()
+        automationActivities.removeAll()
+        automationStatus = nil
+    }
+
     func submitAddress() {
         guard let url = BrowserAddressResolver.resolve(addressText) else { return }
         addressText = url.absoluteString
@@ -676,6 +739,7 @@ private final class BrowserSession: NSObject, ObservableObject {
     }
 
     func endAutomationActivity(_ id: UUID) {
+        guard automationActivities.contains(where: { $0.id == id }) else { return }
         automationActivities.removeAll { $0.id == id }
         automationStatus = automationActivities.last?.status
     }
@@ -825,10 +889,12 @@ private final class BrowserSession: NSObject, ObservableObject {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
         while webView.isLoading {
+            guard !isInvalidated else { throw CancellationError() }
             guard clock.now < deadline else { throw BrowserAutomationError.navigationTimedOut }
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(100))
         }
+        guard !isInvalidated else { throw CancellationError() }
         if let errorMessage, !errorMessage.isEmpty {
             throw NSError(domain: "OpenClientBrowser", code: 1, userInfo: [NSLocalizedDescriptionKey: errorMessage])
         }
@@ -836,6 +902,7 @@ private final class BrowserSession: NSObject, ObservableObject {
 
     private func settleAfterInteraction() async throws {
         try await Task.sleep(for: .milliseconds(150))
+        guard !isInvalidated else { throw CancellationError() }
         if webView.isLoading {
             try await waitForNavigation()
         }
@@ -843,7 +910,8 @@ private final class BrowserSession: NSObject, ObservableObject {
     }
 
     private func evaluateJavaScript(_ script: String) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
+        guard !isInvalidated else { throw CancellationError() }
+        let result: String = try await withCheckedThrowingContinuation { continuation in
             webView.evaluateJavaScript(script) { result, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -854,6 +922,8 @@ private final class BrowserSession: NSObject, ObservableObject {
                 }
             }
         }
+        guard !isInvalidated else { throw CancellationError() }
+        return result
     }
 
     private static func javaScriptLiteral(_ value: String) throws -> String {
@@ -914,13 +984,20 @@ private final class BrowserSession: NSObject, ObservableObject {
     })()
     """
 
+    private func synchronizePageTitle() {
+        let title = webView.url?.scheme == "about"
+            ? String(localized: "Browser")
+            : webView.title ?? webView.url?.host ?? String(localized: "Browser")
+        if pageTitle != title {
+            pageTitle = title
+        }
+    }
+
     private func synchronizeMetadata() {
         let loadedURL = webView.url
         let isWelcomeDocument = loadedURL?.scheme == "about"
         currentURL = isWelcomeDocument ? nil : loadedURL
-        pageTitle = isWelcomeDocument
-            ? String(localized: "Browser")
-            : webView.title ?? currentURL?.host ?? String(localized: "Browser")
+        synchronizePageTitle()
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
         isLoading = webView.isLoading

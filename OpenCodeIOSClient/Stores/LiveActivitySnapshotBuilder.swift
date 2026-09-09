@@ -13,6 +13,8 @@ struct LiveActivitySnapshotInput {
     var sessionPreviewText: String?
     var permissions: [OpenCodePermission]
     var questions: [OpenCodeQuestionRequest]
+    var profile: OpenCodeProfileIdentity = .legacy
+    var forms: [BackendForm] = []
 }
 
 enum LiveActivitySnapshotBuilder {
@@ -25,11 +27,12 @@ enum LiveActivitySnapshotBuilder {
     }
 
     static func state(for input: LiveActivitySnapshotInput, now: Date = .now) -> OpenCodeChatActivityAttributes.ContentState {
-        let pendingPermission = input.permissions.first
-        let pendingQuestion = input.questions.first
+        let pendingPermission = input.permissions.first { $0.sessionID == input.session.id }
+        let pendingQuestion = input.profile == .legacy ? input.questions.first { $0.sessionID == input.session.id } : nil
+        let pendingForm = input.profile == .v2 ? input.forms.first { $0.sessionID == input.session.id } : nil
         let transcriptLines = transcriptLines(for: input)
         let latestSnippet = latestSnippet(for: input, transcriptLines: transcriptLines)
-        let status = statusText(sessionStatus: input.sessionStatus, hasPendingInteraction: pendingPermission != nil || pendingQuestion != nil)
+        let status = statusText(sessionStatus: input.sessionStatus, hasPendingInteraction: pendingPermission != nil || pendingQuestion != nil || pendingForm != nil)
 
         if let pendingPermission {
             return OpenCodeChatActivityAttributes.ContentState(
@@ -43,6 +46,15 @@ enum LiveActivitySnapshotBuilder {
                 interactionSummary: pendingPermission.summary,
                 questionOptionLabels: [],
                 canReplyToQuestionInline: false
+            )
+        }
+
+        if let pendingForm {
+            return OpenCodeChatActivityAttributes.ContentState(
+                status: status, latestSnippet: latestSnippet, transcriptLines: transcriptLines,
+                updatedAt: now, pendingInteractionKind: "form", interactionID: pendingForm.id,
+                interactionTitle: pendingForm.title, interactionSummary: pendingForm.title,
+                questionOptionLabels: [], canReplyToQuestionInline: false
             )
         }
 

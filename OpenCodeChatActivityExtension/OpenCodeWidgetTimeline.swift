@@ -38,11 +38,10 @@ struct OpenCodeSessionsTimelineProvider: TimelineProvider {
 
     private func entry() -> OpenCodeSessionsWidgetEntry {
         let payload = OpenCodeWidgetStore().load()
-        let serverID = payload.lastConnectedServerID()
-        let server = serverID.flatMap { id in payload.servers.first { $0.id == id } }
+        let server = payload.lastConnectedServer()
         let sessions = payload.sessions.filter { session in
-            guard let serverID else { return false }
-            return session.serverID == serverID
+            guard let server else { return false }
+            return session.owner == server.owner
         }
 
         switch source {

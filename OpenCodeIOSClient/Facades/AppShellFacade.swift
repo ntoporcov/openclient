@@ -4,12 +4,15 @@ import SwiftUI
 
 enum AppShellPrimarySheet: Identifiable, Equatable {
     case connection
+    case createSession
     case newProjectChat(NewProjectChatSheetRequest)
 
     var id: String {
         switch self {
         case .connection:
             return "connection"
+        case .createSession:
+            return "createSession"
         case let .newProjectChat(request):
             return "newProjectChat-\(request.id.uuidString)"
         }
@@ -18,6 +21,8 @@ enum AppShellPrimarySheet: Identifiable, Equatable {
     static func == (lhs: AppShellPrimarySheet, rhs: AppShellPrimarySheet) -> Bool {
         switch (lhs, rhs) {
         case (.connection, .connection):
+            return true
+        case (.createSession, .createSession):
             return true
         case let (.newProjectChat(lhsRequest), .newProjectChat(rhsRequest)):
             return lhsRequest.id == rhsRequest.id
@@ -57,6 +62,17 @@ enum AppShellDetailRoute: Equatable {
 
 @MainActor
 final class AppShellFacade: ObservableObject {
+    var globalForms: GlobalFormsFacade { viewModel.globalFormsFacade }
+    var globalFormLocation: BackendFormLocation? {
+        if case .chat = detailRoute(isCompact: false), let session = viewModel.selectedSession, let directory = session.directory {
+            return .init(directory: directory, workspaceID: session.workspaceID)
+        }
+        if let project = viewModel.currentProject {
+            let scope = viewModel.projectExecutionScope(for: project, directory: viewModel.effectiveSelectedDirectory)
+            return scope.directory.map { .init(directory: $0, workspaceID: scope.workspaceID) }
+        }
+        return nil
+    }
     struct ProjectContentSnapshot: Equatable {
         let selectedTab: OpenClientProjectContentTab
         let availableTabs: [OpenClientProjectContentTab]
@@ -69,6 +85,7 @@ final class AppShellFacade: ObservableObject {
         let isLoadingMCP: Bool
         let isTerminalAvailable: Bool
         let isReadOnly: Bool
+        let allowsSessionCreation: Bool
         let currentProjectID: String?
         let effectiveSelectedDirectory: String?
 
@@ -110,6 +127,7 @@ final class AppShellFacade: ObservableObject {
         }
 
         var isToolbarDisabled: Bool {
+            if selectedTab == .sessions { return !allowsSessionCreation }
             if isReadOnly { return true }
             switch selectedTab {
             case .sessions:
@@ -124,7 +142,11 @@ final class AppShellFacade: ObservableObject {
         }
 
         func showsToolbarAction(usesNativeComposeTab: Bool) -> Bool {
-            selectedTab != .sessions || !usesNativeComposeTab
+            if selectedTab == .sessions {
+                return allowsSessionCreation && !usesNativeComposeTab
+            }
+            if isReadOnly { return false }
+            return selectedTab != .sessions || !usesNativeComposeTab
         }
     }
 
@@ -163,10 +185,16 @@ final class AppShellFacade: ObservableObject {
         funAndGames = viewModel.funAndGamesFacade
         chat = viewModel.chatFacade
         talkSessions = viewModel.talkSessionCoordinator
-        browser = BrowserStore(projectID: viewModel.projectStore.currentProject?.id)
+        browser = BrowserStore()
+        browser.selectContext(
+            connectionID: viewModel.backendConnection?.id,
+            projectID: viewModel.projectStore.currentProject?.id,
+            directory: viewModel.effectiveSelectedDirectory
+        )
 
         Publishers.MergeMany([
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.$backendConnection.map { _ in () }.eraseToAnyPublisher(),
             viewModel.projectStore.objectWillChange.eraseToAnyPublisher(),
             commerce.objectWillChange.eraseToAnyPublisher(),
             projectFiles.objectWillChange.eraseToAnyPublisher(),
@@ -177,6 +205,7 @@ final class AppShellFacade: ObservableObject {
             talkSessions.objectWillChange.eraseToAnyPublisher(),
             viewModel.$isShowingConnectionOverlay.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$newProjectChatSheetRequest.map { _ in () }.eraseToAnyPublisher(),
+            viewModel.$isShowingCreateSessionSheet.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$isShowingProjectSettingsSheet.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$openURLNavigationMessage.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$chatDetailPresentationRequest.map { _ in () }.eraseToAnyPublisher(),
@@ -185,11 +214,27 @@ final class AppShellFacade: ObservableObject {
         .sink { [weak self] _ in self?.objectWillChange.send() }
         .store(in: &observations)
 
-        viewModel.projectStore.$currentProject
-            .map { $0?.id }
-            .removeDuplicates()
-            .sink { [weak browser] projectID in
-                browser?.selectProject(projectID)
+        var browserWasConnected = viewModel.connectionStore.isConnected
+        Publishers.CombineLatest4(
+            viewModel.projectStore.$currentProject
+                .removeDuplicates { $0?.id == $1?.id && $0?.worktree == $1?.worktree },
+            viewModel.projectStore.$selectedDirectory.removeDuplicates(),
+            viewModel.$backendConnection.map { $0?.id }.removeDuplicates(),
+            viewModel.connectionStore.$isConnected.removeDuplicates()
+        )
+            .receive(on: DispatchQueue.main)
+            .sink { [weak browser] project, directory, connectionID, isConnected in
+                guard let browser else { return }
+                if browserWasConnected && !isConnected {
+                    browser.clearAllBrowserSessions()
+                }
+                browserWasConnected = isConnected
+                browser.selectContext(
+                    connectionID: connectionID,
+                    projectID: project?.id,
+                    directory: directory.flatMap { $0.isEmpty ? nil : $0 }
+                        ?? (project?.id == "global" ? nil : project?.worktree)
+                )
             }
             .store(in: &observations)
 
@@ -207,6 +252,9 @@ final class AppShellFacade: ObservableObject {
     var primarySheet: AppShellPrimarySheet? {
         if let request = viewModel.newProjectChatSheetRequest {
             return .newProjectChat(request)
+        }
+        if viewModel.isShowingCreateSessionSheet {
+            return .createSession
         }
         if showsConnectionSheetContent {
             return .connection
@@ -229,6 +277,13 @@ final class AppShellFacade: ObservableObject {
     var isShowingConnectionOverlay: Bool { connection.isShowingConnectionOverlay }
     var hasActiveWorkspace: Bool { viewModel.hasActiveWorkspace }
     var isBrowsingLocalCache: Bool { connection.isBrowsingLocalCache }
+    var isV2Connection: Bool { connection.isV2Connection }
+    var v2NoticeConnectionID: UUID? {
+        guard !hidesShellForConnectionExperience else { return nil }
+        return connection.v2NoticeConnectionID
+    }
+    var allowsProjectCreation: Bool { projects.allowsProjectCreation }
+    var allowsProjectBrowser: Bool { hasCurrentProject && !connection.isBrowsingLocalCache }
     var currentProjectID: String? { projects.currentProject?.id }
     var hasCurrentProject: Bool { projects.currentProject != nil }
     var selectedSessionID: String? { viewModel.directoryStoreRegistry.activeStore.selectedSession?.id }
@@ -236,29 +291,35 @@ final class AppShellFacade: ObservableObject {
         guard let selectedSessionID else { return false }
         return viewModel.chatStore.preparedSessionID == selectedSessionID
     }
+    var canPresentSelectedSessionDetail: Bool {
+        isSelectedSessionPrepared || viewModel.hasPresentableCachedV2Chat
+    }
     var chatDetailPresentationRequest: Int { viewModel.chatDetailPresentationRequest }
     var isActivitySelected: Bool { contentSelection == .activity }
 
     var projectContentSnapshot: ProjectContentSnapshot {
         let files = projectFiles.snapshot
-        let selectedTab: OpenClientProjectContentTab = connection.isBrowsingLocalCache
+        let isReadOnly = connection.isBrowsingLocalCache
+        let selectedTab: OpenClientProjectContentTab = isReadOnly
             ? .sessions
             : viewModel.projectStore.selectedContentTab
         let isTerminalAvailable = supportsTerminal
+            && viewModel.compatibilityClient(for: .terminal) != nil
+            && !isReadOnly
             && connection.isConnected
             && !connection.isUsingAppleIntelligence
-            && viewModel.effectiveSelectedDirectory != nil
+            && viewModel.effectiveTerminalDirectory != nil
         let scopeTitle = viewModel.projectScopeTitle
         return ProjectContentSnapshot(
             selectedTab: selectedTab,
             availableTabs: OpenClientProjectContentTab.allCases.filter { tab in
                 switch tab {
                 case .git:
-                    return !connection.isBrowsingLocalCache && projectFiles.hasGitProject
+                    return !isReadOnly && projectFiles.hasGitProject
                 case .terminal:
                     return isTerminalAvailable
                 case .mcp:
-                    return !connection.isBrowsingLocalCache
+                    return !isReadOnly && viewModel.compatibilityClient(for: .mcp) != nil
                 case .sessions:
                     return true
                 }
@@ -271,7 +332,8 @@ final class AppShellFacade: ObservableObject {
             isLoadingFileTree: files.isLoadingFileTree,
             isLoadingMCP: mcp.snapshot.isLoading,
             isTerminalAvailable: isTerminalAvailable,
-            isReadOnly: connection.isBrowsingLocalCache,
+            isReadOnly: isReadOnly,
+            allowsSessionCreation: !connection.isBrowsingLocalCache,
             currentProjectID: projects.currentProject?.id,
             effectiveSelectedDirectory: viewModel.effectiveSelectedDirectory
         )
@@ -286,7 +348,7 @@ final class AppShellFacade: ObservableObject {
     }
 
     func contentRoute(isCompact: Bool) -> AppShellContentRoute {
-        if contentSelection == .activity { return .activity }
+        if contentSelection == .activity, activity.isAvailable { return .activity }
         guard projects.currentProject != nil else { return .selectProject }
         let directory = viewModel.directoryStoreRegistry.activeStore
         if isCompact, directory.isLoadingSessions, directory.sessions.isEmpty {
@@ -314,7 +376,7 @@ final class AppShellFacade: ObservableObject {
         guard let session = directory.selectedSession, !connection.isUsingAppleIntelligence else {
             return .selectSession
         }
-        if viewModel.chatStore.preparedSessionID != session.id {
+        if !canPresentSelectedSessionDetail {
             return .loadingChat(sessionID: session.id)
         }
         return .chat(
@@ -326,6 +388,7 @@ final class AppShellFacade: ObservableObject {
     }
 
     func selectActivity() {
+        guard activity.isAvailable else { return }
         contentSelection = .activity
     }
 
@@ -338,13 +401,22 @@ final class AppShellFacade: ObservableObject {
         case .projects:
             selectProjectContent()
         case .activity:
-            selectActivity()
+            if !activity.isAvailable {
+                selectProjectContent()
+            } else {
+                selectActivity()
+            }
         }
     }
 
     func dismissPrimarySheet() {
-        guard viewModel.newProjectChatSheetRequest != nil else { return }
-        projects.dismissNewChat()
+        if viewModel.newProjectChatSheetRequest != nil {
+            projects.dismissNewChat()
+            return
+        }
+        if viewModel.isShowingCreateSessionSheet {
+            sessions.dismissCreateSession()
+        }
     }
 
     func setProjectSettingsPresented(_ isPresented: Bool) {
@@ -352,7 +424,7 @@ final class AppShellFacade: ObservableObject {
     }
 
     func presentProjectSettings() {
-        guard !connection.isBrowsingLocalCache else { return }
+        guard !projectContentSnapshot.isReadOnly else { return }
         projects.presentSettings()
     }
 
@@ -361,7 +433,7 @@ final class AppShellFacade: ObservableObject {
     }
 
     func selectProjectContentTab(_ tab: OpenClientProjectContentTab) {
-        guard !connection.isBrowsingLocalCache || tab == .sessions else { return }
+        guard projectContentSnapshot.availableTabs.contains(tab) else { return }
         if viewModel.selectedProjectContentTab == .terminal, tab != .terminal {
             terminal.detachRenderer()
         }
@@ -405,7 +477,7 @@ final class AppShellFacade: ObservableObject {
     }
 
     func reconcileInvalidGitSelection() {
-        if connection.isBrowsingLocalCache {
+        if projectContentSnapshot.isReadOnly {
             terminal.detachRenderer()
             viewModel.selectedProjectContentTab = .sessions
             return
@@ -424,12 +496,17 @@ final class AppShellFacade: ObservableObject {
         workspaceDirectory: String?,
         locksProject: Bool
     ) {
-        guard !connection.isBrowsingLocalCache else { return }
+        guard projects.allowsNewChat else { return }
         viewModel.presentNewProjectChatSheet(
             projectID: projectID,
             workspaceDirectory: workspaceDirectory,
             locksProject: locksProject
         )
+    }
+
+    func presentCreateProject() {
+        guard allowsProjectCreation else { return }
+        projects.presentCreateProject()
     }
 
     func presentNewChatForCurrentContext() {
@@ -441,7 +518,7 @@ final class AppShellFacade: ObservableObject {
     }
 
     func presentNewTalkForCurrentContext() {
-        guard !connection.isBrowsingLocalCache, let project = viewModel.currentProject else { return }
+        guard viewModel.projectFacade.allowsNewTalk, let project = viewModel.currentProject else { return }
         talkSessions.start(project: project, workspaceDirectory: viewModel.effectiveSelectedDirectory)
     }
 
@@ -459,7 +536,8 @@ final class AppShellFacade: ObservableObject {
     }
 
     func performProjectContentToolbarAction() {
-        switch viewModel.selectedProjectContentTab {
+        guard !projectContentSnapshot.isToolbarDisabled else { return }
+        switch projectContentSnapshot.selectedTab {
         case .sessions:
             presentNewChatForCurrentContext()
         case .git:

@@ -108,6 +108,7 @@ enum OpenCodeLocalCacheMigrationPlan: SchemaMigrationPlan {
 actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
     private var latestMessagesWrittenAtByKey: [String: Date] = [:]
     private var latestTodosWrittenAtByKey: [String: Date] = [:]
+    private var clearedAtByNamespace: [String: Date] = [:]
 
     func loadProjects(serverID: String) async throws -> OpenCodeCachedProjectsSnapshot? {
         let key = OpenCodeLocalCacheKey.make([serverID])
@@ -124,8 +125,9 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
         refreshedAt: Date,
         writtenAt: Date
     ) async throws {
+        guard writtenAt > (clearedAtByNamespace[serverID] ?? .distantPast) else { return }
         let key = OpenCodeLocalCacheKey.make([serverID])
-        let payload = try encode(projects)
+        let payload = try encode(OpenCodeLocalCacheIdentity.isV2(serverID) ? Array(projects.prefix(100)) : projects)
         if let record = try projectsRecord(forKey: key) {
             guard writtenAt >= record.writtenAt else { return }
             record.serverID = serverID
@@ -155,10 +157,10 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
         let payload = try directoryPayload(from: record.payload)
         return OpenCodeCachedDirectorySessionsSnapshot(
             sessions: payload.sessions,
-            statuses: payload.statuses,
-            permissions: payload.permissions,
-            questions: payload.questions,
-            refreshedAt: record.refreshedAt
+            statuses: OpenCodeLocalCacheIdentity.isV2(serverID) ? nil : payload.statuses,
+            permissions: OpenCodeLocalCacheIdentity.isV2(serverID) ? nil : payload.permissions,
+            questions: OpenCodeLocalCacheIdentity.isV2(serverID) ? nil : payload.questions,
+            refreshedAt: OpenCodeLocalCacheIdentity.isV2(serverID) ? .distantPast : record.refreshedAt
         )
     }
 
@@ -169,12 +171,13 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
         refreshedAt: Date,
         writtenAt: Date
     ) async throws {
+        guard writtenAt > (clearedAtByNamespace[serverID] ?? .distantPast) else { return }
         let key = OpenCodeLocalCacheKey.make([serverID, directory])
         let existing = try directorySessionsRecord(forKey: key)
             .flatMap { try? directoryPayload(from: $0.payload) }
         let payload = try encode(
             OpenCodeCachedDirectoryPayload(
-                sessions: sessions,
+                sessions: OpenCodeLocalCacheIdentity.isV2(serverID) ? Array(sessions.prefix(100)) : sessions,
                 statuses: existing?.statuses,
                 permissions: existing?.permissions,
                 questions: existing?.questions
@@ -209,6 +212,8 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
         refreshedAt: Date,
         writtenAt: Date
     ) async throws {
+        guard writtenAt > (clearedAtByNamespace[serverID] ?? .distantPast),
+              !OpenCodeLocalCacheIdentity.isV2(serverID) else { return }
         let key = OpenCodeLocalCacheKey.make([serverID, directory])
         if let record = try directorySessionsRecord(forKey: key) {
             guard writtenAt >= record.writtenAt else { return }
@@ -273,11 +278,12 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
         return OpenCodeCachedChatSnapshot(
             preparedMessages: OpenCodeCachedMessageState(
                 envelopes: messages ?? [],
-                sessionID: sessionID
+                sessionID: sessionID,
+                preservingOrder: OpenCodeLocalCacheIdentity.isV2(serverID)
             ),
-            todos: todos ?? [],
-            messagesRefreshedAt: messages == nil ? nil : record.messagesRefreshedAt,
-            todosRefreshedAt: todos == nil ? nil : record.todosRefreshedAt
+            todos: OpenCodeLocalCacheIdentity.isV2(serverID) ? [] : todos ?? [],
+            messagesRefreshedAt: OpenCodeLocalCacheIdentity.isV2(serverID) ? nil : messages == nil ? nil : record.messagesRefreshedAt,
+            todosRefreshedAt: OpenCodeLocalCacheIdentity.isV2(serverID) ? nil : todos == nil ? nil : record.todosRefreshedAt
         )
     }
 
@@ -286,9 +292,50 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
         serverID: String,
         sessionID: String,
         refreshedAt: Date,
-        writtenAt: Date
+        writtenAt: Date,
+        coverage: OpenCodeLocalCacheTranscriptCoverage
     ) async throws {
+        guard writtenAt > (clearedAtByNamespace[serverID] ?? .distantPast) else { return }
         let key = OpenCodeLocalCacheKey.make([serverID, sessionID])
+        var messages = messages
+        if OpenCodeLocalCacheIdentity.isV2(serverID) {
+            // A bounded HTTP page is not a deletion manifest for unloaded history.
+            // Merge canonical IDs; oldest entries may be evicted for capacity,
+            // but hydration never claims complete or validated v2 history.
+            let existingPayload = try chatRecord(forKey: key)?.messagesPayload
+            let existing = existingPayload.flatMap { try? decode([OpenCodeMessageEnvelope].self, from: $0) } ?? []
+            let incomingIDs = Set(messages.map(\.info.id))
+            let merged: [OpenCodeMessageEnvelope]
+            switch coverage {
+            case .newestPage(hasOlder: false):
+                merged = messages
+            case .newestPage(hasOlder: true):
+                if let first = messages.first, let anchor = existing.firstIndex(where: { $0.id == first.id }) {
+                    merged = existing.prefix(anchor).filter { !incomingIDs.contains($0.id) } + messages
+                } else {
+                    merged = existing.filter { !incomingIDs.contains($0.id) } + messages
+                }
+            case let .olderPage(beforeMessageID):
+                if let first = existing.firstIndex(where: { incomingIDs.contains($0.id) }),
+                   let last = existing.lastIndex(where: { incomingIDs.contains($0.id) }) {
+                    // Disk can contain history older than this newly loaded page.
+                    // Replace its anchored range in place, not at the start.
+                    merged = Array(existing[..<first]) + messages + Array(existing[(last + 1)...])
+                } else if let boundary = existing.firstIndex(where: { $0.id == beforeMessageID }) {
+                    merged = Array(existing[..<boundary]) + messages + Array(existing[boundary...])
+                } else {
+                    merged = messages + existing
+                }
+            case .partial:
+                merged = existing.filter { !incomingIDs.contains($0.id) } + messages
+            }
+            messages = OpenCodeCachedMessageState(
+                envelopes: merged,
+                sessionID: sessionID,
+                preservingOrder: true
+            ).envelopes
+            messages = Array(messages.suffix(2_000))
+        }
         let payload = try encode(messages)
         if let record = try chatRecord(forKey: key) {
             let latestWrittenAt = max(record.messagesWrittenAt, latestMessagesWrittenAtByKey[key] ?? .distantPast)
@@ -299,6 +346,8 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
                record.messagesPayload.flatMap({ try? decode([OpenCodeMessageEnvelope].self, from: $0) }) == messages,
                record.deletedAt == nil {
                 latestMessagesWrittenAtByKey[key] = writtenAt
+                record.messagesWrittenAt = writtenAt
+                try modelContext.save()
                 return
             }
             record.serverID = serverID
@@ -330,6 +379,8 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
         refreshedAt: Date,
         writtenAt: Date
     ) async throws {
+        guard writtenAt > (clearedAtByNamespace[serverID] ?? .distantPast),
+              !OpenCodeLocalCacheIdentity.isV2(serverID) else { return }
         let key = OpenCodeLocalCacheKey.make([serverID, sessionID])
         let payload = try encode(todos)
         if let record = try chatRecord(forKey: key) {
@@ -341,6 +392,8 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
                record.todosPayload.flatMap({ try? decode([OpenCodeTodo].self, from: $0) }) == todos,
                record.deletedAt == nil {
                 latestTodosWrittenAtByKey[key] = writtenAt
+                record.todosWrittenAt = writtenAt
+                try modelContext.save()
                 return
             }
             record.serverID = serverID
@@ -385,7 +438,9 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
 
         let chatKey = OpenCodeLocalCacheKey.make([serverID, sessionID])
         if let record = try chatRecord(forKey: chatKey) {
-            if record.deletedAt.map({ removedAt >= $0 }) ?? true {
+            if removedAt >= max(record.messagesWrittenAt, record.todosWrittenAt),
+               removedAt >= max(latestMessagesWrittenAtByKey[chatKey] ?? .distantPast, latestTodosWrittenAtByKey[chatKey] ?? .distantPast),
+               record.deletedAt.map({ removedAt >= $0 }) ?? true {
                 record.messagesPayload = nil
                 record.todosPayload = nil
                 record.messagesRefreshedAt = nil
@@ -418,6 +473,7 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
     }
 
     func clear(serverID: String) async throws {
+        clearedAtByNamespace[serverID] = Date()
         for record in try projectRecords(serverID: serverID) {
             modelContext.delete(record)
         }
@@ -425,11 +481,11 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
             modelContext.delete(record)
         }
         for record in try chatRecords(serverID: serverID) {
+            latestMessagesWrittenAtByKey[record.key] = nil
+            latestTodosWrittenAtByKey[record.key] = nil
             modelContext.delete(record)
         }
         try modelContext.save()
-        latestMessagesWrittenAtByKey.removeAll()
-        latestTodosWrittenAtByKey.removeAll()
     }
 
     private func projectsRecord(forKey key: String) throws -> OpenCodeCachedProjectsRecord? {
@@ -535,7 +591,8 @@ struct NoOpOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
         serverID: String,
         sessionID: String,
         refreshedAt: Date,
-        writtenAt: Date
+        writtenAt: Date,
+        coverage: OpenCodeLocalCacheTranscriptCoverage
     ) async throws {}
 
     func saveTodos(

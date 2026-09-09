@@ -199,25 +199,54 @@ final class ChatFacadeTests: XCTestCase {
         XCTAssertEqual(state.visibleTodos(fallback: fallback), [])
     }
 
-    func testObservationRebindsToNewActiveDirectoryStoreAndSyncStore() {
+    func testObservationRebindsToNewActiveDirectoryStoreAndSyncStore() async {
         let viewModel = makeViewModel()
         let facade = viewModel.chatFacade
         let oldStore = viewModel.directoryStoreRegistry.activeStore
-        var changeCount = 0
-        let observation = facade.objectWillChange.sink { changeCount += 1 }
-
         let newStore = viewModel.directoryStoreRegistry.activate("/tmp/other")
-        let countAfterActivation = changeCount
+
+        // Rebinding and activation invalidations are queued on main before this checkpoint.
+        let activated = expectation(description: "Active directory observation rebound")
+        DispatchQueue.main.async { activated.fulfill() }
+        await fulfillment(of: [activated], timeout: 1)
+
+        var changeCount = 0
+        var pendingChange: XCTestExpectation?
+        let observation = facade.objectWillChange.sink {
+            changeCount += 1
+            pendingChange?.fulfill()
+            pendingChange = nil
+        }
+
         oldStore.selectedSession = makeSession(id: "session-old")
         oldStore.applyTodos([makeTodo(content: "Old")], forSessionID: "session-old")
 
-        XCTAssertEqual(changeCount, countAfterActivation)
+        // Drain queued forwarding before checking that old-store subscriptions were detached.
+        let oldStoreDelivered = expectation(description: "Old directory notification queue drained")
+        DispatchQueue.main.async { oldStoreDelivered.fulfill() }
+        await fulfillment(of: [oldStoreDelivered], timeout: 1)
+        XCTAssertEqual(changeCount, 0)
 
+        let selectionChanged = expectation(description: "New active directory changes delivered")
+        pendingChange = selectionChanged
         newStore.selectedSession = makeSession(id: "session-new")
-        XCTAssertEqual(changeCount, countAfterActivation + 1)
+        await fulfillment(of: [selectionChanged], timeout: 1)
+        let selectionDrained = expectation(description: "Selection notifications drained")
+        DispatchQueue.main.async { selectionDrained.fulfill() }
+        await fulfillment(of: [selectionDrained], timeout: 1)
+        // Derived snapshots can publish more than once; forwarding is not one-to-one.
+        XCTAssertGreaterThan(changeCount, 0)
+        XCTAssertEqual(facade.todoInspectorSnapshot.selectedSessionID, "session-new")
 
-        newStore.applyTodos([makeTodo(content: "New")], forSessionID: "session-new")
-        XCTAssertEqual(changeCount, countAfterActivation + 2)
+        let selectionChangeCount = changeCount
+        let syncChanged = expectation(description: "New active sync store change delivered")
+        pendingChange = syncChanged
+        let todos = [makeTodo(content: "New")]
+        newStore.applyTodos(todos, forSessionID: "session-new")
+
+        await fulfillment(of: [syncChanged], timeout: 1)
+        XCTAssertGreaterThan(changeCount, selectionChangeCount)
+        XCTAssertEqual(facade.todoInspectorSnapshot.todos, todos)
         withExtendedLifetime(observation) {}
     }
 
@@ -381,6 +410,8 @@ final class ChatFacadeTests: XCTestCase {
 
     func testComposerSnapshotContainsPreparedComposerState() {
         let viewModel = makeViewModel()
+        viewModel.backendConnection = OpenCodeBackendFactory(client: OpenCodeAPIClient(config: .init()), eventManager: viewModel.eventManager)
+            .makeConnection(profile: .legacy, version: "test", healthy: true)
         let session = makeSession(id: "session-composer")
         viewModel.selectedSession = session
         viewModel.directoryStore.commands = [makeCommand(name: "explain")]
