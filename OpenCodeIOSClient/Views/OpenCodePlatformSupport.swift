@@ -1,4 +1,5 @@
 import SwiftUI
+import GameController
 
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
 import AppKit
@@ -93,41 +94,62 @@ enum OpenCodeHaptics {
 
 @MainActor
 final class OpenClientCommandHoldMonitor {
-    static let shared = OpenClientCommandHoldMonitor()
-
     private var monitoringTask: Task<Void, Never>?
+    private var cancellation: (() -> Void)?
 
-    func monitor(onHold: @escaping () -> Void, onRelease: @escaping () -> Void) {
+    func monitor(
+        isCommandPressed: @escaping () -> Bool = { OpenClientCommandHoldMonitor.isCommandPressed },
+        isActive: @escaping () -> Bool = { true },
+        holdDelay: Duration = .milliseconds(225),
+        onHold: @escaping () -> Void,
+        onRelease: @escaping () -> Void,
+        onCancel: @escaping () -> Void = {}
+    ) {
         guard monitoringTask == nil else { return }
-
-#if targetEnvironment(macCatalyst)
+        cancellation = onCancel
         monitoringTask = Task { @MainActor [weak self] in
-            var elapsedMilliseconds = 0
+            let started = ContinuousClock.now
             var revealed = false
-
-            while Self.isCommandPressed {
-                try? await Task.sleep(for: .milliseconds(25))
+            while true {
                 guard !Task.isCancelled else { return }
-                elapsedMilliseconds += 25
-                if !revealed, elapsedMilliseconds >= 225 {
+                guard isActive() else { self?.cancel(); return }
+                guard isCommandPressed() else {
+                    self?.monitoringTask = nil
+                    self?.cancellation = nil
+                    onRelease()
+                    return
+                }
+                if !revealed, started.duration(to: .now) >= holdDelay {
                     revealed = true
                     onHold()
                 }
+                do { try await Task.sleep(for: .milliseconds(16)) }
+                catch { return }
             }
-
-            onRelease()
-            self?.monitoringTask = nil
         }
-#else
-        onRelease()
-#endif
     }
 
-#if targetEnvironment(macCatalyst)
-    private static var isCommandPressed: Bool {
-        CGEventSource.flagsState(.combinedSessionState).contains(.maskCommand)
+    func cancel() {
+        monitoringTask?.cancel()
+        monitoringTask = nil
+        let cancellation = cancellation
+        self.cancellation = nil
+        cancellation?()
     }
-#endif
+
+    static var isCommandPressed: Bool {
+        #if targetEnvironment(macCatalyst)
+        CGEventSource.flagsState(.combinedSessionState).contains(.maskCommand)
+        #elseif canImport(UIKit)
+        let keyboard = GCKeyboard.coalesced?.keyboardInput
+        return keyboard?.button(forKeyCode: .leftGUI)?.isPressed == true
+            || keyboard?.button(forKeyCode: .rightGUI)?.isPressed == true
+        #elseif canImport(AppKit)
+        NSEvent.modifierFlags.contains(.command)
+        #else
+        false
+        #endif
+    }
 }
 
 extension View {

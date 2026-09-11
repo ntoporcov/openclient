@@ -503,6 +503,13 @@ Build for simulator:
 xcodebuild -quiet -project OpenCodeIOSClient.xcodeproj -scheme OpenCodeIOSClient -sdk iphonesimulator build
 ```
 
+Keep Xcode's normal simulator code signing enabled for installed apps and hosted tests.
+Do not pass `CODE_SIGNING_ALLOWED=NO`: an unsigned simulator build can fail Keychain
+credential writes, which prevents the app from safely saving connection details.
+This was reproduced with a failing credential read-back test and resolved by rebuilding
+with default signing on both iPhone and iPad simulators. Hosted persistence tests must
+also preserve and restore the user's `recentServerConfigs` data.
+
 Build for device:
 
 ```bash

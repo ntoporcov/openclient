@@ -4,6 +4,59 @@ import XCTest
 
 @MainActor
 final class ChatFacadeTests: XCTestCase {
+    func testProviderLogoUsesExactBundledProviderIDWithSyntheticFallback() {
+        for id in ["openai", "openrouter", "amazon-bedrock", "azure", "github-copilot"] {
+            XCTAssertEqual(ProviderIcon.assetName(for: id), "ProviderIcon_\(id)")
+        }
+        XCTAssertEqual(ProviderIcon.assetName(for: "custom-local-provider"), "ProviderIcon_synthetic")
+        XCTAssertEqual(ProviderIcon.assetName(for: "OpenRouter"), "ProviderIcon_synthetic")
+    }
+
+    func testSameModelNameOnDifferentProvidersChangesDisplayedProvider() {
+        let model = makeViewModel()
+        let session = makeSession(id: "provider-switch")
+        let routed = OpenCodeProvider(id: "openrouter", name: "OpenRouter", models: [
+            "reasoner": makeModel(id: "reasoner", providerID: "openrouter", name: "Reasoner"),
+        ])
+        model.modelConfigurationStore.allProviders.append(routed)
+        model.modelConfigurationStore.availableProviders.append(routed)
+        model.chatFacade.selectModel(.init(providerID: "openai", modelID: "reasoner"), for: session)
+        let first = model.chatFacade.toolbarSnapshot(for: session)
+        model.chatFacade.selectModel(.init(providerID: "openrouter", modelID: "reasoner"), for: session)
+        let second = model.chatFacade.toolbarSnapshot(for: session)
+
+        XCTAssertEqual(first.modelTitle, second.modelTitle)
+        XCTAssertEqual(first.displayedModelReference?.providerID, "openai")
+        XCTAssertEqual(second.displayedModelReference?.providerID, "openrouter")
+        XCTAssertEqual(second.modelProviderName, "OpenRouter")
+        XCTAssertNotEqual(first, second, "Equal model names must not suppress provider-logo updates")
+    }
+
+    func testDisplayedProviderFollowsMessageFallbackWithoutCatalogEntry() {
+        let model = makeViewModel()
+        let session = makeSession(id: "message-provider")
+        model.selectedSession = session
+        model.isLoadingSelectedSession = true
+        let message = OpenCodeMessageEnvelope(info: OpenCodeMessage(id: "routed-message", role: "user",
+            sessionID: session.id, time: nil, agent: nil,
+            model: OpenCodeMessageModelReference(providerID: "custom-router", modelID: "claude-custom", variant: nil)), parts: [])
+        model.messages = [message]
+
+        let snapshot = model.chatFacade.toolbarSnapshot(for: session)
+        XCTAssertEqual(snapshot.modelTitle, "claude-custom")
+        XCTAssertEqual(snapshot.displayedModelReference?.providerID, "custom-router")
+        XCTAssertEqual(snapshot.modelProviderName, "custom-router")
+        XCTAssertNil(snapshot.selectedModelReference)
+    }
+
+    func testDisplayedProviderFollowsEffectiveDefault() {
+        let model = makeViewModel()
+        let snapshot = model.chatFacade.toolbarSnapshot(for: makeSession(id: "default-provider"))
+        XCTAssertEqual(snapshot.modelTitle, "Basic")
+        XCTAssertEqual(snapshot.displayedModelReference, .init(providerID: "openai", modelID: "basic"))
+        XCTAssertEqual(snapshot.modelProviderName, "OpenAI")
+    }
+
     func testSelectingUnpreparedSessionDoesNotExposePreviousTranscript() {
         let model = AppViewModel()
         let first = makeSession(id: "first")
@@ -120,6 +173,8 @@ final class ChatFacadeTests: XCTestCase {
 
         XCTAssertEqual(snapshot.agentTitle, "review")
         XCTAssertEqual(snapshot.modelTitle, "Reasoner")
+        XCTAssertEqual(snapshot.displayedModelReference, .init(providerID: "openai", modelID: "reasoner"))
+        XCTAssertEqual(snapshot.modelProviderName, "OpenAI")
         XCTAssertFalse(snapshot.isLoading)
     }
 
@@ -133,6 +188,8 @@ final class ChatFacadeTests: XCTestCase {
 
         XCTAssertEqual(snapshot.agentTitle, "Agent")
         XCTAssertEqual(snapshot.modelTitle, "Model")
+        XCTAssertNil(snapshot.displayedModelReference)
+        XCTAssertNil(snapshot.modelProviderName)
         XCTAssertTrue(snapshot.isAgentLoading)
         XCTAssertTrue(snapshot.isModelLoading)
         XCTAssertTrue(snapshot.isLoading)

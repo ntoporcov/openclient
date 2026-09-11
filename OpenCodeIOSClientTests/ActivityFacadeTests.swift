@@ -325,6 +325,305 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertEqual(viewModel.activityFacade.snapshot.recentRows.map(\.recent.session.id), [newer.id, older.id])
     }
 
+    func testSessionSwitcherCandidatesUseOnlyLiteralRecentSectionInExistingOrder() throws {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "project", directory: "/tmp/project")
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.startOfDay(for: Date())
+        let recentTime = today.addingTimeInterval(12 * 3_600).timeIntervalSince1970 * 1_000
+        let recent = (0..<7).map {
+            makeSession(id: "recent-\($0)", title: "Recent", directory: project.worktree,
+                projectID: project.id, updated: recentTime + Double($0))
+        }
+        let working = makeSession(id: "working", title: "Working", directory: project.worktree, projectID: project.id, updated: recentTime)
+        let blocked = makeSession(id: "blocked", title: "Blocked", directory: project.worktree, projectID: project.id, updated: recentTime)
+        let deleted = makeSession(id: "deleted", title: "Deleted", directory: project.worktree, projectID: project.id, updated: recentTime)
+        var archived = makeSession(id: "archived", title: "Archived", directory: project.worktree, projectID: project.id, updated: recentTime)
+        archived.time = .init(created: recentTime, updated: recentTime, archived: recentTime)
+        let child = OpenCodeSession(id: "child", title: "Child", workspaceID: nil,
+            directory: project.worktree, projectID: project.id, parentID: recent[0].id)
+        let older = try [1, 4, 8].map { days in
+            let date = try XCTUnwrap(calendar.date(byAdding: .day, value: -days, to: today))
+            return makeSession(id: "older-\(days)", title: "Older", directory: project.worktree,
+                projectID: project.id, updated: date.timeIntervalSince1970 * 1_000)
+        }
+        let sessions = recent + older + [working, blocked, deleted, archived, child]
+        viewModel.projects = [project]
+        viewModel.sessionListStore.setRecentSessions(sessions + [recent[0]], for: project.worktree)
+        let store = viewModel.directoryStoreRegistry.store(for: project.worktree)
+        store.sessions = sessions
+        store.applySessionStatuses([working.id: "busy", blocked.id: "busy"])
+        store.syncState.permissionsBySessionID[blocked.id] = [
+            .init(id: "permission", sessionID: blocked.id, permission: "bash", patterns: ["rm"],
+                always: nil, metadata: nil, tool: nil),
+        ]
+        for (index, session) in recent.enumerated() {
+            store.applyCanonicalMessages([
+                makeMessage(id: "user-\(index)", sessionID: session.id, role: "user", text: "Prompt",
+                    created: recentTime - Double(index)),
+            ], forSessionID: session.id)
+        }
+        let facade = ActivityFacade(viewModel: viewModel)
+        viewModel.directoryStoreRegistry.markV2SessionDeleted(deleted.id)
+
+        XCTAssertEqual(facade.snapshot.workingRows.map(\.recent.session.id), [working.id])
+        XCTAssertEqual(facade.snapshot.needsInputRows.map(\.recent.session.id), [blocked.id])
+        XCTAssertTrue(older.allSatisfy { session in facade.snapshot.recentRows.contains { $0.recent.session.id == session.id } })
+        XCTAssertEqual(facade.sessionSwitcherCandidates, recent)
+        XCTAssertEqual(facade.sessionSwitcherCandidates.map(\.id), facade.snapshot.recentRows
+            .map(\.recent.session.id).filter { $0.hasPrefix("recent-") })
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: working.id), working)
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: blocked.id), blocked)
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: older[0].id), older[0])
+        XCTAssertNil(facade.sessionSwitcherTarget(id: deleted.id))
+        XCTAssertNil(facade.sessionSwitcherTarget(id: archived.id))
+        XCTAssertNil(facade.sessionSwitcherTarget(id: child.id))
+    }
+
+    func testProjectSessionSwitcherCandidatesUseNewestFiveVisibleRootChatsIncludingIdle() {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "switcher-project", directory: "/tmp/switcher-project")
+        viewModel.projects = [project]
+        viewModel.currentProject = project
+        viewModel.selectedDirectory = project.worktree
+        let updated = makeSession(id: "updated", title: "Updated", directory: project.worktree, projectID: project.id, updated: 6_000)
+        var created = makeSession(id: "created", title: "Created", directory: project.worktree, projectID: project.id, updated: 0)
+        created.time = .init(created: 5_000)
+        var preview = makeSession(id: "preview", title: "Preview", directory: project.worktree, projectID: project.id, updated: 0)
+        preview.time = nil
+        let tieA = makeSession(id: "tie-a", title: "Tie A", directory: project.worktree, projectID: project.id, updated: 3_000)
+        let tieZ = makeSession(id: "tie-z", title: "Tie Z", directory: project.worktree, projectID: project.id, updated: 3_000)
+        let oldest = makeSession(id: "oldest", title: "Oldest", directory: project.worktree, projectID: project.id, updated: 1_000)
+        var undated = makeSession(id: "undated", title: "Undated", directory: project.worktree, projectID: project.id, updated: 0)
+        undated.time = nil
+        var archived = makeSession(id: "archived", title: "Archived", directory: project.worktree, projectID: project.id, updated: 9_000)
+        archived.time = .init(updated: 9_000, archived: 9_000)
+        let deleted = makeSession(id: "deleted", title: "Deleted", directory: project.worktree, projectID: project.id, updated: 9_000)
+        let child = OpenCodeSession(id: "child", title: "Child", workspaceID: nil,
+            directory: project.worktree, projectID: project.id, parentID: updated.id)
+        let outside = makeSession(id: "outside", title: "Outside", directory: "/tmp/other", projectID: "other", updated: 10_000)
+        viewModel.allSessions = [oldest, tieZ, preview, updated, created, tieA, undated, archived, deleted, child, updated]
+        viewModel.sessionListStore.previews = [
+            preview.id: .init(text: "Preview", date: Date(timeIntervalSince1970: 4)),
+            oldest.id: .init(text: "Newer preview must not override session time", date: Date(timeIntervalSince1970: 20)),
+        ]
+        viewModel.sessionListStore.pinnedSessionIDsByScope = [viewModel.currentPinScopeKey: [oldest.id, updated.id, updated.id]]
+        viewModel.directoryStoreRegistry.store(for: outside.directory).sessions = [outside]
+        viewModel.sessionListStore.setWorkspaceSessionState(.init(sessions: [outside]), for: "/tmp/other")
+        viewModel.directoryStore.applySessionStatuses([updated.id: "idle", created.id: "busy"])
+        let facade = SessionListFacade(viewModel: viewModel)
+        viewModel.directoryStoreRegistry.markV2SessionDeleted(deleted.id)
+
+        XCTAssertFalse(facade.snapshot.showsWorkspaces)
+        XCTAssertEqual(facade.snapshot.pinnedRows.map(\.id), [oldest.id, updated.id, updated.id])
+        XCTAssertEqual(facade.sessionSwitcherCandidates, [updated, created, preview, tieA, tieZ])
+        XCTAssertEqual(viewModel.directoryStore.openedSessionHistory, [])
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: oldest.id), oldest)
+        XCTAssertNil(facade.sessionSwitcherTarget(id: outside.id))
+        XCTAssertNil(facade.sessionSwitcherTarget(id: deleted.id))
+        XCTAssertNil(facade.sessionSwitcherTarget(id: archived.id))
+        XCTAssertNil(facade.sessionSwitcherTarget(id: child.id))
+    }
+
+    func testProjectSessionSwitcherCandidatesIncludeOnlyShownWorkspaceRows() throws {
+        let backend = HomeTestBackend()
+        let viewModel = AppViewModel(backendFactory: backend)
+        let client = OpenCodeAPIClient(config: .init(baseURL: "https://switcher.invalid", password: "test"))
+        viewModel.backendConnection = BackendConnection(descriptor: .init(id: "switcher-test", name: "Test", version: "1"),
+            projects: backend, sessions: backend, chat: backend, models: backend, events: backend,
+            worktrees: OpenCodeWorktreeServices(client: client, profile: .v2))
+        let project = OpenCodeProject(id: "workspace-switcher", worktree: "/tmp/main", vcs: "git", name: "Project",
+            sandboxes: ["/tmp/sandbox"], icon: nil, time: nil)
+        viewModel.projects = [project]
+        viewModel.currentProject = project
+        viewModel.selectedDirectory = project.worktree
+        viewModel.projectPreferencesStore.projectWorkspacesEnabledByScope[viewModel.currentProjectPreferenceScopeKey] = true
+        let main = makeSession(id: "main", title: "Main", directory: project.worktree, projectID: project.id, updated: 1_000)
+        let sandbox = makeSession(id: "sandbox", title: "Sandbox", directory: "/tmp/sandbox", projectID: project.id, updated: 3_000)
+        let pinned = makeSession(id: "pinned", title: "Pinned", directory: "/tmp/sandbox", projectID: project.id, updated: 2_000)
+        let hidden = makeSession(id: "hidden", title: "Hidden workspace", directory: "/tmp/hidden", projectID: project.id, updated: 10_000)
+        viewModel.allSessions = [main, sandbox, pinned, hidden]
+        viewModel.sessionListStore.pinnedSessionIDsByScope = [viewModel.currentPinScopeKey: [pinned.id]]
+        for (directory, sessions) in [(project.worktree, [main]), ("/tmp/sandbox", [sandbox, pinned]), ("/tmp/hidden", [hidden])] {
+            let key = try XCTUnwrap(viewModel.workspacePageKey(directory: directory))
+            let requestID = try XCTUnwrap(viewModel.sessionListStore.beginWorkspacePage(key, replacing: true))
+            XCTAssertTrue(viewModel.sessionListStore.finishWorkspacePage(key, requestID: requestID, sessions: sessions,
+                nextCursor: nil, limit: 10, hasMore: false))
+        }
+        let facade = SessionListFacade(viewModel: viewModel)
+
+        XCTAssertTrue(facade.snapshot.showsWorkspaces)
+        XCTAssertTrue(facade.snapshot.unpinnedRows.isEmpty)
+        XCTAssertEqual(facade.snapshot.workspaceSections.map(\.directory), [project.worktree, "/tmp/sandbox"])
+        XCTAssertEqual(facade.sessionSwitcherCandidates, [sandbox, pinned, main])
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: sandbox.id), sandbox)
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: pinned.id), pinned)
+        XCTAssertNil(facade.sessionSwitcherTarget(id: hidden.id))
+    }
+
+    func testSessionSwitcherCandidatesExcludeHiddenActionsBeforeSnapshotRefresh() throws {
+        let journalKey = "openclient.project-action-journal.v1"
+        let savedJournal = UserDefaults.standard.data(forKey: journalKey)
+        addTeardownBlock {
+            if let savedJournal { UserDefaults.standard.set(savedJournal, forKey: journalKey) }
+            else { UserDefaults.standard.removeObject(forKey: journalKey) }
+        }
+        let backend = HomeTestBackend()
+        let viewModel = AppViewModel(backendFactory: backend)
+        let client = OpenCodeAPIClient(config: .init(baseURL: "https://switcher.invalid", password: "test"))
+        let commands = try XCTUnwrap(OpenCodeCommandsService.make(client: client, profile: .legacy,
+            version: "1", sessions: backend, chat: backend))
+        let backendID = UUID().uuidString
+        viewModel.backendConnection = BackendConnection(descriptor: .init(id: backendID, name: "Test", version: "1"),
+            projects: backend, sessions: backend, chat: backend, models: backend, events: backend, commands: commands)
+        let project = makeProject(id: "action-switcher", directory: "/tmp/action-switcher")
+        let time = Calendar.autoupdatingCurrent.startOfDay(for: Date()).addingTimeInterval(12 * 3_600).timeIntervalSince1970 * 1_000
+        let actionSession = makeSession(id: "action", title: "Action", directory: project.worktree, projectID: project.id, updated: time)
+        let ordinary = makeSession(id: "ordinary", title: "Ordinary", directory: project.worktree, projectID: project.id, updated: time)
+        viewModel.projects = [project]
+        viewModel.currentProject = project
+        viewModel.selectedDirectory = project.worktree
+        viewModel.allSessions = [actionSession, ordinary]
+        viewModel.sessionListStore.pinnedSessionIDsByScope = [:]
+        viewModel.sessionListStore.setRecentSessions([actionSession, ordinary], for: project.worktree)
+        let activity = ActivityFacade(viewModel: viewModel)
+        let sessions = SessionListFacade(viewModel: viewModel)
+        XCTAssertEqual(activity.sessionSwitcherCandidates.count, 2)
+        XCTAssertEqual(sessions.sessionSwitcherCandidates.count, 2)
+
+        let scope = ProjectActionScope(backendID: backendID, contractID: commands.actionContractID,
+            projectID: project.id, directory: project.worktree, workspaceID: nil)
+        let run = try XCTUnwrap(viewModel.projectActionStore.begin(
+            action: OpenCodeAction(commandName: "test", iconName: "bolt.fill"), scope: scope))
+        viewModel.projectActionStore.update(id: run.id) {
+            $0.sessionID = actionSession.id
+            $0.state = .succeeded
+        }
+
+        XCTAssertEqual(activity.sessionSwitcherCandidates, [ordinary])
+        XCTAssertEqual(sessions.sessionSwitcherCandidates, [ordinary])
+        XCTAssertNil(activity.sessionSwitcherTarget(id: actionSession.id))
+        XCTAssertNil(sessions.sessionSwitcherTarget(id: actionSession.id))
+    }
+
+    func testActivitySessionSwitcherTargetSurvivesRecentToWorkingButRejectsRemovedRow() async {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "switcher-activity", directory: "/tmp/switcher-activity")
+        let time = Calendar.autoupdatingCurrent.startOfDay(for: Date()).addingTimeInterval(12 * 3_600).timeIntervalSince1970 * 1_000
+        let target = makeSession(id: "target", title: "Target", directory: project.worktree, projectID: project.id, updated: time)
+        viewModel.projects = [project]
+        viewModel.sessionListStore.setRecentSessions([target], for: project.worktree)
+        let store = viewModel.directoryStoreRegistry.store(for: project.worktree)
+        store.sessions = [target]
+        let facade = ActivityFacade(viewModel: viewModel)
+        XCTAssertEqual(facade.sessionSwitcherCandidates, [target])
+
+        let movedToWorking = expectation(description: "Target moves out of Recent into Working")
+        let workingObservation = facade.$snapshot
+            .filter { $0.workingRows.contains { $0.recent.session.id == target.id } }
+            .prefix(1).sink { _ in movedToWorking.fulfill() }
+        store.applySessionStatus("busy", forSessionID: target.id)
+        await fulfillment(of: [movedToWorking], timeout: 1)
+
+        XCTAssertTrue(facade.sessionSwitcherCandidates.isEmpty)
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: target.id), target)
+
+        let removed = expectation(description: "Target row leaves Activity")
+        let removalObservation = facade.$snapshot.filter(\.isEmpty)
+            .prefix(1).sink { _ in removed.fulfill() }
+        store.selectedSession = target
+        store.sessions = []
+        viewModel.sessionListStore.setRecentSessions([], for: project.worktree)
+        await fulfillment(of: [removed], timeout: 1)
+
+        XCTAssertEqual(viewModel.directoryStoreRegistry.session(matching: target.id), target)
+        XCTAssertNil(facade.sessionSwitcherTarget(id: target.id))
+        withExtendedLifetime((workingObservation, removalObservation)) {}
+    }
+
+    func testProjectSessionSwitcherTargetSurvivesRecencyDropButRejectsRemovedRow() async {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "switcher-ranking", directory: "/tmp/switcher-ranking")
+        let target = makeSession(id: "target", title: "Target", directory: project.worktree, projectID: project.id, updated: 1_000)
+        viewModel.projects = [project]
+        viewModel.currentProject = project
+        viewModel.selectedDirectory = project.worktree
+        viewModel.sessionListStore.pinnedSessionIDsByScope = [:]
+        viewModel.allSessions = [target]
+        let facade = SessionListFacade(viewModel: viewModel)
+        XCTAssertEqual(facade.sessionSwitcherCandidates, [target])
+
+        let newer = (0..<5).map {
+            makeSession(id: "newer-\($0)", title: "Newer", directory: project.worktree,
+                projectID: project.id, updated: 2_000 + Double($0))
+        }
+        let reranked = expectation(description: "Five newer rows move target outside candidate limit")
+        let rankingObservation = facade.$snapshot.filter { $0.unpinnedRows.count == 6 }
+            .prefix(1).sink { _ in reranked.fulfill() }
+        viewModel.allSessions = newer + [target]
+        await fulfillment(of: [reranked], timeout: 1)
+
+        XCTAssertEqual(facade.sessionSwitcherCandidates.count, 5)
+        XCTAssertFalse(facade.sessionSwitcherCandidates.contains { $0.id == target.id })
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: target.id), target)
+
+        let renamed = makeSession(id: target.id, title: "Canonical title", directory: project.worktree,
+            projectID: project.id, updated: 1_000)
+        viewModel.directoryStore.insertV2Session(renamed)
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: target.id), renamed)
+
+        let removed = expectation(description: "Target row leaves project list")
+        let removalObservation = facade.$snapshot.filter { !$0.unpinnedRows.contains { $0.id == target.id } }
+            .prefix(1).sink { _ in removed.fulfill() }
+        viewModel.directoryStore.selectedSession = renamed
+        viewModel.allSessions = newer
+        await fulfillment(of: [removed], timeout: 1)
+
+        XCTAssertEqual(viewModel.directoryStoreRegistry.session(matching: target.id), renamed)
+        XCTAssertNil(facade.sessionSwitcherTarget(id: target.id))
+        withExtendedLifetime((rankingObservation, removalObservation)) {}
+    }
+
+    func testSessionSwitcherTargetsValidateCanonicalSessionBeforeSnapshotRefresh() {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "switcher-validation", directory: "/tmp/switcher-validation")
+        let original = makeSession(id: "target", title: "Target", directory: project.worktree, projectID: project.id, updated: 1_000)
+        viewModel.projects = [project]
+        viewModel.currentProject = project
+        viewModel.selectedDirectory = project.worktree
+        viewModel.allSessions = [original]
+        viewModel.sessionListStore.pinnedSessionIDsByScope = [:]
+        let activity = ActivityFacade(viewModel: viewModel)
+        let sessions = SessionListFacade(viewModel: viewModel)
+        XCTAssertEqual(activity.sessionSwitcherTarget(id: original.id), original)
+        XCTAssertEqual(sessions.sessionSwitcherTarget(id: original.id), original)
+
+        var archived = original
+        archived.time = .init(created: 1_000, updated: 1_000, archived: 2_000)
+        let child = OpenCodeSession(id: original.id, title: "Child", workspaceID: nil,
+            directory: project.worktree, projectID: project.id, parentID: "parent")
+        for invalid in [archived, child] {
+            viewModel.allSessions = [invalid]
+            XCTAssertNil(activity.sessionSwitcherTarget(id: original.id))
+            XCTAssertNil(sessions.sessionSwitcherTarget(id: original.id))
+        }
+        for moved in [
+            OpenCodeSession(id: original.id, title: "Moved directory", workspaceID: nil,
+                directory: "/tmp/elsewhere", projectID: project.id, parentID: nil),
+            OpenCodeSession(id: original.id, title: "Moved workspace", workspaceID: "remote",
+                directory: project.worktree, projectID: project.id, parentID: nil),
+            OpenCodeSession(id: original.id, title: "Moved project", workspaceID: nil,
+                directory: project.worktree, projectID: "other-project", parentID: nil),
+        ] {
+            viewModel.allSessions = [moved]
+            XCTAssertNil(sessions.sessionSwitcherTarget(id: original.id))
+        }
+        viewModel.allSessions = [original]
+        viewModel.directoryStoreRegistry.markV2SessionDeleted(original.id)
+        XCTAssertNil(activity.sessionSwitcherTarget(id: original.id))
+        XCTAssertNil(sessions.sessionSwitcherTarget(id: original.id))
+    }
+
     func testSnapshotTracksSelectedActivitySessionBeforeDeferredRowRebuild() throws {
         let viewModel = AppViewModel()
         let project = makeProject(id: "project", directory: "/tmp/project")
@@ -407,6 +706,18 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertEqual(row?.projectID, "global")
         XCTAssertEqual(row?.recent.session.projectID, "global")
         XCTAssertTrue(row?.usesGlobalProjectAvatar == true)
+
+        var updated = makeSession(id: canonical.id, title: "Canonical rename", directory: canonical.directory!,
+            projectID: repository.id, updated: 3_000)
+        globalStore.sessions = [updated]
+        let target = viewModel.activityFacade.sessionSwitcherTarget(id: canonical.id)
+        XCTAssertEqual(target?.title, updated.title)
+        XCTAssertEqual(target?.projectID, "global")
+        XCTAssertEqual(target?.directory, updated.directory)
+        XCTAssertEqual(target?.time, updated.time)
+        updated.time = .init(created: 2_000, updated: 3_000, archived: 4_000)
+        globalStore.sessions = [updated]
+        XCTAssertNil(viewModel.activityFacade.sessionSwitcherTarget(id: canonical.id))
     }
 
     func testNeedsInputSectionTakesPrecedenceOverWorking() {

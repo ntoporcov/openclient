@@ -192,6 +192,42 @@ final class SessionListFacade: ObservableObject {
     }
     @Published private(set) var pendingWorktreeRemoval: WorktreeRemovalConfirmation?
     @Published private(set) var snapshot = Snapshot.empty
+
+    var sessionSwitcherCandidates: [OpenCodeSession] {
+        Array(sessionSwitcherEligibleSessions.prefix(5))
+    }
+
+    var sessionSwitcherEligibleSessions: [OpenCodeSession] {
+        let rows = snapshot.pinnedRows + snapshot.unpinnedRows
+            + (snapshot.showsWorkspaces ? snapshot.workspaceSections.flatMap(\.rows) : [])
+        let hiddenIDs = viewModel.hiddenProjectActionSessionIDs
+        var seenIDs = Set<String>()
+        let candidates = rows.filter {
+            $0.session.isRootSession && !$0.session.isArchived && !hiddenIDs.contains($0.id)
+                && !viewModel.directoryStoreRegistry.isV2SessionDeleted($0.id)
+                && seenIDs.insert($0.id).inserted
+        }.sorted { lhs, rhs in
+            let lhsTime = lhs.updatedAt?.timeIntervalSince1970 ?? lhs.preview?.date?.timeIntervalSince1970 ?? 0
+            let rhsTime = rhs.updatedAt?.timeIntervalSince1970 ?? rhs.preview?.date?.timeIntervalSince1970 ?? 0
+            if lhsTime != rhsTime { return lhsTime > rhsTime }
+            return lhs.id < rhs.id
+        }
+        return candidates.map(\.session)
+    }
+
+    func sessionSwitcherTarget(id: String) -> OpenCodeSession? {
+        let rows = snapshot.pinnedRows + snapshot.unpinnedRows
+            + (snapshot.showsWorkspaces ? snapshot.workspaceSections.flatMap(\.rows) : [])
+        guard !viewModel.directoryStoreRegistry.isV2SessionDeleted(id),
+              let row = rows.first(where: { $0.id == id }) else { return nil }
+        let target = viewModel.directoryStoreRegistry.session(matching: id) ?? row.session
+        guard target.isRootSession, !target.isArchived, !viewModel.isActionSession(target),
+              DirectoryStoreRegistry.key(for: target.directory) == DirectoryStoreRegistry.key(for: row.session.directory),
+              target.workspaceID == row.session.workspaceID,
+              (target.projectID ?? row.session.projectID) == (row.session.projectID ?? target.projectID) else { return nil }
+        return target
+    }
+
     private var observations: Set<AnyCancellable> = []
     private var activeDirectoryObservations: Set<AnyCancellable> = []
     private var snapshotRefreshTask: Task<Void, Never>?

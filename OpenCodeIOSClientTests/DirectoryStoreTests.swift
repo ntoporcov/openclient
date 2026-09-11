@@ -270,6 +270,105 @@ final class DirectoryStoreTests: XCTestCase {
         XCTAssertNil(store.sessionSwitcherPresentation)
     }
 
+    func testSessionSwitcherUsesExplicitScopeAndOrderAndWraps() {
+        let current = session(id: "current", directory: "/tmp/project")
+        let unrelated = session(id: "unrelated", directory: "/tmp/project")
+        let first = session(id: "first", directory: "/tmp/other")
+        let last = session(id: "last", directory: "/tmp/workspace")
+        let store = DirectoryStore(sessions: [current, unrelated], selectedSession: unrelated)
+        store.selectedSession = current
+        let candidates = [first, current, last]
+
+        XCTAssertEqual(store.advanceSessionSwitcher(from: current.id, candidates: candidates), last)
+        XCTAssertNil(store.sessionSwitcherPresentation)
+        store.revealSessionSwitcher()
+        XCTAssertEqual(store.sessionSwitcherPresentation?.sessions, candidates)
+        XCTAssertEqual(store.advanceSessionSwitcher(from: last.id, candidates: candidates), first)
+        XCTAssertEqual(store.sessionSwitcherPresentation?.selectedSessionID, first.id)
+        XCTAssertEqual(store.advanceSessionSwitcher(from: first.id, candidates: candidates), current)
+        XCTAssertEqual(store.finishSessionSwitcher(), current)
+        XCTAssertNil(store.sessionSwitcherPresentation)
+        XCTAssertEqual(store.selectedSession, current)
+    }
+
+    func testSessionSwitcherStartsAtFirstExplicitCandidateWhenCurrentIsAbsent() {
+        let candidates = (0..<7).map { session(id: "candidate-\($0)", directory: "/tmp/project") }
+        let store = DirectoryStore()
+
+        XCTAssertEqual(store.advanceSessionSwitcher(from: "absent", candidates: candidates), candidates[0])
+        store.revealSessionSwitcher()
+        XCTAssertEqual(store.sessionSwitcherPresentation?.sessions, candidates)
+        for candidate in candidates.dropFirst() {
+            XCTAssertEqual(store.advanceSessionSwitcher(from: "absent", candidates: candidates), candidate)
+        }
+        XCTAssertEqual(store.advanceSessionSwitcher(from: "absent", candidates: candidates), candidates[0])
+        XCTAssertEqual(store.finishSessionSwitcher(), candidates[0])
+    }
+
+    func testSessionSwitcherAllowsSingleExplicitAlternativeAndDeduplicates() {
+        let alternative = session(id: "alternative", directory: "/tmp/other")
+        let store = DirectoryStore()
+
+        XCTAssertEqual(store.advanceSessionSwitcher(from: "current", candidates: [alternative, alternative]), alternative)
+        store.revealSessionSwitcher()
+        XCTAssertEqual(store.sessionSwitcherPresentation?.sessions, [alternative])
+        XCTAssertEqual(store.advanceSessionSwitcher(from: alternative.id, candidates: []), alternative)
+        XCTAssertEqual(store.finishSessionSwitcher(), alternative)
+    }
+
+    func testSessionSwitcherRejectsExplicitCandidatesWithoutAlternatives() {
+        let current = session(id: "current", directory: "/tmp/project")
+        let previous = session(id: "previous", directory: "/tmp/project")
+        let store = DirectoryStore(sessions: [current, previous], selectedSession: previous)
+        store.selectedSession = current
+
+        for candidates in [[], [current], [current, current]] {
+            XCTAssertNil(store.advanceSessionSwitcher(from: current.id, candidates: candidates))
+            store.revealSessionSwitcher()
+            XCTAssertNil(store.sessionSwitcherPresentation)
+            XCTAssertNil(store.finishSessionSwitcher())
+        }
+        XCTAssertEqual(store.advanceSessionSwitcher(from: current.id), previous)
+    }
+
+    func testSessionSwitcherFreezesExplicitCandidatesUntilFinish() {
+        let first = session(id: "first", directory: "/tmp/project")
+        let second = session(id: "second", directory: "/tmp/project")
+        let third = session(id: "third", directory: "/tmp/other")
+        let store = DirectoryStore(sessions: [first, second], selectedSession: first)
+        let candidates = [first, second, third]
+
+        XCTAssertEqual(store.advanceSessionSwitcher(from: first.id, candidates: candidates), second)
+        store.selectedSession = second
+        store.sessions = [second]
+        XCTAssertEqual(store.advanceSessionSwitcher(from: second.id, candidates: [second, first]), third)
+        store.revealSessionSwitcher()
+        XCTAssertEqual(store.sessionSwitcherPresentation?.sessions, candidates)
+        XCTAssertEqual(store.advanceSessionSwitcher(from: third.id), first)
+        XCTAssertEqual(store.sessionSwitcherPresentation?.selectedSessionID, first.id)
+        store.finishSessionSwitcher()
+        XCTAssertNil(store.sessionSwitcherPresentation)
+        XCTAssertEqual(store.selectedSession, second)
+
+        XCTAssertEqual(store.advanceSessionSwitcher(from: second.id, candidates: [third, second, first]), first)
+        store.revealSessionSwitcher()
+        XCTAssertEqual(store.sessionSwitcherPresentation?.sessions, [third, second, first])
+    }
+
+    func testSessionSwitcherDefaultKeepsSixMostRecentlyOpenedAvailableSessions() {
+        let candidates = (0..<8).map { session(id: "candidate-\($0)", directory: "/tmp/project") }
+        let store = DirectoryStore(sessions: candidates)
+        for candidate in candidates { store.selectedSession = candidate }
+        store.sessions.removeAll { $0.id == candidates[6].id }
+
+        XCTAssertEqual(store.advanceSessionSwitcher(from: candidates[7].id, candidates: nil), candidates[5])
+        store.revealSessionSwitcher()
+        XCTAssertEqual(store.sessionSwitcherPresentation?.sessions, [
+            candidates[7], candidates[5], candidates[4], candidates[3], candidates[2], candidates[1],
+        ])
+        XCTAssertEqual(store.finishSessionSwitcher(), candidates[5])
+    }
+
     func testUpsertSessionsPreservesExistingSessionsAndMergesUpdates() {
         let existing = OpenCodeSession(id: "existing", title: "Old", workspaceID: nil, directory: "/tmp/project", projectID: "project", parentID: nil)
         let updated = OpenCodeSession(id: "existing", title: "Updated", workspaceID: nil, directory: "/tmp/project", projectID: "project", parentID: nil)

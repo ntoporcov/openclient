@@ -1620,6 +1620,63 @@ final class OpenCodeStreamingTests: XCTestCase {
         XCTAssertEqual(question.id, "q_1")
     }
 
+    func testQuestionEventWithToolDecodesOnSmallWorkerStack() async {
+        let completed = expectation(description: "Question event decoded on worker stack")
+        let payload = #"{"directory":"/tmp/project","type":"question.asked","properties":{"id":"q_worker","sessionID":"ses_test","tool":{"messageID":"msg_test","callID":"call_test"},"questions":[{"question":"Choose","header":"Question","options":[{"label":"Build","description":"Build it"}]}]}}"#
+        let worker = Thread {
+            defer { completed.fulfill() }
+            for _ in 0..<20 {
+                guard case let .event(event) = OpenCodeEventManager.decodeManagedEvent(from: payload),
+                      case let .questionAsked(question) = event.typed else {
+                    XCTFail("Expected typed question event")
+                    return
+                }
+                XCTAssertEqual(question.tool?.messageID, "msg_test")
+                XCTAssertEqual(question.tool?.callID, "call_test")
+                XCTAssertEqual(question.questions.first?.multiple, false)
+                XCTAssertEqual(question.questions.first?.custom, true)
+            }
+        }
+        worker.stackSize = 512 * 1024
+        worker.start()
+        await fulfillment(of: [completed], timeout: 5)
+    }
+
+    func testDirectInteractionProjectionPreservesOptionalFields() {
+        let payloads = [
+            #"{"type":"permission.asked","properties":{"id":"perm","sessionID":"ses","permission":"bash","patterns":["git status"],"always":["git *"],"metadata":{"reason":"test"}}}"#,
+            #"{"type":"permission.asked","properties":{"id":"legacy","sessionID":"ses","type":"read","pattern":"*.swift","messageID":"msg","callID":"call"}}"#,
+            #"{"type":"permission.replied","properties":{"sessionID":"ses","permissionID":"perm","reply":"once"}}"#,
+            #"{"type":"project.updated","properties":{"id":"project","worktree":"/tmp/project","name":"Project","sandboxes":["/tmp/worktree"]}}"#,
+        ]
+        let events = payloads.compactMap { payload -> OpenCodeTypedEvent? in
+            guard case let .event(event) = OpenCodeEventManager.decodeManagedEvent(from: payload) else { return nil }
+            return event.typed
+        }
+        XCTAssertEqual(events.count, 4)
+        guard events.count == 4 else { return }
+        if case let .permissionAsked(permission) = events[0] {
+            XCTAssertNil(permission.tool)
+            XCTAssertEqual(permission.patterns, ["git status"])
+            XCTAssertEqual(permission.always, ["git *"])
+            XCTAssertEqual(permission.metadata?["reason"], .string("test"))
+        } else { XCTFail("Expected permission") }
+        if case let .permissionAsked(permission) = events[1] {
+            XCTAssertEqual(permission.permission, "read")
+            XCTAssertEqual(permission.patterns, ["*.swift"])
+            XCTAssertEqual(permission.tool?.messageID, "msg")
+        } else { XCTFail("Expected legacy permission") }
+        if case let .permissionReplied(sessionID, requestID, reply) = events[2] {
+            XCTAssertEqual(sessionID, "ses")
+            XCTAssertEqual(requestID, "perm")
+            XCTAssertEqual(reply, "once")
+        } else { XCTFail("Expected reply") }
+        if case let .projectUpdated(project) = events[3] {
+            XCTAssertEqual(project.id, "project")
+            XCTAssertEqual(project.sandboxes, ["/tmp/worktree"])
+        } else { XCTFail("Expected project") }
+    }
+
     func testReducerIgnoresDeltaWhenMessageShellHasNotArrived() throws {
         let payload = try decodeEvent(
             #"{"type":"message.part.delta","properties":{"sessionID":"ses_test","messageID":"msg_assistant","partID":"prt_text","field":"text","delta":"Hello"}}"#

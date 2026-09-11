@@ -7,21 +7,23 @@ final class OpenCodeSavedServerTests: XCTestCase {
     private let storageKey = AppViewModel.StorageKey.recentServerConfigs
     private var passwordIDsToClean: Set<String> = []
     private var previousMirror: Data?
+    private var previousSavedServers: Data?
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
+        previousSavedServers = defaults.data(forKey: storageKey)
         defaults.removeObject(forKey: storageKey)
         passwordIDsToClean = []
         previousMirror = UserDefaults(suiteName: OpenClientSharePayloadStore.appGroupID)?.data(forKey: storageKey)
     }
 
-    override func tearDown() {
-        defaults.removeObject(forKey: storageKey)
+    override func tearDown() async throws {
+        defaults.set(previousSavedServers, forKey: storageKey)
         OpenClientSharePayloadStore.mirrorRecentServersData(previousMirror)
         for serverID in passwordIDsToClean {
             viewPasswordStore.deletePassword(for: serverID)
         }
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testSavedServerDecodesWithoutName() throws {

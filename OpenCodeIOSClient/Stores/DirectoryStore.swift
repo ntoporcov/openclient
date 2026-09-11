@@ -23,6 +23,7 @@ final class DirectoryStoreRegistry: ObservableObject {
     @Published private(set) var activeKey: String
     @Published private(set) var generation: Int
     private var storesByKey: [String: DirectoryStore]
+    private var openedSessionIDs: [String] = []
     private(set) var v2PendingSessionIDs: Set<String> = []
     private(set) var v2NeedsReconnectHydration = false
     private var v2LifecycleRevisions: [String: UInt] = [:]
@@ -32,6 +33,7 @@ final class DirectoryStoreRegistry: ObservableObject {
     func isV2SessionDeleted(_ id: String) -> Bool { v2DeletedSessionIDs.contains(id) }
 
     func markV2SessionDeleted(_ id: String) {
+        openedSessionIDs.removeAll { $0 == id }
         v2DeletedSessionIDs.insert(id)
         v2LifecycleRevisions[id, default: 0] &+= 1
         v2PendingSessionIDs.remove(id)
@@ -122,6 +124,27 @@ final class DirectoryStoreRegistry: ObservableObject {
         activeStore = store
         generation = 0
         storesByKey = [key: store]
+        observeSessionOpenings(in: store)
+    }
+
+    private func observeSessionOpenings(in store: DirectoryStore) {
+        store.onSessionOpened = { [weak self, weak store] session in
+            guard let self, let store, self.activeStore === store,
+                  self.openedSessionIDs.first != session.id else { return }
+            self.openedSessionIDs.removeAll { $0 == session.id }
+            self.openedSessionIDs.insert(session.id, at: 0)
+        }
+    }
+
+    func orderedSessionSwitcherCandidates(
+        _ candidates: [OpenCodeSession], currentSession: OpenCodeSession?
+    ) -> [OpenCodeSession] {
+        let byID = Dictionary(candidates.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let ordered = currentSession.map { [$0] } ?? []
+        var seen = Set<String>()
+        return (ordered + openedSessionIDs.compactMap { byID[$0] } + candidates).filter {
+            !$0.isArchived && !isV2SessionDeleted($0.id) && seen.insert($0.id).inserted
+        }
     }
 
     static func key(for directory: String?) -> String {
@@ -156,6 +179,7 @@ final class DirectoryStoreRegistry: ObservableObject {
         }
         let store = DirectoryStore()
         storesByKey[key] = store
+        observeSessionOpenings(in: store)
         return store
     }
 
@@ -227,6 +251,7 @@ final class DirectoryStoreRegistry: ObservableObject {
     }
 
     func reset() {
+        openedSessionIDs = []
         v2PendingSessionIDs.removeAll()
         v2NeedsReconnectHydration = false
         let store = DirectoryStore()
@@ -236,6 +261,7 @@ final class DirectoryStoreRegistry: ObservableObject {
         storesByKey = [Self.globalKey: store]
         activeKey = Self.globalKey
         activeStore = store
+        observeSessionOpenings(in: store)
         generation &+= 1
     }
 }
@@ -310,9 +336,11 @@ final class DirectoryStore: ObservableObject {
         didSet {
             if let selectedSession {
                 recordOpenedSession(selectedSession)
+                if selectedSession.id != oldValue?.id { onSessionOpened?(selectedSession) }
             }
         }
     }
+    fileprivate var onSessionOpened: ((OpenCodeSession) -> Void)?
     @Published private(set) var openedSessionHistory: [OpenCodeSession]
     @Published private(set) var sessionSwitcherPresentation: OpenClientSessionSwitcherPresentation?
     @Published var commands: [OpenCodeCommand]
@@ -392,23 +420,31 @@ final class DirectoryStore: ObservableObject {
         }
     }
 
-    func advanceSessionSwitcher(from sessionID: String) -> OpenCodeSession? {
+    func advanceSessionSwitcher(
+        from sessionID: String,
+        candidates providedCandidates: [OpenCodeSession]? = nil
+    ) -> OpenCodeSession? {
         let candidates: [OpenCodeSession]
         let selectedSessionID: String
         if !sessionSwitcherCandidates.isEmpty, let sessionSwitcherSelectedSessionID {
             candidates = sessionSwitcherCandidates
             selectedSessionID = sessionSwitcherSelectedSessionID
         } else {
-            let availableSessionIDs = Set(sessions.map(\.id))
-            candidates = Array(openedSessionHistory.filter { availableSessionIDs.contains($0.id) }.prefix(6))
+            if let providedCandidates {
+                var seenIDs = Set<String>()
+                candidates = providedCandidates.filter { seenIDs.insert($0.id).inserted }
+            } else {
+                let availableSessionIDs = Set(sessions.map(\.id))
+                candidates = Array(openedSessionHistory.filter { availableSessionIDs.contains($0.id) }.prefix(6))
+            }
+            guard candidates.contains(where: { $0.id != sessionID }) else { return nil }
             selectedSessionID = sessionID
             sessionSwitcherCandidates = candidates
         }
 
-        guard candidates.count > 1 else { return nil }
         let currentIndex = candidates.firstIndex { $0.id == selectedSessionID }
             ?? candidates.firstIndex { $0.id == sessionID }
-            ?? 0
+            ?? -1
         let target = candidates[(currentIndex + 1) % candidates.count]
         sessionSwitcherSelectedSessionID = target.id
         if sessionSwitcherPresentation != nil {

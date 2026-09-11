@@ -268,7 +268,15 @@ private struct OpenClientFocusedChatCommands: Commands {
             .disabled(stopCurrentChat == nil)
 
             Button("Previous Session") {
+                #if canImport(UIKit)
+                if UIDevice.current.userInterfaceIdiom != .phone {
+                    SessionSwitcherKeyboardController.dispatchFromMenu()
+                } else {
+                    switchToRecentlyOpenedSession?()
+                }
+                #else
                 switchToRecentlyOpenedSession?()
+                #endif
             }
             .keyboardShortcut("`", modifiers: .command)
             .disabled(switchToRecentlyOpenedSession == nil)

@@ -86,6 +86,32 @@ final class ActivityFacade: ObservableObject {
 
     @Published private(set) var snapshot = Snapshot.empty
 
+    var sessionSwitcherCandidates: [OpenCodeSession] {
+        let now = Date()
+        let calendar = Calendar.autoupdatingCurrent
+        let hiddenIDs = viewModel.hiddenProjectActionSessionIDs
+        var seenIDs = Set<String>()
+        return snapshot.recentRows.filter {
+            ActivityRecentBucket.bucket(for: $0.updatedAt, now: now, calendar: calendar) == .recent
+        }.map(\.recent.session).filter {
+            $0.isRootSession && !$0.isArchived && !hiddenIDs.contains($0.id)
+                && !viewModel.directoryStoreRegistry.isV2SessionDeleted($0.id)
+                && seenIDs.insert($0.id).inserted
+        }
+    }
+
+    func sessionSwitcherTarget(id: String) -> OpenCodeSession? {
+        guard !viewModel.directoryStoreRegistry.isV2SessionDeleted(id),
+              let row = (snapshot.needsInputRows + snapshot.workingRows + snapshot.recentRows)
+                .first(where: { $0.recent.session.id == id }) else { return nil }
+        let target = session(
+            viewModel.directoryStoreRegistry.session(matching: id) ?? row.recent.session,
+            preservingAttributionFrom: row.recent.session
+        )
+        guard target.isRootSession, !target.isArchived, !viewModel.isActionSession(target) else { return nil }
+        return target
+    }
+
     private unowned let viewModel: AppViewModel
     private weak var liveActivityBackgroundBridge: LiveActivityBackgroundBridge?
     private var observations: Set<AnyCancellable> = []

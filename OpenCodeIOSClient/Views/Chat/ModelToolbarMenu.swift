@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ModelToolbarMenu: View {
     let modelTitle: String
+    var modelReference: OpenCodeModelReference?
+    var providerName: String?
     let providerGroups: [ChatFacade.ToolbarProviderGroup]
     let reasoningVariants: [ChatFacade.ToolbarReasoningVariant]
     let reasoningTitle: String
@@ -17,7 +19,11 @@ struct ModelToolbarMenu: View {
             accessibilityIdentifier: "chat.toolbar.model",
             onSelect: select
         ) {
-            Group {
+            HStack(spacing: 4) {
+                if let providerID = modelReference?.providerID, !providerID.isEmpty {
+                    ProviderIcon(providerID: providerID)
+                        .foregroundStyle(.secondary)
+                }
                 if let reasoningSubtitle {
                     VStack(alignment: .trailing, spacing: 0) {
                         Text(modelTitle)
@@ -32,9 +38,10 @@ struct ModelToolbarMenu: View {
                 }
             }
             .padding(.trailing, 12)
-            .frame(minWidth: 72, alignment: .trailing)
+            .frame(minWidth: modelReference == nil ? 72 : 108, alignment: .leading)
             .opencodeToolbarGlassID("model-toolbar", in: glassNamespace)
         }
+        .help(Text(verbatim: providerName ?? modelTitle))
         .transaction { transaction in
             transaction.animation = nil
         }
@@ -46,8 +53,7 @@ struct ModelToolbarMenu: View {
     }
 
     private var accessibilityValue: String {
-        guard let reasoningSubtitle else { return modelTitle }
-        return "\(modelTitle), \(reasoningSubtitle)"
+        [providerName, modelTitle, reasoningSubtitle].compactMap { $0 }.joined(separator: ", ")
     }
 
     private var menuElements: [StablePickerMenuElement] {
@@ -63,7 +69,7 @@ struct ModelToolbarMenu: View {
                             id: modelActionID(providerID: provider.id, modelID: model.id),
                             title: model.name,
                             systemImage: nil,
-                            isSelected: model.name == modelTitle
+                            isSelected: modelReference == OpenCodeModelReference(providerID: provider.id, modelID: model.id)
                         )
                     }
                 )

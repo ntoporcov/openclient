@@ -2621,70 +2621,117 @@ enum OpenCodeTypedEvent: Sendable {
     case unknown(String)
 
     init?(envelope: OpenCodeEventEnvelope) {
+        let event: OpenCodeTypedEvent?
+        switch envelope.type {
+        case "project.updated", "server.instance.disposed", "server.connected", "global.disposed",
+             "lsp.updated", "file.edited", "file.watcher.updated", "installation.updated",
+             "installation.update-available", "worktree.ready", "worktree.failed":
+            event = Self.projectEvent(envelope: envelope)
+        case "session.created", "session.updated", "session.deleted", "session.status", "session.idle",
+             "session.error", "session.diff", "todo.updated":
+            event = Self.sessionEvent(envelope: envelope)
+        case "message.updated", "message.removed", "message.part.updated", "message.part.removed",
+             "message.part.delta":
+            event = Self.messageEvent(envelope: envelope)
+        case "permission.asked", "permission.replied", "question.asked", "question.replied", "question.rejected":
+            event = Self.interactionEvent(envelope: envelope)
+        case "pty.created", "pty.updated", "pty.exited", "pty.deleted", "vcs.branch.updated":
+            event = Self.ptyEvent(envelope: envelope)
+        default:
+            event = .unknown(envelope.type)
+        }
+        guard let event else { return nil }
+        self = event
+    }
+
+    // Keep family projections in separate frames so Debug temporaries fit on SSE worker stacks.
+    @inline(never)
+    private static func projectEvent(envelope: OpenCodeEventEnvelope) -> OpenCodeTypedEvent? {
         switch envelope.type {
         case "project.updated":
-            guard let data = try? JSONDecoder().decode(OpenCodeProject.self, from: try JSONEncoder().encode(envelope.properties)) else { return nil }
-            self = .projectUpdated(data)
+            guard let id = envelope.properties.id, let worktree = envelope.properties.worktree else { return nil }
+            return .projectUpdated(OpenCodeProject(id: id, worktree: worktree,
+                vcs: envelope.properties.vcs, name: envelope.properties.name,
+                sandboxes: envelope.properties.sandboxes, icon: envelope.properties.icon, time: envelope.properties.time))
         case "server.instance.disposed":
             guard let directory = envelope.properties.directory else { return nil }
-            self = .serverInstanceDisposed(directory: directory)
+            return .serverInstanceDisposed(directory: directory)
         case "server.connected":
-            self = .serverConnected
+            return .serverConnected
         case "global.disposed":
-            self = .globalDisposed
+            return .globalDisposed
         case "lsp.updated":
-            self = .lspUpdated
+            return .lspUpdated
         case "file.edited":
             guard let file = envelope.properties.file else { return nil }
-            self = .fileEdited(file: file)
+            return .fileEdited(file: file)
+        case "file.watcher.updated":
+            guard let file = envelope.properties.file else { return nil }
+            return .fileWatcherUpdated(file: file)
         case "installation.updated":
             guard let version = envelope.properties.version else { return nil }
-            self = .installationUpdated(version: version)
+            return .installationUpdated(version: version)
         case "installation.update-available":
             guard let version = envelope.properties.version else { return nil }
-            self = .installationUpdateAvailable(version: version)
+            return .installationUpdateAvailable(version: version)
         case "worktree.ready":
             guard let name = envelope.properties.name,
                   let branch = envelope.properties.branch else { return nil }
-            self = .worktreeReady(name: name, branch: branch)
+            return .worktreeReady(name: name, branch: branch)
         case "worktree.failed":
             guard let message = envelope.properties.message else { return nil }
-            self = .worktreeFailed(message: message)
+            return .worktreeFailed(message: message)
+        default:
+            return nil
+        }
+    }
+
+    @inline(never)
+    private static func sessionEvent(envelope: OpenCodeEventEnvelope) -> OpenCodeTypedEvent? {
+        switch envelope.type {
         case "session.created":
             guard let info = envelope.properties.info else { return nil }
-            self = .sessionCreated(info.asSession())
+            return .sessionCreated(info.asSession())
         case "session.updated":
             guard let info = envelope.properties.info else { return nil }
-            self = .sessionUpdated(info.asSession())
+            return .sessionUpdated(info.asSession())
         case "session.deleted":
             guard let info = envelope.properties.info else { return nil }
-            self = .sessionDeleted(info.asSession())
+            return .sessionDeleted(info.asSession())
         case "session.status":
             guard let sessionID = envelope.properties.sessionID,
                   let status = envelope.properties.status?.type else { return nil }
-            self = .sessionStatus(sessionID: sessionID, status: status)
+            return .sessionStatus(sessionID: sessionID, status: status)
         case "session.idle":
             guard let sessionID = envelope.properties.sessionID else { return nil }
-            self = .sessionIdle(sessionID: sessionID)
+            return .sessionIdle(sessionID: sessionID)
         case "session.error":
-            self = .sessionError(sessionID: envelope.properties.sessionID, message: envelope.properties.error?.data?.message)
+            return .sessionError(sessionID: envelope.properties.sessionID, message: envelope.properties.error?.data?.message)
         case "session.diff":
             guard let sessionID = envelope.properties.sessionID else { return nil }
-            self = .sessionDiff(sessionID: sessionID, diff: envelope.properties.diff ?? [])
+            return .sessionDiff(sessionID: sessionID, diff: envelope.properties.diff ?? [])
         case "todo.updated":
             guard let sessionID = envelope.properties.sessionID,
                   let todos = envelope.properties.todos else { return nil }
-            self = .todoUpdated(sessionID: sessionID, todos: todos)
+            return .todoUpdated(sessionID: sessionID, todos: todos)
+        default:
+            return nil
+        }
+    }
+
+    @inline(never)
+    private static func messageEvent(envelope: OpenCodeEventEnvelope) -> OpenCodeTypedEvent? {
+        switch envelope.type {
         case "message.updated":
             guard let info = envelope.properties.info else { return nil }
-            self = .messageUpdated(info.asMessage())
+            return .messageUpdated(info.asMessage())
         case "message.removed":
             guard let sessionID = envelope.properties.sessionID,
                   let messageID = envelope.properties.messageID else { return nil }
-            self = .messageRemoved(sessionID: sessionID, messageID: messageID)
+            return .messageRemoved(sessionID: sessionID, messageID: messageID)
         case "message.part.updated":
             guard let part = envelope.properties.part ?? envelope.properties.reconstructedPartFromFlatEvent() else { return nil }
-            self = .messagePartUpdated(
+            return .messagePartUpdated(
                 part.applyingEventFallbacks(
                     sessionID: envelope.properties.sessionID,
                     messageID: envelope.properties.messageID,
@@ -2694,62 +2741,76 @@ enum OpenCodeTypedEvent: Sendable {
         case "message.part.removed":
             guard let messageID = envelope.properties.messageID,
                   let partID = envelope.properties.partID else { return nil }
-            self = .messagePartRemoved(messageID: messageID, partID: partID)
+            return .messagePartRemoved(messageID: messageID, partID: partID)
         case "message.part.delta":
             guard let sessionID = envelope.properties.sessionID,
                   let messageID = envelope.properties.messageID,
                   let partID = envelope.properties.partID,
                   let field = envelope.properties.field,
                   let delta = envelope.properties.delta else { return nil }
-            self = .messagePartDelta(sessionID: sessionID, messageID: messageID, partID: partID, field: field, delta: delta)
+            return .messagePartDelta(sessionID: sessionID, messageID: messageID, partID: partID, field: field, delta: delta)
+        default:
+            return nil
+        }
+    }
+
+    @inline(never)
+    private static func interactionEvent(envelope: OpenCodeEventEnvelope) -> OpenCodeTypedEvent? {
+        switch envelope.type {
         case "permission.asked":
-            if let permission = try? JSONDecoder().decode(OpenCodePermission.self, from: try JSONEncoder().encode(envelope.properties)) {
-                self = .permissionAsked(permission)
+            if let id = envelope.properties.id, let sessionID = envelope.properties.sessionID,
+               let permission = envelope.properties.permission {
+                return .permissionAsked(OpenCodePermission(id: id, sessionID: sessionID, permission: permission,
+                    patterns: envelope.properties.patterns, always: envelope.properties.always,
+                    metadata: envelope.properties.metadata, tool: envelope.properties.tool))
             } else if let permission = OpenCodePermission.from(eventProperties: envelope.properties) {
-                self = .permissionAsked(permission)
+                return .permissionAsked(permission)
             } else {
                 return nil
             }
         case "permission.replied":
-            if let reply = try? JSONDecoder().decode(OpenCodePermissionReplyEvent.self, from: try JSONEncoder().encode(envelope.properties)) {
-                self = .permissionReplied(sessionID: reply.sessionID, requestID: reply.requestID, reply: reply.reply)
-            } else if let sessionID = envelope.properties.sessionID,
-                      let requestID = envelope.properties.requestID ?? envelope.properties.permissionID {
-                self = .permissionReplied(sessionID: sessionID, requestID: requestID, reply: envelope.properties.reply)
-            } else {
-                return nil
-            }
+            guard let sessionID = envelope.properties.sessionID,
+                  let requestID = envelope.properties.requestID ?? envelope.properties.permissionID else { return nil }
+            return .permissionReplied(sessionID: sessionID, requestID: requestID, reply: envelope.properties.reply)
         case "question.asked":
-            guard let question = try? JSONDecoder().decode(OpenCodeQuestionRequest.self, from: try JSONEncoder().encode(envelope.properties)) else { return nil }
-            self = .questionAsked(question)
+            // Avoid re-encoding the large generic envelope on the SSE worker's small stack.
+            guard let id = envelope.properties.id, let sessionID = envelope.properties.sessionID,
+                  let questions = envelope.properties.questions else { return nil }
+            let tool = envelope.properties.tool.map { OpenCodeQuestionTool(messageID: $0.messageID, callID: $0.callID) }
+            return .questionAsked(OpenCodeQuestionRequest(id: id, sessionID: sessionID, questions: questions, tool: tool))
         case "question.replied":
             guard let sessionID = envelope.properties.sessionID,
                   let requestID = envelope.properties.requestID ?? envelope.properties.id else { return nil }
-            self = .questionReplied(sessionID: sessionID, requestID: requestID)
+            return .questionReplied(sessionID: sessionID, requestID: requestID)
         case "question.rejected":
             guard let sessionID = envelope.properties.sessionID,
                   let requestID = envelope.properties.requestID ?? envelope.properties.id else { return nil }
-            self = .questionRejected(sessionID: sessionID, requestID: requestID)
+            return .questionRejected(sessionID: sessionID, requestID: requestID)
+        default:
+            return nil
+        }
+    }
+
+    @inline(never)
+    private static func ptyEvent(envelope: OpenCodeEventEnvelope) -> OpenCodeTypedEvent? {
+        switch envelope.type {
         case "pty.created":
             guard let pty = envelope.properties.info?.asPTY() else { return nil }
-            self = .ptyCreated(pty)
+            return .ptyCreated(pty)
         case "pty.updated":
             guard let pty = envelope.properties.info?.asPTY() else { return nil }
-            self = .ptyUpdated(pty)
+            return .ptyUpdated(pty)
         case "pty.exited":
             guard let id = envelope.properties.id,
                   let exitCode = envelope.properties.exitCode else { return nil }
-            self = .ptyExited(id: id, exitCode: exitCode)
+            return .ptyExited(id: id, exitCode: exitCode)
         case "pty.deleted":
             guard let id = envelope.properties.id else { return nil }
-            self = .ptyDeleted(id: id)
+            return .ptyDeleted(id: id)
         case "vcs.branch.updated":
-            self = .vcsBranchUpdated(branch: envelope.properties.branch)
-        case "file.watcher.updated":
-            guard let file = envelope.properties.file else { return nil }
-            self = .fileWatcherUpdated(file: file)
+            return .vcsBranchUpdated(branch: envelope.properties.branch)
         default:
-            self = .unknown(envelope.type)
+            return nil
         }
     }
 }

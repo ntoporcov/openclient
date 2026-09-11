@@ -21,6 +21,8 @@ private struct ModelToolbarMenuPreviewHost: View {
     var body: some View {
         ModelToolbarMenu(
             modelTitle: OpenCodePreviewData.previewModel.name,
+            modelReference: OpenCodeModelReference(providerID: OpenCodePreviewData.previewModel.providerID,
+                modelID: OpenCodePreviewData.previewModel.id),
             providerGroups: OpenCodePreviewData.providers.map {
                 ChatFacade.ToolbarProviderGroup(id: $0.id, name: $0.name, models: Array($0.models.values))
             },

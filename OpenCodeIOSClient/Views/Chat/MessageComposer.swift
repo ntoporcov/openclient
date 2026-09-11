@@ -168,6 +168,8 @@ struct MessageComposer: View {
     var agentTitle: String = ""
     var selectableAgents: [OpenCodeAgent] = []
     var modelTitle: String = ""
+    var modelReference: OpenCodeModelReference?
+    var modelProviderName: String?
     var providerGroups: [ChatFacade.ToolbarProviderGroup] = []
     var reasoningVariants: [ChatFacade.ToolbarReasoningVariant] = []
     var reasoningTitle: String = ""
@@ -838,15 +840,17 @@ struct MessageComposer: View {
                 StablePickerMenu(
                     elements: modelMenuElements,
                     accessibilityLabel: String(localized: "Model"),
-                    accessibilityValue: modelTitle,
+                    accessibilityValue: [modelProviderName, modelTitle].compactMap { $0 }.joined(separator: ", "),
                     accessibilityIdentifier: "chat.composer.model",
                     onSelect: selectModel
                 ) {
                     catalystSelectorLabel(
                         title: modelTitle,
-                        systemImage: "cpu"
+                        systemImage: nil,
+                        providerID: modelReference?.providerID
                     )
                 }
+                .help(Text(verbatim: modelProviderName ?? modelTitle))
                 .transaction { transaction in
                     transaction.animation = nil
                 }
@@ -995,8 +999,20 @@ struct MessageComposer: View {
         .accessibilityIdentifier("chat.stream.stop")
     }
 
-    private func catalystSelectorLabel(title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
+    private func catalystSelectorLabel(title: String, systemImage: String?, providerID: String? = nil) -> some View {
+        HStack(spacing: 6) {
+            if let providerID, !providerID.isEmpty {
+                ProviderIcon(providerID: providerID)
+                    .foregroundStyle(.secondary)
+            } else if let systemImage {
+                Image(systemName: systemImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 22, height: 22)
+                    .frame(width: 30, height: 30)
+            }
+            Text(verbatim: title)
+        }
             .font(.footnote.weight(.medium))
             .foregroundStyle(.primary)
             .lineLimit(1)
@@ -1018,7 +1034,7 @@ struct MessageComposer: View {
                             id: "model:\(provider.id):\(model.id)",
                             title: model.name,
                             systemImage: nil,
-                            isSelected: model.name == modelTitle
+                            isSelected: modelReference == OpenCodeModelReference(providerID: provider.id, modelID: model.id)
                         )
                     }
                 )
@@ -2531,7 +2547,10 @@ final class ComposerPlaceholderTextView: UITextView {
     }
 
     override var keyCommands: [UIKeyCommand]? {
-        var commands = [UIKeyCommand]()
+        var commands = super.keyCommands ?? []
+        if let switchCommand = SessionSwitcherKeyboardController.command(for: window) {
+            commands.insert(switchCommand, at: 0)
+        }
 
         let submitCommand = UIKeyCommand(
             title: "",
@@ -2569,7 +2588,19 @@ final class ComposerPlaceholderTextView: UITextView {
         insertText("\n")
     }
 
+    @objc private func openClientCycleSession(_ command: UIKeyCommand) {
+        SessionSwitcherDiagnostics.log("composer command action")
+        SessionSwitcherKeyboardController.dispatch(command)
+    }
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: {
+            $0.key?.keyCode == .keyboardGraveAccentAndTilde && $0.key?.modifierFlags.contains(.command) == true
+        }), let command = SessionSwitcherKeyboardController.command(for: window) {
+            SessionSwitcherDiagnostics.log("composer key press")
+            SessionSwitcherKeyboardController.dispatch(command)
+            return
+        }
         guard
             presses.contains(where: { press in
                 guard let key = press.key else { return false }
@@ -2588,6 +2619,9 @@ final class ComposerPlaceholderTextView: UITextView {
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(openClientCycleSession(_:)) {
+            return SessionSwitcherKeyboardController.command(for: window) != nil
+        }
         if action == #selector(paste(_:)), UIPasteboard.general.hasImages {
             return true
         }

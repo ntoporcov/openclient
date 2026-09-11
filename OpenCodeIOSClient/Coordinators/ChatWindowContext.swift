@@ -83,14 +83,16 @@ final class ChatWindowContext: ObservableObject {
         drafts[session.id] = (composer.draftMessage, composer.draftAgentMentions, composer.draftAttachments)
     }
 
-    func advanceSessionSwitcher() -> OpenCodeSession? {
+    func advanceSessionSwitcher(candidates: [OpenCodeSession]? = nil) -> OpenCodeSession? {
         guard isCurrent else { return nil }
         if switcherCandidates.isEmpty {
-            switcherCandidates = history.reversed().compactMap { model.directoryStoreRegistry.session(matching: $0.id) }
-            switcherCandidates = Array(switcherCandidates.prefix(6))
+            let available = candidates ?? history.reversed().compactMap { model.directoryStoreRegistry.session(matching: $0.id) }
+            switcherCandidates = Array(available.filter {
+                !$0.isArchived && !model.directoryStoreRegistry.isV2SessionDeleted($0.id)
+            }.prefix(6))
         }
-        guard switcherCandidates.count > 1 else { return nil }
-        let index = switcherCandidates.firstIndex { $0.id == (switcherTarget ?? session.id) } ?? 0
+        guard switcherCandidates.contains(where: { $0.id != session.id }) else { return nil }
+        let index = switcherCandidates.firstIndex { $0.id == (switcherTarget ?? session.id) } ?? -1
         let target = switcherCandidates[(index + 1) % switcherCandidates.count]
         switcherTarget = target.id
         if sessionSwitcherPresentation != nil { revealSessionSwitcher() }
@@ -189,6 +191,7 @@ final class ChatWindowContext: ObservableObject {
         guard !isClosed else { return }
         saveDraft()
         isClosed = true
+        commandHoldMonitor.cancel()
         _ = finishSessionSwitcher()
         navigationRevision &+= 1
         hydration?.cancel()

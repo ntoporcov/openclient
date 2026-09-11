@@ -1715,26 +1715,34 @@ private struct OpenClientSessionSwitcherOverlay: View {
     let presentation: OpenClientSessionSwitcherPresentation
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(presentation.sessions) { session in
-                let isSelected = session.id == presentation.selectedSessionID
-                VStack(spacing: 7) {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.title3)
-                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-
-                    Text(session.displayTitle(fallback: String(localized: "Session")))
-                        .font(.caption.weight(isSelected ? .semibold : .regular))
-                        .lineLimit(1)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(presentation.sessions) { session in
+                        let isSelected = session.id == presentation.selectedSessionID
+                        HStack(spacing: 10) {
+                            Image(systemName: "bubble.left.and.bubble.right.fill")
+                                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                            Text(session.displayTitle(fallback: String(localized: "Session")))
+                                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                                .lineLimit(2)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(10)
+                        .frame(minHeight: 44)
+                        .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .id(session.id)
+                    }
                 }
-                .frame(width: 124, height: 62)
-                .background(
-                    isSelected ? Color.accentColor.opacity(0.14) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
+                .padding(10)
+            }
+            .onChange(of: presentation.selectedSessionID, initial: true) { _, id in
+                proxy.scrollTo(id, anchor: .center)
             }
         }
-        .padding(10)
+        .frame(maxWidth: 360)
+        .frame(height: min(360, CGFloat(presentation.sessions.count) * 56 + 20))
         .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
         .allowsHitTesting(false)
@@ -2100,6 +2108,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
     var agentTitle: String = ""
     var selectableAgents: [OpenCodeAgent] = []
     var modelTitle: String = ""
+    var modelReference: OpenCodeModelReference?
+    var modelProviderName: String?
     var providerGroups: [ChatFacade.ToolbarProviderGroup] = []
     var reasoningVariants: [ChatFacade.ToolbarReasoningVariant] = []
     var reasoningTitle: String = ""
@@ -2152,6 +2162,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
             agentTitle: agentTitle,
             selectableAgents: selectableAgents,
             modelTitle: modelTitle,
+            modelReference: modelReference,
+            modelProviderName: modelProviderName,
             providerGroups: providerGroups,
             reasoningVariants: reasoningVariants,
             reasoningTitle: reasoningTitle,
@@ -2315,7 +2327,11 @@ struct ChatView: View {
     private let bottomRefreshIndicatorHeight: CGFloat = 34
     private let outgoingRequestDelayMS = 720
     private let eagerRefreshMinimumInterval: TimeInterval = 4
+    #if targetEnvironment(macCatalyst)
+    private let regularWidthChatMaximum: CGFloat = 1_000
+    #else
     private let regularWidthChatMaximum: CGFloat = 720
+    #endif
 
     private static let emptyContextMetrics = OpenCodeSessionContextMetrics(
         totalCost: 0,
@@ -2646,6 +2662,7 @@ struct ChatView: View {
 
                 if let presentation = chatFacade.sessionSwitcherPresentation {
                     OpenClientSessionSwitcherOverlay(presentation: presentation)
+                        .padding(.horizontal, 16)
                         .padding(.top, 18)
                         .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
                 }
@@ -2669,6 +2686,18 @@ struct ChatView: View {
                 switchSessionAction: recentlyOpenedSessionSwitchAction
             )
         )
+        .background {
+            #if canImport(UIKit)
+            if usesCatalystComposerLayout, onDismissChildSession == nil {
+                SessionSwitcherKeyboardBridge(onAdvance: { isActive in
+                    advanceRecentlyOpenedSessionSwitcher(isActive: isActive)
+                }, onCancel: {
+                    chatFacade.cancelSessionSwitcher(for: sessionID)
+                })
+                .frame(width: 0, height: 0)
+            }
+            #endif
+        }
         .onAppear {
             chatFacade.windowContext?.stopAudio = { [weak conversationController] in conversationController?.stop() }
             syncComposerDraftFromViewModel()
@@ -2683,6 +2712,7 @@ struct ChatView: View {
             await chatFacade.hydrateSessionForPresentation(liveSession)
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .active { chatFacade.cancelSessionSwitcher(for: sessionID) }
             if phase == .active {
                 clearInactiveKeyboardMeasurement()
                 scheduleEagerChatRefresh(reason: "scene active")
@@ -2696,6 +2726,7 @@ struct ChatView: View {
         }
 #endif
         .onDisappear {
+            chatFacade.cancelSessionSwitcher(for: sessionID)
             thinkingEntryGate = ChatThinkingEntryGate()
             preparingOutgoingMessageID = nil
             animatingOutgoingMessageID = nil
@@ -2931,17 +2962,17 @@ struct ChatView: View {
     }
 
     private var recentlyOpenedSessionSwitchAction: (() -> Void)? {
-        guard chatFacade.previouslyOpenedSession(excluding: sessionID) != nil else {
-            return nil
-        }
         return {
             advanceRecentlyOpenedSessionSwitcher()
         }
     }
 
-    private func advanceRecentlyOpenedSessionSwitcher() {
+    private func advanceRecentlyOpenedSessionSwitcher(isActive: @escaping () -> Bool = { true }) {
+        #if canImport(UIKit)
+        SessionSwitcherDiagnostics.log("advance candidates=\(chatFacade.sessionSwitcherCandidates.count) commandDown=\(OpenClientCommandHoldMonitor.isCommandPressed)")
+        #endif
         guard chatFacade.advanceSessionSwitcher(from: sessionID) != nil else { return }
-        chatFacade.monitorSessionSwitcher()
+        chatFacade.monitorSessionSwitcher(isActive: isActive)
     }
 
     private func refreshCachedContextMetrics(
@@ -3472,6 +3503,8 @@ struct ChatView: View {
             agentTitle: toolbarSnapshot.agentTitle,
             selectableAgents: toolbarSnapshot.selectableAgents,
             modelTitle: toolbarSnapshot.modelTitle,
+            modelReference: toolbarSnapshot.displayedModelReference,
+            modelProviderName: toolbarSnapshot.modelProviderName,
             providerGroups: toolbarSnapshot.providerGroups,
             reasoningVariants: toolbarSnapshot.reasoningVariants,
             reasoningTitle: toolbarSnapshot.reasoningTitle,
@@ -5071,22 +5104,24 @@ struct ChatView: View {
                 #endif
 
                 ToolbarItem(placement: .opencodeTrailing) {
-                    SessionContextUsageToolbarButton(metrics: contextMetrics) {
-                        showingContextMetrics = true
-                    }
-                    .opencodeToolbarGlassID("context-usage-toolbar", in: toolbarGlassNamespace)
-                }
+                    HStack(spacing: 12) {
+                        SessionContextUsageToolbarButton(metrics: contextMetrics) {
+                            showingContextMetrics = true
+                        }
+                        .opencodeToolbarGlassID("context-usage-toolbar", in: toolbarGlassNamespace)
 
-                ToolbarItem(placement: .opencodeTrailing) {
-                    ModelToolbarMenu(
-                        modelTitle: toolbarSnapshot.modelTitle,
-                        providerGroups: toolbarSnapshot.providerGroups,
-                        reasoningVariants: toolbarSnapshot.reasoningVariants,
-                        reasoningTitle: toolbarSnapshot.reasoningTitle,
-                        glassNamespace: toolbarGlassNamespace,
-                        onSelectModel: { chatFacade.selectModel($0, for: liveSession) },
-                        onSelectReasoningVariant: { chatFacade.selectReasoningVariant($0, for: liveSession) }
-                    )
+                        ModelToolbarMenu(
+                            modelTitle: toolbarSnapshot.modelTitle,
+                            modelReference: toolbarSnapshot.displayedModelReference,
+                            providerName: toolbarSnapshot.modelProviderName,
+                            providerGroups: toolbarSnapshot.providerGroups,
+                            reasoningVariants: toolbarSnapshot.reasoningVariants,
+                            reasoningTitle: toolbarSnapshot.reasoningTitle,
+                            glassNamespace: toolbarGlassNamespace,
+                            onSelectModel: { chatFacade.selectModel($0, for: liveSession) },
+                            onSelectReasoningVariant: { chatFacade.selectReasoningVariant($0, for: liveSession) }
+                        )
+                    }
                 }
             }
             #endif

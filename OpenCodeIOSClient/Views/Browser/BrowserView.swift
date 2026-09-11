@@ -956,14 +956,26 @@ private struct ProjectBrowserAccessoryModifier: ViewModifier {
     let isEnabled: Bool
 
     func body(content: Content) -> some View {
-        #if os(iOS)
+        #if targetEnvironment(macCatalyst) || targetEnvironment(simulator)
+        fallbackAccessory(content: content)
+        #elseif os(iOS)
         if #available(iOS 26.1, macCatalyst 26.1, *) {
             content.tabViewBottomAccessory(isEnabled: isEnabled && browser.presentation == .collapsed) {
                 BrowserAccessoryRow(browser: browser, accessibilityIdentifier: "browser.projectAccessory")
             }
             .animation(.snappy(duration: 0.3, extraBounce: 0.02), value: browser.presentation)
-        } else if #available(iOS 26.0, macCatalyst 26.0, *) {
-            // 26.0 cannot hide the native container. Keep the TabView in place and inset only a real row.
+        } else {
+            fallbackAccessory(content: content)
+        }
+        #else
+        content
+        #endif
+    }
+
+    @ViewBuilder
+    private func fallbackAccessory(content: Content) -> some View {
+        if #available(iOS 26.0, macCatalyst 26.0, *) {
+            // Keep the TabView in place when the SDK cannot hide its native accessory container.
             content.safeAreaInset(edge: .bottom, spacing: 0) {
                 if isEnabled && browser.presentation == .collapsed {
                     BrowserAccessoryRow(browser: browser, accessibilityIdentifier: "browser.projectAccessory")
@@ -980,9 +992,6 @@ private struct ProjectBrowserAccessoryModifier: ViewModifier {
         } else {
             content
         }
-        #else
-        content
-        #endif
     }
 }
 

@@ -112,6 +112,8 @@ final class ChatFacade: ObservableObject {
         let selectedReasoningVariant: String?
         let agentTitle: String
         let modelTitle: String
+        let displayedModelReference: OpenCodeModelReference?
+        let modelProviderName: String?
         let reasoningTitle: String
         let isAgentLoading: Bool
         let isModelLoading: Bool
@@ -179,14 +181,52 @@ final class ChatFacade: ObservableObject {
     }
 
     func advanceSessionSwitcher(from sessionID: String) -> OpenCodeSession? {
-        if let windowContext { return windowContext.advanceSessionSwitcher() }
-        return viewModel.directoryStore.advanceSessionSwitcher(from: sessionID)
+        switcherCommit?.task.cancel()
+        switcherCommit = nil
+        let target: OpenCodeSession?
+        if let windowContext { target = windowContext.advanceSessionSwitcher(candidates: sessionSwitcherCandidates) }
+        else { target = viewModel.directoryStore.advanceSessionSwitcher(from: sessionID, candidates: sessionSwitcherCandidates) }
+        if target != nil, switcherOriginSessionID == nil { switcherOriginSessionID = sessionID }
+        return target
     }
 
-    func monitorSessionSwitcher() {
-        let monitor = windowContext?.commandHoldMonitor ?? .shared
+    var sessionSwitcherCandidates: [OpenCodeSession] {
+        if let windowContext {
+            return Array(windowContext.history.reversed().compactMap {
+                viewModel.directoryStoreRegistry.session(matching: $0.id)
+            }.filter { !$0.isArchived && !viewModel.directoryStoreRegistry.isV2SessionDeleted($0.id) }.prefix(6))
+        }
+        #if targetEnvironment(macCatalyst)
+        let isActivity = viewModel.appShellFacade.isActivitySelected
+        let eligible = isActivity ? viewModel.activityFacade.sessionSwitcherCandidates
+            : viewModel.sessionListFacade.sessionSwitcherEligibleSessions
+        let ordered = viewModel.directoryStoreRegistry.orderedSessionSwitcherCandidates(eligible, currentSession: selectedSession)
+        return isActivity ? ordered : Array(ordered.prefix(5))
+        #else
+        return viewModel.appShellFacade.isActivitySelected
+            ? viewModel.activityFacade.sessionSwitcherCandidates
+            : viewModel.sessionListFacade.sessionSwitcherCandidates
+        #endif
+    }
+
+    func canSwitchSession(from sessionID: String) -> Bool {
+        sessionSwitcherCandidates.contains { $0.id != sessionID }
+    }
+
+    private var sessionSwitcherContextID: String {
+        if let windowContext { return windowContext.contextID }
+        return "\(viewModel.sessionListFacade.selectionContextID)|\(viewModel.appShellFacade.contentSelection)|\(selectedSession?.id ?? "")"
+    }
+
+    func monitorSessionSwitcher(isActive: @escaping () -> Bool = { true }) {
+        let monitor = windowContext?.commandHoldMonitor ?? sessionSwitcherMonitor
         let rootOwner = viewModel.directoryStore
-        monitor.monitor(onHold: { [weak self] in
+        let contextID = sessionSwitcherContextID
+        monitor.monitor(isActive: { [weak self] in
+            guard let self else { return false }
+            return isActive() && self.sessionSwitcherContextID == contextID
+                && (self.windowContext?.isCurrent ?? true)
+        }, onHold: { [weak self] in
             guard let self else { return }
             if let windowContext = self.windowContext { windowContext.revealSessionSwitcher() }
             else { rootOwner.revealSessionSwitcher() }
@@ -195,8 +235,53 @@ final class ChatFacade: ObservableObject {
             let target: OpenCodeSession?
             if let windowContext = self.windowContext { target = windowContext.finishSessionSwitcher() }
             else { target = rootOwner.finishSessionSwitcher() }
-            if let target { Task { await self.selectSession(target) } }
+            guard let target else { self.switcherOriginSessionID = nil; return }
+            let commitID = UUID()
+            let task = Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer {
+                    if self.switcherCommit?.id == commitID {
+                        self.switcherCommit = nil
+                        self.switcherOriginSessionID = nil
+                    }
+                }
+                guard !Task.isCancelled, isActive(), self.sessionSwitcherContextID == contextID else { return }
+                self.switcherOriginSessionID = nil
+                if self.windowContext != nil {
+                    guard let current = self.viewModel.directoryStoreRegistry.session(matching: target.id),
+                          !current.isArchived, !self.viewModel.directoryStoreRegistry.isV2SessionDeleted(current.id),
+                          current.id != self.selectedSession?.id else { return }
+                    await self.selectSession(current)
+                } else if self.viewModel.appShellFacade.isActivitySelected {
+                    let activity = self.viewModel.activityFacade
+                    guard let current = activity.sessionSwitcherTarget(id: target.id),
+                          current.id != self.selectedSession?.id else { return }
+                    let recent = RecentProjectSession(session: current, projectTitle: "", preview: nil, isBusy: false)
+                    self.viewModel.prepareRecentProjectSessionSelection(recent)
+                    await self.viewModel.openRecentProjectSession(recent)
+                } else {
+                    let facade = self.viewModel.sessionListFacade
+                    guard let current = facade.sessionSwitcherTarget(id: target.id),
+                          current.id != self.selectedSession?.id else { return }
+                    let ticket = facade.beginSelection(current)
+                    guard await facade.prepareSelectionForNavigation(ticket) else { return }
+                    await facade.completeSelection(ticket)
+                }
+            }
+            self.switcherCommit = (commitID, task)
+        }, onCancel: { [weak self] in
+            if let windowContext = self?.windowContext { _ = windowContext.finishSessionSwitcher() }
+            else { _ = rootOwner.finishSessionSwitcher() }
+            self?.switcherOriginSessionID = nil
         })
+    }
+
+    func cancelSessionSwitcher(for sessionID: String) {
+        guard switcherOriginSessionID == sessionID else { return }
+        (windowContext?.commandHoldMonitor ?? sessionSwitcherMonitor).cancel()
+        switcherCommit?.task.cancel()
+        switcherCommit = nil
+        switcherOriginSessionID = nil
     }
 
     func previouslyOpenedSession(excluding sessionID: String) -> OpenCodeSession? {
@@ -208,6 +293,9 @@ final class ChatFacade: ObservableObject {
     private weak var liveActivityBackgroundBridge: LiveActivityBackgroundBridge?
     private var observations: Set<AnyCancellable> = []
     private var activeDirectoryObservations: Set<AnyCancellable> = []
+    private let sessionSwitcherMonitor = OpenClientCommandHoldMonitor()
+    private var switcherOriginSessionID: String?
+    private var switcherCommit: (id: UUID, task: Task<Void, Never>)?
     // The app's root facade owns canonical configuration work, not any window presentation.
     private var configurationTasksByConnectionID: [UUID: [String: (id: UUID, task: Task<Bool, Never>)]] = [:]
     var v2ConfigurationTasks: [String: (id: UUID, task: Task<Bool, Never>)] {
@@ -1395,6 +1483,8 @@ final class ChatFacade: ObservableObject {
         let reasoningVariants = store.reasoningVariants(forSessionID: session.id).map { variant in
             ToolbarReasoningVariant(id: variant, title: store.formattedVariantTitle(variant))
         }
+        let displayedModel = modelToolbarDisplay(for: session, selectedModelReference: selectedModelReference,
+            lastUserMessage: lastUserMessage, isLoading: isModelLoading)
 
         return ToolbarSnapshot(
             selectableAgents: store.selectableAgents,
@@ -1415,12 +1505,9 @@ final class ChatFacade: ObservableObject {
                 lastUserMessage: lastUserMessage,
                 isLoading: isAgentLoading
             ),
-            modelTitle: modelToolbarTitle(
-                for: session,
-                selectedModelReference: selectedModelReference,
-                lastUserMessage: lastUserMessage,
-                isLoading: isModelLoading
-            ),
+            modelTitle: displayedModel.title,
+            displayedModelReference: displayedModel.reference,
+            modelProviderName: displayedModel.reference.map { store.provider(id: $0.providerID)?.name ?? $0.providerID },
             reasoningTitle: selectedReasoningVariant.map(store.formattedVariantTitle) ?? String(localized: "Default"),
             isAgentLoading: isAgentLoading,
             isModelLoading: isModelLoading,
@@ -1645,22 +1732,24 @@ final class ChatFacade: ObservableObject {
         return viewModel.modelConfigurationStore.effectiveAgentName(for: session.id) ?? String(localized: "Agent")
     }
 
-    private func modelToolbarTitle(
+    private func modelToolbarDisplay(
         for session: OpenCodeSession,
         selectedModelReference: OpenCodeModelReference?,
         lastUserMessage: OpenCodeMessageEnvelope?,
         isLoading: Bool
-    ) -> String {
+    ) -> (title: String, reference: OpenCodeModelReference?) {
         let store = viewModel.modelConfigurationStore
         if let selectedModel = store.model(for: selectedModelReference) {
-            return selectedModel.name
+            return (selectedModel.name, selectedModelReference)
         }
         if let messageModel = lastUserMessage?.info.model {
             let reference = OpenCodeModelReference(providerID: messageModel.providerID, modelID: messageModel.modelID)
-            return store.model(for: reference)?.name ?? messageModel.modelID
+            return (store.model(for: reference)?.name ?? messageModel.modelID, reference)
         }
-        guard !isLoading else { return String(localized: "Model") }
-        return store.effectiveModel(for: session.id)?.name ?? String(localized: "Model")
+        guard !isLoading, let model = store.effectiveModel(for: session.id) else {
+            return (String(localized: "Model"), nil)
+        }
+        return (model.name, store.effectiveModelReference(for: session.id))
     }
 
     private func bindActiveDirectoryStore(_ store: DirectoryStore) {
