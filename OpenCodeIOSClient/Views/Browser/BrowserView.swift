@@ -943,43 +943,45 @@ private struct BrowserErrorView: View {
 }
 
 extension View {
-    @ViewBuilder
     func opencodeProjectBrowserAccessory(
         browser: BrowserStore,
         isEnabled: Bool = true
     ) -> some View {
-        #if targetEnvironment(macCatalyst)
-        if #available(macCatalyst 26.0, *) {
-            self.tabViewBottomAccessory {
-                if isEnabled, browser.presentation == .collapsed {
-                    BrowserAccessoryRow(
-                        browser: browser,
-                        accessibilityIdentifier: "browser.projectAccessory"
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+        modifier(ProjectBrowserAccessoryModifier(browser: browser, isEnabled: isEnabled))
+    }
+}
+
+private struct ProjectBrowserAccessoryModifier: ViewModifier {
+    @ObservedObject var browser: BrowserStore
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.1, macCatalyst 26.1, *) {
+            content.tabViewBottomAccessory(isEnabled: isEnabled && browser.presentation == .collapsed) {
+                BrowserAccessoryRow(browser: browser, accessibilityIdentifier: "browser.projectAccessory")
+            }
+            .animation(.snappy(duration: 0.3, extraBounce: 0.02), value: browser.presentation)
+        } else if #available(iOS 26.0, macCatalyst 26.0, *) {
+            // 26.0 cannot hide the native container. Keep the TabView in place and inset only a real row.
+            content.safeAreaInset(edge: .bottom, spacing: 0) {
+                if isEnabled && browser.presentation == .collapsed {
+                    BrowserAccessoryRow(browser: browser, accessibilityIdentifier: "browser.projectAccessory")
+                        .opencodeConcentricGlassSurface(
+                            isInteractive: true,
+                            minimumCornerRadius: 26,
+                            in: Capsule()
+                        )
+                        .padding(.horizontal, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .animation(.snappy(duration: 0.3, extraBounce: 0.02), value: browser.presentation)
         } else {
-            self
-        }
-        #elseif os(iOS)
-        if #available(iOS 26.0, *) {
-            self.tabViewBottomAccessory {
-                if isEnabled, browser.presentation == .collapsed {
-                    BrowserAccessoryRow(
-                        browser: browser,
-                        accessibilityIdentifier: "browser.projectAccessory"
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(.snappy(duration: 0.3, extraBounce: 0.02), value: browser.presentation)
-        } else {
-            self
+            content
         }
         #else
-        self
+        content
         #endif
     }
 }

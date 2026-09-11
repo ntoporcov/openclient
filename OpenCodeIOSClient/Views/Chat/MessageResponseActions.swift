@@ -31,10 +31,21 @@ enum ResponseCompletionTime {
             ?? date(timestamp: message.info.time?.completed)
     }
 
-    private static func date(timestamp: Double?) -> Date? {
+    fileprivate static func date(timestamp: Double?) -> Date? {
         guard let timestamp, timestamp.isFinite, timestamp > 0 else { return nil }
         // Older saved transcripts and demo fixtures can use seconds rather than milliseconds.
         return Date(timeIntervalSince1970: timestamp > 100_000_000_000 ? timestamp / 1_000 : timestamp)
+    }
+}
+
+enum ResponseTurnDuration {
+    static func formatted(_ interval: TimeInterval?, locale: Locale) -> String? {
+        // Reject malformed magnitudes before converting floating-point seconds to Duration.
+        guard let interval, interval.isFinite, interval >= 0, interval < Double(Int64.max) / 2 else { return nil }
+        return Duration.seconds(interval.rounded()).formatted(
+            .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2)
+                .locale(locale)
+        )
     }
 }
 
@@ -50,6 +61,7 @@ struct AssistantResponseTurn: Identifiable, Hashable, Sendable {
     let markdownParts: [String]
     var markdown: String { markdownParts.joined(separator: "\n\n") }
     let completedAt: Date?
+    var duration: TimeInterval? = nil
     let message: OpenCodeMessageEnvelope
 
     static func project(
@@ -60,6 +72,13 @@ struct AssistantResponseTurn: Identifiable, Hashable, Sendable {
         var turns: [AssistantResponseTurn] = []
         var promptID: String?
         var assistants: [OpenCodeMessageEnvelope] = []
+        let promptStarts = messages.reduce(into: [String: Date]()) { starts, message in
+            guard message.info.role?.lowercased() == "user",
+                  !message.info.isCompactionSummary,
+                  !message.parts.contains(where: \.isCompaction),
+                  let start = ResponseCompletionTime.date(timestamp: message.info.time?.created) else { return }
+            starts[message.id] = start
+        }
 
         func appendTurn() {
             guard let first = assistants.first,
@@ -75,12 +94,18 @@ struct AssistantResponseTurn: Identifiable, Hashable, Sendable {
                 ResponseCompletionTime.date(message: message, parts: [])
                     ?? ResponseCompletionTime.date(message: message, parts: message.parts)
             }.max()
+            let duration: TimeInterval? = promptID.flatMap { promptStarts[$0] }.flatMap { start in
+                guard let completedAt else { return nil }
+                let elapsed = completedAt.timeIntervalSince(start)
+                return elapsed.isFinite && elapsed >= 0 ? elapsed : nil
+            }
             turns.append(AssistantResponseTurn(
                 id: promptID ?? first.id,
                 messageIDs: assistants.map(\.id),
                 anchorMessageID: anchor.id,
                 markdownParts: answers.flatMap(\.parts),
                 completedAt: completedAt,
+                duration: duration,
                 message: latestAnswer.message
             ))
         }
@@ -132,6 +157,7 @@ struct ResponseTurnCaption<Details: View>: View {
                     messageID: turn.id,
                     markdown: turn.markdown,
                     completedAt: turn.completedAt,
+                    duration: turn.duration,
                     markdownParts: turn.markdownParts,
                     details: details
                 )
@@ -167,9 +193,11 @@ struct ResponseTextContent: View {
 }
 
 struct MessageResponseActions<Details: View>: View {
+    @Environment(\.locale) private var locale
     let messageID: String
     let markdown: String?
     var completedAt: Date? = nil
+    var duration: TimeInterval? = nil
     var markdownParts: [String]? = nil
     @ViewBuilder let details: () -> Details
 
@@ -179,10 +207,22 @@ struct MessageResponseActions<Details: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             if let completedAt {
-                Text(completedAt, format: .dateTime.hour().minute())
+                HStack(spacing: 4) {
+                    Text(completedAt, format: .dateTime.hour().minute())
+                        .accessibilityLabel(Text("Completed at \(completedAt.formatted(date: .omitted, time: .shortened))"))
+                        .accessibilityIdentifier("chat.responseCompletedAt.\(messageID)")
+                    if let formattedDuration = ResponseTurnDuration.formatted(duration, locale: locale) {
+                        Text(verbatim: "\u{00B7}")
+                            .accessibilityHidden(true)
+                        Text(verbatim: formattedDuration)
+                            .accessibilityLabel(Text("Turn took \(formattedDuration)",
+                                                     comment: "Elapsed time from the user prompt to the final assistant completion. The argument is a fully formatted duration."))
+                            .accessibilityIdentifier("chat.responseDuration.\(messageID)")
+                    }
+                }
                     .monospacedDigit()
-                    .accessibilityLabel(Text("Completed at \(completedAt.formatted(date: .omitted, time: .shortened))"))
-                    .accessibilityIdentifier("chat.responseCompletedAt.\(messageID)")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                     .frame(height: 32)
                     .padding(.trailing, 8)
             }
@@ -205,6 +245,7 @@ struct MessageResponseActions<Details: View>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("chat.copyResponse.\(messageID)")
+                .fixedSize()
             }
 
             Menu {
@@ -235,6 +276,7 @@ struct MessageResponseActions<Details: View>: View {
             .menuIndicator(.hidden)
             .buttonStyle(.plain)
             .accessibilityIdentifier("chat.responseActions.\(messageID)")
+            .fixedSize()
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -266,6 +308,7 @@ private struct ResponseCaptionControlLabel: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(.caption2.weight(.semibold))
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .frame(width: 28, height: 28)
             .background {
                 Circle().fill(.clear)

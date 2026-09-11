@@ -7,6 +7,193 @@ import UIKit
 @testable import OpenClient
 
 final class OpenCodeStreamingTests: XCTestCase {
+    @MainActor
+    private final class LegacyHapticFixture {
+        let model = AppViewModel()
+        let session = OpenCodeSession(id: "ses_test", title: "Streaming", workspaceID: nil,
+            directory: "/tmp/project", projectID: "project", parentID: nil)
+        var time = Date(timeIntervalSince1970: 100)
+        var impacts = 0
+        var interval: TimeInterval = 0.065
+
+        init() throws {
+            model.chatStore.streamHapticFeedback = .init(
+                now: { [unowned self] in self.time },
+                impact: { [unowned self] in
+                    MainActor.assertIsolated()
+                    self.impacts += 1
+                },
+                interval: { [unowned self] in self.interval }
+            )
+            model.config = OpenCodeServerConfig(baseURL: "https://fixture.invalid", username: "", password: "", apiPreference: .legacy)
+            model.localCacheRepository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+            model.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)
+            _ = try model.requireBackendConnection()
+            model.selectedDirectory = session.directory
+            model.allSessions = [session]
+            model.selectedSession = session
+            model.chatStore.beginSelectingSession(sessionID: session.id, cachedMessages: [])
+            // The same facade entry point used by the root ChatView's onAppear.
+            model.chatFacade.setActiveChatSessionID(session.id)
+        }
+
+        func event(_ type: String, _ properties: String) throws -> OpenCodeManagedEvent {
+            let raw = #"{"directory":"/tmp/project","payload":{"type":"\#(type)","properties":\#(properties)}}"#
+            guard case let .event(event) = OpenCodeEventManager.decodeManagedEvent(from: raw) else {
+                throw NSError(domain: "LegacyHapticFixture", code: 1)
+            }
+            return event
+        }
+
+        func establishPart(role: String = "assistant", type: String = "text") throws {
+            model.handleManagedEvent(try event("message.updated",
+                #"{"info":{"id":"msg_assistant","role":"\#(role)","sessionID":"ses_test","time":{"created":2}}}"#))
+            model.handleManagedEvent(try event("message.part.updated",
+                #"{"part":{"id":"part_text","messageID":"msg_assistant","sessionID":"ses_test","type":"\#(type)","text":""}}"#))
+        }
+
+        func delta(_ text: String = "Hello", field: String = "text", partID: String = "part_text", sessionID: String = "ses_test") throws -> OpenCodeManagedEvent {
+            try event("message.part.delta",
+                #"{"sessionID":"\#(sessionID)","messageID":"msg_assistant","partID":"\#(partID)","field":"\#(field)","delta":"\#(text)"}"#)
+        }
+
+        func close() {
+            model.stopEventStream()
+            model.backendConnection?.close()
+            model.resetLocalCacheRuntimeState()
+        }
+    }
+
+    @MainActor
+    func testLegacyStreamHapticsFollowRootChatLifecycleAndThrottle() throws {
+        let fixture = try LegacyHapticFixture()
+        defer { fixture.close() }
+        let model = fixture.model
+        XCTAssertFalse(model.isCapturingStreamingDiagnostics)
+        XCTAssertNil(model.chatFacade.windowContext)
+        try fixture.establishPart()
+        XCTAssertEqual(fixture.impacts, 0, "Canonical snapshots alone are not stream deltas")
+
+        model.handleManagedEvent(try fixture.delta())
+        model.handleManagedEvent(try fixture.delta(" world"))
+        XCTAssertEqual(fixture.impacts, 1, "Throttle, not debounce")
+        fixture.time = fixture.time.addingTimeInterval(0.09)
+        fixture.interval = 0.15
+        model.handleManagedEvent(try fixture.delta(" again"))
+        XCTAssertEqual(fixture.impacts, 2, "The same part can emit repeatedly")
+        fixture.time = fixture.time.addingTimeInterval(0.1)
+        model.handleManagedEvent(try fixture.delta(" still"))
+        XCTAssertEqual(fixture.impacts, 2, "Respect the occasional longer interval")
+        fixture.time = fixture.time.addingTimeInterval(0.1)
+        model.handleManagedEvent(try fixture.delta(" streaming"))
+        XCTAssertEqual(fixture.impacts, 3)
+
+        model.chatFacade.clearActiveChatSessionIfMatching("another-session")
+        XCTAssertEqual(model.activeChatSessionID, fixture.session.id)
+        model.chatFacade.clearActiveChatSessionIfMatching(fixture.session.id)
+        fixture.time = fixture.time.addingTimeInterval(1)
+        model.handleManagedEvent(try fixture.delta())
+        XCTAssertEqual(fixture.impacts, 3, "An inactive root chat stays silent")
+        model.chatFacade.setActiveChatSessionID(fixture.session.id)
+        model.handleManagedEvent(try fixture.delta())
+        XCTAssertEqual(fixture.impacts, 4, "Reappearing does not require a new part")
+    }
+
+    @MainActor
+    func testLegacyStreamHapticsUseVisibleCanonicalPartWhenRootArrayLags() throws {
+        let fixture = try LegacyHapticFixture()
+        defer { fixture.close() }
+        let model = fixture.model
+        try fixture.establishPart()
+        // Root presentation preparation can lag the canonical store ChatView renders first.
+        model.chatStore.beginSelectingSession(sessionID: fixture.session.id, cachedMessages: [])
+        XCTAssertTrue(model.messages.isEmpty)
+        let visible = model.directoryStore.syncStore.messageEnvelopes(forSessionID: fixture.session.id, suffix: 1)
+        XCTAssertEqual(visible.first?.parts.first?.id, "part_text")
+        XCTAssertEqual(model.activeChatSessionID, fixture.session.id)
+
+        model.handleManagedEvent(try fixture.delta())
+        XCTAssertEqual(fixture.impacts, 1, "Use the canonical part already on screen, not the lagging root array")
+        model.flushBufferedTranscript(reason: "haptic regression")
+        XCTAssertEqual(model.directoryStore.syncStore.messageEnvelopes(forSessionID: fixture.session.id, suffix: 1).first?.parts.first?.text, "Hello")
+        XCTAssertEqual(model.messages.first?.parts.first?.text, "Hello")
+        XCTAssertEqual(fixture.impacts, 1, "Publishing the buffered text must not emit twice")
+    }
+
+    @MainActor
+    func testLegacyStreamHapticsUseCanonicalTypeInsteadOfStaleRootText() throws {
+        let fixture = try LegacyHapticFixture()
+        defer { fixture.close() }
+        let model = fixture.model
+        try fixture.establishPart()
+        // A newer canonical type must win over stale root text classification.
+        model.directoryStore.syncState.partsByMessageID["msg_assistant"] = [
+            OpenCodePart(id: "part_text", messageID: "msg_assistant", sessionID: fixture.session.id,
+                type: "reasoning", mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil, text: "")
+        ]
+        model.handleManagedEvent(try fixture.delta())
+        XCTAssertEqual(fixture.impacts, 0)
+    }
+
+    @MainActor
+    func testLegacyStreamHapticsSuppressIneligibleProductionEvents() throws {
+        for (role, type) in [("assistant", "reasoning"), ("user", "text"), ("assistant", "tool")] {
+            let fixture = try LegacyHapticFixture()
+            defer { fixture.close() }
+            try fixture.establishPart(role: role, type: type)
+            fixture.model.handleManagedEvent(try fixture.delta())
+            XCTAssertEqual(fixture.impacts, 0, "\(role)/\(type)")
+        }
+        let fixture = try LegacyHapticFixture()
+        defer { fixture.close() }
+        try fixture.establishPart()
+        for event in [
+            try fixture.delta("   "),
+            try fixture.delta(field: "metadata"),
+            try fixture.delta(partID: "missing"),
+            try fixture.delta(sessionID: "other"),
+        ] {
+            fixture.model.handleManagedEvent(event)
+        }
+        fixture.model.chatFacade.setActiveChatSessionID("other")
+        fixture.model.handleManagedEvent(try fixture.delta())
+        fixture.model.selectedSession = nil
+        fixture.model.chatFacade.setActiveChatSessionID(fixture.session.id)
+        fixture.model.handleManagedEvent(try fixture.delta())
+        XCTAssertEqual(fixture.impacts, 0)
+    }
+
+    @MainActor
+    func testLegacyStreamHapticsTimerBatchReachesProductionHandler() async throws {
+        let fixture = try LegacyHapticFixture()
+        defer { fixture.close() }
+        let connection = try fixture.model.requireBackendConnection()
+        let delivered = expectation(description: "timer delivers canonical identity and deltas")
+        delivered.expectedFulfillmentCount = 4
+        let batcher = OpenCodeManagedEventBatcher { event in
+            await MainActor.run {
+                XCTAssertFalse(Task.isCancelled)
+                guard fixture.model.isCurrentBackendConnection(connection) else { return }
+                fixture.model.handleManagedEvent(event)
+                delivered.fulfill()
+            }
+        }
+        for event in [
+            try fixture.event("message.updated", #"{"info":{"id":"msg_assistant","role":"assistant","sessionID":"ses_test","time":{"created":2}}}"#),
+            try fixture.event("message.part.updated", #"{"part":{"id":"part_text","messageID":"msg_assistant","sessionID":"ses_test","type":"text","text":""}}"#),
+            try fixture.delta(),
+            try fixture.delta(" world"),
+        ] {
+            await batcher.enqueue(event)
+        }
+        await fulfillment(of: [delivered], timeout: 2)
+        await batcher.stop()
+        XCTAssertEqual(fixture.impacts, 1)
+        fixture.model.flushBufferedTranscript(reason: "timer haptic regression")
+        XCTAssertEqual(fixture.model.messages.first?.parts.first?.text, "Hello world")
+        XCTAssertEqual(fixture.impacts, 1)
+    }
+
     func testSSEByteFramingDispatchesWithoutWaitingForAnotherEvent() {
         for separator in ["\n", "\r\n", "\r"] {
             var lines = OpenCodeSSELineDecoder()
@@ -342,6 +529,7 @@ final class OpenCodeStreamingTests: XCTestCase {
     @MainActor
     func testLegacyBatchedEventsPublishDirectoryAndActiveTranscriptWithoutRefresh() async throws {
         let model = AppViewModel()
+        model.chatStore.streamHapticFeedback.impact = {}
         model.config = OpenCodeServerConfig(baseURL: "https://fixture.invalid", username: "", password: "", apiPreference: .legacy)
         model.localCacheRepository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
         model.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)

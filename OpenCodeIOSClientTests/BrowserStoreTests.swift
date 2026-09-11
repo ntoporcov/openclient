@@ -1,5 +1,6 @@
 import Combine
 import Network
+import SwiftUI
 import XCTest
 import UIKit
 import WebKit
@@ -7,6 +8,107 @@ import WebKit
 
 @MainActor
 final class BrowserStoreTests: XCTestCase {
+    func testProjectAccessoryGeometryAndIdentityAcrossPresentationAndContextChanges() async throws {
+        guard #available(iOS 26.1, *) else { throw XCTSkip("Native accessory visibility requires iOS 26.1") }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let browser = BrowserStore(projectID: "project-a")
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            browser.clearAllBrowserSessions()
+        }
+
+        @discardableResult
+        func host<V: View>(_ view: V) async throws -> UIHostingController<V> {
+            let controller = UIHostingController(rootView: view)
+            // Exercise the actual bottom TabView on both approved device classes.
+            controller.traitOverrides.horizontalSizeClass = .compact
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            try await Task.sleep(for: .milliseconds(700))
+            window.layoutIfNeeded()
+            return controller
+        }
+        func descendants(_ view: UIView) -> [UIView] {
+            [view] + view.subviews.flatMap(descendants)
+        }
+        func geometry() throws -> (CGRect, CGRect) {
+            let views = descendants(window)
+            let probe = try XCTUnwrap(views.first { $0.accessibilityIdentifier == "browser.layoutProbe" })
+            let tabBar = try XCTUnwrap(views.compactMap { $0 as? UITabBar }.first)
+            return (probe.convert(probe.bounds, to: window), tabBar.convert(tabBar.bounds, to: window))
+        }
+        func settleAndAssertBaseline(_ baseline: (CGRect, CGRect), name: String) async throws {
+            try await Task.sleep(for: .milliseconds(700))
+            window.layoutIfNeeded()
+            let current = try geometry()
+            XCTAssertEqual(current.0.maxY, baseline.0.maxY, accuracy: 1, name)
+            XCTAssertEqual(current.1.minY, baseline.1.minY, accuracy: 1, name)
+        }
+        func screenshot(_ name: String) {
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        try await host(BrowserAccessoryTabFixture())
+        let baseline = try geometry()
+        let controller = try await host(BrowserAccessoryTabFixture().opencodeProjectBrowserAccessory(browser: browser))
+        try await settleAndAssertBaseline(baseline, name: "Initially closed must reserve no native accessory")
+        screenshot("Browser-accessory-closed-baseline")
+        let originalProbe = try XCTUnwrap(descendants(window).first { $0.accessibilityIdentifier == "browser.layoutProbe" })
+
+        for iteration in 0..<2 {
+            browser.openAddressBar()
+            try await settleAndAssertBaseline(baseline, name: "Expanded removes native accessory")
+            browser.collapse()
+            try await Task.sleep(for: .milliseconds(700))
+            window.layoutIfNeeded()
+            let collapsed = try geometry()
+            XCTAssertEqual(baseline.0.maxY - collapsed.0.maxY, 56, accuracy: 2, "52-point row plus native spacing")
+            screenshot("Browser-accessory-collapsed-\(iteration)")
+            browser.expand()
+            try await settleAndAssertBaseline(baseline, name: "Re-expansion restores baseline")
+            browser.collapse()
+            try await Task.sleep(for: .milliseconds(700))
+            browser.close()
+            try await settleAndAssertBaseline(baseline, name: "Close restores baseline")
+            XCTAssertTrue(descendants(window).contains { $0 === originalProbe }, "Tab content identity must survive presentation changes")
+        }
+        screenshot("Browser-accessory-after-close")
+        browser.openAddressBar()
+        browser.collapse()
+        try await Task.sleep(for: .milliseconds(700))
+        browser.selectProject("project-b")
+        try await settleAndAssertBaseline(baseline, name: "New project hides old collapsed accessory")
+        browser.selectProject("project-a")
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertEqual(baseline.0.maxY - (try geometry()).0.maxY, 56, accuracy: 2)
+        browser.clearAllBrowserSessions()
+        try await settleAndAssertBaseline(baseline, name: "Root reset removes accessory")
+        XCTAssertTrue(descendants(window).contains { $0 === originalProbe })
+
+        browser.selectProject("project-a")
+        browser.openAddressBar()
+        browser.collapse()
+        controller.rootView = BrowserAccessoryTabFixture().opencodeProjectBrowserAccessory(browser: browser, isEnabled: false)
+        try await settleAndAssertBaseline(baseline, name: "Disabled project accessory reserves no space even when collapsed")
+        XCTAssertTrue(descendants(window).contains { $0 === originalProbe }, "Changing the caller's gate must preserve TabView identity")
+        controller.rootView = BrowserAccessoryTabFixture().opencodeProjectBrowserAccessory(browser: browser, isEnabled: true)
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertEqual(baseline.0.maxY - (try geometry()).0.maxY, 56, accuracy: 2)
+
+        let replacement = BrowserStore(projectID: "project-b")
+        controller.rootView = BrowserAccessoryTabFixture().opencodeProjectBrowserAccessory(browser: replacement)
+        try await settleAndAssertBaseline(baseline, name: "Replacing the observed store must hide the old collapsed browser")
+        XCTAssertTrue(descendants(window).contains { $0 === originalProbe })
+    }
+
     func testWelcomeDocumentContainsRotatingBrowserPuns() {
         XCTAssertEqual(BrowserWelcomeDocument.puns.count, 16)
         XCTAssertTrue(BrowserWelcomeDocument.html.contains("font-family: ui-serif"))
@@ -411,6 +513,31 @@ final class BrowserStoreTests: XCTestCase {
             }
         }
     }
+}
+
+@available(iOS 18.0, *)
+private struct BrowserAccessoryTabFixture: View {
+    var body: some View {
+        TabView {
+            Tab("Sessions", systemImage: "bubble.left") {
+                BrowserAccessoryLayoutProbe()
+            }
+            Tab("Files", systemImage: "folder") {
+                Color.clear
+            }
+        }
+    }
+}
+
+private struct BrowserAccessoryLayoutProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .systemBackground
+        view.accessibilityIdentifier = "browser.layoutProbe"
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
 @MainActor

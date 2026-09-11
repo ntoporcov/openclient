@@ -906,6 +906,108 @@ final class V2SessionWorkflowTests: XCTestCase {
         }
     }
 
+    func testSessionListReselectionPreservesReadyTranscriptHistoryAndRequestsDetail() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        let facade = model.sessionListFacade
+        let first = facade.beginSelection(session)
+        let prepared = await facade.prepareSelectionForNavigation(first)
+        XCTAssertTrue(prepared)
+        await facade.completeSelection(first)
+        var reads = 0
+        V2SessionWorkflowURLProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            reads += 1
+            return (200, Self.page("msg_ready"))
+        }
+        let accepted = await model.hydrateV2Transcript(for: session, navigationGeneration: model.sessionNavigationGeneration,
+            expectedDirectoryKey: model.directoryStoreRegistry.activeKey)
+        XCTAssertTrue(accepted)
+        let loaded = model.messages
+        model.chatStore.beginV2TranscriptHydration(sessionID: session.id, preservingCanonicalRead: true)
+        XCTAssertTrue(model.chatStore.applyInitialV2Transcript(loaded, olderCursor: "older", sessionID: session.id))
+        let generation = model.sessionNavigationGeneration
+        let read = try XCTUnwrap(model.chatStore.v2CanonicalReadID(sessionID: session.id))
+        let request = model.chatDetailPresentationRequest
+        let messages = model.messages
+        model.setDraftMessage("Keep typing", forSessionID: session.id)
+        let ticket = facade.beginSelection(session)
+        let reselected = await facade.prepareSelectionForNavigation(ticket)
+        XCTAssertTrue(reselected)
+        await facade.completeSelection(ticket)
+        XCTAssertEqual(model.sessionNavigationGeneration, generation)
+        XCTAssertEqual(model.chatStore.v2CanonicalReadID(sessionID: session.id), read)
+        XCTAssertEqual(model.chatStore.preparedSessionID, session.id)
+        XCTAssertFalse(model.chatStore.isLoadingSelectedSession)
+        XCTAssertEqual(model.messages, messages)
+        XCTAssertEqual(model.chatStore.beginLoadingOlderV2Messages(sessionID: session.id), "older")
+        XCTAssertEqual(model.draftMessage, "Keep typing")
+        XCTAssertEqual(model.chatDetailPresentationRequest, request + 1)
+        XCTAssertEqual(reads, 1, "Reselection must not issue another read or submission")
+    }
+
+    func testSessionListReselectionDuringInitialReadKeepsTicketAndAcceptsResponse() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        let facade = model.sessionListFacade
+        let first = facade.beginSelection(session)
+        let prepared = await facade.prepareSelectionForNavigation(first)
+        XCTAssertTrue(prepared)
+        await facade.completeSelection(first)
+        let generation = model.sessionNavigationGeneration
+        var reads = 0
+        V2SessionWorkflowURLProtocol.handler = { httpRequest in
+            XCTAssertEqual(httpRequest.httpMethod, "GET")
+            reads += 1
+            let read = try XCTUnwrap(model.chatStore.v2CanonicalReadID(sessionID: session.id))
+            let request = model.chatDetailPresentationRequest
+            let ticket = facade.beginSelection(session)
+            let reselected = await facade.prepareSelectionForNavigation(ticket)
+            XCTAssertTrue(reselected)
+            await facade.completeSelection(ticket)
+            XCTAssertEqual(model.sessionNavigationGeneration, generation)
+            XCTAssertEqual(model.chatStore.v2CanonicalReadID(sessionID: session.id), read)
+            XCTAssertTrue(model.chatStore.isHydratingV2Transcript(sessionID: session.id))
+            XCTAssertEqual(model.chatDetailPresentationRequest, request + 1)
+            return (200, Self.page("msg_arrived"))
+        }
+        let accepted = await model.hydrateV2Transcript(for: session, navigationGeneration: generation,
+            expectedDirectoryKey: model.directoryStoreRegistry.activeKey)
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(model.messages.map(\.id), ["msg_arrived"])
+        XCTAssertEqual(model.chatStore.preparedSessionID, session.id)
+        XCTAssertFalse(model.chatStore.isLoadingSelectedSession)
+        XCTAssertEqual(reads, 1, "The original suspended read must finish without a replacement")
+    }
+
+    func testSessionListSameIDInDifferentScopeStillBeginsNavigation() async {
+        for changesDirectory in [true, false] {
+            let model = makeModel()
+            defer { model.stopEventStream() }
+            let first = Self.session(id: "ses_v2", directory: "/repo")
+            let facade = model.sessionListFacade
+            _ = facade.beginSelection(first)
+            XCTAssertTrue(model.chatStore.applyInitialV2Transcript([], olderCursor: nil, sessionID: first.id))
+            let generation = model.sessionNavigationGeneration
+            let request = model.chatDetailPresentationRequest
+            let second = OpenCodeSession(id: first.id, title: nil,
+                workspaceID: changesDirectory ? nil : "other-workspace",
+                directory: changesDirectory ? "/other" : first.directory, projectID: nil, parentID: nil)
+            let ticket = facade.beginSelection(second)
+            let prepared = await facade.prepareSelectionForNavigation(ticket)
+            XCTAssertTrue(prepared)
+            await facade.completeSelection(ticket)
+            XCTAssertEqual(model.sessionNavigationGeneration, generation + 1)
+            XCTAssertTrue(model.chatStore.isHydratingV2Transcript(sessionID: second.id))
+            XCTAssertNil(model.chatStore.preparedSessionID)
+            XCTAssertEqual(model.selectedSession?.workspaceID, second.workspaceID)
+            XCTAssertEqual(model.directoryStoreRegistry.activeKey, DirectoryStoreRegistry.key(for: second.directory))
+            XCTAssertEqual(model.chatDetailPresentationRequest, request)
+        }
+    }
+
     private func makeModel() -> AppViewModel {
         let model = AppViewModel()
         model.localCacheRepository = NoOpOpenCodeLocalCacheRepository()

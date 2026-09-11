@@ -385,6 +385,45 @@ final class TranscriptContinuityTests: XCTestCase {
         XCTAssertEqual(harness.collectionView.alpha, 1)
     }
 
+    func testInitialMeasurementAppliesLatestKeyboardViewportWithoutAnimationOrStaleReplay() async {
+        let harness = ChatTranscriptContinuityHarness()
+        let ids = (0..<12).map { "row-\($0)" }
+        harness.update(ids: ids, bottomInset: 100)
+        harness.prepareInitialReveal()
+        let collection = harness.collectionView
+        let controller = UIViewController()
+        controller.view.addSubview(collection)
+        let window = UIWindow(frame: collection.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        harness.sampleInitialLayout()
+        collection.insetAnimationDurations = []
+        harness.update(ids: ids + ["intermediate"], bottomInset: 400, keyboardHeight: 300,
+            keyboardTransition: .init(duration: 1, curve: 7))
+        XCTAssertEqual(collection.contentInset.bottom, 400)
+        XCTAssertEqual(collection.insetAnimationDurations.last, 0)
+        harness.sampleInitialLayout()
+        XCTAssertTrue(harness.awaitsInitialReveal, "Changed geometry needs a fresh stable sample")
+        harness.update(ids: ids + ["latest"], bottomInset: 100,
+            keyboardTransition: .init(duration: 1, curve: 7))
+        XCTAssertEqual(collection.contentInset.bottom, 100)
+        XCTAssertEqual(collection.insetAnimationDurations.last, 0)
+        XCTAssertEqual(harness.appliedIDs, ids, "Viewport delivery must not unfreeze row presentation")
+        harness.sampleInitialLayout()
+        XCTAssertTrue(harness.awaitsInitialReveal)
+
+        await settle(harness)
+        await settle(harness)
+        XCTAssertFalse(harness.awaitsInitialReveal)
+        XCTAssertEqual(collection.alpha, 1)
+        XCTAssertEqual(harness.appliedIDs, ids + ["latest"])
+        XCTAssertEqual(collection.contentInset.bottom, 100, "Queued rows must not replay older viewport geometry")
+        XCTAssertEqual(collection.contentOffset.y,
+            collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom, accuracy: 2)
+    }
+
     func testDetachedInitialPresentationDefersQueuedRowsUntilReattached() async {
         let harness = ChatTranscriptContinuityHarness()
         harness.update(ids: ["first"])
@@ -568,6 +607,241 @@ final class TranscriptContinuityTests: XCTestCase {
                 add(measurement)
             }
         }
+    }
+
+    func testKeyboardHideDrainsViewportBeforeGestureEndsAndKeepsRowsDeferred() async throws {
+        for decelerates in [false, true] {
+            let harness = ChatTranscriptContinuityHarness()
+            let collection = harness.collectionView
+            let controller = UIViewController()
+            controller.view.addSubview(collection)
+            let window = UIWindow(frame: collection.frame)
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            let ids = (0..<30).map { "row-\($0)" }
+            harness.update(ids: ids, bottomInset: 400, keyboardHeight: 300)
+            await settle(harness)
+            collection.contentOffset.y = 800
+            harness.pinned = false
+            await settle(harness)
+            let anchor = try XCTUnwrap(harness.cell(id: "row-12"))
+            let anchorY = anchor.frame.minY - collection.contentOffset.y
+
+            collection.holdsBatchCompletion = true
+            let inserted = ids + ["caption"]
+            harness.update(ids: inserted, bottomInset: 400, keyboardHeight: 300)
+            for _ in 0..<100 where collection.heldBatchCompletion == nil {
+                collection.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let complete = try XCTUnwrap(collection.heldBatchCompletion)
+            collection.heldBatchCompletion = nil
+            collection.holdsBatchCompletion = false
+            collection.simulatesTracking = true
+            collection.simulatesDragging = true
+            collection.delegate?.scrollViewWillBeginDragging?(collection)
+            if decelerates {
+                collection.simulatesTracking = false
+                collection.simulatesDragging = false
+                collection.simulatesDecelerating = true
+                collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: true)
+            }
+            let latest = inserted + ["queued-tail"]
+            harness.update(ids: latest, revision: 1, bottomInset: 100)
+            XCTAssertEqual(collection.contentInset.bottom, 400, "Do not mutate geometry inside an unfinished batch")
+            complete()
+            await Task.yield()
+            collection.layoutIfNeeded()
+            XCTAssertEqual(collection.contentInset.bottom, 100, accuracy: 0.5,
+                "Keyboard reservation must drain after rows complete, BEFORE scroll end; decelerates=\(decelerates)")
+            XCTAssertEqual(collection.verticalScrollIndicatorInsets.bottom, 100, accuracy: 0.5)
+            XCTAssertEqual(harness.appliedIDs, inserted, "Row presentations still wait for the gesture")
+            XCTAssertEqual(anchor.frame.minY - collection.contentOffset.y, anchorY, accuracy: 2)
+            let insetBeforeEnd = collection.contentInset.bottom
+            collection.simulatesTracking = false
+            collection.simulatesDragging = false
+            collection.simulatesDecelerating = false
+            if decelerates {
+                collection.delegate?.scrollViewDidEndDecelerating?(collection)
+            } else {
+                collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+            }
+            await settle(harness)
+            XCTAssertEqual(collection.contentInset.bottom, insetBeforeEnd, accuracy: 0.5,
+                "Scroll settling must not remove a stale 300-point keyboard reservation")
+            XCTAssertEqual(harness.appliedIDs, latest)
+            XCTAssertEqual(anchor.frame.minY - collection.contentOffset.y, anchorY, accuracy: 2)
+        }
+    }
+
+    func testKeyboardViewportUpdatesDuringTrackingDraggingAndDecelerationWithoutBatch() async throws {
+        for phase in 0..<3 {
+            let harness = ChatTranscriptContinuityHarness()
+            let collection = harness.collectionView
+            let controller = UIViewController()
+            controller.view.addSubview(collection)
+            let window = UIWindow(frame: collection.frame)
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            let ids = (0..<30).map { "row-\($0)" }
+            harness.update(ids: ids, bottomInset: 400, keyboardHeight: 300)
+            await settle(harness)
+            collection.contentOffset.y = 800
+            harness.pinned = false
+            await settle(harness)
+            let anchor = try XCTUnwrap(harness.cell(id: "row-12"))
+            let y = anchor.frame.minY - collection.contentOffset.y
+            collection.delegate?.scrollViewWillBeginDragging?(collection)
+            collection.simulatesTracking = phase == 0
+            collection.simulatesDragging = phase == 1
+            collection.simulatesDecelerating = phase == 2
+            // A cancelled interactive dismissal must keep the newest geometry, not queued row geometry.
+            for height: CGFloat in [0, 180, 300, 0] {
+                harness.update(ids: ids + ["queued-\(height)"], bottomInset: 100 + height, keyboardHeight: height,
+                    keyboardTransition: .init(duration: 0.25, curve: 7))
+                XCTAssertEqual(collection.contentInset.bottom, 100 + height, accuracy: 0.5)
+                XCTAssertEqual(harness.appliedIDs, ids)
+                XCTAssertEqual(anchor.frame.minY - collection.contentOffset.y, y, accuracy: 2)
+            }
+            collection.simulatesTracking = false
+            collection.simulatesDragging = false
+            collection.simulatesDecelerating = false
+            collection.delegate?.scrollViewDidEndDecelerating?(collection)
+            await settle(harness)
+            XCTAssertEqual(collection.contentInset.bottom, 100, accuracy: 0.5)
+            XCTAssertEqual(harness.appliedIDs, ids + ["queued-0.0"])
+            XCTAssertEqual(anchor.frame.minY - collection.contentOffset.y, y, accuracy: 2)
+        }
+    }
+
+    func testKeyboardStationaryLargeShrinkPinsLegalBottomAndPreservesHistory() async throws {
+        for pinned in [false, true] {
+            for expired in [false, true] {
+                let harness = ChatTranscriptContinuityHarness()
+                let collection = harness.collectionView
+                let controller = UIViewController()
+                controller.view.addSubview(collection)
+                let window = UIWindow(frame: collection.frame)
+                window.rootViewController = controller
+                window.makeKeyAndVisible()
+                defer { window.isHidden = true }
+                let ids = (0..<30).map { "row-\($0)" }
+                harness.update(ids: ids, bottomInset: 400, keyboardHeight: 300)
+                await settle(harness)
+                if !pinned { collection.contentOffset.y = 800 }
+                harness.pinned = pinned
+                await settle(harness)
+                let original = collection.contentOffset.y
+                let transition = ChatKeyboardTransition(duration: 0.12, curve: 7,
+                    receivedAt: ProcessInfo.processInfo.systemUptime - (expired ? 1 : 0))
+                collection.insetAnimationDurations = []
+                harness.update(ids: ids, bottomInset: 100, keyboardTransition: transition)
+                let duration = try XCTUnwrap(collection.insetAnimationDurations.last)
+                if pinned && !expired { XCTAssertGreaterThan(duration, 0); XCTAssertLessThanOrEqual(duration, 0.12) }
+                else { XCTAssertEqual(duration, 0) }
+                await settle(harness)
+                let bottom = max(-collection.adjustedContentInset.top,
+                    collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
+                XCTAssertEqual(collection.contentInset.bottom, 100, accuracy: 0.5)
+                XCTAssertEqual(collection.contentOffset.y, pinned ? bottom : original, accuracy: 2)
+                XCTAssertEqual(harness.pinned, pinned)
+            }
+        }
+    }
+
+    func testKeyboardPendingPinAndDelayedCorrectionCannotUndoCompletedDrag() async throws {
+        for heldBatch in [false, true] {
+            let harness = ChatTranscriptContinuityHarness()
+            let collection = harness.collectionView
+            let controller = UIViewController()
+            controller.view.addSubview(collection)
+            let window = UIWindow(frame: collection.frame)
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            let ids = (0..<30).map { "row-\($0)" }
+            harness.update(ids: ids, bottomInset: 400, keyboardHeight: 300)
+            await settle(harness)
+            let updated = heldBatch ? ids + ["caption"] : ids
+            if heldBatch {
+                collection.holdsBatchCompletion = true
+                harness.update(ids: updated, bottomInset: 400, keyboardHeight: 300)
+                for _ in 0..<100 where collection.heldBatchCompletion == nil {
+                    collection.layoutIfNeeded()
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                XCTAssertNotNil(collection.heldBatchCompletion)
+            }
+            harness.update(ids: updated, bottomInset: 100, keyboardTransition: .init(duration: 0.12, curve: 7))
+            collection.delegate?.scrollViewWillBeginDragging?(collection)
+            collection.contentOffset.y = 800
+            collection.delegate?.scrollViewDidScroll?(collection)
+            collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+            if heldBatch {
+                let complete = try XCTUnwrap(collection.heldBatchCompletion)
+                collection.heldBatchCompletion = nil
+                collection.holdsBatchCompletion = false
+                complete()
+            }
+            await settle(harness)
+            XCTAssertEqual(collection.contentInset.bottom, 100, accuracy: 0.5)
+            XCTAssertEqual(collection.contentOffset.y, 800, accuracy: 2)
+            XCTAssertFalse(harness.pinned)
+        }
+    }
+
+    func testKeyboardTransitionUsesRemainingTimeAndDoesNotReplayExpiredAnimation() {
+        let transition = ChatKeyboardTransition(duration: 0.25, curve: 7, receivedAt: 100)
+        XCTAssertEqual(transition.remainingDuration(at: 100.1), 0.15, accuracy: 0.0001)
+        XCTAssertEqual(transition.remainingDuration(at: 101), 0)
+        XCTAssertEqual(transition.animationOptions.rawValue & (7 << 16), 7 << 16)
+        let notification = Notification(name: UIResponder.keyboardWillHideNotification, userInfo: [
+            UIResponder.keyboardAnimationDurationUserInfoKey: NSNumber(value: 0.4),
+            UIResponder.keyboardAnimationCurveUserInfoKey: NSNumber(value: 7)])
+        let mapped = ChatKeyboardTransition(notification: notification)
+        XCTAssertEqual(mapped.duration, 0.4)
+        XCTAssertEqual(mapped.curve, 7)
+        XCTAssertGreaterThan(mapped.remainingDuration(), 0.3)
+    }
+
+    func testReentrantBatchViewportCoalescesWithoutReplayingOldRowGeometry() async throws {
+        let harness = ChatTranscriptContinuityHarness()
+        let collection = harness.collectionView
+        let controller = UIViewController()
+        controller.view.addSubview(collection)
+        let window = UIWindow(frame: collection.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let ids = (0..<30).map { "row-\($0)" }
+        harness.update(ids: ids, bottomInset: 400, keyboardHeight: 300)
+        await settle(harness)
+        collection.holdsBatchCompletion = true
+        collection.duringBatch = {
+            harness.update(ids: ids + ["intermediate"], bottomInset: 100)
+            harness.update(ids: ids + ["cancelled-hide"], bottomInset: 400, keyboardHeight: 300)
+            harness.update(ids: ids + ["latest"], bottomInset: 100,
+                keyboardTransition: .init(duration: 0.25, curve: 7, receivedAt: ProcessInfo.processInfo.systemUptime - 1))
+        }
+        harness.update(ids: ids + ["batch"], bottomInset: 400, keyboardHeight: 300)
+        for _ in 0..<100 where collection.heldBatchCompletion == nil {
+            collection.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let complete = try XCTUnwrap(collection.heldBatchCompletion)
+        collection.heldBatchCompletion = nil
+        collection.holdsBatchCompletion = false
+        collection.insetAnimationDurations = []
+        complete()
+        XCTAssertEqual(collection.contentInset.bottom, 100, accuracy: 0.5, "Viewport drains before the next queued row batch")
+        XCTAssertEqual(collection.insetAnimationDurations.last, 0, "Expired keyboard metadata does not replay an animation")
+        await settle(harness)
+        XCTAssertEqual(harness.appliedIDs, ids + ["latest"])
+        XCTAssertEqual(collection.contentInset.bottom, 100, accuracy: 0.5)
+        XCTAssertEqual(collection.contentOffset.y,
+            collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom, accuracy: 2)
     }
 
     private func settle(_ harness: ChatTranscriptContinuityHarness) async {

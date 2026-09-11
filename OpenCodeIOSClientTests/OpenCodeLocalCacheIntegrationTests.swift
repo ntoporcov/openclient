@@ -3,6 +3,51 @@ import XCTest
 
 @MainActor
 final class OpenCodeLocalCacheIntegrationTests: XCTestCase {
+    func testSelectionPreservesOutgoingDraftOnceAndKeepsTypingDuringDiskHydration() async throws {
+        let originalDrafts = UserDefaults.standard.data(forKey: OpenClientStorageKey.messageDraftsByChat)
+        defer { UserDefaults.standard.set(originalDrafts, forKey: OpenClientStorageKey.messageDraftsByChat) }
+        let model = AppViewModel()
+        model.config = serverConfig
+        model.backendMode = .cachedServer
+        let first = OpenCodeSession(id: "draft-first", title: "First", workspaceID: nil,
+            directory: session.directory, projectID: session.projectID, parentID: nil)
+        let second = session
+        model.selectedDirectory = second.directory
+        model.allSessions = [first, second]
+        model.selectedSession = first
+        model.composerStore.draftsByChatKey = [:]
+        model.saveMessageDraft("Draft A", forSessionID: first.id)
+        model.saveMessageDraft("Draft B", forSessionID: second.id)
+        let cached = OpenCodeCachedChatSnapshot(preparedMessages: .init(envelopes: [message], sessionID: second.id),
+            todos: [], messagesRefreshedAt: nil, todosRefreshedAt: nil)
+        let forbidden = expectation(description: "No unrelated cache operations")
+        forbidden.isInverted = true
+        let loaded = expectation(description: "Disk hydration suspends navigation preparation")
+        model.localCacheRepository = ForbiddenLocalCacheRepository(access: forbidden, chatLoad: { _, id in
+            await MainActor.run {
+                XCTAssertEqual(id, second.id)
+                XCTAssertEqual(model.draftMessage, "Draft B before await")
+                model.setDraftMessage("Draft B typed during disk read", forSessionID: second.id)
+                loaded.fulfill()
+            }
+            return cached
+        }, chatSave: { id in XCTAssertEqual(id, first.id, "Navigation may persist only the outgoing chat") })
+        let facade = model.sessionListFacade
+        let ticket = facade.beginSelection(second)
+        XCTAssertEqual(model.draftMessage, "Draft B")
+        model.setDraftMessage("Draft B before await", forSessionID: second.id)
+        let prepared = await facade.prepareSelectionForNavigation(ticket)
+        XCTAssertTrue(prepared)
+        await facade.completeSelection(ticket)
+        XCTAssertEqual(model.draftMessage, "Draft B typed during disk read")
+        XCTAssertEqual(model.messages, [message])
+        XCTAssertEqual(model.composerStore.draftsByChatKey[model.messageDraftStorageKey(for: first)]?.text, "Draft A")
+        let persisted = model.loadMessageDraftsByChatKey()
+        XCTAssertEqual(persisted[model.messageDraftStorageKey(for: first)]?.text, "Draft A")
+        XCTAssertEqual(persisted[model.messageDraftStorageKey(for: second)]?.text, "Draft B typed during disk read")
+        await fulfillment(of: [loaded, forbidden], timeout: 0.1)
+    }
+
     func testCachedPresentationAndReentrantCanonicalCompletionPresentOnlyOnce() async throws {
         let model = AppViewModel()
         model.config = serverConfig
@@ -584,6 +629,7 @@ private struct ForbiddenLocalCacheRepository: OpenCodeLocalCacheRepository {
     var projectLoad: (@Sendable (String) async -> OpenCodeCachedProjectsSnapshot?)? = nil
     var projectSave: (@Sendable ([OpenCodeProject], String, Date, Date) async -> Void)? = nil
     var chatLoad: (@Sendable (String, String) async -> OpenCodeCachedChatSnapshot?)? = nil
+    var chatSave: (@Sendable (String) -> Void)? = nil
 
     func loadProjects(serverID: String) async throws -> OpenCodeCachedProjectsSnapshot? {
         if let projectLoad { return await projectLoad(serverID) }
@@ -616,6 +662,7 @@ private struct ForbiddenLocalCacheRepository: OpenCodeLocalCacheRepository {
     }
 
     func saveChatMessages(_ messages: [OpenCodeMessageEnvelope], serverID: String, sessionID: String, refreshedAt: Date, writtenAt: Date, coverage: OpenCodeLocalCacheTranscriptCoverage) async throws {
+        if let chatSave { chatSave(sessionID); return }
         access.fulfill()
     }
 

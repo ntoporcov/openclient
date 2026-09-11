@@ -38,6 +38,143 @@ final class OpenCodeIOSClientUITests: XCTestCase {
     }
 
     @MainActor
+    func testBrowserAccessorySessionLayoutAndControls() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "sessions"
+        app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
+        app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "0"
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["screenshot.scene.sessions"].waitForExistence(timeout: 15))
+        let open = app.buttons["browser.open"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        let list = app.collectionViews.containing(.button, identifier: "session.row.session-screenshot-release").firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        let tabBar = app.tabBars.firstMatch
+        let isPad = app.frame.width > 700
+        let baselineTabFrame = tabBar.exists ? tabBar.frame : .zero
+        let baselineListFrame = list.frame
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'session.row.'"))
+        let baselineIDs = rows.allElementsBoundByIndex.map(\.identifier)
+        XCTAssertFalse(baselineIDs.isEmpty)
+        let showsTalk = app.buttons["sessions.newTalk"].exists
+
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        capture("Browser-sessions-initially-closed")
+        for iteration in 0..<2 {
+            open.tap()
+            XCTAssertTrue(app.textFields["browser.address"].waitForExistence(timeout: 5), app.debugDescription)
+            let collapse = app.buttons["browser.collapse"].firstMatch
+            XCTAssertTrue(collapse.isHittable)
+            capture("Browser-sessions-expanded-\(iteration)")
+            collapse.tap()
+            XCTAssertTrue(app.textFields["browser.address"].waitForNonExistence(timeout: 5))
+            let accessory = app.buttons["browser.projectAccessory"]
+            if isPad {
+                XCTAssertFalse(accessory.exists, "Regular iPad must use inspector controls, not a bottom accessory")
+                open.tap()
+                XCTAssertTrue(app.textFields["browser.address"].waitForExistence(timeout: 5))
+                app.buttons["browser.close"].firstMatch.tap()
+            } else {
+                XCTAssertTrue(accessory.waitForExistence(timeout: 5))
+                XCTAssertEqual(accessory.label, "Expand browser")
+                XCTAssertTrue(app.buttons["browser.close.accessory"].isHittable)
+                capture("Browser-sessions-collapsed-\(iteration)")
+                accessory.tap()
+                XCTAssertTrue(app.textFields["browser.address"].waitForExistence(timeout: 5))
+                collapse.tap()
+                XCTAssertTrue(app.buttons["browser.close.accessory"].waitForExistence(timeout: 5))
+                app.buttons["browser.close.accessory"].tap()
+                XCTAssertTrue(accessory.waitForNonExistence(timeout: 5))
+                XCTAssertEqual(tabBar.frame.minY, baselineTabFrame.minY, accuracy: 1)
+            }
+            XCTAssertTrue(app.textFields["browser.address"].waitForNonExistence(timeout: 5))
+            XCTAssertEqual(rows.allElementsBoundByIndex.map(\.identifier), baselineIDs)
+            XCTAssertEqual(list.frame, baselineListFrame)
+            XCTAssertTrue(app.buttons["sessions.create"].isHittable)
+            XCTAssertEqual(app.buttons["sessions.newTalk"].exists, showsTalk)
+            if showsTalk { XCTAssertTrue(app.buttons["sessions.newTalk"].isHittable) }
+            capture("Browser-sessions-after-close-\(iteration)")
+        }
+    }
+
+    @MainActor
+    func testLatestAnnouncementLocalizedLayoutAndDismissal() throws {
+        let catalogURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("OpenCodeIOSClient/Localizable.xcstrings")
+        let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: catalogURL)) as? [String: Any])
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+        for (language, accessibilitySize) in [("en", false), ("it", false), ("pt-BR", false), ("pt-BR", true)] {
+            let profile = "announcement-\(language)-\(accessibilitySize ? "AXXXL" : "default")"
+            let app = XCUIApplication()
+            app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "connection"
+            app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "1"
+            app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
+            app.launchArguments = ["-AppleLanguages", "(\(language))", "-AppleLocale", language,
+                                   "-UIPreferredContentSizeCategoryName",
+                                   accessibilitySize ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
+            app.launch()
+            XCTAssertTrue(app.staticTexts["screenshot.scene.connection"].waitForExistence(timeout: 15))
+            let entry = app.buttons["help.latest-updates"]
+            for _ in 0..<6 where !entry.isHittable { app.swipeUp() }
+            XCTAssertTrue(entry.isHittable)
+            entry.tap()
+            let done = app.buttons["new-features.continue"]
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            let scroll = app.scrollViews.firstMatch
+            let keys = ["Ahead of what’s next", "EXPERIMENTAL PREVIEW", "Select. Copy. Done.", "Smoother around the edges"]
+            let initial = XCTAttachment(screenshot: app.screenshot())
+            initial.name = "\(profile)-hero"
+            initial.lifetime = .keepAlways
+            add(initial)
+            for (index, key) in keys.enumerated() {
+                let localizations = try XCTUnwrap(strings[key]?["localizations"] as? [String: [String: Any]])
+                let unit = try XCTUnwrap(localizations[language]?["stringUnit"] as? [String: String])
+                let text = try XCTUnwrap(unit["value"])
+                let card = index == 0
+                    ? app.staticTexts.matching(NSPredicate(format: "label == %@", text)).firstMatch
+                    : app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+                for _ in 0..<12 where !card.isHittable { scroll.swipeUp() }
+                XCTAssertTrue(card.isHittable, "Expected reachable \(key) for \(profile)")
+                for _ in 0..<12 where card.frame.maxY > done.frame.minY - 12 {
+                    scroll.swipeUp()
+                }
+                XCTAssertLessThanOrEqual(card.frame.maxY, done.frame.minY, "Card detail must scroll clear of the footer")
+                if index == 0 {
+                    XCTAssertEqual(card.label, text)
+                    if accessibilitySize {
+                        let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
+                        let lineHeight = UIFont.preferredFont(forTextStyle: .largeTitle, compatibleWith: traits).lineHeight
+                        XCTAssertGreaterThan(card.frame.height, lineHeight * 1.5, "The full Portuguese title must wrap rather than truncate to one line")
+                    }
+                }
+                if index == 1 {
+                    XCTAssertTrue(app.staticTexts["new-features.v2-preview"].exists)
+                    XCTAssertTrue(card.label.contains("OpenCode v2"))
+                }
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "\(profile)-card-\(index)"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+                let hierarchy = XCTAttachment(string: app.debugDescription)
+                hierarchy.name = "\(profile)-hierarchy-\(index)"
+                hierarchy.lifetime = .keepAlways
+                add(hierarchy)
+            }
+            XCTAssertTrue(done.isHittable)
+            done.tap()
+            XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(entry.isHittable)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testAppStoreScreenshots() {
         let allScenes: [(scene: String, screenshotName: String)] = [
             ("connection", "01-connection"),

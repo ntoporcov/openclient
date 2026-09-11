@@ -8,7 +8,7 @@ import UIKit
 @MainActor
 final class ResponseTurnCaptionTests: XCTestCase {
 #if canImport(UIKit)
-    func testCaptionOccupiesSpaceOnlyWhileRevealed() throws {
+    func testCaptionOccupiesSpaceOnlyWhileRevealed() async throws {
         let turn = try XCTUnwrap(project([message("answer", parts: [part(text: "Answer")])]).first)
         let visibility = ResponseActionsVisibility()
         let host = UIHostingController(rootView:
@@ -16,11 +16,35 @@ final class ResponseTurnCaptionTests: XCTestCase {
                 .transaction { $0.disablesAnimations = true }
         )
         let proposal = CGSize(width: 320, height: 1_000)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: proposal))
+        host.safeAreaRegions = []
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        window.layoutIfNeeded()
+
+        func awaitHeight(_ expected: CGFloat) async {
+            let settled = expectation(description: "Observed caption height becomes \(expected)")
+            Task { @MainActor in
+                for _ in 0..<100 {
+                    host.view.setNeedsLayout()
+                    host.view.layoutIfNeeded()
+                    if abs(host.sizeThatFits(in: proposal).height - expected) < 0.5 {
+                        settled.fulfill()
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+            }
+            await fulfillment(of: [settled], timeout: 2)
+        }
 
         XCTAssertEqual(host.sizeThatFits(in: proposal).height, 0, accuracy: 0.5)
         visibility.tappedMessageID = "answer"
+        await awaitHeight(44)
         XCTAssertEqual(host.sizeThatFits(in: proposal).height, 44, accuracy: 0.5)
         visibility.tappedMessageID = "another-turn"
+        await awaitHeight(0)
         XCTAssertEqual(host.sizeThatFits(in: proposal).height, 0, accuracy: 0.5)
     }
 #endif
@@ -202,6 +226,89 @@ final class ResponseTurnCaptionTests: XCTestCase {
         )
     }
 
+    func testDurationIncludesAllStepsAndLateToolWithMixedEndpointUnits() throws {
+        for start in [1_750_000_000.0, 1_750_000_000_000] {
+            for end in [1_750_000_083.0, 1_750_000_083_000] {
+                let turn = try XCTUnwrap(project([
+                    message("u", role: "user", created: start),
+                    message("a", parentID: "u", parts: [part(text: "Answer")], completed: 1_750_000_010),
+                    message("b", parentID: "u", parts: [part(text: "Final")], completed: 1_750_000_020),
+                    message("tool", parentID: "u", parts: [part(type: "tool")], completed: end)
+                ]).first)
+                XCTAssertEqual(turn.duration, 83)
+            }
+        }
+    }
+
+    func testDurationUsesMatchingParentInsteadOfMostRecentPrompt() {
+        let turns = project([
+            message("u1", role: "user", created: 1_750_000_000),
+            message("u2", role: "user", created: 1_750_000_050),
+            message("a1", parentID: "u1", parts: [part(text: "First")], completed: 1_750_000_060),
+            message("a2", parentID: "u2", parts: [part(text: "Second")], completed: 1_750_000_070),
+            message("a3", parentID: "unloaded", parts: [part(text: "Partial")], completed: 1_750_000_080)
+        ])
+        XCTAssertEqual(turns.map(\.id), ["u1", "u2", "unloaded"])
+        XCTAssertEqual(turns.map(\.duration), [60, 20, nil])
+    }
+
+    func testDurationOmitsMissingInvalidOrReversedEndpoints() throws {
+        let invalid: [Double?] = [nil, 0, -1, .nan, .infinity, -.infinity]
+        for timestamp in invalid {
+            let badStart = project([
+                message("u", role: "user", created: timestamp),
+                message("a", parts: [part(text: "Answer")], completed: 1_750_000_083)
+            ])
+            XCTAssertNil(try XCTUnwrap(badStart.first).duration)
+            let badEnd = project([
+                message("u", role: "user"),
+                message("a", parts: [part(text: "Answer")], completed: timestamp)
+            ])
+            XCTAssertNil(try XCTUnwrap(badEnd.first).duration)
+        }
+        for prompt in [
+            message("u", role: "user", created: 1_750_000_100),
+            message("u", role: "user", parts: [part(type: "compaction")]),
+            message("u", summary: true)
+        ] {
+            XCTAssertNil(try XCTUnwrap(project([
+                prompt, message("a", parentID: "u", parts: [part(text: "Answer")], completed: 1_750_000_083)
+            ]).first).duration)
+        }
+        XCTAssertNil(try XCTUnwrap(project([
+            message("a", parts: [part(text: "Answer")], completed: 1_750_000_083)
+        ]).first).duration)
+    }
+
+    func testZeroElapsedIsValidAndDurationParticipatesInEqualityWithoutChangingIdentity() throws {
+        let turn = try XCTUnwrap(project([
+            message("u", role: "user"),
+            message("a", parts: [part(text: "Answer")], completed: 1_750_000_000_000)
+        ]).first)
+        XCTAssertEqual(turn.duration, 0)
+        var updated = turn
+        updated.duration = 1
+        XCTAssertEqual(turn.id, updated.id)
+        XCTAssertNotEqual(turn, updated)
+        XCTAssertEqual(Set([turn, updated]).count, 2)
+    }
+
+    func testDurationFormattingRoundsBeforeChoosingUnitsAndUsesLocale() throws {
+        for localeID in ["en_US", "pt_BR", "it_IT"] {
+            let locale = Locale(identifier: localeID)
+            for (seconds, rounded) in [(0.0, 0.0), (59.6, 60), (83, 83), (3_723, 3_723)] {
+                let expected = Duration.seconds(rounded).formatted(
+                    .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2).locale(locale)
+                )
+                XCTAssertEqual(ResponseTurnDuration.formatted(seconds, locale: locale), expected)
+            }
+            for invalid: Double in [-1, .nan, .infinity, .greatestFiniteMagnitude, Double(Int64.max)] {
+                XCTAssertNil(ResponseTurnDuration.formatted(invalid, locale: locale))
+            }
+            XCTAssertNil(ResponseTurnDuration.formatted(nil, locale: locale))
+        }
+    }
+
     private func project(
         _ messages: [OpenCodeMessageEnvelope],
         displayed: Set<String>? = nil,
@@ -220,12 +327,13 @@ final class ResponseTurnCaptionTests: XCTestCase {
         parentID: String? = nil,
         summary: Bool? = nil,
         parts: [OpenCodePart] = [],
-        completed: Double? = nil
+        completed: Double? = nil,
+        created: Double? = 1_750_000_000_000
     ) -> OpenCodeMessageEnvelope {
         OpenCodeMessageEnvelope(
             info: OpenCodeMessage(
                 id: id, role: role, sessionID: "session",
-                time: OpenCodeMessageTime(created: 1_750_000_000_000, completed: completed),
+                time: OpenCodeMessageTime(created: created, completed: completed),
                 agent: nil, model: nil, parentID: parentID, summary: summary
             ),
             parts: parts

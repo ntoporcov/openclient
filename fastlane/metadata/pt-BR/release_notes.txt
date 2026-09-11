@@ -1,8 +1,8 @@
-Vamos conversar com o OpenClient.
+Suporte ao OpenCode v2 e uma experiência de chat mais fluida.
 
-• Inicie conversas por voz naturais em Projetos, Atividade, listas de sessões ou qualquer chat.
-• Ouça cada resposta concluída enquanto trabalhos mais longos continuam.
-• Mantenha o Talk visível na Tela Bloqueada e na Dynamic Island.
-• Minimize as tarefas e pesquise na Atividade por sessões, projetos, mensagens, status e ferramentas em execução.
+• O OpenClient agora detecta automaticamente a API do seu servidor, com suporte experimental ao OpenCode v2 sem deixar de oferecer suporte às conexões OpenCode existentes.
+• Mantenha pressionado o texto do assistente para selecionar e copiar apenas a parte de que precisa.
+• Aproveite mais fluidez no envio de mensagens, no feedback durante a transmissão e nas transições do teclado.
+• Inclui correções e melhorias de confiabilidade em todo o app.
 
-Esta atualização também refina a navegação no iPad, o compositor e a busca por sessões.
+O suporte ao OpenCode v2 ainda está evoluindo, e alguns recursos podem estar incompletos. O aviso de suporte experimental no app inclui um link para relatar bugs.

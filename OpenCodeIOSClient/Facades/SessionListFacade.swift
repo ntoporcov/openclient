@@ -163,7 +163,6 @@ final class SessionListFacade: ObservableObject {
 
     struct SelectionTicket {
         fileprivate let session: OpenCodeSession
-        fileprivate let previousSessionID: String?
         fileprivate let navigationGeneration: UInt
         fileprivate let directoryKey: String
         fileprivate let connectionID: UUID?
@@ -394,15 +393,26 @@ final class SessionListFacade: ObservableObject {
     }
 
     func beginSelection(_ session: OpenCodeSession) -> SelectionTicket {
-        let previousSessionID = viewModel.beginSessionNavigation(session)
+        let isV2Reselection = viewModel.connectionStore.apiProfile == .v2
+            && viewModel.selectedSession?.id == session.id
+            && viewModel.selectedSession?.workspaceID == session.workspaceID
+            && DirectoryStoreRegistry.key(for: session.directory ?? viewModel.selectedDirectory) == viewModel.directoryStoreRegistry.activeKey
+        if isV2Reselection {
+            // Reopen compact detail without invalidating its active read or loaded history.
+            viewModel.chatDetailPresentationRequest &+= 1
+        } else {
+            let previousSessionID = viewModel.beginSessionNavigation(session)
+            if viewModel.connectionStore.apiProfile != .v2 {
+                viewModel.prepareSessionSelection(session,
+                    preservingDraftForSessionID: previousSessionID, animatesChanges: false)
+            }
+        }
         let ticket = SelectionTicket(
             session: session,
-            previousSessionID: previousSessionID,
             navigationGeneration: viewModel.sessionNavigationGeneration,
             directoryKey: viewModel.directoryStoreRegistry.activeKey,
             connectionID: (try? viewModel.requireBackendConnection())?.id
         )
-        _ = prepareSelectionIfCurrent(ticket)
         // Selection must not wait for transcript-derived row content to rebuild.
         if snapshot.selectedSessionID != viewModel.selectedSession?.id {
             var nextSnapshot = snapshot
@@ -446,8 +456,10 @@ final class SessionListFacade: ObservableObject {
         }
         viewModel.prepareSessionSelection(
             ticket.session,
-            preservingDraftForSessionID: ticket.previousSessionID,
-            animatesChanges: false
+            // The composer handoff already happened synchronously in beginSelection.
+            preservingDraftForSessionID: nil,
+            animatesChanges: false,
+            restoresDraft: false
         )
         return selectionIsCurrent(ticket)
     }

@@ -124,7 +124,9 @@ struct TranscriptContinuityFixture: View {
         let session = OpenCodeSession(id: "continuity", title: "Continuity", workspaceID: nil, directory: "/continuity", projectID: "project", parentID: nil)
         model.directoryStore.insertV2Session(session)
         if !splitOwner { _ = model.beginSessionNavigation(session) }
-        let history = [OpenCodeMessageEnvelope.local(role: "user", text: "Continuity history", messageID: "history", sessionID: session.id)]
+        let history = ChatKeyboardFrameProbe.enabled
+            ? (0..<40).map { OpenCodeMessageEnvelope.local(role: "user", text: "Keyboard history row \($0)\nLine two\nLine three\nLine four", messageID: "history-\($0)", sessionID: session.id) }
+            : [OpenCodeMessageEnvelope.local(role: "user", text: "Continuity history", messageID: "history", sessionID: session.id)]
         model.chatStore.beginSelectingSession(sessionID: session.id, cachedMessages: history)
         model.chatStore.applyCanonicalMessages(history, forSessionID: session.id, isActiveSession: true)
         model.directoryStore.applyV2Messages(history, forSessionID: session.id)
@@ -152,7 +154,13 @@ struct TranscriptContinuityFixture: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                if TranscriptContinuityDiagnostics.toolGated {
+                if ChatKeyboardFrameProbe.enabled {
+                    Button { ChatKeyboardFrameProbe.frames = [] } label: { Text(verbatim: "Record") }
+                        .accessibilityIdentifier("continuity.keyboard.record")
+                    Button { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
+                        label: { Text(verbatim: "Hide keyboard") }
+                        .accessibilityIdentifier("continuity.keyboard.hide")
+                } else if TranscriptContinuityDiagnostics.toolGated {
                     Button { startTool() } label: { Text(verbatim: "Tool") }
                         .accessibilityIdentifier("continuity.tool")
                     Button { model.appCustomizationStore.setShowsToolCalls(!model.appCustomizationStore.showsToolCalls) } label: { Text(verbatim: "Tools") }
@@ -172,6 +180,12 @@ struct TranscriptContinuityFixture: View {
                 }
             }
             TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                if ChatKeyboardFrameProbe.enabled {
+                    Text(verbatim: "Keyboard frames")
+                        .font(.system(size: 10, design: .monospaced))
+                        .accessibilityIdentifier("continuity.keyboard.frames")
+                        .accessibilityValue(Text(verbatim: String(data: (try? JSONSerialization.data(withJSONObject: ChatKeyboardFrameProbe.frames)) ?? Data(), encoding: .utf8) ?? "[]"))
+                }
                 let progress = TranscriptContinuityDiagnostics.progress
                 Text(verbatim: "posts=\(TranscriptContinuityURLProtocol.posts) starts=\(TranscriptContinuityDiagnostics.starts.values.reduce(0, +)) historical=\(TranscriptContinuityDiagnostics.starts["historical-recovery", default: 0]) frames=\(progress.count) moving=\(progress.contains { $0 > 0 && $0 < 0.95 }) streaming=\(streaming) ended=\(ended)")
                     .font(.system(size: 10, design: .monospaced))

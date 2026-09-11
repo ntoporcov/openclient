@@ -48,6 +48,25 @@ enum OpenCodeClipboard {
 }
 
 enum OpenCodeHaptics {
+    @MainActor
+    struct StreamFeedback {
+        var now: () -> Date = Date.init
+        var impact: () -> Void = { OpenCodeHaptics.impact(.crisp) }
+        var interval: () -> TimeInterval = {
+            if Double.random(in: 0 ... 1) < 0.18 {
+                return Double.random(in: 0.12 ... 0.18)
+            }
+            return Double.random(in: 0.045 ... 0.085)
+        }
+
+        func emit(nextAllowedAt: inout Date) {
+            let time = now()
+            guard time >= nextAllowedAt else { return }
+            impact()
+            nextAllowedAt = time.addingTimeInterval(interval())
+        }
+    }
+
     enum ImpactStyle {
         case crisp
         case soft

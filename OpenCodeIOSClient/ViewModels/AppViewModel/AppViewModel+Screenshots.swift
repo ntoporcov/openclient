@@ -496,25 +496,29 @@ extension AppViewModel {
 
 enum OpenClientScreenshotData {
     static var responseCopyMessages: [OpenCodeMessageEnvelope] {
-        func message(id: String, role: String, created: Double, completed: Double?, texts: [String]) -> OpenCodeMessageEnvelope {
+        func message(id: String, role: String, created: Double?, completed: Double?, texts: [String]) -> OpenCodeMessageEnvelope {
             OpenCodeMessageEnvelope(
                 info: OpenCodeMessage(
                     id: id, role: role, sessionID: releaseSession.id,
                     time: .init(created: created, completed: completed),
-                    agent: "build", model: assistantMessage.info.model
+                    agent: "build", model: assistantMessage.info.model,
+                    parentID: role == "assistant" ? "response-copy-prompt" : nil
                 ),
                 parts: texts.enumerated().map { index, text in
                     OpenCodePart(
                         id: "\(id)-\(index)", messageID: id, sessionID: releaseSession.id, type: "text",
                         mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil,
-                        text: text, time: role == "assistant" ? .init(start: created, end: completed) : nil
+                        text: text, time: role == "assistant" ? created.map { .init(start: $0, end: completed) } : nil
                     )
                 }
             )
         }
         let start: Double = 1_712_286_500_000
+        let captionFixture = ProcessInfo.processInfo.environment["OPENCLIENT_UI_TEST_RESPONSE_DURATION"]
+        let elapsed = captionFixture == "hours" ? 3_723_000.0 : 83_000.0
         return [
-            message(id: "response-copy-prompt", role: "user", created: start, completed: nil, texts: ["Explain the update."]),
+            message(id: "response-copy-prompt", role: "user", created: captionFixture == "missing" ? nil : start,
+                    completed: nil, texts: ["Explain the update."]),
             message(id: "response-copy-answer", role: "assistant", created: start + 1_000, completed: start + 10_000, texts: [
                 "First paragraph has **formatted text**.\n\nA second paragraph belongs to the same answer.",
                 "This paragraph comes from another text part.\n\n- Select across paragraphs\n- Keep the text together"
@@ -525,7 +529,8 @@ enum OpenClientScreenshotData {
             OpenCodeMessageEnvelope(
                 info: OpenCodeMessage(
                     id: "response-copy-tool", role: "assistant", sessionID: releaseSession.id,
-                    time: .init(created: start + 21_000, completed: start + 30_000), agent: nil, model: nil
+                    time: .init(created: start + 21_000, completed: start + elapsed), agent: nil, model: nil,
+                    parentID: "response-copy-prompt"
                 ),
                 parts: toolMessage.parts
             )

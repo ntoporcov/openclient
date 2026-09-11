@@ -8,6 +8,7 @@ struct OpenClientReleaseNotes: Identifiable, Equatable {
         case internationalization
         case ipad
         case talk
+        case openCodeV2
     }
 
     struct Feature: Identifiable, Equatable {
@@ -244,6 +245,26 @@ enum OpenClientReleaseNotesCatalog {
             ],
             hero: .talk,
             featureSectionTitle: "More natural, less in the way",
+            showsSetup: false
+        ),
+        OpenClientReleaseNotes(
+            version: "1.0.20",
+            title: "Ahead of what’s next",
+            summary: "Try OpenCode v2 early, copy exactly what you need, and enjoy more polish throughout OpenClient.",
+            features: [
+                OpenClientReleaseNotes.Feature(
+                    title: "Select. Copy. Done.",
+                    detail: "Press and hold assistant text to select and copy just the part you need, right from the response.",
+                    systemImage: "text.cursor"
+                ),
+                OpenClientReleaseNotes.Feature(
+                    title: "Smoother around the edges",
+                    detail: "This release also includes fixes and reliability improvements across the app.",
+                    systemImage: "wrench.and.screwdriver.fill"
+                ),
+            ],
+            hero: .openCodeV2,
+            featureSectionTitle: "Little things that move work forward",
             showsSetup: false
         ),
     ]

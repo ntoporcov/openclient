@@ -117,7 +117,8 @@ extension AppViewModel {
     func prepareSessionSelection(
         _ session: OpenCodeSession,
         preservingDraftForSessionID previousSessionID: String?,
-        animatesChanges: Bool
+        animatesChanges: Bool,
+        restoresDraft: Bool = true
     ) {
         if let previousSessionID {
             preserveCurrentMessageDraftForNavigation(forSessionID: previousSessionID)
@@ -147,7 +148,7 @@ extension AppViewModel {
         if !selectedMessages.isEmpty {
             inferFunAndGames(from: selectedMessages, forSessionID: session.id)
         }
-        restoreMessageDraft(for: session)
+        if restoresDraft { restoreMessageDraft(for: session) }
         streamDirectory = session.directory
     }
 
@@ -1504,7 +1505,8 @@ extension AppViewModel {
             prepareSessionSelection(
                 session,
                 preservingDraftForSessionID: nil,
-                animatesChanges: false
+                animatesChanges: false,
+                restoresDraft: false
             )
         }
         if isBrowsingLocalCache {

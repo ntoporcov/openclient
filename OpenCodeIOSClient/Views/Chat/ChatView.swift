@@ -1193,6 +1193,34 @@ enum OpenCodeChatBottomInsetAnimationPolicy {
     }
 }
 
+struct ChatKeyboardTransition: Equatable {
+    let duration: TimeInterval
+    let curve: UInt
+    let receivedAt: TimeInterval
+
+    func remainingDuration(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TimeInterval {
+        max(0, min(duration, receivedAt + duration - time))
+    }
+
+#if canImport(UIKit)
+    var animationOptions: UIView.AnimationOptions {
+        [UIView.AnimationOptions(rawValue: curve << 16), .beginFromCurrentState, .allowUserInteraction]
+    }
+
+    init(notification: Notification) {
+        duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0
+        curve = (notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 0
+        receivedAt = ProcessInfo.processInfo.systemUptime
+    }
+#endif
+
+    init(duration: TimeInterval, curve: UInt, receivedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        self.duration = duration
+        self.curve = curve
+        self.receivedAt = receivedAt
+    }
+}
+
 private final class ChatTranscriptScrollController {
 #if canImport(UIKit)
     @MainActor private weak var collectionView: UICollectionView?
@@ -1956,6 +1984,7 @@ private struct ChatTranscriptPane<RowContent: View>: View {
     let animatedBottomScrollToken: Int
     let composerMeasuredHeight: CGFloat
     let keyboardMeasuredHeight: CGFloat
+    let keyboardTransition: ChatKeyboardTransition?
     let bottomContentInsetAnimationToken: Int
     let messageBottomPadding: CGFloat
     let bottomRefreshThreshold: CGFloat
@@ -1992,6 +2021,8 @@ private struct ChatTranscriptPane<RowContent: View>: View {
                 animatedBottomScrollToken: animatedBottomScrollToken,
                 bottomContentInset: composerMeasuredHeight + keyboardMeasuredHeight + messageBottomPadding,
                 bottomContentInsetAnimationToken: bottomContentInsetAnimationToken,
+                keyboardHeight: keyboardMeasuredHeight,
+                keyboardTransition: keyboardTransition,
                 bottomRefreshThreshold: bottomRefreshThreshold,
                 bottomRefreshProgress: bottomRefreshRenderSnapshot.progress,
                 showsBottomRefreshIndicator: bottomRefreshRenderSnapshot.showsIndicator,
@@ -2264,6 +2295,7 @@ struct ChatView: View {
     @State private var chatViewportWidth: CGFloat = 0
     @State private var composerMeasuredHeight: CGFloat = 0
     @State private var keyboardMeasuredHeight: CGFloat = 0
+    @State private var keyboardTransition: ChatKeyboardTransition?
     @State private var bottomContentInsetAnimationToken = 0
     @State private var transcriptScrollController = ChatTranscriptScrollController()
     @State private var bottomReadjustmentToken = 0
@@ -2491,8 +2523,9 @@ struct ChatView: View {
                 scrollController: transcriptScrollController,
                 bottomReadjustmentToken: bottomReadjustmentToken,
                 animatedBottomScrollToken: animatedBottomScrollToken,
-                 composerMeasuredHeight: showsImmersiveConversation ? 0 : composerMeasuredHeight,
-                 keyboardMeasuredHeight: showsImmersiveConversation ? 0 : keyboardMeasuredHeight,
+                composerMeasuredHeight: showsImmersiveConversation ? 0 : composerMeasuredHeight,
+                keyboardMeasuredHeight: showsImmersiveConversation ? 0 : keyboardMeasuredHeight,
+                keyboardTransition: keyboardTransition,
                 bottomContentInsetAnimationToken: bottomContentInsetAnimationToken,
                 messageBottomPadding: messageBottomPadding,
                 bottomRefreshThreshold: bottomRefreshThreshold,
@@ -2559,10 +2592,10 @@ struct ChatView: View {
             }
 #if canImport(UIKit)
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                updateKeyboardMeasuredHeight(keyboardHeight(from: notification))
+                updateKeyboardMeasuredHeight(keyboardHeight(from: notification), transition: ChatKeyboardTransition(notification: notification))
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                updateKeyboardMeasuredHeight(0)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { notification in
+                updateKeyboardMeasuredHeight(0, transition: ChatKeyboardTransition(notification: notification))
             }
 #endif
 
@@ -3818,13 +3851,11 @@ struct ChatView: View {
         requestBottomReadjustment()
     }
 
-    private func updateKeyboardMeasuredHeight(_ height: CGFloat) {
+    private func updateKeyboardMeasuredHeight(_ height: CGFloat, transition: ChatKeyboardTransition? = nil) {
         let height = max(0, height)
         guard abs(height - keyboardMeasuredHeight) > 0.5 else { return }
-        let wasAtBottom = isScrollGeometryAtBottom
+        keyboardTransition = transition
         keyboardMeasuredHeight = height
-        guard wasAtBottom else { return }
-        requestBottomReadjustment()
     }
 
     private func clearInactiveKeyboardMeasurement(forceBottomReadjustment: Bool = false) {
@@ -3832,7 +3863,7 @@ struct ChatView: View {
         if keyboardMeasuredHeight > 0 {
             keyboardMeasuredHeight = 0
         }
-        if forceBottomReadjustment || isScrollGeometryAtBottom {
+        if forceBottomReadjustment {
             requestBottomReadjustment()
         }
     }
@@ -5986,10 +6017,22 @@ class ChatTranscriptCollection: UICollectionView {
     var didLayout: (() -> Void)?
     var didDetach: (() -> Void)?
     var didAttach: (() -> Void)?
+#if DEBUG
+    var keyboardProbe: ChatKeyboardFrameProbe?
+#endif
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil { didAttach?() }
+#if DEBUG
+        guard ChatKeyboardFrameProbe.enabled else { return }
+        if window != nil {
+            if keyboardProbe == nil { keyboardProbe = ChatKeyboardFrameProbe(collection: self) }
+        } else {
+            keyboardProbe?.stop()
+            keyboardProbe = nil
+        }
+#endif
     }
 
     override func willMove(toWindow newWindow: UIWindow?) {
@@ -6018,6 +6061,50 @@ class ChatTranscriptCollection: UICollectionView {
     }
 }
 
+#if DEBUG
+@MainActor
+final class ChatKeyboardFrameProbe: NSObject {
+    static var enabled: Bool { ProcessInfo.processInfo.environment["OPENCLIENT_KEYBOARD_CONTINUITY"] == "1" }
+    static var frames: [[String: Double]] = []
+    private weak var collection: UICollectionView?
+    private var link: CADisplayLink?
+    private var hidden = true
+    var expectedInset: CGFloat = 0
+    var requestedHeight: CGFloat = 0
+
+    init(collection: UICollectionView) {
+        self.collection = collection
+        super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(willShow), name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(didHide), name: UIResponder.keyboardDidHideNotification, object: nil)
+        link = CADisplayLink(target: self, selector: #selector(sample))
+        link?.add(to: .main, forMode: .common)
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func willShow() { hidden = false }
+    @objc private func didHide() { hidden = true }
+
+    @objc private func sample() {
+        guard let collection, let window = collection.window else { return }
+        let frame = collection.convert(collection.bounds, to: window)
+        Self.frames.append(["time": ProcessInfo.processInfo.systemUptime, "hidden": hidden ? 1 : 0,
+            "requestedKeyboard": Double(requestedHeight), "expectedInset": Double(expectedInset),
+            "inset": Double(collection.contentInset.bottom), "adjustedInset": Double(collection.adjustedContentInset.bottom),
+            "offset": Double(collection.contentOffset.y), "height": Double(collection.bounds.height),
+            "minY": Double(frame.minY), "maxY": Double(frame.maxY),
+            "contentHeight": Double(collection.contentSize.height),
+            "scrolling": collection.isTracking || collection.isDragging || collection.isDecelerating ? 1 : 0])
+        if Self.frames.count > 720 { Self.frames.removeFirst() }
+    }
+}
+#endif
+
 private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentable {
     let rows: [ChatTranscriptRow]
     @Binding var isAtBottom: Bool
@@ -6026,6 +6113,8 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
     let animatedBottomScrollToken: Int
     let bottomContentInset: CGFloat
     let bottomContentInsetAnimationToken: Int
+    var keyboardHeight: CGFloat = 0
+    var keyboardTransition: ChatKeyboardTransition? = nil
     let bottomRefreshThreshold: CGFloat
     let bottomRefreshProgress: CGFloat
     let showsBottomRefreshIndicator: Bool
@@ -6093,8 +6182,8 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
 
     func update(_ collectionView: UICollectionView, coordinator: Coordinator) {
         guard Set(rows.map(\.id)).count == rows.count else { return }
-        coordinator.updateInitialPresentationInset(bottomContentInset,
-            animationToken: bottomContentInsetAnimationToken, in: collectionView)
+        coordinator.submitViewportUpdate(bottomContentInset, animationToken: bottomContentInsetAnimationToken,
+            keyboardHeight: keyboardHeight, transition: keyboardTransition, in: collectionView)
         coordinator.submitViewUpdate(in: collectionView) { [self, weak collectionView, weak coordinator] in
             guard let collectionView, let coordinator else { return }
             applyUpdate(collectionView, coordinator: coordinator)
@@ -6120,11 +6209,6 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         coordinator.animatedRowIDs = animatedRowIDs
         coordinator.onBottomPullChanged = onBottomPullChanged
         coordinator.onBottomPullEnded = onBottomPullEnded
-        coordinator.updateBottomContentInset(
-            bottomContentInset,
-            animationToken: bottomContentInsetAnimationToken,
-            in: collectionView
-        )
         coordinator.updateRows(rows, in: collectionView)
         coordinator.scrollToBottomIfNeeded(token: bottomScrollToken, animated: false, in: collectionView)
         coordinator.scrollToBottomIfNeeded(token: animatedBottomScrollToken, animated: true, in: collectionView)
@@ -6176,6 +6260,10 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         private var rowIDs: [String]
         private var rowSignaturesByID: [String: String]
         private var pendingViewUpdate: (() -> Void)?
+        private var pendingViewport: (inset: CGFloat, animationToken: Int, keyboardHeight: CGFloat,
+            transition: ChatKeyboardTransition?, scrollGeneration: Int, preservesBottom: Bool)?
+        private var isApplyingViewport = false
+        private var keyboardHeight: CGFloat = 0
         private var isApplyingRows = false
         private var userScrollGeneration = 0
         private var lastBottomScrollToken: Int?
@@ -6223,14 +6311,6 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 self.applyPendingRowsIfNeeded(in: collectionView)
                 self.scheduleInitialPresentation(in: collectionView)
             }
-        }
-
-        func updateInitialPresentationInset(_ inset: CGFloat, animationToken: Int, in collectionView: UICollectionView) {
-            guard awaitsInitialReveal, isMeasuringInitialPresentation, !isApplyingRows,
-                  !isPerformingViewUpdate else { return }
-            beginViewUpdate()
-            updateBottomContentInset(inset, animationToken: animationToken, in: collectionView)
-            endViewUpdate()
         }
 
         private func scheduleInitialPresentation(in collectionView: UICollectionView) {
@@ -6343,10 +6423,10 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         }
 
         func submitViewUpdate(in collectionView: UICollectionView, _ update: @escaping () -> Void) {
-            // Queue the entire presentation, not just rows: closures and signatures must
+            // Queue the row presentation, not viewport geometry: closures and signatures must
             // describe the same snapshot throughout UIKit's asynchronous batch completion.
             guard !isApplyingRows, !isPerformingViewUpdate, !isMeasuringInitialPresentation,
-                  !isUserScrolling(collectionView) else {
+                  !isApplyingViewport, !isUserScrolling(collectionView) else {
                 pendingViewUpdate = update
                 return
             }
@@ -6356,11 +6436,13 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
 
         func endViewUpdate() {
             isPerformingViewUpdate = false
+            if let collectionView { applyPendingViewport(in: collectionView) }
             let pendingAtBottomValue = self.pendingAtBottomValue
             self.pendingAtBottomValue = nil
+            let scrollGeneration = userScrollGeneration
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                if let pendingAtBottomValue { self.setAtBottom(pendingAtBottomValue) }
+                if let pendingAtBottomValue, self.userScrollGeneration == scrollGeneration { self.setAtBottom(pendingAtBottomValue) }
                 if let collectionView = self.collectionView { self.applyPendingRowsIfNeeded(in: collectionView) }
                 if let collectionView = self.collectionView { self.scheduleInitialPresentation(in: collectionView) }
             }
@@ -6384,6 +6466,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             // A drag can end before an outstanding batch completes. Its intent must
             // outlive isDragging/isDecelerating, even while bottom publication is deferred.
             userScrollGeneration &+= 1
+            bottomCorrectionGeneration &+= 1
             if let pendingBottomScroll, !pendingBottomScroll.animated {
                 markBottomScrollTokenHandled(pendingBottomScroll.token, animated: false)
                 self.pendingBottomScroll = nil
@@ -6417,7 +6500,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         }
 
         func collectionViewDidLayout(_ collectionView: UICollectionView) {
-            guard !isPerformingViewUpdate else { return }
+            guard !isPerformingViewUpdate, !isApplyingViewport else { return }
             applyPendingBottomScrollIfNeeded(in: collectionView, performsLayout: false)
             scheduleInitialPresentation(in: collectionView)
         }
@@ -6486,6 +6569,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                     }
                 }
                 self.isApplyingRows = false
+                self.applyPendingViewport(in: collectionView)
                 if self.userScrollGeneration != scrollGeneration {
                     self.updateBottomState(for: collectionView)
                 }
@@ -6521,24 +6605,74 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             }
         }
 
-        func updateBottomContentInset(
+        func submitViewportUpdate(
             _ inset: CGFloat,
             animationToken: Int,
+            keyboardHeight: CGFloat,
+            transition: ChatKeyboardTransition?,
             in collectionView: UICollectionView
         ) {
-            let inset = max(0, inset)
+            #if DEBUG
+            if let probe = (collectionView as? ChatTranscriptCollection)?.keyboardProbe {
+                probe.expectedInset = inset
+                probe.requestedHeight = keyboardHeight
+            }
+            #endif
+            pendingViewport = (max(0, inset), animationToken, keyboardHeight, transition,
+                userScrollGeneration, isAtBottom.wrappedValue && !isUserScrolling(collectionView))
+            applyPendingViewport(in: collectionView)
+        }
+
+        private func applyPendingViewport(in collectionView: UICollectionView) {
+            guard !isApplyingRows, !isPerformingViewUpdate, !isApplyingViewport,
+                  let viewport = pendingViewport else { return }
+            pendingViewport = nil
+            isApplyingViewport = true
+            defer {
+                isApplyingViewport = false
+                if pendingViewport != nil {
+                    DispatchQueue.main.async { [weak self, weak collectionView] in
+                        guard let self, let collectionView else { return }
+                        self.applyPendingViewport(in: collectionView)
+                    }
+                }
+            }
+            let keyboardChanged = abs(viewport.keyboardHeight - keyboardHeight) > 0.5
+            keyboardHeight = viewport.keyboardHeight
+            let inset = viewport.inset
             guard abs(inset - bottomContentInset) > 0.5 else { return }
-            let preservesBottom = OpenCodeChatBottomAnchorPolicy.preservesBottom(
-                isAtBottom: isAtBottom.wrappedValue,
-                isUserScrolling: isUserScrolling(collectionView)
-            )
+            initialLayoutSample = nil
+            bottomCorrectionGeneration &+= 1
+            let preservesBottom = viewport.preservesBottom && viewport.scrollGeneration == userScrollGeneration
+                && !isUserScrolling(collectionView)
             let animatesChange = !awaitsInitialReveal && OpenCodeChatBottomInsetAnimationPolicy.shouldAnimate(
-                animationToken: animationToken,
+                animationToken: viewport.animationToken,
                 lastAnimationToken: lastBottomContentInsetAnimationToken,
                 preservesBottom: preservesBottom
             )
-            lastBottomContentInsetAnimationToken = animationToken
+            lastBottomContentInsetAnimationToken = viewport.animationToken
             bottomContentInset = inset
+            if keyboardChanged {
+                let duration = preservesBottom && !awaitsInitialReveal ? viewport.transition?.remainingDuration() ?? 0 : 0
+                let changes = {
+                    collectionView.contentInset.bottom = inset
+                    collectionView.verticalScrollIndicatorInsets.bottom = inset
+                    if preservesBottom {
+                        collectionView.layoutIfNeeded()
+                        self.pinKeyboardViewport(in: collectionView)
+                    }
+                }
+                if duration > 0 {
+                    UIView.animate(withDuration: duration, delay: 0,
+                        options: viewport.transition?.animationOptions ?? [], animations: changes)
+                } else {
+                    UIView.performWithoutAnimation(changes)
+                }
+                if preservesBottom {
+                    schedulePinnedBottomCorrection(in: collectionView, delay: duration, keyboardChange: true)
+                }
+                return
+            }
             UIView.performWithoutAnimation {
                 collectionView.contentInset.bottom = inset
                 collectionView.verticalScrollIndicatorInsets.bottom = inset
@@ -6554,12 +6688,24 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             }
         }
 
+        private func pinKeyboardViewport(in collectionView: UICollectionView) {
+            guard !rows.isEmpty, collectionView.window != nil,
+                  collectionView.bounds.width > 0, collectionView.bounds.height > 0 else { return }
+            // A known keyboard shrink can exceed the general unstable-layout correction limit.
+            let target = max(-collectionView.adjustedContentInset.top,
+                collectionView.contentSize.height - collectionView.bounds.height + collectionView.adjustedContentInset.bottom)
+            collectionView.contentOffset.y = target
+            setAtBottomAfterViewUpdate()
+        }
+
         private func schedulePinnedBottomCorrection(
             in collectionView: UICollectionView,
-            delay: TimeInterval = 0
+            delay: TimeInterval = 0,
+            keyboardChange: Bool = false
         ) {
             bottomCorrectionGeneration &+= 1
             let generation = bottomCorrectionGeneration
+            let scrollGeneration = userScrollGeneration
             Task { @MainActor [weak self, weak collectionView] in
                 if delay > 0 {
                     try? await Task.sleep(for: .milliseconds(Int(delay * 1_000)))
@@ -6568,9 +6714,12 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 }
                 guard let self, let collectionView else { return }
                 guard self.bottomCorrectionGeneration == generation else { return }
-                guard collectionView.window != nil, !self.isUserScrolling(collectionView) else { return }
+                guard collectionView.window != nil,
+                      self.userScrollGeneration == scrollGeneration, !self.isApplyingRows,
+                      !self.isUserScrolling(collectionView), self.isAtBottom.wrappedValue else { return }
                 collectionView.layoutIfNeeded()
-                self.scrollToBottom(in: collectionView, animated: false, performsLayout: false)
+                if keyboardChange { self.pinKeyboardViewport(in: collectionView) }
+                else { self.scrollToBottom(in: collectionView, animated: false, performsLayout: false) }
             }
         }
 
@@ -6680,7 +6829,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
 
         private func applyPendingRowsIfNeeded(in scrollView: UIScrollView) {
             guard let collectionView = scrollView as? UICollectionView, collectionView.window != nil, !isApplyingRows,
-                  !isPerformingViewUpdate, !isMeasuringInitialPresentation,
+                  !isPerformingViewUpdate, !isMeasuringInitialPresentation, !isApplyingViewport,
                   !isUserScrolling(collectionView), let update = pendingViewUpdate else { return }
             pendingViewUpdate = nil
             update()
@@ -6713,13 +6862,15 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         }
 
         private func setAtBottomAfterViewUpdate() {
+            let scrollGeneration = userScrollGeneration
             DispatchQueue.main.async { [weak self] in
-                self?.setAtBottom(true)
+                guard let self, self.userScrollGeneration == scrollGeneration else { return }
+                self.setAtBottom(true)
             }
         }
 
         private func updateBottomState(for scrollView: UIScrollView) {
-            guard !isApplyingRows else { return }
+            guard !isApplyingRows, !isApplyingViewport else { return }
             let distanceFromBottom = distanceFromBottom(for: scrollView)
             if isAtBottom.wrappedValue {
                 guard distanceFromBottom > 140 else { return }
@@ -6855,6 +7006,16 @@ final class ChatTranscriptContinuityHarness {
     }
 
     final class CollectionView: ChatTranscriptCollection {
+        var insetAnimationDurations: [TimeInterval] = []
+        override var contentInset: UIEdgeInsets {
+            didSet { insetAnimationDurations.append(UIView.inheritedAnimationDuration) }
+        }
+        var simulatesTracking = false
+        var simulatesDragging = false
+        var simulatesDecelerating = false
+        override var isTracking: Bool { simulatesTracking || super.isTracking }
+        override var isDragging: Bool { simulatesDragging || super.isDragging }
+        override var isDecelerating: Bool { simulatesDecelerating || super.isDecelerating }
         var reloadCount = 0
         var itemReloadCount = 0
         var batchCount = 0
@@ -6892,15 +7053,17 @@ final class ChatTranscriptContinuityHarness {
         collectionView.register(ChatTranscriptHostingCell.self, forCellWithReuseIdentifier: ChatTranscriptHostingCell.reuseIdentifier)
     }
 
-    func update(ids: [String], revision: Int = 0, streaming: Bool = false, hasInitialContent: Bool = true) {
+    func update(ids: [String], revision: Int = 0, streaming: Bool = false, hasInitialContent: Bool = true, bottomInset: CGFloat = 0,
+                keyboardHeight: CGFloat = 0, keyboardTransition: ChatKeyboardTransition? = nil) {
         let rows = ids.map { id in
             ChatTranscriptRow.displayItem(.message(.local(role: "user", text: id + String(repeating: "!", count: revision), messageID: id, sessionID: "continuity", partID: "part-\(id)")),
                 recovery: nil, recoveryStatusVisible: false)
         }
         let view = ChatTranscriptCollectionView<AnyView>(rows: rows,
             isAtBottom: Binding(get: { self.pinned }, set: { self.pinned = $0 }), scrollController: scrollController,
-            bottomScrollToken: 0, animatedBottomScrollToken: 0, bottomContentInset: 0,
-            bottomContentInsetAnimationToken: 0, bottomRefreshThreshold: 90, bottomRefreshProgress: 0,
+            bottomScrollToken: 0, animatedBottomScrollToken: 0, bottomContentInset: bottomInset,
+            bottomContentInsetAnimationToken: 0, keyboardHeight: keyboardHeight, keyboardTransition: keyboardTransition,
+            bottomRefreshThreshold: 90, bottomRefreshProgress: 0,
             showsBottomRefreshIndicator: false, bottomRefreshColorIsActive: false, bottomRefreshHeight: 0,
             isRefreshing: false, isStreaming: streaming, hasInitialContent: hasInitialContent,
             contentInvalidationToken: "", animatedRowIDs: [],
@@ -6939,7 +7102,7 @@ final class ChatTranscriptContinuityHarness {
     func sampleInitialLayout() { coordinator?.settleInitialPresentation(in: collectionView) }
     var awaitsInitialReveal: Bool { coordinator?.awaitsInitialReveal ?? false }
     func updateBottomInset(_ inset: CGFloat) {
-        coordinator?.updateBottomContentInset(inset, animationToken: 1, in: collectionView)
+        coordinator?.submitViewportUpdate(inset, animationToken: 1, keyboardHeight: 0, transition: nil, in: collectionView)
     }
 }
 #endif
@@ -6952,6 +7115,8 @@ private struct ChatTranscriptCollectionView<RowContent: View>: View {
     let animatedBottomScrollToken: Int
     let bottomContentInset: CGFloat
     let bottomContentInsetAnimationToken: Int
+    var keyboardHeight: CGFloat = 0
+    var keyboardTransition: ChatKeyboardTransition? = nil
     let bottomRefreshThreshold: CGFloat
     let bottomRefreshProgress: CGFloat
     let showsBottomRefreshIndicator: Bool

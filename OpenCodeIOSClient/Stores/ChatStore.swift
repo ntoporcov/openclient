@@ -248,6 +248,7 @@ final class ChatStore: ObservableObject {
     private var v2LiveTextPartIDs: [String: Set<String>] = [:]
     var inFlightToolMessageDetailIDs: Set<String>
     var nextStreamPartHapticAllowedAt: Date
+    var streamHapticFeedback = OpenCodeHaptics.StreamFeedback()
     var pendingTranscriptEvents: [OpenCodePendingTranscriptEvent]
     private var pendingTranscriptCharacterTotal: Int
     private var pendingTranscriptOldestDate: Date?

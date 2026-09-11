@@ -158,6 +158,19 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         ])
     }
 
+    func testCurrentCatalogDescribesOpenCodeV2Release() {
+        let release = OpenClientReleaseNotesCatalog.releases.first { $0.version == "1.0.20" }
+
+        XCTAssertEqual(release?.title, "Ahead of what’s next")
+        XCTAssertEqual(release?.hero, .openCodeV2)
+        XCTAssertEqual(release?.featureSectionTitle, "Little things that move work forward")
+        XCTAssertFalse(release?.showsSetup == true)
+        XCTAssertEqual(release?.features.map(\.title), [
+            "Select. Copy. Done.",
+            "Smoother around the edges",
+        ])
+    }
+
     private var release: OpenClientReleaseNotes {
         OpenClientReleaseNotes(
             version: "2.0",

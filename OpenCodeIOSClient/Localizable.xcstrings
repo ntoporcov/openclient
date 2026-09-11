@@ -1,6 +1,76 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Ahead of what’s next": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ahead of what’s next" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Un passo avanti verso il futuro" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Um passo à frente do que vem por aí" } }
+      }
+    },
+    "Connect to OpenCode v2 and explore early support as it evolves. Some features may still be incomplete or change along the way.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Connect to OpenCode v2 and explore early support as it evolves. Some features may still be incomplete or change along the way." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Connettiti a OpenCode v2 e prova in anteprima il supporto mentre continua a evolversi. Alcune funzionalità potrebbero essere ancora incomplete o cambiare nel tempo." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Conecte-se ao OpenCode v2 e experimente o suporte antecipado enquanto ele evolui. Alguns recursos ainda podem estar incompletos ou mudar ao longo do tempo." } }
+      }
+    },
+    "EXPERIMENTAL PREVIEW": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "EXPERIMENTAL PREVIEW" } },
+        "it": { "stringUnit": { "state": "translated", "value": "ANTEPRIMA SPERIMENTALE" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "PRÉVIA EXPERIMENTAL" } }
+      }
+    },
+    "Little things that move work forward": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Little things that move work forward" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Piccoli dettagli che fanno avanzare il lavoro" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Pequenos detalhes que fazem o trabalho avançar" } }
+      }
+    },
+    "OpenCode v2, ready to try": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "OpenCode v2, ready to try" } },
+        "it": { "stringUnit": { "state": "translated", "value": "OpenCode v2, pronto da provare" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "OpenCode v2, pronto para experimentar" } }
+      }
+    },
+    "Press and hold assistant text to select and copy just the part you need, right from the response.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Press and hold assistant text to select and copy just the part you need, right from the response." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Tieni premuto il testo dell’assistente per selezionare e copiare solo la parte che ti serve, direttamente dalla risposta." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Mantenha pressionado o texto do assistente para selecionar e copiar apenas a parte de que precisa, diretamente da resposta." } }
+      }
+    },
+    "Select. Copy. Done.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Select. Copy. Done." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Seleziona. Copia. Fatto." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Selecione. Copie. Pronto." } }
+      }
+    },
+    "Smoother around the edges": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Smoother around the edges" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Miglioramenti in ogni dettaglio" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Mais melhorias em cada detalhe" } }
+      }
+    },
+    "This release also includes fixes and reliability improvements across the app.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This release also includes fixes and reliability improvements across the app." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Questa versione include anche correzioni e miglioramenti dell’affidabilità in tutta l’app." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Esta versão também inclui correções e melhorias de confiabilidade em todo o app." } }
+      }
+    },
+    "Try OpenCode v2 early, copy exactly what you need, and enjoy more polish throughout OpenClient.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Try OpenCode v2 early, copy exactly what you need, and enjoy more polish throughout OpenClient." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Prova OpenCode v2 in anteprima, copia esattamente ciò che ti serve e scopri un OpenClient ancora più rifinito." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Experimente o OpenCode v2 antecipadamente, copie exatamente o que precisa e aproveite ainda mais melhorias em todo o OpenClient." } }
+      }
+    },
     "Unable to safely update saved servers. Unlock your device and try again. If this continues, contact support.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Unable to safely update saved servers. Unlock your device and try again. If this continues, contact support." } },
@@ -19854,6 +19924,14 @@
             "value": "Sintonizzando l'antenna alla ricerca del segnale OpenCode."
           }
         }
+      }
+    },
+    "Turn took %@": {
+      "comment": "Elapsed time from the user prompt to the final assistant completion. The argument is a fully formatted duration.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Turn took %@" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "O turno levou %@" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Il turno ha richiesto %@" } }
       }
     },
     "Turn on Apple Intelligence to try the on-device demo.": {

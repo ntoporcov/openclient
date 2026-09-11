@@ -22,6 +22,10 @@ struct OpenClientWhatsNewView: View {
                         hero: release.hero
                     )
 
+                    if release.hero == .openCodeV2 {
+                        OpenClientWhatsNewV2Preview()
+                    }
+
                     if release.hero == .ipad {
                         OpenClientWhatsNewIPadTransitionNotes(connection: connection)
                     }
@@ -229,6 +233,8 @@ private struct OpenClientWhatsNewHero: View {
                         OpenClientWhatsNewIPadMark()
                     case .talk:
                         OpenClientWhatsNewTalkMark()
+                    case .openCodeV2:
+                        OpenClientWhatsNewV2Mark()
                     }
                 }
 
@@ -236,6 +242,7 @@ private struct OpenClientWhatsNewHero: View {
                     Text(title)
                         .font(.system(.largeTitle, design: .rounded, weight: .bold))
                         .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Text(summary)
                         .font(.body)
@@ -253,6 +260,91 @@ private struct OpenClientWhatsNewHero: View {
         }
         .shadow(color: .black.opacity(0.14), radius: 24, y: 12)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct OpenClientWhatsNewV2Mark: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.cyan.opacity(0.2))
+                .frame(width: 68, height: 68)
+                .rotationEffect(.degrees(-9))
+
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.purple, .blue],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 62, height: 62)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(.white.opacity(0.55), lineWidth: 1)
+                }
+                .shadow(color: .purple.opacity(0.38), radius: 18, y: 8)
+
+            Text(verbatim: "v2")
+                .font(.system(size: 25, weight: .black, design: .monospaced))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 92, height: 72)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct OpenClientWhatsNewV2Preview: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: .orange.opacity(0.55), radius: 5)
+
+                Text("EXPERIMENTAL PREVIEW")
+                    .font(.caption.weight(.bold))
+                    .tracking(0.8)
+                    .foregroundStyle(.primary)
+            }
+
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.cyan)
+                    .frame(width: 48, height: 48)
+                    .background(.cyan.opacity(0.12), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("OpenCode v2, ready to try")
+                        .font(.title3.bold())
+
+                    Text("Connect to OpenCode v2 and explore early support as it evolves. Some features may still be incomplete or change along the way.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(18)
+        .background(
+            LinearGradient(
+                colors: [.purple.opacity(0.11), .cyan.opacity(0.07)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.purple.opacity(0.2), lineWidth: 0.75)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("new-features.v2-preview")
     }
 }
 

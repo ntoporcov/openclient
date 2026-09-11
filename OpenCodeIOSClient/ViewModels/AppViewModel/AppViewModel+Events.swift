@@ -1211,29 +1211,29 @@ extension AppViewModel {
 
     private func triggerStreamPartHapticIfNeeded(for managed: OpenCodeManagedEvent) {
         guard shouldEmitStreamPartHaptic(for: managed) else { return }
-
-        let now = Date()
-        guard now >= nextStreamPartHapticAllowedAt else { return }
-
-        OpenCodeHaptics.impact(.crisp)
-        nextStreamPartHapticAllowedAt = now.addingTimeInterval(nextStreamPartHapticInterval())
+        chatStore.streamHapticFeedback.emit(nextAllowedAt: &nextStreamPartHapticAllowedAt)
     }
 
     private func shouldEmitStreamPartHaptic(for managed: OpenCodeManagedEvent) -> Bool {
-        ChatStore.shouldEmitStreamPartHaptic(
-            for: managed.typed,
-            selectedSessionID: selectedSession?.id,
-            activeChatSessionID: activeChatSessionID,
-            messages: messages
-        )
-    }
-
-    private func nextStreamPartHapticInterval() -> TimeInterval {
-        if Double.random(in: 0 ... 1) < 0.18 {
-            return Double.random(in: 0.12 ... 0.18)
+        guard let selectedSession, activeChatSessionID == selectedSession.id,
+              case let .messagePartDelta(sessionID, messageID, _, _, _) = managed.typed,
+              sessionID == selectedSession.id else { return false }
+        let state = chatFacade.directoryStore(forSessionID: sessionID).syncState
+        let visibleMessages: [OpenCodeMessageEnvelope]
+        // ChatView renders the canonical transcript first, even while the root array is being prepared.
+        if let canonical = state.messagesBySessionID[sessionID], !canonical.isEmpty {
+            visibleMessages = canonical.first(where: { $0.id == messageID }).map {
+                [OpenCodeMessageEnvelope(info: $0, parts: state.partsByMessageID[messageID] ?? [])]
+            } ?? []
+        } else {
+            visibleMessages = chatFacade.messageSource(for: selectedSession)
         }
-
-        return Double.random(in: 0.045 ... 0.085)
+        return ChatStore.shouldEmitStreamPartHaptic(
+            for: managed.typed,
+            selectedSessionID: selectedSession.id,
+            activeChatSessionID: activeChatSessionID,
+            messages: visibleMessages
+        )
     }
 
     private func eventScopeSummary(for managed: OpenCodeManagedEvent) -> String {

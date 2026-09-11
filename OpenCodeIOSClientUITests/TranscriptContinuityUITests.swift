@@ -2,6 +2,66 @@ import XCTest
 
 @MainActor
 final class TranscriptContinuityUITests: XCTestCase {
+    func testNativeKeyboardDismissalHasNoDeferredReservation() throws {
+        continueAfterFailure = false
+        for interactive in [false, true] {
+            let app = XCUIApplication()
+            defer { app.terminate() }
+            app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "submission-recovery"
+            app.launchEnvironment["OPENCLIENT_TRANSCRIPT_CONTINUITY"] = "1"
+            app.launchEnvironment["OPENCLIENT_KEYBOARD_CONTINUITY"] = "1"
+            app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launch()
+            let input = app.textViews["chat.input"].firstMatch
+            XCTAssertTrue(input.waitForExistence(timeout: 15))
+            input.tap()
+            input.typeText("Keyboard draft")
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            let trace = app.staticTexts["continuity.keyboard.frames"]
+            func frames() -> [[String: Double]] {
+                guard let value = trace.value as? String,
+                      let frames = try? JSONSerialization.jsonObject(with: Data(value.utf8)) as? [[String: Double]] else { return [] }
+                return frames
+            }
+            let shown = NSPredicate { _, _ in (frames().last?["requestedKeyboard"] ?? 0) > 200 }
+            capture(app, name: "keyboard-\(interactive)-focused")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: shown, object: nil)], timeout: 15), .completed,
+                "Expected software keyboard: \(frames().last ?? [:])")
+            app.buttons["continuity.keyboard.record"].tap()
+            capture(app, name: "keyboard-\(interactive)-before")
+            if interactive {
+                let scroll = app.collectionViews["chat.scroll"].firstMatch
+                XCTAssertTrue(scroll.exists)
+                let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: scroll.frame.midX, dy: input.frame.minY - 100))
+                let end = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: scroll.frame.midX, dy: app.frame.maxY - 30))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
+            } else {
+                app.buttons["continuity.keyboard.hide"].tap()
+            }
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+            capture(app, name: "keyboard-\(interactive)-hidden")
+            let hidden = NSPredicate { _, _ in
+                let last = frames().last ?? [:]
+                return last["hidden"] == 1 && last["requestedKeyboard"] == 0
+            }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: hidden, object: nil)], timeout: 5), .completed)
+            let samples = frames()
+            let attachment = XCTAttachment(string: trace.value as? String ?? "missing")
+            attachment.name = "keyboard-\(interactive)-display-frames"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTAssertTrue(samples.contains { $0["hidden"] == 0 }, "Capture the visible keyboard before dismissal")
+            if interactive { XCTAssertTrue(samples.contains { $0["scrolling"] == 1 }, "Exercise a native scrolling gesture") }
+            let afterHide = samples.filter { $0["hidden"] == 1 && $0["requestedKeyboard"] == 0 }
+            XCTAssertFalse(afterHide.isEmpty)
+            for frame in afterHide {
+                XCTAssertEqual(frame["inset"]!, frame["expectedInset"]!, accuracy: 1,
+                    "No stale keyboard reservation in ANY frame after keyboardDidHide: \(frame)")
+            }
+            capture(app, name: "keyboard-\(interactive)-after")
+        }
+    }
+
     func testEarlyCanonicalHandoffWaitsForEntryAndFastAnswerNeverFlashesThinking() throws {
         continueAfterFailure = false
         for profile in ["legacy", "v2"] {

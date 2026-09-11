@@ -6,6 +6,80 @@ final class ResponseCopyUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testDurationCaptionLocalizedLayoutAndMissingStart() throws {
+        let originalAppearance = XCUIDevice.shared.appearance
+        defer { XCUIDevice.shared.appearance = originalAppearance }
+        for (language, locale, prefix) in [
+            ("en", "en_US", "Turn took "),
+            ("pt-BR", "pt_BR", "O turno levou "),
+            ("it", "it_IT", "Il turno ha richiesto ")
+        ] {
+            for appearance in ["Light", "Dark"] {
+                XCUIDevice.shared.appearance = appearance == "Dark" ? .dark : .light
+                let app = XCUIApplication()
+                app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "chat"
+                app.launchEnvironment["OPENCLIENT_UI_TEST_RESPONSE_COPY"] = "1"
+                app.launchEnvironment["OPENCLIENT_UI_TEST_RESPONSE_DURATION"] = appearance == "Dark" ? "hours" : "known"
+                app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
+                app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "0"
+                app.launchArguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", locale]
+                if appearance == "Dark" {
+                    app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+                }
+                app.launch()
+                XCTAssertTrue(app.staticTexts["screenshot.scene.chat"].waitForExistence(timeout: 15))
+                let transcript = app.collectionViews["chat.scroll"]
+                let answer = app.textViews["chat.responseText.response-copy-followup"]
+                reveal(answer, in: transcript, towardStart: true)
+                answer.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+                let copy = app.buttons["chat.copyResponse.response-copy-prompt"]
+                reveal(copy, in: transcript, towardStart: false)
+                let clock = app.staticTexts["chat.responseCompletedAt.response-copy-prompt"]
+                let duration = app.staticTexts["chat.responseDuration.response-copy-prompt"]
+                let actions = app.buttons["chat.responseActions.response-copy-prompt"]
+                XCTAssertTrue(duration.waitForExistence(timeout: 3))
+                let seconds = appearance == "Dark" ? 3_723.0 : 83.0
+                let expected = Duration.seconds(seconds).formatted(
+                    .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2)
+                        .locale(Locale(identifier: locale))
+                )
+                XCTAssertEqual(duration.label, prefix + expected)
+                XCTAssertGreaterThanOrEqual(duration.frame.minX, clock.frame.maxX)
+                XCTAssertEqual(duration.frame.midY, clock.frame.midY, accuracy: 2)
+                XCTAssertLessThanOrEqual(duration.frame.maxX, copy.frame.minX)
+                for control in [copy, actions] {
+                    XCTAssertTrue(control.isHittable)
+                    XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+                    XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+                    XCTAssertLessThanOrEqual(control.frame.maxX, transcript.frame.maxX)
+                }
+                let attachment = XCTAttachment(screenshot: app.screenshot())
+                attachment.name = "Duration-\(language)-\(appearance)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                app.terminate()
+            }
+        }
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "chat"
+        app.launchEnvironment["OPENCLIENT_UI_TEST_RESPONSE_COPY"] = "1"
+        app.launchEnvironment["OPENCLIENT_UI_TEST_RESPONSE_DURATION"] = "missing"
+        app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
+        app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "0"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["screenshot.scene.chat"].waitForExistence(timeout: 15))
+        let transcript = app.collectionViews["chat.scroll"]
+        let answer = app.textViews["chat.responseText.response-copy-followup"]
+        reveal(answer, in: transcript, towardStart: true)
+        answer.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        let copy = app.buttons["chat.copyResponse.response-copy-prompt"]
+        reveal(copy, in: transcript, towardStart: false)
+        XCTAssertTrue(app.staticTexts["chat.responseCompletedAt.response-copy-prompt"].exists)
+        XCTAssertFalse(app.staticTexts["chat.responseDuration.response-copy-prompt"].exists)
+        XCTAssertTrue(copy.isHittable)
+    }
+
     func testResponseCopyAndSelection() throws {
         let app = XCUIApplication()
         app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "chat"
@@ -46,7 +120,7 @@ final class ResponseCopyUITests: XCTestCase {
 
         assertCaption(visible: false)
         XCTAssertTrue(tool.waitForExistence(timeout: 3))
-        let bottomCell = transcript.cells.element(boundBy: transcript.cells.count - 1)
+        var bottomCell: XCUIElement { transcript.cells.element(boundBy: transcript.cells.count - 1) }
         let hiddenTailHeight = bottomCell.frame.maxY - tool.frame.maxY
         XCTAssertLessThan(hiddenTailHeight, 32, "Hidden captions must not reserve a row of space")
         reveal(paragraph, in: transcript, towardStart: true)
