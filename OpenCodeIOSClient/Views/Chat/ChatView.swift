@@ -1605,6 +1605,7 @@ private struct MessageComposerSnapshot: Equatable {
     let conversationState: ConversationModeController.State
     let conversationInputLevel: CGFloat
     let blocksNewInput: Bool
+    let toolbarSnapshot: ChatFacade.ToolbarSnapshot
 }
 
 private struct MessageBubbleSnapshot: Equatable {
@@ -1963,6 +1964,7 @@ private struct ChatTranscriptPane<RowContent: View>: View {
     let isRefreshingChatData: Bool
     let isSessionBusy: Bool
     let isInitialHydration: Bool
+    let isLoadingPresentation: Bool
     let contentInvalidationToken: String
     let makeDisplaySnapshot: () -> TimedChatDisplaySnapshot
     let makeRows: (ChatDisplaySnapshot) -> [ChatTranscriptRow]
@@ -1997,6 +1999,7 @@ private struct ChatTranscriptPane<RowContent: View>: View {
                 bottomRefreshHeight: messageBottomPadding + bottomRefreshIndicatorHeight * bottomRefreshRenderSnapshot.progress,
                 isRefreshing: isRefreshingChatData,
                 isStreaming: isSessionBusy || isInitialHydration,
+                hasInitialContent: !displaySnapshot.messages.isEmpty || !isLoadingPresentation,
                 contentInvalidationToken: contentInvalidationToken,
                 animatedRowIDs: animatedRowIDs,
                 onBottomPullChanged: onBottomPullChanged,
@@ -2273,15 +2276,9 @@ struct ChatView: View {
 
     @State private var selectedInstructionTab: AppleIntelligenceInstructionTab = .user
 
-    #if targetEnvironment(macCatalyst)
-    private let initialMessageWindowSize = 200
-    private let fallbackMessageWindowSize = 40
-    private let olderMessageWindowSize = 100
-    #else
     private let initialMessageWindowSize = 12
     private let fallbackMessageWindowSize = 3
     private let olderMessageWindowSize = 12
-    #endif
     private let bottomRefreshThreshold: CGFloat = 72
     private let bottomRefreshIndicatorHeight: CGFloat = 34
     private let outgoingRequestDelayMS = 720
@@ -2465,7 +2462,20 @@ struct ChatView: View {
     }
 
     var body: some View {
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        if chatFacade.windowContext == nil, !isDedicatedWindow, onDismissChildSession == nil,
+           chatFacade.selectedSession?.id != sessionID {
+            // Compact navigation can expose its retained detail before the shell replaces it.
+            OpenCodePlatformColor.groupedBackground
+                .ignoresSafeArea()
+                .transition(.identity)
+        } else {
+            chatObservedContent
+                .transition(.identity)
+        }
+        #else
         chatObservedContent
+        #endif
     }
 
     private var chatTranscriptContent: some View {
@@ -2491,6 +2501,7 @@ struct ChatView: View {
                 isRefreshingChatData: isRefreshingChatData,
                 isSessionBusy: isSessionBusy,
                 isInitialHydration: chatFacade.isLoadingPresentation || !hasCompletedInitialHydrationSnap,
+                isLoadingPresentation: chatFacade.isLoadingPresentation,
                 contentInvalidationToken: transcriptContentInvalidationToken,
                 makeDisplaySnapshot: { timedChatDisplaySnapshot },
                 makeRows: { transcriptRows(for: $0) },
@@ -3307,7 +3318,8 @@ struct ChatView: View {
             contextSnapshot: contextMetrics.context,
             conversationState: conversationController.state,
             conversationInputLevel: conversationController.inputLevel,
-            blocksNewInput: chatFacade.hasGlobalForms(sessionID: sessionID) || funAndGamesStore.hasPendingSetup(for: sessionID)
+            blocksNewInput: chatFacade.hasGlobalForms(sessionID: sessionID) || funAndGamesStore.hasPendingSetup(for: sessionID),
+            toolbarSnapshot: toolbarSnapshot
         )
 
         let browserAction: (() -> Void)?
@@ -3976,12 +3988,6 @@ struct ChatView: View {
     }
 
     private var transcriptRequestedMessageCount: Int {
-        #if targetEnvironment(macCatalyst)
-        return min(
-            chatSourceMessageCount,
-            initialMessageWindowSize + additionalLeadingMessageCount
-        )
-        #else
         let baseCount: Int
         if directoryStore.syncStore.messageCount(forSessionID: sessionID) > 0 {
             baseCount = directoryStore.syncStore.messageCountIncludingLatestUserRounds(
@@ -4000,7 +4006,6 @@ struct ChatView: View {
             chatSourceMessageCount,
             min(baseCount, initialMessageWindowSize) + additionalLeadingMessageCount
         )
-        #endif
     }
 
     private func transcriptSuffix(_ count: Int) -> [OpenCodeMessageEnvelope] {
@@ -5979,6 +5984,33 @@ private struct UIKitRefreshActivityIndicator: UIViewRepresentable {
 #if canImport(UIKit)
 class ChatTranscriptCollection: UICollectionView {
     var didLayout: (() -> Void)?
+    var didDetach: (() -> Void)?
+    var didAttach: (() -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { didAttach?() }
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        if newWindow == nil {
+            didDetach?()
+            #if targetEnvironment(macCatalyst)
+            if window != nil, let container = superview, !container.isHidden, container.alpha > 0,
+               alpha > 0, !UIAccessibility.isReduceMotionEnabled,
+               let snapshot = snapshotView(afterScreenUpdates: false) {
+                snapshot.frame = convert(bounds, to: container)
+                snapshot.isUserInteractionEnabled = false
+                snapshot.accessibilityElementsHidden = true
+                container.addSubview(snapshot)
+                UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut]) {
+                    snapshot.alpha = 0
+                } completion: { _ in snapshot.removeFromSuperview() }
+            }
+            #endif
+        }
+        super.willMove(toWindow: newWindow)
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -6001,6 +6033,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
     let bottomRefreshHeight: CGFloat
     let isRefreshing: Bool
     let isStreaming: Bool
+    var hasInitialContent = true
     let contentInvalidationToken: String
     let animatedRowIDs: Set<String>
     let onBottomPullChanged: (CGFloat) -> Void
@@ -6038,6 +6071,14 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         collectionView.delegate = context.coordinator
         collectionView.register(ChatTranscriptHostingCell.self, forCellWithReuseIdentifier: ChatTranscriptHostingCell.reuseIdentifier)
         context.coordinator.collectionView = collectionView
+        context.coordinator.prepareInitialPresentation(in: collectionView)
+        collectionView.didDetach = { [weak coordinator = context.coordinator] in
+            coordinator?.cancelInitialPresentation()
+        }
+        collectionView.didAttach = { [weak collectionView, weak coordinator = context.coordinator] in
+            guard let collectionView else { return }
+            coordinator?.collectionViewDidAttach(collectionView)
+        }
         collectionView.didLayout = { [weak collectionView, weak coordinator = context.coordinator] in
             guard let collectionView else { return }
             coordinator?.collectionViewDidLayout(collectionView)
@@ -6052,6 +6093,8 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
 
     func update(_ collectionView: UICollectionView, coordinator: Coordinator) {
         guard Set(rows.map(\.id)).count == rows.count else { return }
+        coordinator.updateInitialPresentationInset(bottomContentInset,
+            animationToken: bottomContentInsetAnimationToken, in: collectionView)
         coordinator.submitViewUpdate(in: collectionView) { [self, weak collectionView, weak coordinator] in
             guard let collectionView, let coordinator else { return }
             applyUpdate(collectionView, coordinator: coordinator)
@@ -6072,6 +6115,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         coordinator.bottomRefreshHeight = bottomRefreshHeight
         coordinator.isRefreshing = isRefreshing
         coordinator.isStreaming = isStreaming
+        coordinator.hasInitialContent = hasInitialContent
         coordinator.contentInvalidationToken = contentInvalidationToken
         coordinator.animatedRowIDs = animatedRowIDs
         coordinator.onBottomPullChanged = onBottomPullChanged
@@ -6143,6 +6187,115 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         private var isBottomPullTracking = false
         private var isPerformingViewUpdate = false
         private var pendingAtBottomValue: Bool?
+        private(set) var awaitsInitialReveal = false
+        var hasInitialContent = true
+        private let initialPresentationHandoff = OpenCodeDisplayFrameHandoff()
+        private var initialPresentationScheduled = false
+        private var isMeasuringInitialPresentation = false
+        private var initialRevealGeneration = 0
+        private struct InitialLayoutSample: Equatable {
+            let size: CGSize
+            let viewport: CGSize
+            let inset: UIEdgeInsets
+            let offset: CGPoint
+            let frames: [CGRect]
+        }
+        private var initialLayoutSample: InitialLayoutSample?
+
+        func prepareInitialPresentation(in collectionView: UICollectionView) {
+            awaitsInitialReveal = true
+            initialLayoutSample = nil
+            collectionView.alpha = 0
+        }
+
+        func cancelInitialPresentation() {
+            initialRevealGeneration &+= 1
+            initialPresentationHandoff.cancel()
+            initialPresentationScheduled = false
+            initialLayoutSample = nil
+            isMeasuringInitialPresentation = false
+            collectionView?.layer.removeAnimation(forKey: "opacity")
+        }
+
+        func collectionViewDidAttach(_ collectionView: UICollectionView) {
+            DispatchQueue.main.async { [weak self, weak collectionView] in
+                guard let self, let collectionView, collectionView.window != nil else { return }
+                self.applyPendingRowsIfNeeded(in: collectionView)
+                self.scheduleInitialPresentation(in: collectionView)
+            }
+        }
+
+        func updateInitialPresentationInset(_ inset: CGFloat, animationToken: Int, in collectionView: UICollectionView) {
+            guard awaitsInitialReveal, isMeasuringInitialPresentation, !isApplyingRows,
+                  !isPerformingViewUpdate else { return }
+            beginViewUpdate()
+            updateBottomContentInset(inset, animationToken: animationToken, in: collectionView)
+            endViewUpdate()
+        }
+
+        private func scheduleInitialPresentation(in collectionView: UICollectionView) {
+            guard awaitsInitialReveal, hasInitialContent, !initialPresentationScheduled,
+                  collectionView.window != nil else { return }
+            initialPresentationScheduled = true
+            initialPresentationHandoff.schedule { [weak self, weak collectionView] in
+                guard let self, let collectionView else { return }
+                self.initialPresentationScheduled = false
+                self.settleInitialPresentation(in: collectionView)
+            }
+        }
+
+        func settleInitialPresentation(in collectionView: UICollectionView) {
+            guard awaitsInitialReveal, hasInitialContent, collectionView.window != nil else { return }
+            guard !isApplyingRows, !isPerformingViewUpdate,
+                  collectionView.bounds.width > 0, collectionView.bounds.height > 0 else {
+                initialLayoutSample = nil
+                scheduleInitialPresentation(in: collectionView)
+                return
+            }
+            // Freeze this render snapshot through measurement and the fade. Live state keeps
+            // advancing; submitViewUpdate coalesces its latest presentation for afterwards.
+            isMeasuringInitialPresentation = true
+            UIView.performWithoutAnimation {
+                collectionView.layoutIfNeeded()
+                let target = max(-collectionView.adjustedContentInset.top,
+                    collectionView.contentSize.height - collectionView.bounds.height + collectionView.adjustedContentInset.bottom)
+                collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: target), animated: false)
+                collectionView.layoutIfNeeded()
+            }
+            let sample = InitialLayoutSample(size: collectionView.contentSize,
+                viewport: collectionView.bounds.size, inset: collectionView.adjustedContentInset,
+                offset: collectionView.contentOffset,
+                frames: collectionView.indexPathsForVisibleItems.sorted().compactMap {
+                    collectionView.layoutAttributesForItem(at: $0)?.frame
+                })
+            let target = max(-collectionView.adjustedContentInset.top,
+                collectionView.contentSize.height - collectionView.bounds.height + collectionView.adjustedContentInset.bottom)
+            guard sample == initialLayoutSample, abs(collectionView.contentOffset.y - target) < 1 else {
+                initialLayoutSample = sample
+                scheduleInitialPresentation(in: collectionView)
+                return
+            }
+            awaitsInitialReveal = false
+            initialPresentationHandoff.cancel()
+            initialPresentationScheduled = false
+            initialLayoutSample = nil
+            // Only opacity animates; self-sizing and initial positioning have already settled.
+            let revealGeneration = initialRevealGeneration
+            UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.18,
+                delay: 0, options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction]) {
+                collectionView.alpha = 1
+            } completion: { [weak self, weak collectionView] _ in
+                guard let self, let collectionView, collectionView.window != nil,
+                      self.initialRevealGeneration == revealGeneration else { return }
+                // Give a pending sidebar switch priority over catching up this fading chat.
+                self.initialPresentationHandoff.schedule { [weak self, weak collectionView] in
+                    guard let self, let collectionView, collectionView.window != nil,
+                          self.initialRevealGeneration == revealGeneration else { return }
+                    self.isMeasuringInitialPresentation = false
+                    self.applyPendingRowsIfNeeded(in: collectionView)
+                }
+            }
+        }
 
         init(
             rows: [ChatTranscriptRow],
@@ -6192,7 +6345,8 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         func submitViewUpdate(in collectionView: UICollectionView, _ update: @escaping () -> Void) {
             // Queue the entire presentation, not just rows: closures and signatures must
             // describe the same snapshot throughout UIKit's asynchronous batch completion.
-            guard !isApplyingRows, !isPerformingViewUpdate, !isUserScrolling(collectionView) else {
+            guard !isApplyingRows, !isPerformingViewUpdate, !isMeasuringInitialPresentation,
+                  !isUserScrolling(collectionView) else {
                 pendingViewUpdate = update
                 return
             }
@@ -6208,6 +6362,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 guard let self else { return }
                 if let pendingAtBottomValue { self.setAtBottom(pendingAtBottomValue) }
                 if let collectionView = self.collectionView { self.applyPendingRowsIfNeeded(in: collectionView) }
+                if let collectionView = self.collectionView { self.scheduleInitialPresentation(in: collectionView) }
             }
         }
 
@@ -6221,6 +6376,11 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            if awaitsInitialReveal {
+                awaitsInitialReveal = false
+                cancelInitialPresentation()
+                scrollView.alpha = 1
+            }
             // A drag can end before an outstanding batch completes. Its intent must
             // outlive isDragging/isDecelerating, even while bottom publication is deferred.
             userScrollGeneration &+= 1
@@ -6259,6 +6419,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         func collectionViewDidLayout(_ collectionView: UICollectionView) {
             guard !isPerformingViewUpdate else { return }
             applyPendingBottomScrollIfNeeded(in: collectionView, performsLayout: false)
+            scheduleInitialPresentation(in: collectionView)
         }
 
         func updateRows(_ newRows: [ChatTranscriptRow], in collectionView: UICollectionView) {
@@ -6371,7 +6532,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 isAtBottom: isAtBottom.wrappedValue,
                 isUserScrolling: isUserScrolling(collectionView)
             )
-            let animatesChange = OpenCodeChatBottomInsetAnimationPolicy.shouldAnimate(
+            let animatesChange = !awaitsInitialReveal && OpenCodeChatBottomInsetAnimationPolicy.shouldAnimate(
                 animationToken: animationToken,
                 lastAnimationToken: lastBottomContentInsetAnimationToken,
                 preservesBottom: preservesBottom
@@ -6407,7 +6568,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 }
                 guard let self, let collectionView else { return }
                 guard self.bottomCorrectionGeneration == generation else { return }
-                guard !self.isUserScrolling(collectionView) else { return }
+                guard collectionView.window != nil, !self.isUserScrolling(collectionView) else { return }
                 collectionView.layoutIfNeeded()
                 self.scrollToBottom(in: collectionView, animated: false, performsLayout: false)
             }
@@ -6473,7 +6634,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         private func configure(_ cell: ChatTranscriptHostingCell, at indexPath: IndexPath) {
             guard rows.indices.contains(indexPath.item) else { return }
             let row = rows[indexPath.item]
-            let allowsAnimations = row.id == ChatScrollTarget.bottomAnchor || row.id == ChatScrollTarget.thinkingRow || animatedRowIDs.contains(row.id)
+            let allowsAnimations = !awaitsInitialReveal && (row.id == ChatScrollTarget.bottomAnchor || row.id == ChatScrollTarget.thinkingRow || animatedRowIDs.contains(row.id))
             cell.configure(
                 rowID: row.id,
                 renderSignature: rowContentRenderSignature(for: row),
@@ -6518,8 +6679,9 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         }
 
         private func applyPendingRowsIfNeeded(in scrollView: UIScrollView) {
-            guard let collectionView = scrollView as? UICollectionView, !isApplyingRows,
-                  !isPerformingViewUpdate, !isUserScrolling(collectionView), let update = pendingViewUpdate else { return }
+            guard let collectionView = scrollView as? UICollectionView, collectionView.window != nil, !isApplyingRows,
+                  !isPerformingViewUpdate, !isMeasuringInitialPresentation,
+                  !isUserScrolling(collectionView), let update = pendingViewUpdate else { return }
             pendingViewUpdate = nil
             update()
         }
@@ -6534,8 +6696,8 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                   collectionView.bounds.width > 0, collectionView.bounds.height > 0 else { return false }
             guard ChatTranscriptScrollController.scrollToBottom(
                 in: collectionView,
-                animated: animated,
-                interruptsCurrentScroll: animated,
+                animated: animated && !awaitsInitialReveal,
+                interruptsCurrentScroll: animated && !awaitsInitialReveal,
                 performsLayout: performsLayout
             ) else { return false }
             setAtBottomAfterViewUpdate()
@@ -6730,7 +6892,7 @@ final class ChatTranscriptContinuityHarness {
         collectionView.register(ChatTranscriptHostingCell.self, forCellWithReuseIdentifier: ChatTranscriptHostingCell.reuseIdentifier)
     }
 
-    func update(ids: [String], revision: Int = 0, streaming: Bool = false) {
+    func update(ids: [String], revision: Int = 0, streaming: Bool = false, hasInitialContent: Bool = true) {
         let rows = ids.map { id in
             ChatTranscriptRow.displayItem(.message(.local(role: "user", text: id + String(repeating: "!", count: revision), messageID: id, sessionID: "continuity", partID: "part-\(id)")),
                 recovery: nil, recoveryStatusVisible: false)
@@ -6740,7 +6902,8 @@ final class ChatTranscriptContinuityHarness {
             bottomScrollToken: 0, animatedBottomScrollToken: 0, bottomContentInset: 0,
             bottomContentInsetAnimationToken: 0, bottomRefreshThreshold: 90, bottomRefreshProgress: 0,
             showsBottomRefreshIndicator: false, bottomRefreshColorIsActive: false, bottomRefreshHeight: 0,
-            isRefreshing: false, isStreaming: streaming, contentInvalidationToken: "", animatedRowIDs: [],
+            isRefreshing: false, isStreaming: streaming, hasInitialContent: hasInitialContent,
+            contentInvalidationToken: "", animatedRowIDs: [],
             onBottomPullChanged: { _ in }, onBottomPullEnded: { _ in }, rowContent: { [weak self] row in
                 AnyView(Row(id: row.id, revision: revision) { [weak self] lifetime in
                     self?.lifetimes[row.id] = lifetime
@@ -6752,6 +6915,11 @@ final class ChatTranscriptContinuityHarness {
             collectionView.dataSource = coordinator
             collectionView.delegate = coordinator
             coordinator.collectionView = collectionView
+            collectionView.didDetach = { [weak coordinator] in coordinator?.cancelInitialPresentation() }
+            collectionView.didAttach = { [weak collectionView = self.collectionView, weak coordinator] in
+                guard let collectionView else { return }
+                coordinator?.collectionViewDidAttach(collectionView)
+            }
             collectionView.didLayout = { [weak collectionView = self.collectionView, weak coordinator] in
                 guard let collectionView else { return }
                 coordinator?.collectionViewDidLayout(collectionView)
@@ -6766,6 +6934,13 @@ final class ChatTranscriptContinuityHarness {
     }
 
     var appliedIDs: [String] { coordinator?.rows.map(\.id) ?? [] }
+
+    func prepareInitialReveal() { coordinator?.prepareInitialPresentation(in: collectionView) }
+    func sampleInitialLayout() { coordinator?.settleInitialPresentation(in: collectionView) }
+    var awaitsInitialReveal: Bool { coordinator?.awaitsInitialReveal ?? false }
+    func updateBottomInset(_ inset: CGFloat) {
+        coordinator?.updateBottomContentInset(inset, animationToken: 1, in: collectionView)
+    }
 }
 #endif
 #else

@@ -1,5 +1,86 @@
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+// Two display callbacks leave a presentation opportunity between feedback and expensive work.
+@MainActor
+final class OpenCodeDisplayFrameHandoff: NSObject {
+    private var displayLink: CADisplayLink?
+    private var action: (() -> Void)?
+    private var remainingFrames = 0
+
+    func schedule(_ action: @escaping () -> Void) {
+        cancel()
+        self.action = action
+        remainingFrames = 2
+        let link = CADisplayLink(target: self, selector: #selector(advanceFrame))
+        displayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func cancel() {
+        displayLink?.invalidate()
+        displayLink = nil
+        action = nil
+    }
+
+    @objc func advanceFrame() {
+        remainingFrames -= 1
+        guard remainingFrames <= 0 else { return }
+        let action = action
+        cancel()
+        action?()
+    }
+}
+#endif
+
+@MainActor
+final class SessionSelectionFeedback: ObservableObject {
+    @Published private(set) var sessionID: String?
+    var onPress: (() -> Void)?
+    private var committedSessionID: String?
+    private var pressRevision = 0
+    private var loadingTask: Task<Void, Never>?
+
+    func press(_ id: String) {
+        onPress?()
+        pressRevision &+= 1
+        committedSessionID = nil
+        if sessionID != id { sessionID = id }
+    }
+
+    func commit(_ id: String) {
+        committedSessionID = id
+        if sessionID != id { sessionID = id }
+    }
+
+    func load(_ action: @escaping @MainActor () async -> Void) {
+        loadingTask?.cancel()
+        loadingTask = Task {
+            guard !Task.isCancelled else { return }
+            await action()
+        }
+    }
+
+    func release(_ id: String) {
+        guard sessionID == id, committedSessionID != id else { return }
+        reset()
+    }
+
+    func releaseAfterActivation(_ id: String) {
+        let revision = pressRevision
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.pressRevision == revision else { return }
+            self.release(id)
+        }
+    }
+
+    func reset() {
+        committedSessionID = nil
+        if sessionID != nil { sessionID = nil }
+    }
+}
+
 struct SessionListView: View {
     @ObservedObject var facade: SessionListFacade
     let onSessionChosen: () -> Void
@@ -92,6 +173,11 @@ private struct SessionListContent: View, Equatable {
     @State private var renamingSession: OpenCodeSession?
     @State private var renameTitle = ""
     @State private var isShowingCreateWorkspaceSheet = false
+    #if targetEnvironment(macCatalyst)
+    // Native row decorations observe this object without invalidating SwiftUI content.
+    @State private var selectionFeedback = SessionSelectionFeedback()
+    @State private var selectionHandoff = OpenCodeDisplayFrameHandoff()
+    #endif
     let onSessionChosen: () -> Void
 
     nonisolated static func == (lhs: SessionListContent, rhs: SessionListContent) -> Bool {
@@ -229,6 +315,26 @@ private struct SessionListContent: View, Equatable {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(OpenCodePlatformColor.groupedBackground)
+        #if targetEnvironment(macCatalyst)
+        .onAppear {
+            selectionFeedback.onPress = { [weak handoff = selectionHandoff] in handoff?.cancel() }
+        }
+        .onDisappear {
+            selectionHandoff.cancel()
+            selectionFeedback.reset()
+            selectionFeedback.onPress = nil
+        }
+        .onChange(of: snapshot.workspaceContextID) { _, _ in
+            selectionHandoff.cancel()
+            selectionFeedback.reset()
+        }
+        .onChange(of: snapshot.selectedSessionID) { _, id in
+            if selectionFeedback.sessionID == id {
+                selectionHandoff.cancel()
+                selectionFeedback.reset()
+            }
+        }
+        #endif
         .opencodeInteractiveKeyboardDismiss()
         .refreshable {
             if snapshot.showsWorkspaces {
@@ -422,19 +528,33 @@ private struct SessionListContent: View, Equatable {
         for row: SessionListFacade.RowSnapshot
     ) -> some View {
         Button {
-            let ticket = facade.beginSelection(row.session)
-            Task { @MainActor in
-                guard await facade.prepareSelectionForNavigation(ticket) else { return }
-                withAnimation(opencodeSelectionAnimation) {
-                    onSessionChosen()
+            #if targetEnvironment(macCatalyst)
+            selectionFeedback.commit(row.id)
+            let context = facade.selectionContextID
+            selectionHandoff.schedule {
+                guard let session = facade.sessionForSelection(id: row.id, context: context) else {
+                    selectionFeedback.reset()
+                    return
                 }
-                await facade.completeSelection(ticket)
+                selectSession(session)
+                if snapshot.selectedSessionID == row.id { selectionFeedback.reset() }
             }
+            #else
+            selectSession(row.session)
+            #endif
         } label: {
+            #if targetEnvironment(macCatalyst)
+            sessionRowLabel(for: row)
+            #else
             sessionRowLabel(for: row)
                 .animation(opencodeSelectionAnimation, value: row.isSelected)
+            #endif
         }
+        #if targetEnvironment(macCatalyst)
+        .buttonStyle(.plain)
+        #else
         .buttonStyle(SessionRowButtonStyle())
+        #endif
         .contentShape(Rectangle())
         .accessibilityIdentifier("session.row.\(row.session.id)")
         .contextMenu {
@@ -461,6 +581,25 @@ private struct SessionListContent: View, Equatable {
         }
     }
 
+    private func selectSession(_ session: OpenCodeSession) {
+        let ticket = facade.beginSelection(session)
+        #if targetEnvironment(macCatalyst)
+        onSessionChosen()
+        #else
+        withAnimation(opencodeSelectionAnimation) { onSessionChosen() }
+        #endif
+        let load: @MainActor @Sendable () async -> Void = {
+            guard await facade.prepareSelectionForNavigation(ticket) else { return }
+            guard !Task.isCancelled else { return }
+            await facade.completeSelection(ticket)
+        }
+        #if targetEnvironment(macCatalyst)
+        selectionFeedback.load(load)
+        #else
+        Task { await load() }
+        #endif
+    }
+
     @ViewBuilder
     private func sessionRowLabel(for row: SessionListFacade.RowSnapshot) -> some View {
         switch snapshot.cardStyle {
@@ -477,7 +616,8 @@ private struct SessionListContent: View, Equatable {
                 hasDraft: row.hasDraft,
                 hasPermissionRequest: row.hasPermissionRequest,
                 displayTitle: row.displayTitle,
-                shimmersTitle: row.shimmersTitle
+                shimmersTitle: row.shimmersTitle,
+                selectionFeedback: rowSelectionFeedback
             )
             .equatable()
         case .simple:
@@ -493,16 +633,26 @@ private struct SessionListContent: View, Equatable {
                 hasDraft: row.hasDraft,
                 hasPermissionRequest: row.hasPermissionRequest,
                 displayTitle: row.displayTitle,
-                shimmersTitle: row.shimmersTitle
+                shimmersTitle: row.shimmersTitle,
+                selectionFeedback: rowSelectionFeedback
             )
             .equatable()
         case .activity:
             ActivitySessionRow(
                 row: row.activityRow,
                 showsLastUserMessage: snapshot.showsActivityLastUserMessage,
-                isSelected: row.isSelected
+                isSelected: row.isSelected,
+                selectionFeedback: rowSelectionFeedback
             )
         }
+    }
+
+    private var rowSelectionFeedback: SessionSelectionFeedback? {
+        #if targetEnvironment(macCatalyst)
+        selectionFeedback
+        #else
+        nil
+        #endif
     }
 
     @ViewBuilder

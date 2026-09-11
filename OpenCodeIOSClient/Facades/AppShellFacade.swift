@@ -292,7 +292,10 @@ final class AppShellFacade: ObservableObject {
         return viewModel.chatStore.preparedSessionID == selectedSessionID
     }
     var canPresentSelectedSessionDetail: Bool {
-        isSelectedSessionPrepared || viewModel.hasPresentableCachedV2Chat
+        guard let selectedSessionID else { return false }
+        return isSelectedSessionPrepared
+            || viewModel.hasPresentableCachedV2Chat
+            || (isV2Connection && viewModel.chatStore.isHydratingV2Transcript(sessionID: selectedSessionID))
     }
     var chatDetailPresentationRequest: Int { viewModel.chatDetailPresentationRequest }
     var isActivitySelected: Bool { contentSelection == .activity }

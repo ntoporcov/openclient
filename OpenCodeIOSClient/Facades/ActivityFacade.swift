@@ -59,7 +59,7 @@ final class ActivityFacade: ObservableObject {
         let isLoading: Bool
         let isReadOnly: Bool
         let showsLastUserMessage: Bool
-        let selectedSessionID: String?
+        var selectedSessionID: String?
 
         var isEmpty: Bool { needsInputRows.isEmpty && workingRows.isEmpty && recentRows.isEmpty }
 
@@ -90,6 +90,8 @@ final class ActivityFacade: ObservableObject {
     private weak var liveActivityBackgroundBridge: LiveActivityBackgroundBridge?
     private var observations: Set<AnyCancellable> = []
     private var monitoredStoreObservations: Set<AnyCancellable> = []
+    private var monitoredStoreIDs: Set<ObjectIdentifier> = []
+    private var rebindMonitoredStoresOnRefresh = false
     private var snapshotRefreshTask: Task<Void, Never>?
     private var preparationTask: Task<Void, Never>?
     private var isPreparing = false
@@ -122,8 +124,7 @@ final class ActivityFacade: ObservableObject {
         ])
         .receive(on: DispatchQueue.main)
         .sink { [weak self] _ in
-            self?.bindMonitoredStores()
-            self?.scheduleSnapshotRefresh()
+            self?.scheduleSnapshotRefresh(rebindStores: true)
         }
         .store(in: &observations)
 
@@ -270,6 +271,19 @@ final class ActivityFacade: ObservableObject {
 
     func prepareSelection(_ row: RowSnapshot) {
         viewModel.prepareRecentProjectSessionSelection(row.recent)
+        if snapshot.selectedSessionID != viewModel.selectedSession?.id {
+            snapshot.selectedSessionID = viewModel.selectedSession?.id
+        }
+    }
+
+    var selectionContextID: String {
+        "\(viewModel.backendConnection?.id.uuidString ?? "")|\(viewModel.directoryStoreRegistry.generation)|\(viewModel.sessionNavigationGeneration)"
+    }
+
+    func canSelect(_ row: RowSnapshot, context: String) -> Bool {
+        selectionContextID == context && !row.recent.session.isArchived
+            && !viewModel.directoryStoreRegistry.isV2SessionDeleted(row.recent.session.id)
+            && (snapshot.needsInputRows + snapshot.workingRows + snapshot.recentRows).contains { $0.id == row.id }
     }
 
     func open(_ row: RowSnapshot) async {
@@ -494,10 +508,12 @@ final class ActivityFacade: ObservableObject {
     }
 
     private func makeRow(_ candidate: RecentProjectSession) -> RowSnapshot {
-        let directorySnapshot = viewModel.directoryStoreRegistry.snapshot(forSessionID: candidate.session.id)
-        let session = session(directorySnapshot?.session ?? candidate.session, preservingAttributionFrom: candidate.session)
-        let status = directorySnapshot?.status
-        let messages = directorySnapshot?.messages ?? []
+        let owner = viewModel.directoryStoreRegistry.ownerStore(forSessionID: candidate.session.id)
+        let storedSession = owner?.sessions.first { $0.id == candidate.session.id }
+            ?? (owner?.selectedSession?.id == candidate.session.id ? owner?.selectedSession : nil)
+        let session = session(storedSession ?? candidate.session, preservingAttributionFrom: candidate.session)
+        let status = owner?.sessionStatuses[session.id] ?? owner?.syncState.sessionStatusesBySessionID[session.id]
+        let messages = owner?.syncState.messageEnvelopes(forSessionID: session.id) ?? []
         let latestUserMessage = messages.last { $0.info.role?.lowercased() == "user" }
         let isWorking = status.map { $0 != "idle" } ?? false
         let liveRecent = RecentProjectSession(
@@ -509,14 +525,15 @@ final class ActivityFacade: ObservableObject {
         let latestUserText = latestText(in: messages, role: "user")
         let latestAssistantText = latestText(in: messages, role: "assistant") ?? candidate.preview?.text
         let runningTools = runningToolSnapshots(in: messages)
-        let todos = directorySnapshot?.todos ?? []
+        let todos = owner?.syncState.todosBySessionID[session.id] ?? []
         let project = project(for: session)
-        let formOwner = viewModel.directoryStoreRegistry.ownerStore(forSessionID: session.id)
+        let formOwner = owner
             ?? viewModel.directoryStoreRegistry.existingStore(for: monitoringDirectory(for: session))
         let sessionForms = formOwner?.sessionFormStore.forms.values.filter { $0.sessionID == session.id } ?? []
         let formIDs = Set(sessionForms.map(\.id))
-        let questionCount = (directorySnapshot?.questions.filter { !formIDs.contains($0.id) }.count ?? 0) + sessionForms.count
-        let pendingInteractionCount = (directorySnapshot?.permissions.count ?? 0) + questionCount
+        let questionCount = (owner?.syncState.questionsBySessionID[session.id]?.filter { !formIDs.contains($0.id) }.count ?? 0) + sessionForms.count
+        let permissionCount = owner?.syncState.permissionsBySessionID[session.id]?.count ?? 0
+        let pendingInteractionCount = permissionCount + questionCount
 
         return RowSnapshot(
             recent: liveRecent,
@@ -527,7 +544,7 @@ final class ActivityFacade: ObservableObject {
             isWorking: isWorking,
             statusTitle: statusTitle(
                 status: status,
-                permissionCount: directorySnapshot?.permissions.count ?? 0,
+                permissionCount: permissionCount,
                 questionCount: questionCount
             ),
             latestUserText: latestUserText,
@@ -699,13 +716,18 @@ final class ActivityFacade: ObservableObject {
     }
 
     private func bindMonitoredStores() {
-        monitoredStoreObservations.removeAll()
         let keys = Set(viewModel.homeSessionScopes.map { DirectoryStoreRegistry.key(for: $0.directory) })
             .union(recentCandidates().map { DirectoryStoreRegistry.key(for: monitoringDirectory(for: $0.session)) })
-        for key in keys {
-            guard let store = viewModel.directoryStoreRegistry.existingStore(
+        let stores = keys.compactMap { key in
+            viewModel.directoryStoreRegistry.existingStore(
                 for: DirectoryStoreRegistry.directory(forKey: key)
-            ) else { continue }
+            )
+        }
+        let ids = Set(stores.map(ObjectIdentifier.init))
+        guard ids != monitoredStoreIDs else { return }
+        monitoredStoreIDs = ids
+        monitoredStoreObservations.removeAll()
+        for store in stores {
 
             store.objectWillChange
                 .receive(on: DispatchQueue.main)
@@ -718,11 +740,16 @@ final class ActivityFacade: ObservableObject {
         }
     }
 
-    private func scheduleSnapshotRefresh() {
-        snapshotRefreshTask?.cancel()
+    private func scheduleSnapshotRefresh(rebindStores: Bool = false) {
+        rebindMonitoredStoresOnRefresh = rebindMonitoredStoresOnRefresh || rebindStores
+        guard snapshotRefreshTask == nil else { return }
         snapshotRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(50))
             guard let self, !Task.isCancelled else { return }
+            if rebindMonitoredStoresOnRefresh {
+                rebindMonitoredStoresOnRefresh = false
+                bindMonitoredStores()
+            }
             refreshSnapshot()
             snapshotRefreshTask = nil
         }

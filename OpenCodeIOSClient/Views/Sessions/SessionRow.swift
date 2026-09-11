@@ -1,4 +1,234 @@
 import SwiftUI
+import Combine
+
+#if canImport(UIKit)
+import UIKit
+#if DEBUG
+import os
+private let sessionSelectionLog = OSLog(subsystem: "com.ntoporcov.openclient", category: "SessionSelection")
+#endif
+
+// Observe the cell's input without recognizing a gesture or delaying its Button/scroll view.
+private final class SessionSelectionPressRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    weak var surface: SessionSelectionSurfaceView?
+    private var pressOrigin: CGPoint?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let surface, let touch = touches.first else { state = .failed; return }
+        guard touch.type != .indirectPointer || event.buttonMask == .primary else { state = .failed; return }
+        pressOrigin = touch.location(in: surface)
+        surface.beginNativePress(inputTimestamp: touch.timestamp)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let surface, let origin = pressOrigin, let touch = touches.first else { return }
+        let point = touch.location(in: surface)
+        if !surface.bounds.contains(point) || hypot(point.x - origin.x, point.y - origin.y) > 8 {
+            surface.endNativePress()
+            state = .failed
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        surface?.endNativePress()
+        state = .failed
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        surface?.endNativePress()
+        state = .failed
+    }
+
+    override func reset() {
+        surface?.endNativePress()
+        pressOrigin = nil
+        super.reset()
+    }
+
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard let surface, surface.window != nil, !surface.isHidden else { return false }
+        return surface.bounds.contains(touch.location(in: surface))
+    }
+}
+
+final class SessionSelectionSurfaceView: UIView {
+    private var observation: AnyCancellable?
+    private weak var feedback: SessionSelectionFeedback?
+    private var sessionID = ""
+    private var optimisticID: String?
+    private var canonicalSelection = false
+    private var pressRecognizer: SessionSelectionPressRecognizer?
+    private var pressedSessionID: String?
+    private(set) var showsSelection = false
+    var selectedFill = UIColor.clear
+    var normalFill = UIColor.clear
+    var selectedBorder = UIColor.clear
+    var normalBorder = UIColor.clear
+    var selectedBorderWidth: CGFloat = 1.4
+
+    func bind(sessionID: String, canonicalSelection: Bool, feedback: SessionSelectionFeedback) {
+        if observation == nil {
+            registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) {
+                (view: SessionSelectionSurfaceView, _: UITraitCollection) in view.updateSelection()
+            }
+        }
+        self.canonicalSelection = canonicalSelection
+        if self.feedback !== feedback || self.sessionID != sessionID {
+            endNativePress()
+            self.feedback = feedback
+            self.sessionID = sessionID
+            observation = feedback.$sessionID.sink { [weak self] id in
+                guard let self else { return }
+                self.optimisticID = id
+                self.updateSelection()
+            }
+        }
+        updateSelection()
+        installPressObservation()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            endNativePress()
+            if let pressRecognizer { pressRecognizer.view?.removeGestureRecognizer(pressRecognizer) }
+            pressRecognizer = nil
+        } else {
+            installPressObservation()
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        installPressObservation()
+    }
+
+    private func installPressObservation() {
+        guard window != nil, feedback != nil else { return }
+        var ancestor = superview
+        while let candidate = ancestor {
+            if candidate is UICollectionViewCell || candidate is UITableViewCell {
+                guard pressRecognizer?.view !== candidate else { return }
+                if let pressRecognizer { pressRecognizer.view?.removeGestureRecognizer(pressRecognizer) }
+                let recognizer = SessionSelectionPressRecognizer()
+                recognizer.name = "openclient.selectionFeedback"
+                recognizer.surface = self
+                recognizer.delegate = recognizer
+                recognizer.cancelsTouchesInView = false
+                recognizer.delaysTouchesBegan = false
+                recognizer.delaysTouchesEnded = false
+                candidate.addGestureRecognizer(recognizer)
+                pressRecognizer = recognizer
+                return
+            }
+            ancestor = candidate.superview
+        }
+    }
+
+    func beginNativePress(inputTimestamp: TimeInterval? = nil) {
+        guard let feedback else { return }
+        pressedSessionID = sessionID
+        #if DEBUG
+        let started = ProcessInfo.processInfo.systemUptime
+        os_signpost(.begin, log: sessionSelectionLog, name: "Press To Layer Commit",
+            "inputAgeMS=%.2f", inputTimestamp.map { (started - $0) * 1_000 } ?? 0)
+        #endif
+        feedback.press(sessionID)
+        #if DEBUG
+        os_signpost(.end, log: sessionSelectionLog, name: "Press To Layer Commit")
+        #endif
+    }
+
+    func endNativePress() {
+        guard let pressedSessionID else { return }
+        self.pressedSessionID = nil
+        feedback?.releaseAfterActivation(pressedSessionID)
+    }
+
+    private func updateSelection() {
+        showsSelection = optimisticID.map { $0 == sessionID } ?? canonicalSelection
+        // Commit the decoration without waiting for SwiftUI to rebuild or measure the row.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.backgroundColor = (showsSelection ? selectedFill : normalFill).resolvedColor(with: traitCollection).cgColor
+        layer.borderColor = (showsSelection ? selectedBorder : normalBorder).resolvedColor(with: traitCollection).cgColor
+        layer.borderWidth = showsSelection ? selectedBorderWidth : 1
+        CATransaction.commit()
+    }
+
+}
+
+private struct NativeSessionSelectionSurface: UIViewRepresentable {
+    let feedback: SessionSelectionFeedback
+    let sessionID: String
+    let isSelected: Bool
+    let cornerRadius: CGFloat
+    let selectedFill: Color
+    let normalFill: Color
+    let selectedBorder: Color
+    let normalBorder: Color
+    let selectedBorderWidth: CGFloat
+
+    func makeUIView(context: Context) -> SessionSelectionSurfaceView {
+        let view = SessionSelectionSurfaceView()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        view.layer.cornerCurve = .continuous
+        return view
+    }
+
+    func updateUIView(_ view: SessionSelectionSurfaceView, context: Context) {
+        view.layer.cornerRadius = cornerRadius
+        view.selectedFill = UIColor(selectedFill)
+        view.normalFill = UIColor(normalFill)
+        view.selectedBorder = UIColor(selectedBorder)
+        view.normalBorder = UIColor(normalBorder)
+        view.selectedBorderWidth = selectedBorderWidth
+        view.bind(sessionID: sessionID, canonicalSelection: isSelected, feedback: feedback)
+    }
+}
+#endif
+
+struct SessionSelectionSurface: View {
+    let feedback: SessionSelectionFeedback?
+    let sessionID: String
+    let isSelected: Bool
+    let cornerRadius: CGFloat
+    let selectedFill: Color
+    let normalFill: Color
+    let selectedBorder: Color
+    let normalBorder: Color
+    let selectedBorderWidth: CGFloat
+
+    var body: some View {
+        #if canImport(UIKit)
+        if let feedback {
+            NativeSessionSelectionSurface(feedback: feedback, sessionID: sessionID,
+                isSelected: isSelected, cornerRadius: cornerRadius,
+                selectedFill: selectedFill, normalFill: normalFill,
+                selectedBorder: selectedBorder, normalBorder: normalBorder,
+                selectedBorderWidth: selectedBorderWidth)
+        } else {
+            swiftUISurface
+        }
+        #else
+        swiftUISurface
+        #endif
+    }
+
+    private var swiftUISurface: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(isSelected ? selectedFill : normalFill)
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(isSelected ? selectedBorder : normalBorder,
+                        lineWidth: isSelected ? selectedBorderWidth : 1)
+            }
+    }
+}
 
 struct SessionRow: View, Equatable {
     enum Style: Equatable {
@@ -18,6 +248,7 @@ struct SessionRow: View, Equatable {
     var hasPermissionRequest = false
     var displayTitle: String? = nil
     var shimmersTitle = false
+    var selectionFeedback: SessionSelectionFeedback?
 
     nonisolated static func == (lhs: SessionRow, rhs: SessionRow) -> Bool {
         lhs.session == rhs.session
@@ -32,6 +263,7 @@ struct SessionRow: View, Equatable {
             && lhs.hasPermissionRequest == rhs.hasPermissionRequest
             && lhs.displayTitle == rhs.displayTitle
             && lhs.shimmersTitle == rhs.shimmersTitle
+            && lhs.selectionFeedback === rhs.selectionFeedback
     }
 
     private var titleText: String {
@@ -49,10 +281,12 @@ struct SessionRow: View, Equatable {
         }
         .padding(.horizontal, style == .compact ? 10 : 14)
         .padding(.vertical, style == .compact ? 8 : 12)
-        .background(rowBackground, in: RoundedRectangle(cornerRadius: style == .compact ? 14 : 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: style == .compact ? 14 : 18, style: .continuous)
-                .strokeBorder(rowBorder, lineWidth: isSelected ? 1.4 : 1)
+        .background {
+            SessionSelectionSurface(feedback: selectionFeedback, sessionID: session.id,
+                isSelected: isSelected, cornerRadius: style == .compact ? 14 : 18,
+                selectedFill: Color.blue.opacity(0.10), normalFill: OpenCodePlatformColor.secondaryGroupedBackground,
+                selectedBorder: Color.blue.opacity(0.28), normalBorder: Color.primary.opacity(0.06),
+                selectedBorderWidth: 1.4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -162,13 +396,6 @@ struct SessionRow: View, Equatable {
             .background(background, in: Capsule())
     }
 
-    private var rowBackground: Color {
-        isSelected ? Color.blue.opacity(0.10) : OpenCodePlatformColor.secondaryGroupedBackground
-    }
-
-    private var rowBorder: Color {
-        isSelected ? Color.blue.opacity(0.28) : Color.primary.opacity(0.06)
-    }
 }
 
 private struct ShimmeringSessionTitle: View {

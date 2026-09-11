@@ -325,7 +325,7 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertEqual(viewModel.activityFacade.snapshot.recentRows.map(\.recent.session.id), [newer.id, older.id])
     }
 
-    func testSnapshotTracksSelectedActivitySession() async throws {
+    func testSnapshotTracksSelectedActivitySessionBeforeDeferredRowRebuild() throws {
         let viewModel = AppViewModel()
         let project = makeProject(id: "project", directory: "/tmp/project")
         let session = makeSession(
@@ -341,11 +341,12 @@ final class ActivityFacadeTests: XCTestCase {
         _ = store.upsertSessions([session])
         let facade = viewModel.activityFacade
         let row = try XCTUnwrap(facade.snapshot.recentRows.first)
+        let rows = facade.snapshot.recentRows
 
         facade.prepareSelection(row)
-        try await Task.sleep(for: .milliseconds(100))
 
         XCTAssertEqual(facade.snapshot.selectedSessionID, session.id)
+        XCTAssertEqual(facade.snapshot.recentRows, rows)
     }
 
     func testSnapshotOrdersWithinSectionByLatestUserMessageInsteadOfSessionUpdate() {

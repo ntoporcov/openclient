@@ -1,5 +1,17 @@
 import Foundation
 
+private let previewMarkdownExpressions: [String: NSRegularExpression] = {
+    let patterns = [
+        #"^#{1,6}\s*"#, #"^>\s*"#, #"^(?:[-*+•]|\d+[.)])\s+"#, #"^\[[ xX]\]\s+"#,
+        #"!\[([^\]]*)\]\([^\)]*\)"#, #"\[([^\]]+)\]\([^\)]*\)"#,
+        #"`{1,3}([^`]+)`{1,3}"#, #"\*\*([^*]+)\*\*"#, #"__([^_]+)__"#,
+        #"(?<!\*)\*([^*]+)\*(?!\*)"#, #"(?<!_)_([^_]+)_(?!_)"#,
+    ]
+    return Dictionary(uniqueKeysWithValues: patterns.compactMap { pattern in
+        (try? NSRegularExpression(pattern: pattern)).map { (pattern, $0) }
+    })
+}()
+
 func opencodePreviewText(_ text: String, limit: Int? = 140) -> String? {
     let normalized = text
         .replacingOccurrences(of: "\r\n", with: "\n")
@@ -46,7 +58,7 @@ private func stripInlineMarkdown(_ line: String) -> String {
 }
 
 private func replacingMatches(_ pattern: String, in value: String, template: String) -> String {
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return value }
+    guard let regex = previewMarkdownExpressions[pattern] else { return value }
     let range = NSRange(value.startIndex..., in: value)
     return regex.stringByReplacingMatches(in: value, options: [], range: range, withTemplate: template)
 }

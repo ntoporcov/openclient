@@ -163,10 +163,8 @@ final class ChatFacade: ObservableObject {
             let messages = windowContext.owner.syncState.messageEnvelopes(forSessionID: windowContext.session.id)
             return chatStore.withoutRecoveryMessages(messages, sessionID: windowContext.session.id)
         }
-        if let sessionID = selectedSession?.id {
-            return chatStore.withoutRecoveryMessages(chatStore.messages, sessionID: sessionID)
-        }
-        return chatStore.messages
+        guard let session = selectedSession else { return [] }
+        return chatStore.withoutRecoveryMessages(messageSource(for: session), sessionID: session.id)
     }
 
     var isLoadingPresentation: Bool { windowContext?.isLoading ?? chatStore.isLoadingSelectedSession }
@@ -1589,12 +1587,14 @@ final class ChatFacade: ObservableObject {
            viewModel.chatStore.messages.contains(where: {
                $0.info.sessionID == session.id && ($0.info.role ?? "").lowercased() == "user"
            }) {
-            return viewModel.chatStore.messages
+            return viewModel.chatStore.messages.filter { $0.info.sessionID == session.id }
         }
         let syncedMessages = directoryStore.syncState.messageEnvelopes(forSessionID: session.id)
         if !syncedMessages.isEmpty { return syncedMessages }
         if let cachedMessages = viewModel.cachedMessagesBySessionID[session.id], !cachedMessages.isEmpty { return cachedMessages }
-        if directoryStore.selectedSession?.id == session.id { return viewModel.messages }
+        if directoryStore.selectedSession?.id == session.id {
+            return viewModel.messages.filter { $0.info.sessionID == session.id }
+        }
         return []
     }
 

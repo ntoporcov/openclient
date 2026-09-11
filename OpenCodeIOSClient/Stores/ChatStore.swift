@@ -336,7 +336,7 @@ final class ChatStore: ObservableObject {
         v2HydrationRevision = v2StreamRevision(sessionID: sessionID)
         isLoadingSelectedSession = true
         preparedSessionID = nil
-        messages = []
+        messages = cachedMessagesBySessionID[sessionID] ?? []
         v2TranscriptStates[sessionID] = V2TranscriptState(olderCursor: nil, hasLoadedInitial: false)
         v2AdmittedInputsByID = v2AdmittedInputsByID.filter { $0.value.info.sessionID != sessionID }
     }

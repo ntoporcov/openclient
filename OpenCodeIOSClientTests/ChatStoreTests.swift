@@ -112,6 +112,18 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertFalse(store.isLoadingSelectedSession)
     }
 
+    func testV2HydrationStagesOnlyTheSelectedSessionsMemoryCache() {
+        let previous = message(id: "msg_previous", role: "assistant", text: "Previous", sessionID: "ses_previous")
+        let selected = message(id: "msg_selected", role: "assistant", text: "Selected", sessionID: "ses_v2")
+        let store = ChatStore(messages: [previous], cachedMessagesBySessionID: ["ses_v2": [selected]])
+
+        store.beginV2TranscriptHydration(sessionID: "ses_v2")
+
+        XCTAssertEqual(store.messages, [selected])
+        XCTAssertNil(store.preparedSessionID)
+        XCTAssertTrue(store.isHydratingV2Transcript(sessionID: "ses_v2"))
+    }
+
     func testOlderV2TranscriptPrependsWithoutReorderingOrDuplicatingBoundary() {
         let store = ChatStore()
         let boundary = message(id: "msg_boundary", role: "user", text: "Boundary", sessionID: "ses_v2")

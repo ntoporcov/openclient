@@ -5,6 +5,87 @@ import XCTest
 
 @MainActor
 final class TranscriptContinuityTests: XCTestCase {
+    #if !targetEnvironment(macCatalyst)
+    func testOldChatIsHiddenWhenSelectionChangesBeforeShellRouteReplacement() async throws {
+        let model = AppViewModel()
+        model.backendMode = .cachedServer
+        let first = OpenCodeSession(id: "old-presentation", title: "First", workspaceID: nil,
+            directory: "/tmp/presentation", projectID: "project", parentID: nil)
+        let second = OpenCodeSession(id: "new-presentation", title: "Second", workspaceID: nil,
+            directory: first.directory, projectID: first.projectID, parentID: nil)
+        let message = OpenCodeMessageEnvelope.local(role: "user", text: "Previous transcript",
+            messageID: "previous-message", sessionID: first.id, partID: "previous-part")
+        model.selectedDirectory = first.directory
+        model.allSessions = [first, second]
+        model.selectedSession = first
+        model.directoryStore.applyCanonicalMessages([message], forSessionID: first.id)
+        model.chatStore.beginSelectingSession(sessionID: first.id, cachedMessages: [message])
+        model.chatStore.finishLoadingSelectedSession()
+        let controller = UIHostingController(rootView: NavigationStack {
+            ChatView(chatFacade: model.chatFacade, browser: BrowserStore(), sessionID: first.id)
+        })
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 400, height: 700)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func transcript(in view: UIView) -> ChatTranscriptCollection? {
+            if let collection = view as? ChatTranscriptCollection { return collection }
+            return view.subviews.lazy.compactMap { transcript(in: $0) }.first
+        }
+        for _ in 0..<50 {
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+            if transcript(in: controller.view)?.alpha == 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let outgoing = try XCTUnwrap(transcript(in: controller.view))
+        XCTAssertEqual(outgoing.alpha, 1)
+
+        // Keep the hosting root on A while canonical selection moves to B.
+        model.selectedSession = second
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertNil(outgoing.window, "A cached old route must not show A while the shell prepares B")
+        XCTAssertEqual(model.directoryStore.syncState.messageEnvelopes(forSessionID: first.id), [message])
+    }
+
+    func testIPhoneChatRouteDoesNotKeepPreviousTranscriptForNavigationFade() async throws {
+        let state = ChatRouteTransitionTestState()
+        let outgoing = ChatRouteTransitionProbeView()
+        let incoming = ChatRouteTransitionProbeView()
+        let outgoingAttached = expectation(description: "Outgoing chat mounted")
+        let incomingAttached = expectation(description: "Incoming chat mounted")
+        outgoing.onAttach = { outgoingAttached.fulfill() }
+        incoming.onAttach = { incomingAttached.fulfill() }
+        let controller = UIHostingController(rootView: ChatRouteTransitionTestView(
+            state: state, outgoing: outgoing, incoming: incoming))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 400, height: 700)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        controller.view.layoutIfNeeded()
+        await fulfillment(of: [outgoingAttached], timeout: 2)
+        XCTAssertNotNil(outgoing.window)
+
+        withAnimation(.linear(duration: 5)) {
+            state.route = AppShellChatRoute(sessionID: "second", presentationRequest: 0)
+        }
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        await fulfillment(of: [incomingAttached], timeout: 2)
+        controller.view.layoutIfNeeded()
+
+        XCTAssertNotNil(incoming.window)
+        XCTAssertNil(outgoing.window, "Only the new transcript should own the entry fade")
+    }
+    #endif
+
     func testThinkingGateScopesCompletionAndCancellationWithoutRestartingExistingIndicator() {
         var root = ChatThinkingEntryGate()
         var window = ChatThinkingEntryGate()
@@ -230,6 +311,103 @@ final class TranscriptContinuityTests: XCTestCase {
             "Later viewport layouts must not override deliberate history scrolling")
     }
 
+    func testInitialRevealWaitsForContentViewportAndSettledBottom() async {
+        let harness = ChatTranscriptContinuityHarness()
+        let collection = harness.collectionView
+        collection.frame = .zero
+        harness.update(ids: [], hasInitialContent: false)
+        harness.prepareInitialReveal()
+        XCTAssertEqual(collection.alpha, 0)
+
+        let controller = UIViewController()
+        controller.view.addSubview(collection)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        collection.frame = window.bounds
+        await settle(harness)
+        XCTAssertTrue(harness.awaitsInitialReveal)
+        XCTAssertEqual(collection.alpha, 0, "An empty hydration placeholder must not consume the reveal")
+
+        harness.update(ids: (0..<12).map { "row-\($0)" }, revision: 40)
+        harness.updateBottomInset(120)
+        await settle(harness)
+        XCTAssertFalse(harness.awaitsInitialReveal)
+        XCTAssertEqual(collection.alpha, 1)
+        let bottom = collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom
+        XCTAssertEqual(collection.contentOffset.y, bottom, accuracy: 2)
+
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.contentOffset.y = 0
+        collection.delegate?.scrollViewDidScroll?(collection)
+        collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+        collection.frame.size.height = 500
+        await settle(harness)
+        XCTAssertEqual(collection.alpha, 1)
+        XCTAssertEqual(collection.contentOffset.y, 0, accuracy: 2)
+    }
+
+    func testInitialRevealAllowsLoadedEmptySession() async {
+        let harness = ChatTranscriptContinuityHarness()
+        harness.update(ids: [], hasInitialContent: false)
+        harness.prepareInitialReveal()
+        let controller = UIViewController()
+        controller.view.addSubview(harness.collectionView)
+        let window = UIWindow(frame: harness.collectionView.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        harness.update(ids: [], hasInitialContent: true)
+        await settle(harness)
+        XCTAssertFalse(harness.awaitsInitialReveal)
+        XCTAssertEqual(harness.collectionView.alpha, 1)
+    }
+
+    func testInitialMeasurementCoalescesStreamingUntilFadeCompletes() async {
+        let harness = ChatTranscriptContinuityHarness()
+        harness.update(ids: ["first"], streaming: true)
+        harness.prepareInitialReveal()
+        let controller = UIViewController()
+        controller.view.addSubview(harness.collectionView)
+        let window = UIWindow(frame: harness.collectionView.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        harness.sampleInitialLayout()
+        harness.update(ids: ["first", "next"], streaming: true)
+        harness.update(ids: ["first", "latest"], streaming: true)
+        XCTAssertEqual(harness.appliedIDs, ["first"])
+        await settle(harness)
+        await settle(harness)
+        XCTAssertFalse(harness.awaitsInitialReveal)
+        XCTAssertEqual(harness.appliedIDs, ["first", "latest"])
+        XCTAssertEqual(harness.collectionView.alpha, 1)
+    }
+
+    func testDetachedInitialPresentationDefersQueuedRowsUntilReattached() async {
+        let harness = ChatTranscriptContinuityHarness()
+        harness.update(ids: ["first"])
+        harness.prepareInitialReveal()
+        let controller = UIViewController()
+        controller.view.addSubview(harness.collectionView)
+        let window = UIWindow(frame: harness.collectionView.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        harness.sampleInitialLayout()
+        harness.update(ids: ["first", "queued"])
+        XCTAssertEqual(harness.appliedIDs, ["first"])
+        harness.sampleInitialLayout()
+        harness.collectionView.removeFromSuperview()
+        await settle(harness)
+        await settle(harness)
+        XCTAssertEqual(harness.appliedIDs, ["first"], "An outgoing fade must not rebuild its queued transcript")
+        controller.view.addSubview(harness.collectionView)
+        await settle(harness)
+        XCTAssertEqual(harness.appliedIDs, ["first", "queued"], "Temporary detach must not lose the newest presentation")
+    }
+
     func testHostingCellsSurviveCanonicalContentCaptionAndChunkReplacement() async throws {
         for pinned in [false, true] {
             let harness = ChatTranscriptContinuityHarness()
@@ -396,6 +574,45 @@ final class TranscriptContinuityTests: XCTestCase {
         for _ in 0..<12 {
             harness.collectionView.layoutIfNeeded()
             try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+}
+
+@MainActor
+private final class ChatRouteTransitionTestState: ObservableObject {
+    @Published var route = AppShellChatRoute(sessionID: "first", presentationRequest: 0)
+}
+
+private struct ChatRouteTransitionTestView: View {
+    @ObservedObject var state: ChatRouteTransitionTestState
+    let outgoing: UIView
+    let incoming: UIView
+
+    var body: some View {
+        ZStack {
+            ChatRouteView(route: state.route) { id, _ in
+                ChatRouteTransitionProbe(view: id == "first" ? outgoing : incoming)
+            }
+            .equatable()
+        }
+    }
+}
+
+private struct ChatRouteTransitionProbe: UIViewRepresentable {
+    let view: UIView
+    func makeUIView(context: Context) -> UIView { view }
+    func updateUIView(_ view: UIView, context: Context) {}
+}
+
+private final class ChatRouteTransitionProbeView: UIView {
+    var onAttach: (() -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+            let callback = onAttach
+            onAttach = nil
+            callback?()
         }
     }
 }

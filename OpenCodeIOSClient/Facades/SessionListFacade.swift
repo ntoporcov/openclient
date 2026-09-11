@@ -5,7 +5,7 @@ import Foundation
 final class SessionListFacade: ObservableObject {
     struct RowSnapshot: Identifiable, Equatable {
         let session: OpenCodeSession
-        let isSelected: Bool
+        var isSelected: Bool
         let showsPinnedBadge: Bool
         let workspaceOverline: String?
         let style: SessionRow.Style
@@ -74,7 +74,7 @@ final class SessionListFacade: ObservableObject {
         let directory: String
         let title: String
         let isMain: Bool
-        let rows: [RowSnapshot]
+        var rows: [RowSnapshot]
         let isLoading: Bool
         let hasMore: Bool
         let operation: OpenCodeWorkspaceOperation?
@@ -118,11 +118,11 @@ final class SessionListFacade: ObservableObject {
         let isLoadingEmpty: Bool
         let isLoadingMoreSessions: Bool
         let isEmpty: Bool
-        let selectedSessionID: String?
-        let pinnedRows: [RowSnapshot]
-        let unpinnedRows: [RowSnapshot]
+        var selectedSessionID: String?
+        var pinnedRows: [RowSnapshot]
+        var unpinnedRows: [RowSnapshot]
         let showsWorkspaces: Bool
-        let workspaceSections: [WorkspaceSection]
+        var workspaceSections: [WorkspaceSection]
         let hasMoreSessions: Bool
         let errorMessage: String?
         let hasProUnlock: Bool
@@ -143,6 +143,21 @@ final class SessionListFacade: ObservableObject {
 
         var workspaceTaskID: String {
             showsWorkspaces ? workspaceContextID + "|" + workspaceSections.map(\.directory).joined(separator: "|") : "off"
+        }
+
+        mutating func selectSession(_ sessionID: String?) {
+            selectedSessionID = sessionID
+            for index in pinnedRows.indices {
+                pinnedRows[index].isSelected = pinnedRows[index].id == sessionID
+            }
+            for index in unpinnedRows.indices {
+                unpinnedRows[index].isSelected = unpinnedRows[index].id == sessionID
+            }
+            for section in workspaceSections.indices {
+                for row in workspaceSections[section].rows.indices {
+                    workspaceSections[section].rows[row].isSelected = workspaceSections[section].rows[row].id == sessionID
+                }
+            }
         }
     }
 
@@ -297,7 +312,7 @@ final class SessionListFacade: ObservableObject {
     }
 
     private func scheduleSnapshotRefresh() {
-        snapshotRefreshTask?.cancel()
+        guard snapshotRefreshTask == nil else { return }
         snapshotRefreshTask = Task { @MainActor [weak self] in
             await Task.yield()
             guard let self, !Task.isCancelled else { return }
@@ -380,13 +395,21 @@ final class SessionListFacade: ObservableObject {
 
     func beginSelection(_ session: OpenCodeSession) -> SelectionTicket {
         let previousSessionID = viewModel.beginSessionNavigation(session)
-        return SelectionTicket(
+        let ticket = SelectionTicket(
             session: session,
             previousSessionID: previousSessionID,
             navigationGeneration: viewModel.sessionNavigationGeneration,
             directoryKey: viewModel.directoryStoreRegistry.activeKey,
             connectionID: (try? viewModel.requireBackendConnection())?.id
         )
+        _ = prepareSelectionIfCurrent(ticket)
+        // Selection must not wait for transcript-derived row content to rebuild.
+        if snapshot.selectedSessionID != viewModel.selectedSession?.id {
+            var nextSnapshot = snapshot
+            nextSnapshot.selectSession(viewModel.selectedSession?.id)
+            snapshot = nextSnapshot
+        }
+        return ticket
     }
 
     func completeSelection(_ ticket: SelectionTicket) async {
@@ -398,15 +421,7 @@ final class SessionListFacade: ObservableObject {
     func prepareSelectionForNavigation(_ ticket: SelectionTicket) async -> Bool {
         guard prepareSelectionIfCurrent(ticket) else { return false }
         if viewModel.connectionStore.apiProfile == .v2 {
-            let hydrated = await viewModel.hydrateV2Transcript(
-                for: ticket.session,
-                navigationGeneration: ticket.navigationGeneration,
-                expectedDirectoryKey: ticket.directoryKey
-            )
-            if hydrated, selectionIsCurrent(ticket) {
-                await viewModel.hydrateV2Interactions(for: ticket.session)
-            }
-            return hydrated && selectionIsCurrent(ticket)
+            return selectionIsCurrent(ticket)
         }
         guard viewModel.isBrowsingLocalCache || viewModel.compatibilityClient(for: .localCache) != nil else {
             return selectionIsCurrent(ticket)
@@ -484,6 +499,16 @@ final class SessionListFacade: ObservableObject {
     var workspaceErrorMessage: String? { viewModel.errorMessage }
     var workspaceCreationContextID: String {
         [viewModel.backendConnection?.id.uuidString ?? "", viewModel.currentProject?.id ?? ""].joined(separator: "|")
+    }
+
+    var selectionContextID: String {
+        "\(workspaceCreationContextID)|\(viewModel.directoryStoreRegistry.generation)|\(viewModel.directoryStoreRegistry.activeKey)|\(viewModel.sessionNavigationGeneration)"
+    }
+
+    func sessionForSelection(id: String, context: String) -> OpenCodeSession? {
+        guard selectionContextID == context, !viewModel.directoryStoreRegistry.isV2SessionDeleted(id),
+              let session = viewModel.session(matching: id), !session.isArchived else { return nil }
+        return session
     }
 
     @discardableResult
@@ -574,18 +599,22 @@ final class SessionListFacade: ObservableObject {
         hasPermissionRequest: Bool? = nil
     ) -> RowSnapshot {
         let generatedTitle = session.defaultGeneratedTitleDisplayName
+        let showsActivity = viewModel.appCustomizationStore.sessionCardStyle == .activity
         let isBusy = viewModel.sessionStatuses[session.id] == "busy"
-        let directorySnapshot = viewModel.directoryStoreRegistry.snapshot(forSessionID: session.id)
-        let messages = (directorySnapshot?.messages ?? []).filter { $0.info.sessionID == session.id }
-        let status = directorySnapshot?.status ?? viewModel.sessionStatuses[session.id]
-        let isWorking = status.map { $0 != "idle" } ?? false
-        let todos = directorySnapshot?.todos ?? []
-        let permissionCount = directorySnapshot?.permissions.count ?? 0
         let owner = viewModel.directoryStoreRegistry.ownerStore(forSessionID: session.id)
+        let preview = viewModel.sessionPreviews[session.id]
+        let messages = showsActivity || preview == nil
+            ? (owner?.syncState.messageEnvelopes(forSessionID: session.id) ?? []).filter { $0.info.sessionID == session.id }
+            : []
+        let status = owner?.sessionStatuses[session.id] ?? owner?.syncState.sessionStatusesBySessionID[session.id]
+            ?? viewModel.sessionStatuses[session.id]
+        let isWorking = status.map { $0 != "idle" } ?? false
+        let todos = owner?.syncState.todosBySessionID[session.id] ?? []
+        let permissionCount = owner?.syncState.permissionsBySessionID[session.id]?.count ?? 0
         let forms = SessionInteractionStore.forms(forSessionTreeRootID: session.id,
             sessions: owner?.sessions ?? [], forms: owner.map { Array($0.sessionFormStore.forms.values) } ?? [])
         let formKeys = Set(forms.map(\.key))
-        let questionCount = (directorySnapshot?.questions.filter {
+        let questionCount = (owner?.syncState.questionsBySessionID[session.id]?.filter {
             !formKeys.contains(.init(sessionID: $0.sessionID, formID: $0.id))
         }.count ?? 0) + forms.count
         let project = viewModel.currentProject
@@ -595,7 +624,7 @@ final class SessionListFacade: ObservableObject {
             showsPinnedBadge: showsPinnedBadge,
             workspaceOverline: workspaceOverline,
             style: .regular,
-            preview: messages.isEmpty ? viewModel.sessionPreviews[session.id] : viewModel.buildSessionPreview(from: messages),
+            preview: preview ?? (messages.isEmpty ? nil : viewModel.buildSessionPreview(from: messages)),
             isBusy: isBusy,
             hasLiveActivity: viewModel.isLiveActivityActive(for: session),
             hasDraft: viewModel.hasMessageDraft(for: session),
@@ -612,9 +641,9 @@ final class SessionListFacade: ObservableObject {
                 permissionCount: permissionCount,
                 questionCount: questionCount
             ),
-            latestUserText: activityLatestText(in: messages, role: "user"),
-            latestAssistantText: activityLatestText(in: messages, role: "assistant") ?? viewModel.sessionPreviews[session.id]?.text,
-            runningTools: activityRunningToolSnapshots(in: messages),
+            latestUserText: showsActivity ? activityLatestText(in: messages, role: "user") : nil,
+            latestAssistantText: showsActivity ? activityLatestText(in: messages, role: "assistant") ?? viewModel.sessionPreviews[session.id]?.text : nil,
+            runningTools: showsActivity ? activityRunningToolSnapshots(in: messages) : [],
             updatedAt: (session.time?.updated ?? session.time?.created).map { Date(timeIntervalSince1970: $0 / 1_000) }
                 ?? viewModel.sessionPreviews[session.id]?.date,
             pendingInteractionCount: permissionCount + questionCount,

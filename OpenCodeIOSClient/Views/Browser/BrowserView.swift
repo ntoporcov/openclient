@@ -949,17 +949,9 @@ extension View {
         isEnabled: Bool = true
     ) -> some View {
         #if targetEnvironment(macCatalyst)
-        if #available(macCatalyst 26.1, *) {
-            self.tabViewBottomAccessory(isEnabled: isEnabled && browser.presentation == .collapsed) {
-                BrowserAccessoryRow(
-                    browser: browser,
-                    accessibilityIdentifier: "browser.projectAccessory"
-                )
-            }
-            .animation(.snappy(duration: 0.3, extraBounce: 0.02), value: browser.presentation)
-        } else if #available(macCatalyst 26.0, *) {
+        if #available(macCatalyst 26.0, *) {
             self.tabViewBottomAccessory {
-                if browser.presentation == .collapsed {
+                if isEnabled, browser.presentation == .collapsed {
                     BrowserAccessoryRow(
                         browser: browser,
                         accessibilityIdentifier: "browser.projectAccessory"
@@ -972,17 +964,9 @@ extension View {
             self
         }
         #elseif os(iOS)
-        if #available(iOS 26.1, *) {
-            self.tabViewBottomAccessory(isEnabled: isEnabled && browser.presentation == .collapsed) {
-                BrowserAccessoryRow(
-                    browser: browser,
-                    accessibilityIdentifier: "browser.projectAccessory"
-                )
-            }
-            .animation(.snappy(duration: 0.3, extraBounce: 0.02), value: browser.presentation)
-        } else if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *) {
             self.tabViewBottomAccessory {
-                if browser.presentation == .collapsed {
+                if isEnabled, browser.presentation == .collapsed {
                     BrowserAccessoryRow(
                         browser: browser,
                         accessibilityIdentifier: "browser.projectAccessory"

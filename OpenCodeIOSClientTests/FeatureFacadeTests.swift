@@ -8,6 +8,164 @@ import UIKit
 
 @MainActor
 final class FeatureFacadeTests: XCTestCase {
+    func testPendingSelectionCannotOpenASessionDeletedBeforeHandoff() {
+        let model = AppViewModel()
+        let session = OpenCodeSession(id: "pending", title: "Pending", workspaceID: nil,
+            directory: nil, projectID: "global", parentID: nil)
+        model.allSessions = [session]
+        let facade = model.sessionListFacade
+        let context = facade.selectionContextID
+        XCTAssertEqual(facade.sessionForSelection(id: session.id, context: context), session)
+        model.allSessions = []
+        XCTAssertNil(facade.sessionForSelection(id: session.id, context: context))
+        XCTAssertNil(model.selectedSession)
+    }
+
+    func testOptimisticSelectionFeedbackPrecedesCommitAndSurvivesRelease() {
+        let feedback = SessionSelectionFeedback()
+        feedback.press("first")
+        XCTAssertEqual(feedback.sessionID, "first")
+        feedback.commit("first")
+        feedback.release("first")
+        XCTAssertEqual(feedback.sessionID, "first")
+        feedback.press("second")
+        feedback.release("first")
+        XCTAssertEqual(feedback.sessionID, "second")
+        feedback.release("second")
+        XCTAssertNil(feedback.sessionID, "Cancelling a press restores the canonical row selection")
+    }
+
+    func testDelayedReleaseCannotClearANewerPressOnTheSameRow() async {
+        let feedback = SessionSelectionFeedback()
+        feedback.press("first")
+        feedback.releaseAfterActivation("first")
+        feedback.press("first")
+        let released = expectation(description: "Deferred release processed")
+        DispatchQueue.main.async { released.fulfill() }
+        await fulfillment(of: [released], timeout: 1)
+        XCTAssertEqual(feedback.sessionID, "first")
+        feedback.reset()
+        XCTAssertNil(feedback.sessionID)
+    }
+
+    func testReplacementSelectionLoadCancelsThePreviousLoad() async {
+        let feedback = SessionSelectionFeedback()
+        let started = expectation(description: "First load started")
+        let cancelled = expectation(description: "Superseded load cancelled")
+        feedback.load {
+            started.fulfill()
+            do {
+                try await Task.sleep(for: .seconds(60))
+                XCTFail("Superseded load should not finish")
+            } catch {
+                XCTAssertTrue(Task.isCancelled)
+                cancelled.fulfill()
+            }
+        }
+        await fulfillment(of: [started], timeout: 1)
+        feedback.press("second")
+        feedback.commit("second")
+        feedback.load {}
+        await fulfillment(of: [cancelled], timeout: 1)
+        XCTAssertEqual(feedback.sessionID, "second")
+    }
+
+    #if canImport(UIKit)
+    func testNativeSelectionInputAttachesToCellWithoutDelayingItsButton() async throws {
+        let feedback = SessionSelectionFeedback()
+        let surface = SessionSelectionSurfaceView(frame: CGRect(x: 0, y: 0, width: 300, height: 70))
+        surface.bind(sessionID: "first", canonicalSelection: false, feedback: feedback)
+        let cell = UICollectionViewCell(frame: surface.frame)
+        cell.contentView.addSubview(surface)
+        let controller = UIViewController()
+        controller.view.addSubview(cell)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        surface.layoutIfNeeded()
+        let recognizer = try XCTUnwrap(cell.gestureRecognizers?.first { $0.name == "openclient.selectionFeedback" })
+        XCTAssertFalse(recognizer.cancelsTouchesInView)
+        XCTAssertFalse(recognizer.delaysTouchesBegan)
+        XCTAssertFalse(recognizer.delaysTouchesEnded)
+
+        surface.beginNativePress()
+        XCTAssertEqual(feedback.sessionID, "first")
+        XCTAssertTrue(surface.showsSelection)
+        surface.endNativePress()
+        feedback.commit("first")
+        let released = expectation(description: "Native release processed")
+        DispatchQueue.main.async { released.fulfill() }
+        await fulfillment(of: [released], timeout: 1)
+        XCTAssertEqual(feedback.sessionID, "first")
+
+        surface.bind(sessionID: "reused", canonicalSelection: false, feedback: feedback)
+        surface.beginNativePress()
+        XCTAssertEqual(feedback.sessionID, "reused")
+        surface.removeFromSuperview()
+        XCTAssertNil(recognizer.view, "Recycled rows must detach their input observer")
+        let detached = expectation(description: "Cancelled native press processed")
+        DispatchQueue.main.async { detached.fulfill() }
+        await fulfillment(of: [detached], timeout: 1)
+        XCTAssertNil(feedback.sessionID)
+    }
+
+    func testSelectionOutlineChangesSynchronouslyWithoutARowRender() {
+        let feedback = SessionSelectionFeedback()
+        let first = SessionSelectionSurfaceView()
+        let second = SessionSelectionSurfaceView()
+        for surface in [first, second] {
+            surface.selectedBorderWidth = 2
+            surface.selectedBorder = .blue
+            surface.normalBorder = .gray
+        }
+        first.bind(sessionID: "first", canonicalSelection: true, feedback: feedback)
+        second.bind(sessionID: "second", canonicalSelection: false, feedback: feedback)
+        XCTAssertEqual(first.layer.borderWidth, 2)
+
+        feedback.press("second")
+
+        XCTAssertFalse(first.showsSelection)
+        XCTAssertTrue(second.showsSelection)
+        XCTAssertEqual(first.layer.borderWidth, 1)
+        XCTAssertEqual(second.layer.borderWidth, 2)
+        XCTAssertEqual(second.layer.borderColor, UIColor.blue.cgColor)
+        XCTAssertNil(second.layer.animationKeys())
+
+        // A stale SwiftUI update cannot undo optimistic drawing while navigation catches up.
+        second.bind(sessionID: "second", canonicalSelection: false, feedback: feedback)
+        XCTAssertTrue(second.showsSelection)
+        feedback.commit("second")
+        first.bind(sessionID: "first", canonicalSelection: false, feedback: feedback)
+        second.bind(sessionID: "second", canonicalSelection: true, feedback: feedback)
+        feedback.reset()
+        XCTAssertFalse(first.showsSelection)
+        XCTAssertTrue(second.showsSelection)
+        feedback.press("first")
+        feedback.release("first")
+        XCTAssertFalse(first.showsSelection)
+        XCTAssertTrue(second.showsSelection)
+    }
+
+    func testSelectionHandoffLeavesAFrameForFeedbackAndCoalescesClicks() {
+        let handoff = OpenCodeDisplayFrameHandoff()
+        var selected: String?
+        handoff.schedule { selected = "first" }
+        handoff.advanceFrame()
+        XCTAssertNil(selected)
+        handoff.schedule { selected = "second" }
+        handoff.advanceFrame()
+        XCTAssertNil(selected)
+        handoff.advanceFrame()
+        XCTAssertEqual(selected, "second")
+        handoff.schedule { selected = "cancelled" }
+        handoff.cancel()
+        handoff.advanceFrame()
+        handoff.advanceFrame()
+        XCTAssertEqual(selected, "second")
+    }
+    #endif
+
     func testFunAndGamesDefaultsHidden() {
         XCTAssertFalse(FunAndGamesPreferences().showsSection)
     }
@@ -284,7 +442,7 @@ final class FeatureFacadeTests: XCTestCase {
         XCTAssertTrue(settings.hasGitProject)
     }
 
-    func testSessionSelectionCommitsRouteBeforePreparingCachedTranscript() {
+    func testSessionSelectionStagesCachedTranscriptBeforeAsyncPreparation() {
         let viewModel = AppViewModel()
         let first = OpenCodeSession(
             id: "session-first",
@@ -315,15 +473,23 @@ final class FeatureFacadeTests: XCTestCase {
         )
         viewModel.chatStore.messages = [previousMessage]
         viewModel.chatStore.cacheMessages([selectedMessage], forSessionID: second.id)
+        let facade = viewModel.sessionListFacade
+        XCTAssertEqual(facade.snapshot.selectedSessionID, first.id)
+        XCTAssertEqual(facade.snapshot.unpinnedRows.filter(\.isSelected).map(\.id), [first.id])
 
-        let ticket = viewModel.sessionListFacade.beginSelection(second)
+        let ticket = facade.beginSelection(second)
 
+        XCTAssertEqual(facade.snapshot.selectedSessionID, second.id)
+        XCTAssertEqual(facade.snapshot.unpinnedRows.filter(\.isSelected).map(\.id), [second.id])
         XCTAssertEqual(viewModel.selectedSession?.id, second.id)
         XCTAssertEqual(viewModel.directoryStore.selectedSession?.id, second.id)
-        XCTAssertNil(viewModel.chatStore.preparedSessionID)
-        XCTAssertEqual(viewModel.chatStore.messages.map(\.id), [previousMessage.id])
+        XCTAssertEqual(viewModel.chatStore.preparedSessionID, second.id)
+        XCTAssertEqual(viewModel.chatStore.messages.map(\.id), [selectedMessage.id])
         XCTAssertTrue(viewModel.chatStore.isLoadingSelectedSession)
-        XCTAssertEqual(viewModel.appShellFacade.detailRoute(isCompact: true), .loadingChat(sessionID: second.id))
+        XCTAssertEqual(
+            viewModel.appShellFacade.detailRoute(isCompact: true),
+            .chat(AppShellChatRoute(sessionID: second.id, presentationRequest: 0))
+        )
 
         XCTAssertTrue(viewModel.sessionListFacade.prepareSelectionIfCurrent(ticket))
 
@@ -346,11 +512,59 @@ final class FeatureFacadeTests: XCTestCase {
         let secondTicket = viewModel.sessionListFacade.beginSelection(second)
         XCTAssertFalse(viewModel.sessionListFacade.prepareSelectionIfCurrent(firstTicket))
 
-        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        XCTAssertEqual(viewModel.chatStore.preparedSessionID, second.id)
 
         XCTAssertTrue(viewModel.sessionListFacade.prepareSelectionIfCurrent(secondTicket))
 
         XCTAssertEqual(viewModel.chatStore.preparedSessionID, second.id)
+    }
+
+    func testSelectionOnlySnapshotUpdateCoversPinnedAndWorkspaceRows() {
+        let model = AppViewModel()
+        let first = OpenCodeSession(id: "first", title: "First", workspaceID: nil, directory: "/tmp/project", projectID: nil, parentID: nil)
+        let second = OpenCodeSession(id: "second", title: "Second", workspaceID: nil, directory: "/tmp/project", projectID: nil, parentID: nil)
+        model.allSessions = [first, second]
+        var snapshot = model.sessionListFacade.snapshot
+        let rows = snapshot.unpinnedRows
+        XCTAssertEqual(rows.count, 2)
+        snapshot.pinnedRows = rows
+        snapshot.workspaceSections = [SessionListFacade.WorkspaceSection(
+            directory: "/tmp/project", title: "Project", isMain: true,
+            rows: rows, isLoading: false, hasMore: false, operation: nil
+        )]
+
+        for selection in [first.id, second.id, nil] {
+            snapshot.selectSession(selection)
+            XCTAssertEqual(snapshot.selectedSessionID, selection)
+            for group in [snapshot.pinnedRows, snapshot.unpinnedRows, snapshot.workspaceSections[0].rows] {
+                XCTAssertEqual(group.filter(\.isSelected).map(\.id), selection.map { [$0] } ?? [])
+                XCTAssertEqual(group.map(\.session), rows.map(\.session))
+                XCTAssertEqual(group.map(\.preview), rows.map(\.preview))
+            }
+        }
+    }
+
+    func testPendingSidebarRefreshKeepsLatestSelectionAndPreview() async {
+        let model = AppViewModel()
+        let first = OpenCodeSession(id: "first", title: "First", workspaceID: nil, directory: nil, projectID: "global", parentID: nil)
+        let second = OpenCodeSession(id: "second", title: "Second", workspaceID: nil, directory: nil, projectID: "global", parentID: nil)
+        model.allSessions = [first, second]
+        let facade = model.sessionListFacade
+        let refreshed = expectation(description: "Coalesced snapshot contains latest preview and selection")
+        let observation = facade.$snapshot.first { snapshot in
+            snapshot.selectedSessionID == second.id
+                && snapshot.unpinnedRows.first(where: { $0.id == second.id })?.preview?.text == "Latest preview"
+        }.sink { _ in refreshed.fulfill() }
+
+        model.sessionPreviews[second.id] = SessionPreview(text: "Earlier preview", date: nil)
+        _ = facade.beginSelection(first)
+        _ = facade.beginSelection(second)
+        model.sessionPreviews[second.id] = SessionPreview(text: "Latest preview", date: nil)
+
+        XCTAssertEqual(facade.snapshot.unpinnedRows.filter(\.isSelected).map(\.id), [second.id])
+        await fulfillment(of: [refreshed], timeout: 2)
+        XCTAssertEqual(facade.snapshot.unpinnedRows.filter(\.isSelected).map(\.id), [second.id])
+        withExtendedLifetime(observation) {}
     }
 
     func testTranscriptChangesDoNotInvalidateProjectListFacades() {
@@ -515,7 +729,7 @@ final class FeatureFacadeTests: XCTestCase {
         let projectFilesFacade = viewModel!.projectFilesFacade
         let mcpFacade = viewModel!.mcpFacade
         let widgetSnapshotPublisher = viewModel!.widgetSnapshotPublisher
-        weak let weakViewModel = viewModel
+        weak var weakViewModel = viewModel
 
         viewModel = nil
 

@@ -201,6 +201,10 @@ private enum ActivityProjectMenuAvatarRenderer {
 }
 
 private struct ActivityContent: View, Equatable {
+    #if targetEnvironment(macCatalyst)
+    @State private var selectionFeedback = SessionSelectionFeedback()
+    @State private var selectionHandoff = OpenCodeDisplayFrameHandoff()
+    #endif
     let facade: ActivityFacade
     let snapshot: ActivityFacade.Snapshot
     let excludedProjectIDs: Set<String>
@@ -301,6 +305,19 @@ private struct ActivityContent: View, Equatable {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(OpenCodePlatformColor.groupedBackground)
+        #if targetEnvironment(macCatalyst)
+        .onAppear {
+            selectionFeedback.onPress = { [weak handoff = selectionHandoff] in handoff?.cancel() }
+        }
+        .onDisappear {
+            selectionHandoff.cancel()
+            selectionFeedback.reset()
+            selectionFeedback.onPress = nil
+        }
+        .onChange(of: snapshot.selectedSessionID) { _, id in
+            if selectionFeedback.sessionID == id { selectionFeedback.reset() }
+        }
+        #endif
         .refreshable {
             await facade.prepareForPresentation(force: true)
         }
@@ -412,17 +429,27 @@ private struct ActivityContent: View, Equatable {
         Section {
             ForEach(rows) { row in
                 Button {
-                    facade.prepareSelection(row)
-                    withAnimation(opencodeSelectionAnimation) {
-                        onSessionChosen()
+                    #if targetEnvironment(macCatalyst)
+                    selectionFeedback.commit(row.recent.session.id)
+                    let context = facade.selectionContextID
+                    selectionHandoff.schedule {
+                        guard facade.canSelect(row, context: context) else {
+                            selectionFeedback.reset()
+                            return
+                        }
+                        openSession(row)
+                        if snapshot.selectedSessionID == row.recent.session.id { selectionFeedback.reset() }
                     }
-                    Task { await facade.open(row) }
+                    #else
+                    openSession(row)
+                    #endif
                 } label: {
                     ActivitySessionRow(
                         row: row,
                         showsLastUserMessage: showsLastUserMessage,
                         isSelected: snapshot.selectedSessionID == row.recent.session.id,
-                        presentation: presentation
+                        presentation: presentation,
+                        selectionFeedback: rowSelectionFeedback
                     )
                 }
                 .buttonStyle(.plain)
@@ -463,6 +490,28 @@ private struct ActivityContent: View, Equatable {
                 .font(.headline)
                 .textCase(nil)
         }
+    }
+
+    private var rowSelectionFeedback: SessionSelectionFeedback? {
+        #if targetEnvironment(macCatalyst)
+        selectionFeedback
+        #else
+        nil
+        #endif
+    }
+
+    private func openSession(_ row: ActivityFacade.RowSnapshot) {
+        facade.prepareSelection(row)
+        #if targetEnvironment(macCatalyst)
+        onSessionChosen()
+        #else
+        withAnimation(opencodeSelectionAnimation) { onSessionChosen() }
+        #endif
+        #if targetEnvironment(macCatalyst)
+        selectionFeedback.load { await facade.open(row) }
+        #else
+        Task { await facade.open(row) }
+        #endif
     }
 
     private func renameButton(for row: ActivityFacade.RowSnapshot) -> some View {
@@ -560,6 +609,7 @@ struct ActivitySessionRow: View {
     let showsLastUserMessage: Bool
     var isSelected = false
     var presentation: ActivitySessionRowPresentation = .fullContext
+    var selectionFeedback: SessionSelectionFeedback?
 
     private static let regularLayoutMinimumWidth: CGFloat = 200
 
@@ -590,10 +640,12 @@ struct ActivitySessionRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(15)
-        .background(cardBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(cardBorder, lineWidth: isSelected ? 2 : 1)
+        .background {
+            SessionSelectionSurface(feedback: selectionFeedback, sessionID: row.recent.session.id,
+                isSelected: isSelected, cornerRadius: 20,
+                selectedFill: cardBackground, normalFill: cardBackground,
+                selectedBorder: Color.accentColor.opacity(0.82), normalBorder: cardBorder,
+                selectedBorderWidth: 2)
         }
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -728,7 +780,6 @@ struct ActivitySessionRow: View {
     }
 
     private var cardBorder: Color {
-        if isSelected { return Color.accentColor.opacity(0.82) }
         if row.needsInput { return Color.orange.opacity(0.24) }
         if row.isWorking { return Color.accentColor.opacity(0.2) }
         return Color.primary.opacity(0.06)

@@ -478,7 +478,7 @@ final class OpenCodeLocalCacheIntegrationTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoadingSessions)
     }
 
-    func testSelectionPreparationHydratesDiskBeforeExposingChatRoute() async throws {
+    func testSelectionPreparationExposesChatBeforeHydratingDisk() async throws {
         let viewModel = AppViewModel()
         viewModel.config = serverConfig
         let repository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
@@ -492,7 +492,10 @@ final class OpenCodeLocalCacheIntegrationTests: XCTestCase {
         viewModel.allSessions = [session]
 
         let ticket = viewModel.sessionListFacade.beginSelection(session)
-        XCTAssertEqual(viewModel.appShellFacade.detailRoute(isCompact: true), .loadingChat(sessionID: session.id))
+        XCTAssertEqual(
+            viewModel.appShellFacade.detailRoute(isCompact: true),
+            .chat(AppShellChatRoute(sessionID: session.id, presentationRequest: 0))
+        )
 
         let prepared = await viewModel.sessionListFacade.prepareSelectionForNavigation(ticket)
 

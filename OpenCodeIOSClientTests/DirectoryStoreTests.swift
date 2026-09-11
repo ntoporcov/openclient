@@ -179,6 +179,20 @@ final class DirectoryStoreTests: XCTestCase {
         XCTAssertTrue(registry.takeV2Reconciliation().sessionIDs.isEmpty)
     }
 
+    func testOwnerLookupKeepsActivePreferenceAndFindsMetadataOnlyStores() {
+        let registry = DirectoryStoreRegistry(activeDirectory: "/tmp/active")
+        let active = registry.activeStore
+        let background = registry.store(for: "/tmp/background")
+        let shared = session(id: "shared", directory: "/tmp/active")
+        active.sessions = [shared]
+        background.sessions = [shared]
+        XCTAssertTrue(registry.ownerStore(forSessionID: shared.id) === active)
+        XCTAssertEqual(registry.stores(containingSessionID: shared.id).count, 2)
+        background.sessionStatuses["metadata-only"] = "busy"
+        XCTAssertTrue(registry.ownerStore(forSessionID: "metadata-only") === background)
+        XCTAssertNil(registry.ownerStore(forSessionID: "missing"))
+    }
+
     func testV2SessionListSnapshotCannotResurrectUnknownSessionDeletedInFlight() throws {
         let registry = DirectoryStoreRegistry(activeDirectory: "/project")
         let snapshot = registry.v2LifecycleSnapshot

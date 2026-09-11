@@ -777,7 +777,7 @@ final class AppViewModel: ObservableObject {
     var foregroundChatCatchUpTask: Task<Void, Never>?
     var lastForegroundChatCatchUpScheduledAt = Date.distantPast
     var reloadTask: Task<Void, Never>?
-    var pendingRecentSessionOpenID: String?
+    var pendingRecentSessionOpen: (sessionID: String, requestID: UUID)?
     var recentProjectSessionsLoadTask: Task<Void, Never>?
     var recentProjectSessionsLoadGeneration = 0
     var connectionAttemptTask: Task<Void, Never>?

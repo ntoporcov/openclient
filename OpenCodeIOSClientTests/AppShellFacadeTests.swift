@@ -234,7 +234,7 @@ final class AppShellFacadeTests: XCTestCase {
         XCTAssertFalse(shell.canPresentSelectedSessionDetail)
     }
 
-    func testV2SessionSelectionRoutesFromLoadingToWritableChat() {
+    func testV2SessionSelectionPresentsWritableChatDuringHydration() {
         let viewModel = AppViewModel()
         let shell = viewModel.appShellFacade
         let session = makeSession()
@@ -245,7 +245,10 @@ final class AppShellFacadeTests: XCTestCase {
         let ticket = shell.sessions.beginSelection(session)
         XCTAssertEqual(viewModel.selectedSession, session)
         XCTAssertNil(viewModel.chatStore.preparedSessionID)
-        XCTAssertEqual(shell.detailRoute(isCompact: true), .loadingChat(sessionID: session.id))
+        XCTAssertEqual(
+            shell.detailRoute(isCompact: true),
+            .chat(AppShellChatRoute(sessionID: session.id, presentationRequest: viewModel.chatDetailPresentationRequest))
+        )
 
         viewModel.chatStore.applyInitialV2Transcript([], olderCursor: nil, sessionID: session.id)
 

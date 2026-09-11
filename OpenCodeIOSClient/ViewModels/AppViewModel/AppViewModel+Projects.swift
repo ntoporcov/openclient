@@ -1048,11 +1048,14 @@ extension AppViewModel {
     }
 
     func openRecentProjectSession(_ recent: RecentProjectSession) async {
-        guard let connection = try? requireBackendConnection() else { return }
+        guard !Task.isCancelled, let connection = try? requireBackendConnection() else { return }
         let recentSession = recent.session
         let navigation = projectCoordinator.recentSessionNavigationResult(for: recentSession, projects: projects)
-        pendingRecentSessionOpenID = navigation.shouldPreserveMissingSession ? recentSession.id : nil
-        defer { pendingRecentSessionOpenID = nil }
+        let requestID = UUID()
+        pendingRecentSessionOpen = navigation.shouldPreserveMissingSession ? (recentSession.id, requestID) : nil
+        defer {
+            if pendingRecentSessionOpen?.requestID == requestID { pendingRecentSessionOpen = nil }
+        }
         projects = navigation.projects
         currentProject = navigation.currentProject
 
@@ -1067,17 +1070,17 @@ extension AppViewModel {
                 directory: navigation.routeDirectory,
                 workspaceID: recentSession.workspaceID
             ))
-            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+            guard !Task.isCancelled, isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
             try await reloadSessions()
-            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+            guard !Task.isCancelled, isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
             upsertVisibleSession(canonical)
             await loadComposerOptions()
-            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+            guard !Task.isCancelled, isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
             withAnimation(opencodeSelectionAnimation) {
                 isShowingProjectPicker = false
             }
         } catch {
-            guard isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
+            guard !Task.isCancelled, isCurrentBackendConnection(connection), sessionNavigationGeneration == navigationGeneration else { return }
             isLoadingSessions = false
             errorMessage = error.localizedDescription
             return

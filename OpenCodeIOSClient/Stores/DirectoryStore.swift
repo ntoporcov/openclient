@@ -172,14 +172,16 @@ final class DirectoryStoreRegistry: ObservableObject {
     }
 
     func stores(containingSessionID sessionID: String) -> [DirectoryStore] {
-        storesByKey.values.filter { store in
-            store.sessions.contains { $0.id == sessionID }
-                || store.syncState.messagesBySessionID[sessionID] != nil
-                || store.syncState.todosBySessionID[sessionID] != nil
-                || store.syncState.permissionsBySessionID[sessionID] != nil
-                || store.syncState.questionsBySessionID[sessionID] != nil
-                || store.sessionStatuses[sessionID] != nil
-        }
+        storesByKey.values.filter { containsSessionState(sessionID, in: $0) }
+    }
+
+    private func containsSessionState(_ sessionID: String, in store: DirectoryStore) -> Bool {
+        store.syncState.messagesBySessionID[sessionID] != nil
+            || store.syncState.todosBySessionID[sessionID] != nil
+            || store.syncState.permissionsBySessionID[sessionID] != nil
+            || store.syncState.questionsBySessionID[sessionID] != nil
+            || store.sessionStatuses[sessionID] != nil
+            || store.sessions.contains { $0.id == sessionID }
     }
 
     func stores(containingMessageID messageID: String) -> [DirectoryStore] {
@@ -191,12 +193,12 @@ final class DirectoryStoreRegistry: ObservableObject {
     }
 
     func ownerStore(forSessionID sessionID: String) -> DirectoryStore? {
-        if activeStore.sessions.contains(where: { $0.id == sessionID })
+        if activeStore.syncState.messagesBySessionID[sessionID] != nil
             || activeStore.selectedSession?.id == sessionID
-            || activeStore.syncState.messagesBySessionID[sessionID] != nil {
+            || activeStore.sessions.contains(where: { $0.id == sessionID }) {
             return activeStore
         }
-        return stores(containingSessionID: sessionID).first
+        return storesByKey.values.first { containsSessionState(sessionID, in: $0) }
     }
 
     func session(matching sessionID: String) -> OpenCodeSession? {

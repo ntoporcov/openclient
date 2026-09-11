@@ -4,6 +4,53 @@ import XCTest
 
 @MainActor
 final class ChatFacadeTests: XCTestCase {
+    func testSelectingUnpreparedSessionDoesNotExposePreviousTranscript() {
+        let model = AppViewModel()
+        let first = makeSession(id: "first")
+        let second = makeSession(id: "second")
+        model.selectedDirectory = first.directory
+        model.allSessions = [first, second]
+        model.selectedSession = first
+        model.chatStore.beginSelectingSession(sessionID: first.id,
+            cachedMessages: [makeMessage(id: "first-message", sessionID: first.id, role: "user")])
+
+        _ = model.beginSessionNavigation(second)
+
+        XCTAssertTrue(model.chatFacade.messageSource(for: second).isEmpty)
+        XCTAssertTrue(model.chatFacade.presentationMessages.isEmpty)
+    }
+
+    func testInactiveDirectorySelectionCannotReadActiveTranscript() {
+        let model = AppViewModel()
+        let first = makeSession(id: "first")
+        let second = makeSession(id: "second", directory: "/tmp/other")
+        model.selectedDirectory = first.directory
+        model.allSessions = [first]
+        model.selectedSession = first
+        model.chatStore.messages = [makeMessage(id: "first-message", sessionID: first.id, role: "user")]
+        let other = model.directoryStoreRegistry.store(for: second.directory)
+        other.sessions = [second]
+        other.selectedSession = second
+
+        XCTAssertTrue(model.chatFacade.messageSource(for: second).isEmpty)
+    }
+
+    func testActiveTranscriptFallbackFiltersEveryEnvelopeBySession() {
+        let model = AppViewModel()
+        let second = makeSession(id: "second")
+        model.selectedDirectory = second.directory
+        model.selectedSession = second
+        let expected = makeMessage(id: "second-message", sessionID: second.id, role: "user")
+        model.chatStore.beginSelectingSession(sessionID: second.id, cachedMessages: [
+            makeMessage(id: "first-message", sessionID: "first", role: "assistant"), expected,
+        ])
+
+        XCTAssertEqual(model.chatFacade.messageSource(for: second), [expected])
+        XCTAssertEqual(model.chatFacade.presentationMessages, [expected])
+        model.selectedSession = nil
+        XCTAssertTrue(model.chatFacade.presentationMessages.isEmpty)
+    }
+
     override func setUp() {
         super.setUp()
         UserDefaults.standard.removeObject(forKey: "opencode.modelVisibility.v1")
@@ -33,6 +80,29 @@ final class ChatFacadeTests: XCTestCase {
         XCTAssertEqual(snapshot.agentTitle, "review")
         XCTAssertEqual(snapshot.modelTitle, "Reasoner")
         XCTAssertEqual(snapshot.reasoningTitle, "Deep Think")
+    }
+
+    func testToolbarSnapshotChangesAfterEachPickerSelection() {
+        let viewModel = makeViewModel()
+        let session = makeSession(id: "session-picker-updates")
+        var previous = viewModel.chatFacade.toolbarSnapshot(for: session)
+
+        viewModel.chatFacade.selectAgent(named: "review", for: session)
+        var current = viewModel.chatFacade.toolbarSnapshot(for: session)
+        XCTAssertNotEqual(current, previous)
+        previous = current
+
+        viewModel.chatFacade.selectModel(
+            OpenCodeModelReference(providerID: "openai", modelID: "reasoner"),
+            for: session
+        )
+        current = viewModel.chatFacade.toolbarSnapshot(for: session)
+        XCTAssertNotEqual(current, previous)
+        previous = current
+
+        viewModel.chatFacade.selectReasoningVariant("high", for: session)
+        current = viewModel.chatFacade.toolbarSnapshot(for: session)
+        XCTAssertNotEqual(current, previous)
     }
 
     func testSnapshotUsesLatestUserMessageAsToolbarFallback() {
@@ -630,12 +700,12 @@ final class ChatFacadeTests: XCTestCase {
         return viewModel
     }
 
-    private func makeSession(id: String) -> OpenCodeSession {
+    private func makeSession(id: String, directory: String = "/tmp/project") -> OpenCodeSession {
         OpenCodeSession(
             id: id,
             title: id,
             workspaceID: nil,
-            directory: "/tmp/project",
+            directory: directory,
             projectID: "project",
             parentID: nil
         )
