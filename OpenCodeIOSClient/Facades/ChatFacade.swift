@@ -1552,6 +1552,70 @@ final class ChatFacade: ObservableObject {
         return viewModel.modelConfigurationStore.formattedVariantTitle(variant)
     }
 
+    struct HeaderScope: Equatable, Identifiable {
+        let session: OpenCodeSession
+        let contextID: String
+        let connectionID: UUID?
+        var id: String { "\(contextID)|\(session.id)" }
+    }
+
+    func headerScope(for session: OpenCodeSession) -> HeaderScope {
+        HeaderScope(session: session, contextID: promptContextID, connectionID: promptConnectionID)
+    }
+
+    func isCurrentHeaderScope(_ scope: HeaderScope) -> Bool {
+        guard scope.contextID == promptContextID, scope.connectionID == promptConnectionID,
+              let current = selectedSession, current.id == scope.session.id,
+              current.directory == scope.session.directory, current.workspaceID == scope.session.workspaceID,
+              current.projectID == scope.session.projectID, current.parentID == scope.session.parentID,
+              let canonical = directoryStore(forSessionID: current.id).sessions.first(where: { $0.id == current.id }),
+              canonical.directory == current.directory, canonical.workspaceID == current.workspaceID,
+              canonical.projectID == current.projectID, canonical.parentID == current.parentID else { return false }
+        return windowContext?.isCurrent ?? true
+    }
+
+    func allowsHeaderActions(_ scope: HeaderScope) -> Bool {
+        isCurrentHeaderScope(scope) && !isReadOnly && scope.session.parentID == nil
+            && connectionStore.isConnected && viewModel.backendConnection?.isClosed == false
+    }
+
+    func allowsHeaderAgentSelection(_ scope: HeaderScope) -> Bool {
+        let snapshot = toolbarSnapshot(for: scope.session)
+        return isCurrentHeaderScope(scope) && !isReadOnly
+            && connectionStore.isConnected && viewModel.backendConnection?.isClosed == false
+            && snapshot.showsAgentMenu && !snapshot.selectableAgents.isEmpty && !snapshot.isLoading && !isLoadingPresentation
+            && (!isV2Connection || (allowsV2TextPromptAdmission && viewModel.backendConnection?.openCodeCompatibility?.profile == .v2))
+    }
+
+    func selectHeaderAgent(named name: String, scope: HeaderScope) {
+        guard allowsHeaderAgentSelection(scope),
+              toolbarSnapshot(for: scope.session).selectableAgents.contains(where: { $0.name == name }) else { return }
+        selectAgent(named: name, for: scope.session)
+    }
+
+    func renameHeaderSession(_ scope: HeaderScope, title: String) async {
+        guard allowsHeaderActions(scope),
+              let session = directoryStore(forSessionID: scope.session.id).sessions.first(where: { $0.id == scope.session.id }) else { return }
+        await viewModel.renameSession(session, title: title, windowContext: windowContext)
+    }
+
+    func supportsHeaderLiveActivity(_ scope: HeaderScope) -> Bool {
+        allowsHeaderActions(scope) && viewModel.liveActivityFacade.supportsLiveActivities
+    }
+
+    func isHeaderLiveActivityActive(_ scope: HeaderScope) -> Bool {
+        isCurrentHeaderScope(scope) && viewModel.liveActivityFacade.isActive(sessionID: scope.session.id)
+    }
+
+    func toggleHeaderLiveActivity(_ scope: HeaderScope) async {
+        guard supportsHeaderLiveActivity(scope), let session = selectedSession else { return }
+        await viewModel.liveActivityFacade.toggle(session: session) { [weak self] error in
+            guard let self, self.isCurrentHeaderScope(scope) else { return }
+            if let windowContext = self.windowContext { windowContext.errorMessage = error }
+            else { self.connectionStore.errorMessage = error }
+        }
+    }
+
     func selectAgent(named name: String?, for session: OpenCodeSession) {
         guard !isReadOnly else { return }
         if isV2Connection {

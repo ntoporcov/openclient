@@ -41,6 +41,106 @@ final class ChatWindowAdapterTests: XCTestCase {
         return ChatFacade(viewModel: model, windowContext: context)
     }
 
+    func testNormallyNavigatedChildHeaderAllowsSelectableAgentsButNotRootActions() async throws {
+        for profile: OpenCodeAPIProfile in [.legacy, .v2] {
+            for usesWindow in [false, true] {
+                let model = model(profile)
+                defer { model.disconnect() }
+                let child = session("ses_child", directory: "/B", parent: "ses_a")
+                let chat: ChatFacade
+                if usesWindow { chat = window(model, session: child) }
+                else {
+                    model.directoryStoreRegistry.activate("/B").insertV2Session(child)
+                    model.selectedSession = child
+                    chat = model.chatFacade
+                }
+                defer { chat.windowContext?.close() }
+                model.modelConfigurationStore.availableAgents = [
+                    .init(name: "ReviewAgent", description: nil, mode: "all", hidden: false, model: nil, variant: nil),
+                    .init(name: "build", description: nil, mode: "primary", hidden: false, model: nil, variant: nil),
+                    .init(name: "hidden", description: nil, mode: "primary", hidden: true, model: nil, variant: nil),
+                    .init(name: "subagent", description: nil, mode: "subagent", hidden: false, model: nil, variant: nil)
+                ]
+                var mutations = 0
+                WindowAdapterURLProtocol.handler = { request in
+                    XCTAssertEqual(request.httpMethod, "POST")
+                    XCTAssertEqual(request.url?.path, "/api/session/ses_child/agent")
+                    let body = try JSONSerialization.jsonObject(with: Self.body(request)) as? [String: String]
+                    XCTAssertEqual(body?["agent"], "ReviewAgent")
+                    mutations += 1
+                    return (204, "")
+                }
+                let scope = chat.headerScope(for: child)
+                XCTAssertTrue(chat.allowsHeaderAgentSelection(scope))
+                XCTAssertFalse(chat.allowsHeaderActions(scope))
+                XCTAssertEqual(Set(chat.toolbarSnapshot(for: child).selectableAgents.map(\.name)), ["ReviewAgent", "build"])
+                chat.selectHeaderAgent(named: "ReviewAgent", scope: scope)
+                if let task = chat.v2ConfigurationTasks[child.id]?.task { _ = await task.value }
+                XCTAssertEqual(chat.toolbarSnapshot(for: child).selectedAgentName, "ReviewAgent")
+                XCTAssertEqual(chat.toolbarSnapshot(for: child).agentTitle, "ReviewAgent")
+                for invalid in ["hidden", "subagent", "unknown"] { chat.selectHeaderAgent(named: invalid, scope: scope) }
+                model.funAndGamesStore.recordFindBugSession(
+                    FindBugGameSession(sessionID: child.id, language: FindBugGameLanguage(id: "swift", title: "Swift")))
+                XCTAssertFalse(chat.allowsHeaderAgentSelection(scope))
+                chat.selectHeaderAgent(named: "build", scope: scope)
+                if let task = chat.v2ConfigurationTasks[child.id]?.task { _ = await task.value }
+                XCTAssertEqual(model.modelConfigurationStore.selectedAgentName(for: child.id), "ReviewAgent")
+                XCTAssertEqual(mutations, profile == .v2 ? 1 : 0)
+                if usesWindow { XCTAssertEqual(model.selectedSession?.id, "ses_a") }
+            }
+        }
+    }
+
+    func testHeaderRenameRestoresOpeningTitleAfterExternalCanonicalRename() async throws {
+        for profile: OpenCodeAPIProfile in [.legacy, .v2] {
+            for usesWindow in [false, true] {
+                let model = model(profile)
+                defer { model.disconnect() }
+                let original = OpenCodeSession(id: "ses_b", title: "A", workspaceID: "workspace-b",
+                    directory: "/B", projectID: "project-b", parentID: nil)
+                let chat: ChatFacade
+                if usesWindow { chat = window(model, session: original) }
+                else {
+                    model.directoryStoreRegistry.activate("/B").insertV2Session(original)
+                    model.selectedSession = original
+                    chat = model.chatFacade
+                }
+                defer { chat.windowContext?.close() }
+                let scope = chat.headerScope(for: original)
+                let owner = chat.directoryStore(forSessionID: original.id)
+                let external = OpenCodeSession(id: original.id, title: "B", workspaceID: original.workspaceID,
+                    directory: original.directory, projectID: original.projectID, parentID: original.parentID)
+                owner.insertV2Session(external)
+                XCTAssertEqual(chat.selectedSession?.title, "B")
+                XCTAssertTrue(chat.isCurrentHeaderScope(scope), "Title changes must not invalidate the captured identity")
+                var mutations = 0
+                WindowAdapterURLProtocol.handler = { request in
+                    XCTAssertEqual(request.url?.host, "window-adapters.invalid")
+                    if request.httpMethod == "GET" {
+                        XCTAssertEqual(profile, .v2)
+                        XCTAssertEqual(request.url?.path, "/api/session/ses_b")
+                        XCTAssertEqual(mutations, 1)
+                        return (200, #"{"data":{"id":"ses_b","title":"A","projectID":"project-b","location":{"directory":"/B","workspaceID":"workspace-b"},"time":{"created":1,"updated":2}}}"#)
+                    }
+                    XCTAssertEqual(request.httpMethod, profile == .v2 ? "POST" : "PATCH")
+                    XCTAssertEqual(request.url?.path, profile == .v2 ? "/api/session/ses_b/rename" : "/session/ses_b")
+                    let body = try JSONSerialization.jsonObject(with: Self.body(request)) as? [String: String]
+                    XCTAssertEqual(body?["title"], "A")
+                    mutations += 1
+                    if profile == .v2 { return (204, "") }
+                    XCTAssertEqual(Self.query(request, "directory"), "/B")
+                    XCTAssertEqual(Self.query(request, "workspace"), "workspace-b")
+                    return (200, #"{"id":"ses_b","title":"A","projectID":"project-b","directory":"/B","workspaceID":"workspace-b"}"#)
+                }
+                await chat.renameHeaderSession(scope, title: "A")
+                XCTAssertEqual(mutations, 1, "Saving A after an external rename to B must reach the backend")
+                XCTAssertEqual(chat.selectedSession?.title, "A")
+                XCTAssertEqual(owner.sessions.first { $0.id == original.id }?.title, "A")
+                if usesWindow { XCTAssertEqual(model.selectedSession?.id, "ses_a") }
+            }
+        }
+    }
+
     func testWindowMCPUsesActualOriginDirectoryAndWorkspaceForBothProfiles() async throws {
         for profile: OpenCodeAPIProfile in [.legacy, .v2] {
             let model = model(profile)

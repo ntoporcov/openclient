@@ -1,6 +1,34 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Agents": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Agents" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Agenti" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Agentes" } }
+      }
+    },
+    "Live Activity": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Live Activity" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Attività in tempo reale" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Atividade ao Vivo" } }
+      }
+    },
+    "Start Live Activity": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Start Live Activity" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Avvia attivit\u00e0 live" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Iniciar Atividade ao Vivo" } }
+      }
+    },
+    "Stop Live Activity": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Stop Live Activity" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Interrompi attivit\u00e0 live" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Parar Atividade ao Vivo" } }
+      }
+    },
     "Ahead of what’s next": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Ahead of what’s next" } },

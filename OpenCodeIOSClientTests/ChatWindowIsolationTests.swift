@@ -225,6 +225,103 @@ final class ChatWindowIsolationTests: XCTestCase {
         XCTAssertEqual(lease.ownerID, b)
         XCTAssertTrue(lease.release(b))
     }
+
+    func testHeaderRenameAndAgentSelectionInBPreserveRootAAndOtherOwners() async {
+        let (model, backend) = fixture()
+        defer { model.disconnect() }
+        let a = facade(model, id: "a")
+        let b = facade(model, id: "b", directory: "/other", workspace: "workspace-b")
+        defer { a.windowContext?.close(); b.windowContext?.close() }
+        model.selectedSession = a.selectedSession
+        model.composerStore.draftMessage = "root draft"
+        let duplicate = model.directoryStoreRegistry.store(for: "/duplicate")
+        duplicate.sessions = [b.selectedSession!]
+        model.modelConfigurationStore.availableAgents = [
+            .init(name: "MixedCase", description: nil, mode: "all", hidden: false, model: nil, variant: nil),
+            .init(name: "hidden", description: nil, mode: "primary", hidden: true, model: nil, variant: nil),
+            .init(name: "child", description: nil, mode: "subagent", hidden: false, model: nil, variant: nil)
+        ]
+        let scope = b.headerScope(for: b.selectedSession!)
+        XCTAssertEqual(b.toolbarSnapshot(for: scope.session).selectableAgents.map(\.name), ["MixedCase"])
+        b.selectHeaderAgent(named: "MixedCase", scope: scope)
+        XCTAssertEqual(model.modelConfigurationStore.selectedAgentName(for: "b"), "MixedCase")
+        XCTAssertNil(model.modelConfigurationStore.selectedAgentName(for: "a"))
+        b.selectHeaderAgent(named: "hidden", scope: scope)
+        b.selectHeaderAgent(named: "child", scope: scope)
+        XCTAssertEqual(model.modelConfigurationStore.selectedAgentName(for: "b"), "MixedCase")
+        await b.renameHeaderSession(scope, title: "Renamed B")
+        XCTAssertEqual(backend.renames, ["b"])
+        XCTAssertEqual(backend.scopes.last, .init(projectID: "project", directory: "/other", workspaceID: "workspace-b"))
+        XCTAssertEqual(b.selectedSession?.title, "Renamed B")
+        XCTAssertEqual(duplicate.sessions.first?.title, "Renamed B")
+        XCTAssertEqual(model.selectedSession?.id, "a")
+        XCTAssertEqual(model.selectedSession?.title, "a")
+        XCTAssertEqual(model.composerStore.draftMessage, "root draft")
+        XCTAssertFalse(b.supportsHeaderLiveActivity(scope), "Injected backends cannot use an unrelated compatibility fallback")
+        await b.toggleHeaderLiveActivity(scope)
+        XCTAssertTrue(model.activeLiveActivitySessionIDs.isEmpty)
+    }
+
+    func testHeaderRejectsUnknownDeadReadOnlyAndReplacedSelection() async {
+        let (model, backend) = fixture()
+        defer { model.disconnect() }
+        let b = facade(model, id: "b")
+        let scope = b.headerScope(for: b.selectedSession!)
+        let unknown = b.headerScope(for: .init(id: "unknown", title: "Unknown", workspaceID: nil, directory: "/repo", projectID: "project", parentID: nil))
+        await b.renameHeaderSession(unknown, title: "Invalid")
+        model.connectionStore.backendMode = .cachedServer
+        XCTAssertFalse(b.allowsHeaderAgentSelection(scope))
+        await b.renameHeaderSession(scope, title: "Read only")
+        model.connectionStore.backendMode = .server
+        b.windowContext?.close()
+        await b.renameHeaderSession(scope, title: "Closed")
+        XCTAssertFalse(b.isCurrentHeaderScope(scope))
+        XCTAssertTrue(backend.renames.isEmpty)
+    }
+
+    func testHeaderRenameFailureIsWindowLocalAndLateReplacementDoesNotSetNewErrors() async {
+        let (model, backend) = fixture()
+        defer { model.disconnect() }
+        let b = facade(model, id: "b")
+        let scope = b.headerScope(for: b.selectedSession!)
+        backend.renameFails = true
+        model.errorMessage = "root error"
+        await b.renameHeaderSession(scope, title: "Failure")
+        XCTAssertNotNil(b.windowContext?.errorMessage)
+        XCTAssertEqual(model.errorMessage, "root error")
+        let started = expectation(description: "Rename suspended")
+        var release: CheckedContinuation<Void, Never>?
+        backend.beforeRename = { await withCheckedContinuation { release = $0; started.fulfill() } }
+        let pending = Task { await b.renameHeaderSession(scope, title: "Late failure") }
+        await fulfillment(of: [started], timeout: 2)
+        model.backendConnection = WindowBackend().connection()
+        model.errorMessage = "replacement error"
+        release?.resume()
+        await pending.value
+        XCTAssertEqual(model.errorMessage, "replacement error")
+    }
+
+    func testHeaderRenameCanFinishCanonicallyAfterWindowNavigationWithoutChangingNewDraft() async {
+        let (model, backend) = fixture()
+        defer { model.disconnect() }
+        let b = facade(model, id: "b")
+        let c = facade(model, id: "c")
+        defer { b.windowContext?.close(); c.windowContext?.close() }
+        let scope = b.headerScope(for: b.selectedSession!)
+        let started = expectation(description: "Rename suspended")
+        var release: CheckedContinuation<Void, Never>?
+        backend.beforeRename = { await withCheckedContinuation { release = $0; started.fulfill() } }
+        let pending = Task { await b.renameHeaderSession(scope, title: "Old B renamed") }
+        await fulfillment(of: [started], timeout: 2)
+        await b.selectSession(c.selectedSession!)
+        b.saveMessageDraft("new C draft", forSessionID: "c")
+        release?.resume()
+        await pending.value
+        XCTAssertFalse(b.isCurrentHeaderScope(scope))
+        XCTAssertEqual(b.selectedSession?.id, "c")
+        XCTAssertEqual(b.composerStore.draftMessage, "new C draft")
+        XCTAssertEqual(b.directoryStore(forSessionID: "b").sessions.first { $0.id == "b" }?.title, "Old B renamed")
+    }
 }
 
 @MainActor
@@ -236,6 +333,9 @@ private final class WindowBackend: BackendChatService, BackendSessionsService, B
     var scopes: [BackendScope] = []
     var submissions: [BackendSubmission] = []
     var formReplies = 0
+    var renames: [String] = []
+    var beforeRename: (() async -> Void)?
+    var renameFails = false
     func connection() -> BackendConnection {
         BackendConnection(descriptor: .init(id: "window-tests", name: "Windows", version: "test"),
             projects: self, sessions: self, chat: self, models: self, events: self, sessionForms: self)
@@ -260,7 +360,13 @@ private final class WindowBackend: BackendChatService, BackendSessionsService, B
     }
     func sessions(scope: BackendScope, cursor: String?, limit: Int, roots: Bool) async throws -> BackendSessionPage { .init(sessions: []) }
     func createSession(_ request: BackendSessionCreation) async throws -> OpenCodeSession { throw BackendError.invalidScope }
-    func renameSession(id: String, title: String, scope: BackendScope) async throws -> OpenCodeSession { throw BackendError.invalidScope }
+    func renameSession(id: String, title: String, scope: BackendScope) async throws -> OpenCodeSession {
+        renames.append(id)
+        scopes.append(scope)
+        await beforeRename?()
+        if renameFails { throw BackendError.invalidScope }
+        return .init(id: id, title: title, workspaceID: scope.workspaceID, directory: scope.directory, projectID: scope.projectID, parentID: nil)
+    }
     func deleteSession(id: String, scope: BackendScope) async throws {}
     func searchSessions(query: String, scope: BackendScope, limit: Int) async throws -> [OpenCodeSession] { [] }
     func pendingForms(sessionID: String, scope: BackendScope) async throws -> [BackendForm] { [] }

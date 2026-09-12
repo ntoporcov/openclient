@@ -67,7 +67,15 @@ struct ScreenshotSceneView: View {
             NavigationStack {
                 ActivityView(facade: viewModel.activityFacade, connection: viewModel.connectionFacade) {}
             }
-        case .projects, .newSession, .providerSetup, .funGames, .sessions, .terminal, .sessionActions, .sessionPinned, .chat, .permission, .question, .findPlaceGame, .findBugGame, .composerActions:
+        case .chat:
+            #if os(iOS) && !targetEnvironment(macCatalyst)
+            if ProcessInfo.processInfo.environment["OPENCLIENT_HEADER_FIXTURE"] == "1" {
+                ChatHeaderFixture()
+            } else { rootView }
+            #else
+            rootView
+            #endif
+        case .projects, .newSession, .providerSetup, .funGames, .sessions, .terminal, .sessionActions, .sessionPinned, .permission, .question, .findPlaceGame, .findBugGame, .composerActions:
             rootView
         case .paywall:
             OpenClientPaywallView(

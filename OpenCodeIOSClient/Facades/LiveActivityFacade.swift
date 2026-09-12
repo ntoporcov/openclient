@@ -262,15 +262,15 @@ final class LiveActivityFacade: ObservableObject {
         activeSessionIDs.contains(sessionID)
     }
 
-    func toggle(session: OpenCodeSession) async {
+    func toggle(session: OpenCodeSession, reportError: (@MainActor (String?) -> Void)? = nil) async {
         if isActive(sessionID: session.id) {
             await stop(sessionID: session.id, immediate: true)
         } else {
-            await start(session: session)
+            await start(session: session, reportError: reportError)
         }
     }
 
-    func start(session: OpenCodeSession, userVisibleErrors: Bool = true) async {
+    func start(session: OpenCodeSession, userVisibleErrors: Bool = true, reportError: (@MainActor (String?) -> Void)? = nil) async {
         #if canImport(ActivityKit) && os(iOS) && !targetEnvironment(macCatalyst)
         guard let config = startConfig, let lifetime = currentLifetime else { return }
         viewModel.liveActivityStore.bind(lifetime)
@@ -297,12 +297,14 @@ final class LiveActivityFacade: ObservableObject {
             viewModel.liveActivityStore.activityIDsBySessionID[session.id] = activityRecords().first { $0.attributes.identity == lifetime.owner.session(session.id) }?.id
             viewModel.liveActivityStore.setLastState(state, for: session.id)
             if userVisibleErrors {
-                viewModel.errorMessage = nil
+                if let reportError { reportError(nil) }
+                else { viewModel.errorMessage = nil }
             }
         } catch {
             guard isCurrent(lifetime), viewModel.liveActivityStore.owns(operation, sessionID: session.id, lifetime: lifetime) else { return }
             if userVisibleErrors {
-                viewModel.errorMessage = error.localizedDescription
+                if let reportError { reportError(error.localizedDescription) }
+                else { viewModel.errorMessage = error.localizedDescription }
             }
         }
         #endif

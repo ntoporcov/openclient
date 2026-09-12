@@ -1,5 +1,19 @@
 import SwiftUI
 
+struct ChatToolbarWidthBudget {
+    let header: CGFloat
+    let model: CGFloat
+    let spacing: CGFloat
+
+    init(containerWidth: CGFloat) {
+        // The leading pill includes the fixed context target; the trailing pill is model-only.
+        let pillSpace = min(400, max(196, containerWidth - 124))
+        spacing = containerWidth < 360 ? 0 : 4
+        model = (pillSpace * 0.48).rounded() - 10
+        header = pillSpace - model
+    }
+}
+
 struct ModelToolbarMenu: View {
     let modelTitle: String
     var modelReference: OpenCodeModelReference?
@@ -10,6 +24,7 @@ struct ModelToolbarMenu: View {
     let glassNamespace: Namespace.ID
     let onSelectModel: (OpenCodeModelReference) -> Void
     let onSelectReasoningVariant: (String) -> Void
+    var maximumWidth: CGFloat? = nil
 
     var body: some View {
         StablePickerMenu(
@@ -19,26 +34,47 @@ struct ModelToolbarMenu: View {
             accessibilityIdentifier: "chat.toolbar.model",
             onSelect: select
         ) {
-            HStack(spacing: 4) {
-                if let providerID = modelReference?.providerID, !providerID.isEmpty {
+            HStack(spacing: maximumWidth == nil ? 4 : 0) {
+                if maximumWidth != nil {
+                    Spacer(minLength: 0)
+                }
+                if maximumWidth == nil, let providerID = modelReference?.providerID, !providerID.isEmpty {
                     ProviderIcon(providerID: providerID)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary.opacity(0.72))
                 }
                 if let reasoningSubtitle {
                     VStack(alignment: .trailing, spacing: 0) {
                         Text(modelTitle)
                             .font(.caption)
+                            .truncationMode(.head)
+                            .accessibilityIdentifier("chat.toolbar.model.title")
                         Text(reasoningSubtitle)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary.opacity(0.72))
+                            .accessibilityIdentifier("chat.toolbar.model.reasoning")
                     }
                 } else {
                     Text(modelTitle)
                         .font(.caption)
+                        .truncationMode(.head)
+                }
+                if let maximumWidth, let providerID = modelReference?.providerID, !providerID.isEmpty {
+                    ProviderIcon(providerID: providerID, size: maximumWidth < 80 ? 16 : 24)
+                        .foregroundStyle(.primary.opacity(0.72))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text(verbatim: providerName ?? providerID))
+                        .accessibilityIdentifier("chat.toolbar.providerLogo")
+                        .accessibilityHidden(false)
+                        .padding(.leading, 4)
+                        .fixedSize()
+                        .layoutPriority(1)
                 }
             }
-            .padding(.trailing, 12)
-            .frame(minWidth: modelReference == nil ? 72 : 108, alignment: .leading)
+            .lineLimit(maximumWidth == nil ? nil : 1)
+            .truncationMode(.tail)
+            .padding(.trailing, maximumWidth == nil ? 12 : 6)
+            .frame(minWidth: maximumWidth == nil ? (modelReference == nil ? 72 : 108) : 44,
+                idealWidth: maximumWidth, maxWidth: maximumWidth, minHeight: maximumWidth == nil ? nil : 44, alignment: .leading)
             .opencodeToolbarGlassID("model-toolbar", in: glassNamespace)
         }
         .help(Text(verbatim: providerName ?? modelTitle))

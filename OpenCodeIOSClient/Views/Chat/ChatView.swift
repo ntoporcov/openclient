@@ -5050,11 +5050,33 @@ struct ChatView: View {
             }
         }
 
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        let headerBudget = ChatToolbarWidthBudget(containerWidth: chatViewportWidth)
+        let headerWidth = usesCatalystComposerLayout
+            ? min(220, max(92, chatViewportWidth - 208))
+            : headerBudget.header
+        ToolbarItem(placement: .topBarLeading) {
+            HStack(spacing: headerBudget.spacing) {
+                ChatHeaderMenu(facade: chatFacade, session: liveSession,
+                    containerWidth: chatViewportWidth, containerHeight: chatViewportHeight,
+                    glassNamespace: toolbarGlassNamespace,
+                    maximumWidth: headerWidth - 44 - headerBudget.spacing)
+
+                SessionContextUsageToolbarButton(metrics: contextMetrics, hitTargetSize: 44) {
+                    showingContextMetrics = true
+                }
+                .opencodeToolbarGlassID("context-usage-toolbar", in: toolbarGlassNamespace)
+                .accessibilityIdentifier("chat.toolbar.context")
+            }
+        }
+        #else
         ToolbarItem(placement: .principal) {
             ChatNavigationTitle(snapshot: headerSnapshot)
                 .frame(maxWidth: 300, alignment: .leading)
         }
+        #endif
 
+        #if !os(iOS) || targetEnvironment(macCatalyst)
         if chatFacade.isReadOnly {
             ToolbarItem(placement: .opencodeTrailing) {
                 SessionContextUsageToolbarButton(metrics: contextMetrics) {
@@ -5062,7 +5084,9 @@ struct ChatView: View {
                 }
                 .opencodeToolbarGlassID("context-usage-toolbar", in: toolbarGlassNamespace)
             }
-        } else if toolbarSnapshot.isLoading {
+        }
+        #endif
+        if !chatFacade.isReadOnly, toolbarSnapshot.isLoading {
             ToolbarItem(placement: .opencodeTrailing) {
                 ProgressView()
                     .progressViewStyle(.circular)
@@ -5070,22 +5094,10 @@ struct ChatView: View {
                     .opencodeToolbarGlassID("chat-toolbar-loading", in: toolbarGlassNamespace)
                     .accessibilityLabel("Loading chat controls")
             }
-        } else {
-            #if DEBUG
-            if OpenClientScreenshotScene.current == nil {
-                ToolbarItem(placement: .opencodeTrailing) {
-                    Button {
-                        chatPresentationStore.isShowingDebugProbe = true
-                    } label: {
-                        Image(systemName: "waveform.path.ecg")
-                    }
-                    .accessibilityLabel("Open Streaming Debug Log")
-                }
-            }
-            #endif
-
+        } else if !chatFacade.isReadOnly {
             #if !targetEnvironment(macCatalyst)
             if !usesCatalystComposerLayout {
+                #if os(macOS)
                 if toolbarSnapshot.showsAgentMenu {
                     ToolbarItem(placement: .opencodeTrailing) {
                         AgentToolbarMenu(
@@ -5096,32 +5108,39 @@ struct ChatView: View {
                         )
                     }
                 }
-
-                #if !os(macOS)
-                if #available(iOS 26.0, *) {
-                    ToolbarSpacer(.flexible, placement: .topBarTrailing)
-                }
                 #endif
 
+                #if os(iOS)
+                let modelMaximumWidth: CGFloat? = ChatToolbarWidthBudget(containerWidth: chatViewportWidth).model
+                #else
+                let modelMaximumWidth: CGFloat? = nil
+                #endif
                 ToolbarItem(placement: .opencodeTrailing) {
+                    let modelMenu = ModelToolbarMenu(
+                        modelTitle: toolbarSnapshot.modelTitle,
+                        modelReference: toolbarSnapshot.displayedModelReference,
+                        providerName: toolbarSnapshot.modelProviderName,
+                        providerGroups: toolbarSnapshot.providerGroups,
+                        reasoningVariants: toolbarSnapshot.reasoningVariants,
+                        reasoningTitle: toolbarSnapshot.reasoningTitle,
+                        glassNamespace: toolbarGlassNamespace,
+                        onSelectModel: { chatFacade.selectModel($0, for: liveSession) },
+                        onSelectReasoningVariant: { chatFacade.selectReasoningVariant($0, for: liveSession) },
+                        maximumWidth: modelMaximumWidth
+                    )
+                    #if os(macOS)
                     HStack(spacing: 12) {
                         SessionContextUsageToolbarButton(metrics: contextMetrics) {
                             showingContextMetrics = true
                         }
                         .opencodeToolbarGlassID("context-usage-toolbar", in: toolbarGlassNamespace)
+                        .accessibilityIdentifier("chat.toolbar.context")
 
-                        ModelToolbarMenu(
-                            modelTitle: toolbarSnapshot.modelTitle,
-                            modelReference: toolbarSnapshot.displayedModelReference,
-                            providerName: toolbarSnapshot.modelProviderName,
-                            providerGroups: toolbarSnapshot.providerGroups,
-                            reasoningVariants: toolbarSnapshot.reasoningVariants,
-                            reasoningTitle: toolbarSnapshot.reasoningTitle,
-                            glassNamespace: toolbarGlassNamespace,
-                            onSelectModel: { chatFacade.selectModel($0, for: liveSession) },
-                            onSelectReasoningVariant: { chatFacade.selectReasoningVariant($0, for: liveSession) }
-                        )
+                        modelMenu
                     }
+                    #else
+                    modelMenu
+                    #endif
                 }
             }
             #endif

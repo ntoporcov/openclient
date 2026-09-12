@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class ChatFacadeTests: XCTestCase {
+    func testToolbarWidthBudgetLeavesSpaceForBackContextAndNativeMargins() {
+        for width: CGFloat in [320, 375, 390, 440, 650, 900] {
+            let budget = ChatToolbarWidthBudget(containerWidth: width)
+            XCTAssertGreaterThanOrEqual(budget.header - 44 - budget.spacing, 44)
+            XCTAssertGreaterThanOrEqual(budget.model, 52)
+            XCTAssertLessThanOrEqual(budget.header, 220)
+            XCTAssertLessThanOrEqual(budget.model, 192)
+            XCTAssertGreaterThan(budget.header, budget.model)
+            XCTAssertLessThanOrEqual(budget.header + budget.model + 124, width)
+        }
+        XCTAssertEqual(ChatToolbarWidthBudget(containerWidth: 440).header, 174)
+        XCTAssertEqual(ChatToolbarWidthBudget(containerWidth: 440).model, 142)
+        XCTAssertEqual(ChatToolbarWidthBudget(containerWidth: 320).header, 112)
+        XCTAssertEqual(ChatToolbarWidthBudget(containerWidth: 320).model, 84)
+        XCTAssertLessThan(ChatToolbarWidthBudget(containerWidth: 320).header, ChatToolbarWidthBudget(containerWidth: 440).header)
+        XCTAssertLessThan(ChatToolbarWidthBudget(containerWidth: 320).model, ChatToolbarWidthBudget(containerWidth: 440).model)
+    }
+
     func testProviderLogoUsesExactBundledProviderIDWithSyntheticFallback() {
         for id in ["openai", "openrouter", "amazon-bedrock", "azure", "github-copilot"] {
             XCTAssertEqual(ProviderIcon.assetName(for: id), "ProviderIcon_\(id)")

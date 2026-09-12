@@ -3164,13 +3164,18 @@ extension AppViewModel {
         return accepted
     }
 
-    func renameSession(_ session: OpenCodeSession, title: String) async {
+    func renameSession(_ session: OpenCodeSession, title: String, windowContext: ChatWindowContext? = nil) async {
+        if let windowContext {
+            guard windowContext.isCurrent, windowContext.session.id == session.id else { return }
+        }
         guard let connection = try? requireBackendConnection() else { return }
-        let scope = BackendScope(projectID: session.projectID, directory: sendDirectory(for: session), workspaceID: session.workspaceID)
+        let windowContextID = windowContext?.contextID
+        let scope = BackendScope(projectID: session.projectID,
+            directory: windowContext == nil ? sendDirectory(for: session) : session.directory, workspaceID: session.workspaceID)
         if connectionStore.apiProfile == .v2 {
             let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty, title != session.title else { return }
-            let owner = directoryStoreRegistry.ownerStore(forSessionID: session.id) ?? directoryStore
+            let owner = windowContext?.owner ?? directoryStoreRegistry.ownerStore(forSessionID: session.id) ?? directoryStore
             let generation = directoryStoreRegistry.generation
             let revision = owner.v2SessionRevision
             let lifecycleRevision = directoryStoreRegistry.v2LifecycleRevision(sessionID: session.id)
@@ -3186,16 +3191,23 @@ extension AppViewModel {
                     return
                 }
                 owner.insertV2Session(updated)
+                for other in directoryStoreRegistry.allStores where other !== owner && other.sessions.contains(where: { $0.id == updated.id }) {
+                    other.insertV2Session(updated)
+                }
+                if selectedSession?.id == updated.id { selectedSession = updated }
             } catch {
-                if isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation, sessionNavigationGeneration == navigationGeneration {
-                    errorMessage = error.localizedDescription
+                if isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation,
+                   (windowContext != nil || sessionNavigationGeneration == navigationGeneration) {
+                    if let windowContext {
+                        if windowContext.isCurrent, windowContext.contextID == windowContextID { windowContext.errorMessage = error.localizedDescription }
+                    } else { errorMessage = error.localizedDescription }
                 }
             }
             return
         }
         let generation = directoryStoreRegistry.generation
         let navigationGeneration = sessionNavigationGeneration
-        let owner = directoryStoreRegistry.ownerStore(forSessionID: session.id) ?? directoryStore
+        let owner = windowContext?.owner ?? directoryStoreRegistry.ownerStore(forSessionID: session.id) ?? directoryStore
         let previous = owner.sessions.first { $0.id == session.id }
         do {
             guard let renameSubmission = sessionCoordinator.prepareRenameSession(
@@ -3209,6 +3221,9 @@ extension AppViewModel {
                   directoryStoreRegistry.key(for: owner) != nil,
                   owner.sessions.first(where: { $0.id == session.id }) == previous else { return }
             _ = owner.upsertSessions([updatedSession])
+            for other in directoryStoreRegistry.allStores where other !== owner && other.sessions.contains(where: { $0.id == updatedSession.id }) {
+                _ = other.upsertSessions([updatedSession])
+            }
             if selectedSession?.id == updatedSession.id {
                 withAnimation(opencodeSelectionAnimation) {
                     selectedSession = updatedSession
@@ -3220,7 +3235,11 @@ extension AppViewModel {
             publishWidgetSnapshots()
         } catch {
             if isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation,
-               sessionNavigationGeneration == navigationGeneration { errorMessage = error.localizedDescription }
+               (windowContext != nil || sessionNavigationGeneration == navigationGeneration) {
+                if let windowContext {
+                    if windowContext.isCurrent, windowContext.contextID == windowContextID { windowContext.errorMessage = error.localizedDescription }
+                } else { errorMessage = error.localizedDescription }
+            }
         }
     }
 

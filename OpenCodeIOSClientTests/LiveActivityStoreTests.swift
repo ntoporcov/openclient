@@ -183,6 +183,37 @@ final class LiveActivityStoreTests: XCTestCase {
         }
     }
 
+    func testChatHeaderLiveActivityTargetsWindowBAndRejectsClosedContext() async throws {
+        let fixture = LiveActivityRestoreFixture(profile: .legacy)
+        fixture.install()
+        let model = fixture.model
+        let root = OpenCodeSession(id: "root-a", title: "Root A", workspaceID: nil, directory: "/root", projectID: "root", parentID: nil)
+        model.selectedSession = root
+        let session = OpenCodeSession(id: "window-b", title: "Window B", workspaceID: "b-workspace", directory: "/b", projectID: "b-project", parentID: nil)
+        let owner = model.directoryStoreRegistry.store(for: "/b")
+        owner.sessions = [session]
+        let context = ChatWindowContext(model: model, connection: model.backendConnection!, session: session, owner: owner)
+        let chat = ChatFacade(viewModel: model, windowContext: context)
+        var requests: [LiveActivityStartRequest] = []
+        var ended: [String] = []
+        model.liveActivityFacade = LiveActivityFacade(viewModel: model, requestOrUpdate: { requests.append($0) },
+            activityRecords: { [] }, endActivity: { identity, _, _, _ in ended.append(identity.sessionID) })
+        let scope = chat.headerScope(for: session)
+        XCTAssertTrue(chat.supportsHeaderLiveActivity(scope))
+        await chat.toggleHeaderLiveActivity(scope)
+        XCTAssertEqual(requests.map(\.sessionID), ["window-b"])
+        XCTAssertEqual(requests.first?.directory, "/b")
+        XCTAssertEqual(requests.first?.workspaceID, "b-workspace")
+        XCTAssertTrue(chat.isHeaderLiveActivityActive(scope))
+        await chat.toggleHeaderLiveActivity(scope)
+        XCTAssertEqual(ended, ["window-b"])
+        XCTAssertFalse(chat.isHeaderLiveActivityActive(scope))
+        context.close()
+        await chat.toggleHeaderLiveActivity(scope)
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(model.selectedSession?.id, "root-a")
+    }
+
     func testColdRestoredTapConnectsExactSavedOwnerAndPreservesAutomaticPreference() async throws {
         for profile in [OpenCodeProfileIdentity.legacy, .v2] {
             let fixture = LiveActivityRestoreFixture(profile: profile, missingProfile: profile == .legacy)
