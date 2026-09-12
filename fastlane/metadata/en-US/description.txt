@@ -4,6 +4,18 @@ Keep coding sessions within reach when you are away from your desk. Browse proje
 
 OpenClient is designed for developers who already run OpenCode and want more than a remote chat window. It is a mobile command center for active agent work, long-running tasks, quick follow-ups, and remote check-ins.
 
+Free vs Pro
+
+Free includes everything you need to try OpenClient with your own OpenCode server: up to 5 prompts per day and 1 session.
+
+OpenClient Pro unlocks:
+- Unlimited prompts
+- Unlimited sessions
+- Project Actions
+- Support for continued development of the open-source App Store build
+
+Pro Lifetime is a one-time purchase and includes the Pro Life icon. Launch price is $19.99 through September 30, then US$29.99 or the local equivalent. Pro Monthly is $4.99 and renews monthly.
+
 Core OpenCode features:
 
 - Connect to your own self-hosted OpenCode server
