@@ -75,6 +75,8 @@ struct ScreenshotSceneView: View {
             #else
             rootView
             #endif
+        case .ipadRoom:
+            rootView
         case .projects, .newSession, .providerSetup, .funGames, .sessions, .terminal, .sessionActions, .sessionPinned, .permission, .question, .findPlaceGame, .findBugGame, .composerActions:
             rootView
         case .paywall:

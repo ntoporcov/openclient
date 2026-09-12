@@ -330,6 +330,30 @@ final class OpenCodeIOSClientUITests: XCTestCase {
     }
 
     @MainActor
+    func testPromoIPadRoomScreenshot() throws {
+        guard (environment["SIMULATOR_DEVICE_NAME"] ?? "").localizedCaseInsensitiveContains("iPad") else {
+            throw XCTSkip("The three-column promo scene requires iPad")
+        }
+
+        setSnapshotLandscapeOutput(true)
+        XCUIDevice.shared.orientation = .landscapeLeft
+
+        let app = XCUIApplication()
+        setupSnapshot(app)
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "ipad-room"
+        app.launch()
+        XCUIDevice.shared.orientation = .landscapeLeft
+
+        XCTAssertTrue(
+            app.staticTexts["screenshot.scene.ipad-room"].waitForExistence(timeout: 10),
+            "Expected iPad room screenshot scene to load"
+        )
+        snapshot("25-ipad-room")
+        app.terminate()
+    }
+
+    @MainActor
     private func revealForScreenshot(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
         for _ in 0 ..< 8 {
             if element.exists,

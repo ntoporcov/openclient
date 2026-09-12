@@ -13,6 +13,7 @@ enum OpenClientScreenshotScene: String, CaseIterable {
     case terminal
     case terminalShowcase = "terminal-showcase"
     case chat
+    case ipadRoom = "ipad-room"
     case submissionRecovery = "submission-recovery"
     case permission
     case question
@@ -66,7 +67,7 @@ extension AppViewModel {
             return screenshotSessionActions()
         case .sessionPinned:
             return screenshotSessionPinned()
-        case .chat:
+        case .chat, .ipadRoom:
             return screenshotChat()
         case .submissionRecovery:
             let model = screenshotChat()
