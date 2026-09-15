@@ -215,7 +215,10 @@ final class TerminalFacade: ObservableObject {
                 guard isCurrent(context), !Task.isCancelled else { return }
                 // An event or reconnect during the read invalidates that snapshot.
                 guard revision == inventoryRevision else { continue }
-                let visible = terminals.filter { !removedTerminalKeys.contains(context.key + "\u{0000}" + $0.id) }
+                let visible = terminals.filter {
+                    !ProviderUsageCredentialImportHelper.owns($0)
+                        && !removedTerminalKeys.contains(context.key + "\u{0000}" + $0.id)
+                }
                 store.replaceTerminals(visible, directory: context.directory, workspaceID: context.workspaceID)
                 if let id = attachedTerminalID, !store.activeWorkspace.terminals.contains(where: { $0.id == id }) {
                     detachRenderer()
@@ -521,6 +524,7 @@ final class TerminalFacade: ObservableObject {
         switch event {
         case let .ptyCreated(info):
             inventoryRevision &+= 1
+            guard !ProviderUsageCredentialImportHelper.owns(info) else { return true }
             let key = TerminalStore.workspaceKey(directory: directory, workspaceID: workspaceID) + "\u{0000}" + info.id
             if info.status == "exited" {
                 removeTerminal(id: info.id, directory: directory, workspaceID: workspaceID)
@@ -530,6 +534,10 @@ final class TerminalFacade: ObservableObject {
             return true
         case let .ptyUpdated(info):
             inventoryRevision &+= 1
+            if ProviderUsageCredentialImportHelper.owns(info) {
+                removeTerminal(id: info.id, directory: directory, workspaceID: workspaceID)
+                return true
+            }
             if info.status == "exited" {
                 removeTerminal(id: info.id, directory: directory, workspaceID: workspaceID)
             } else {

@@ -135,6 +135,7 @@ targets:
         UIApplicationSupportsIndirectInputEvents: true
         NSSupportsLiveActivities: true
         OpenCodeSharedKeychainAccessGroup: $(AppIdentifierPrefix)com.ntoporcov.openclient.shared
+        ProviderUsagePrivateKeychainAccessGroup: $(AppIdentifierPrefix)com.ntoporcov.openclient
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:

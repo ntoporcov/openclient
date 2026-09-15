@@ -15,6 +15,7 @@ final class HomeTestBackend: BackendFactory, BackendProjectsService, BackendSess
     var admissionResult: (@MainActor (BackendSubmission) throws -> BackendAdmission)?
     var submissions: [BackendSubmission] = []
     var receive: (@MainActor (BackendEvent) -> Void)?
+    var projectsSnapshotOverride: [OpenCodeProject]?
     var storedSessions = [OpenCodeSession(id: "home-session", title: "Recent chat", workspaceID: nil,
         directory: "/home-project", projectID: "home-project", parentID: nil)]
 
@@ -25,7 +26,7 @@ final class HomeTestBackend: BackendFactory, BackendProjectsService, BackendSess
 
     func projectsSnapshot() async throws -> BackendProjectsSnapshot {
         projectLoads += 1
-        return .init(projects: [
+        return .init(projects: projectsSnapshotOverride ?? [
             .init(id: "global", worktree: "/", vcs: nil, name: "Global", sandboxes: nil, icon: nil, time: nil),
             .init(id: "home-project", worktree: "/home-project", vcs: nil, name: "Home", sandboxes: ["/home-sandbox"], icon: nil, time: nil),
         ], defaultDirectory: "/execution-default")

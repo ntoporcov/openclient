@@ -32,6 +32,7 @@ private struct ProjectListPreview: View {
             connection: viewModel.connectionFacade,
             configurations: viewModel.configurationsFacade,
             games: viewModel.funAndGamesFacade,
+            providerUsage: viewModel.providerUsageFacade,
             onProjectChosen: {}
         )
     }

@@ -63,6 +63,7 @@ enum AppShellDetailRoute: Equatable {
 @MainActor
 final class AppShellFacade: ObservableObject {
     var globalForms: GlobalFormsFacade { viewModel.globalFormsFacade }
+    var providerUsage: ProviderUsageFacade { viewModel.providerUsageFacade }
     var globalFormLocation: BackendFormLocation? {
         if case .chat = detailRoute(isCompact: false), let session = viewModel.selectedSession, let directory = session.directory {
             return .init(directory: directory, workspaceID: session.workspaceID)

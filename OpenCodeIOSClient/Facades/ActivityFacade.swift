@@ -215,7 +215,17 @@ final class ActivityFacade: ObservableObject {
                     .union(metadata.permissions?.map(\.sessionID) ?? [])
                     .union(metadata.forms?.map(\.sessionID) ?? [])
                     .union(metadata.questions?.map(\.sessionID) ?? [])
-                for id in pendingIDs where viewModel.directoryStoreRegistry.snapshot(forSessionID: id)?.session == nil {
+                var sessionsToDiscover = Array(pendingIDs).sorted()
+                var discoveredIDs: Set<String> = []
+                while let id = sessionsToDiscover.popLast() {
+                    guard discoveredIDs.insert(id).inserted,
+                          !viewModel.directoryStoreRegistry.isV2SessionDeleted(id) else { continue }
+                    if let session = viewModel.directoryStoreRegistry.snapshot(forSessionID: id)?.session {
+                        if let parentID = session.parentID, !discoveredIDs.contains(parentID) {
+                            sessionsToDiscover.append(parentID)
+                        }
+                        continue
+                    }
                     let lifecycleRevision = viewModel.directoryStoreRegistry.v2LifecycleRevision(sessionID: id)
                     guard let session = try? await connection.sessions.session(id: id, scope: scope) else { continue }
                     guard viewModel.isCurrentBackendConnection(connection), generation == hydrationGeneration else { return }
@@ -225,6 +235,9 @@ final class ActivityFacade: ObservableObject {
                     _ = viewModel.directoryStoreRegistry.store(for: directory).upsertSessions([session])
                     let recent = viewModel.sessionListStore.recentSessionsByDirectory[SessionListStore.recentDirectoryKey(directory)] ?? []
                     viewModel.sessionListStore.setRecentSessions(recent.filter { $0.id != id } + [session], for: directory)
+                    if let parentID = session.parentID, !discoveredIDs.contains(parentID) {
+                        sessionsToDiscover.append(parentID)
+                    }
                 }
                 applyMetadata(metadata, to: store, statusRevision: statusRevision,
                     permissionRevision: permissionRevision, questionRevision: questionRevision)
@@ -553,12 +566,22 @@ final class ActivityFacade: ObservableObject {
         let runningTools = runningToolSnapshots(in: messages)
         let todos = owner?.syncState.todosBySessionID[session.id] ?? []
         let project = project(for: session)
-        let formOwner = owner
+        let interactionOwner = owner
             ?? viewModel.directoryStoreRegistry.existingStore(for: monitoringDirectory(for: session))
-        let sessionForms = formOwner?.sessionFormStore.forms.values.filter { $0.sessionID == session.id } ?? []
-        let formIDs = Set(sessionForms.map(\.id))
-        let questionCount = (owner?.syncState.questionsBySessionID[session.id]?.filter { !formIDs.contains($0.id) }.count ?? 0) + sessionForms.count
-        let permissionCount = owner?.syncState.permissionsBySessionID[session.id]?.count ?? 0
+        let treeSessions = interactionOwner?.sessions ?? []
+        let sessionForms = interactionOwner.map {
+            SessionInteractionStore.forms(forSessionTreeRootID: session.id, sessions: treeSessions,
+                forms: Array($0.sessionFormStore.forms.values))
+        } ?? []
+        let formKeys = Set(sessionForms.map(\.key))
+        let questionCount = (interactionOwner.map {
+            SessionInteractionStore.questions(forSessionTreeRootID: session.id, sessions: treeSessions,
+                questionsBySessionID: $0.syncState.questionsBySessionID)
+        } ?? []).filter { !formKeys.contains(.init(sessionID: $0.sessionID, formID: $0.id)) }.count + sessionForms.count
+        let permissionCount = interactionOwner.map {
+            SessionInteractionStore.permissions(forSessionTreeRootID: session.id, sessions: treeSessions,
+                permissionsBySessionID: $0.syncState.permissionsBySessionID).count
+        } ?? 0
         let pendingInteractionCount = permissionCount + questionCount
 
         return RowSnapshot(

@@ -13,11 +13,33 @@ enum OpenClientBridgePhase: Equatable, Sendable {
     case connected(port: Int)
 }
 
+enum OpenClientNotificationSetupPhase: Equatable, Sendable {
+    case idle
+    case requesting
+    case ready(OpenClientNotificationSetup)
+    case failed(String)
+}
+
+struct OpenClientNotificationSetupOwner: Equatable, Sendable {
+    let requestID: UUID
+    let lifecycleID: UUID
+    let endpoint: OpenClientBridgeEndpoint
+    let context: OpenClientNotificationSetupContext
+}
+
+struct OpenClientNotificationOpenRequest: Equatable, Sendable {
+    let requestID: UUID
+    let url: URL
+}
+
 @MainActor
 final class OpenClientBridgeStore: ObservableObject {
     @Published private(set) var phase: OpenClientBridgePhase = .idle
     @Published private(set) var errorMessage: String?
     @Published private(set) var endpoint: OpenClientBridgeEndpoint?
+    @Published private(set) var notificationSetupPhase: OpenClientNotificationSetupPhase = .idle
+    @Published private(set) var notificationBrowserErrorMessage: String?
+    private(set) var notificationSetupOwner: OpenClientNotificationSetupOwner?
 
     let clientID: String
     let displayName: String
@@ -44,17 +66,33 @@ final class OpenClientBridgeStore: ObservableObject {
         case .searching:
             phase = .searching
             errorMessage = nil
+            endpoint = nil
+            notificationSetupPhase = .idle
+            notificationSetupOwner = nil
+            notificationBrowserErrorMessage = nil
         case .connecting(let endpoint):
             phase = .connecting(port: endpoint.port)
             errorMessage = nil
             self.endpoint = endpoint
+            notificationSetupPhase = .idle
+            notificationSetupOwner = nil
+            notificationBrowserErrorMessage = nil
         case .connected(let endpoint):
+            if self.endpoint != endpoint {
+                notificationSetupPhase = .idle
+                notificationSetupOwner = nil
+                notificationBrowserErrorMessage = nil
+            }
             phase = .connected(port: endpoint.port)
             errorMessage = nil
             self.endpoint = endpoint
         case .disconnected(let message):
             phase = .idle
             errorMessage = message
+            endpoint = nil
+            notificationSetupPhase = .idle
+            notificationSetupOwner = nil
+            notificationBrowserErrorMessage = nil
         }
     }
 
@@ -62,6 +100,41 @@ final class OpenClientBridgeStore: ObservableObject {
         phase = .idle
         errorMessage = nil
         endpoint = nil
+        notificationSetupPhase = .idle
+        notificationSetupOwner = nil
+        notificationBrowserErrorMessage = nil
+    }
+
+    func beginNotificationSetup(owner: OpenClientNotificationSetupOwner) {
+        notificationSetupOwner = owner
+        notificationBrowserErrorMessage = nil
+        notificationSetupPhase = .requesting
+    }
+
+    func finishNotificationSetup(_ setup: OpenClientNotificationSetup, owner: OpenClientNotificationSetupOwner) {
+        guard notificationSetupOwner == owner else { return }
+        notificationBrowserErrorMessage = nil
+        notificationSetupPhase = .ready(setup)
+    }
+
+    func failNotificationSetup(_ message: String, owner: OpenClientNotificationSetupOwner? = nil) {
+        guard owner == nil || notificationSetupOwner == owner else { return }
+        notificationSetupOwner = nil
+        notificationBrowserErrorMessage = nil
+        notificationSetupPhase = .failed(message)
+    }
+
+    func clearNotificationSetup(owner: OpenClientNotificationSetupOwner? = nil) {
+        guard owner == nil || notificationSetupOwner == owner else { return }
+        notificationSetupOwner = nil
+        notificationBrowserErrorMessage = nil
+        notificationSetupPhase = .idle
+    }
+
+    func failNotificationBrowserOpen(_ message: String, owner: OpenClientNotificationSetupOwner) {
+        guard notificationSetupOwner == owner,
+              case .ready = notificationSetupPhase else { return }
+        notificationBrowserErrorMessage = message
     }
 
     private static var currentDeviceName: String {

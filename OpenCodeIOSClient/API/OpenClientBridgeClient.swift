@@ -11,6 +11,21 @@ struct OpenClientBridgeEndpoint: Equatable, Sendable {
     let webSocketURL: URL
     let port: Int
     let openCodePort: Int
+    let notifications: OpenClientBridgeNotificationsCapability
+
+    init(
+        healthURL: URL,
+        webSocketURL: URL,
+        port: Int,
+        openCodePort: Int,
+        notifications: OpenClientBridgeNotificationsCapability = .missing
+    ) {
+        self.healthURL = healthURL
+        self.webSocketURL = webSocketURL
+        self.port = port
+        self.openCodePort = openCodePort
+        self.notifications = notifications
+    }
 }
 
 enum OpenClientBridgeClientEvent: Equatable, Sendable {
@@ -357,7 +372,20 @@ enum OpenClientBridgeEndpointDiscovery {
               health.protocol == openClientBridgeProtocolVersion,
               health.port == candidate.port,
               health.openCodePort == candidate.openCodePort else { return nil }
-        return candidate
+        return endpoint(candidate: candidate, health: health)
+    }
+
+    static func endpoint(
+        candidate: OpenClientBridgeEndpoint,
+        health: OpenClientBridgeHealth
+    ) -> OpenClientBridgeEndpoint {
+        OpenClientBridgeEndpoint(
+            healthURL: candidate.healthURL,
+            webSocketURL: candidate.webSocketURL,
+            port: candidate.port,
+            openCodePort: candidate.openCodePort,
+            notifications: OpenClientBridgeNotificationsCapability(advertisement: health.notifications)
+        )
     }
 }
 
@@ -438,4 +466,120 @@ private extension URL {
             return nil
         }
     }
+}
+
+protocol OpenClientNotificationSetupRequesting: Sendable {
+    func createSetup(
+        endpoint: OpenClientBridgeEndpoint,
+        context: OpenClientNotificationSetupContext
+    ) async throws -> OpenClientNotificationSetup
+}
+
+final class OpenClientNotificationSetupClient: NSObject, OpenClientNotificationSetupRequesting, URLSessionTaskDelegate, @unchecked Sendable {
+    private let session: URLSession
+    private let now: @Sendable () -> Date
+
+    init(
+        sessionConfiguration: URLSessionConfiguration = .ephemeral,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        let configuration = sessionConfiguration
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 15
+        self.now = now
+        session = URLSession(configuration: configuration, delegate: nil, delegateQueue: nil)
+        super.init()
+    }
+
+    func createSetup(
+        endpoint: OpenClientBridgeEndpoint,
+        context: OpenClientNotificationSetupContext
+    ) async throws -> OpenClientNotificationSetup {
+        guard case .ready(let publicOrigin) = endpoint.notifications else {
+            throw OpenClientNotificationSetupError.unavailable
+        }
+        guard var components = URLComponents(url: endpoint.healthURL, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil,
+              components.path == "/openclient/v1/health",
+              components.query == nil,
+              components.fragment == nil,
+              components.url?.absoluteString == endpoint.healthURL.absoluteString else {
+            throw OpenClientNotificationSetupError.invalidResponse
+        }
+        components.path = "/openclient/v1/notifications/setup"
+        components.query = nil
+        components.fragment = nil
+        guard let requestURL = components.url else { throw OpenClientNotificationSetupError.invalidResponse }
+
+        var request = URLRequest(url: requestURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(
+            OpenClientNotificationSetupRequest(
+                baseURL: context.baseURL,
+                username: context.username,
+                profile: context.profile.rawValue
+            )
+        )
+
+        let (data, response) = try await session.data(for: request, delegate: self)
+        guard let response = response as? HTTPURLResponse,
+              response.statusCode == 200,
+              response.url == requestURL else {
+            throw OpenClientNotificationSetupError.invalidResponse
+        }
+        guard let wire = try? JSONDecoder().decode(OpenClientNotificationSetupResponse.self, from: data) else {
+            throw OpenClientNotificationSetupError.invalidResponse
+        }
+        guard wire.code.count == 10,
+              wire.code.utf8.allSatisfy({ (48 ... 57).contains($0) || (65 ... 70).contains($0) }),
+              let url = URL(string: wire.url),
+              wire.url == "\(publicOrigin)/#setup=\(wire.code)",
+              url.absoluteString == wire.url,
+              let expiresAt = Self.parseDate(wire.expiresAt) else {
+            throw OpenClientNotificationSetupError.invalidResponse
+        }
+        let issuedAt = now()
+        guard expiresAt > issuedAt,
+              expiresAt <= issuedAt.addingTimeInterval(610) else {
+            throw OpenClientNotificationSetupError.invalidExpiry
+        }
+        return OpenClientNotificationSetup(url: url, code: wire.code, expiresAt: expiresAt)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+
+    private static func parseDate(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
+}
+
+private struct OpenClientNotificationSetupRequest: Encodable {
+    let baseURL: String
+    let username: String
+    let profile: String
+}
+
+private struct OpenClientNotificationSetupResponse: Decodable {
+    let url: String
+    let code: String
+    let expiresAt: String
 }

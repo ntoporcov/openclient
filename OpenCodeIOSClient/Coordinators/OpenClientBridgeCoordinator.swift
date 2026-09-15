@@ -14,6 +14,8 @@ final class OpenClientBridgeCoordinator {
     private let chatStore: ChatStore
     private let configProvider: @MainActor () -> OpenCodeServerConfig
     private let client: any OpenClientBridgeConnecting
+    private let notificationSetupClient: any OpenClientNotificationSetupRequesting
+    private let notificationContextProvider: @MainActor () -> OpenClientNotificationSetupContext?
     private var observations: Set<AnyCancellable> = []
     private var lifecycleTask: Task<Void, Never>?
     private var sessionUpdateTask: Task<Void, Never>?
@@ -21,6 +23,7 @@ final class OpenClientBridgeCoordinator {
     private var reconnectAttempt = 0
     private var lifecycleID = UUID()
     private let reconnectDelay: @MainActor (Int) -> Duration
+    private let now: @MainActor () -> Date
 
     init(
         store: OpenClientBridgeStore,
@@ -28,6 +31,9 @@ final class OpenClientBridgeCoordinator {
         chatStore: ChatStore,
         configProvider: @escaping @MainActor () -> OpenCodeServerConfig,
         client: any OpenClientBridgeConnecting = OpenClientBridgeClient(),
+        notificationSetupClient: any OpenClientNotificationSetupRequesting = OpenClientNotificationSetupClient(),
+        notificationContextProvider: @escaping @MainActor () -> OpenClientNotificationSetupContext? = { nil },
+        now: @escaping @MainActor () -> Date = Date.init,
         reconnectDelay: @escaping @MainActor (Int) -> Duration = { attempt in
             .seconds(min(15, 1 << min(attempt, 4)))
         }
@@ -37,6 +43,9 @@ final class OpenClientBridgeCoordinator {
         self.chatStore = chatStore
         self.configProvider = configProvider
         self.client = client
+        self.notificationSetupClient = notificationSetupClient
+        self.notificationContextProvider = notificationContextProvider
+        self.now = now
         self.reconnectDelay = reconnectDelay
 
         Publishers.CombineLatest4(
@@ -99,6 +108,79 @@ final class OpenClientBridgeCoordinator {
         }
         reconnectAttempt = 0
         reconcileConnection()
+    }
+
+    func setupNotifications() async {
+        if case .requesting = store.notificationSetupPhase { return }
+        await beginNotificationSetup()
+    }
+
+    func notificationOpenRequest() -> OpenClientNotificationOpenRequest? {
+        guard case .connected = store.phase,
+              let endpoint = store.endpoint,
+              case .ready = endpoint.notifications,
+              let context = notificationContextProvider(),
+              let owner = store.notificationSetupOwner,
+              owner.lifecycleID == lifecycleID,
+              owner.endpoint == endpoint,
+              owner.context == context,
+              case .ready(let setup) = store.notificationSetupPhase,
+              setup.expiresAt > now() else {
+            store.failNotificationSetup(OpenClientNotificationSetupError.staleSetup.localizedDescription)
+            return nil
+        }
+        return OpenClientNotificationOpenRequest(requestID: owner.requestID, url: setup.url)
+    }
+
+    func notificationBrowserOpenFailed(request: OpenClientNotificationOpenRequest) {
+        guard case .ready(let setup) = store.notificationSetupPhase,
+              setup.url == request.url,
+              let currentRequest = notificationOpenRequest(),
+              currentRequest == request,
+              let owner = store.notificationSetupOwner,
+              owner.requestID == request.requestID else { return }
+        store.failNotificationBrowserOpen(
+            OpenClientNotificationSetupError.browserOpenFailed.localizedDescription,
+            owner: owner
+        )
+    }
+
+    private func beginNotificationSetup() async {
+        guard case .connected = store.phase,
+              let endpoint = store.endpoint,
+              case .ready = endpoint.notifications,
+              let context = notificationContextProvider() else {
+            store.failNotificationSetup(OpenClientNotificationSetupError.unavailable.localizedDescription)
+            return
+        }
+        let owner = OpenClientNotificationSetupOwner(
+            requestID: UUID(),
+            lifecycleID: lifecycleID,
+            endpoint: endpoint,
+            context: context
+        )
+        store.beginNotificationSetup(owner: owner)
+        do {
+            let setup = try await notificationSetupClient.createSetup(endpoint: endpoint, context: context)
+            guard lifecycleID == owner.lifecycleID,
+                  store.notificationSetupOwner == owner,
+                  case .connected = store.phase,
+                  store.endpoint == endpoint,
+                  notificationContextProvider() == context else {
+                store.clearNotificationSetup(owner: owner)
+                return
+            }
+            store.finishNotificationSetup(setup, owner: owner)
+        } catch {
+            guard lifecycleID == owner.lifecycleID,
+                  store.notificationSetupOwner == owner,
+                  store.endpoint == endpoint,
+                  notificationContextProvider() == context else {
+                store.clearNotificationSetup(owner: owner)
+                return
+            }
+            store.failNotificationSetup(error.localizedDescription, owner: owner)
+        }
     }
 
     private var shouldConnect: Bool {

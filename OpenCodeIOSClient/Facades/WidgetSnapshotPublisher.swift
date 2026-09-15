@@ -17,6 +17,10 @@ protocol WidgetTimelineReloading {
     func reloadAllTimelines()
 }
 
+protocol ProviderUsageWidgetTimelineReloading {
+    func reloadProviderUsageTimelines()
+}
+
 extension OpenCodeWidgetStore: WidgetSnapshotWriting {
     func update(_ publication: WidgetServerPublication) {
         updatingServer(
@@ -51,6 +55,15 @@ struct SystemWidgetTimelineReloader: WidgetTimelineReloading {
     func reloadAllTimelines() {
         reloadContentTimelines()
         reloadShortcutTimelines()
+    }
+}
+
+extension SystemWidgetTimelineReloader: ProviderUsageWidgetTimelineReloading {
+    func reloadProviderUsageTimelines() {
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: OpenCodeWidgetKind.providerUsageBars)
+        WidgetCenter.shared.reloadTimelines(ofKind: OpenCodeWidgetKind.providerUsageRings)
+        #endif
     }
 }
 

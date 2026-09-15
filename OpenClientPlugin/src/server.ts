@@ -1,6 +1,7 @@
 import { networkInterfaces } from "node:os"
 import { OpenClientBridge } from "./bridge.js"
 import { parseClientMessage, protocolVersion } from "./protocol.js"
+import { mintNotificationSetupTicket, notificationCapability, type SetupDraft } from "./notifications.js"
 import {
   ImageResourceError,
   ImageResourceManager,
@@ -16,6 +17,7 @@ import {
 
 const websocketPath = "/openclient/v1/ws"
 const healthPath = "/openclient/v1/health"
+const notificationSetupPath = "/openclient/v1/notifications/setup"
 const imageContentRoute = /^\/openclient\/v1\/image\/resources\/([A-Za-z0-9_-]{32})\/content$/
 const videoResourceRoute = /^\/openclient\/v1\/video\/resources\/([A-Za-z0-9_-]{32})\/stream$/
 const videoStreamRoute = /^\/openclient\/v1\/video\/streams\/([A-Za-z0-9_-]{32})$/
@@ -52,6 +54,7 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
     registryPath: options.video?.registryPath ?? defaultVideoRegistryPath(options.openCodePort),
   })
   const registrationTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const setupRateBuckets = new Map<string, number[]>()
 
   const server = (() => {
     try {
@@ -62,13 +65,30 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
     async fetch(request, bunServer) {
       const url = new URL(request.url)
        if (url.pathname === healthPath) {
-        return Response.json({
-          service: "openclient-plugin",
-          protocol: protocolVersion,
-          port,
-          openCodePort: options.openCodePort,
-         })
-       }
+         return Response.json({
+           service: "openclient-plugin",
+           protocol: protocolVersion,
+           port,
+           openCodePort: options.openCodePort,
+           notifications: notificationCapability(),
+          })
+        }
+        if (url.pathname === notificationSetupPath) {
+          if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } })
+          if (request.headers.has("origin")) return safeSetupError(403, "Browser-origin requests are not allowed.")
+          if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) return safeSetupError(415, "Requests must use application/json.")
+          const remote = bunServer.requestIP(request)?.address ?? "unknown"
+          if (rateLimited(setupRateBuckets, remote, 10, 10 * 60_000)) return safeSetupError(429, "Too many setup requests. Wait before trying again.")
+          const capability = notificationCapability()
+          if (capability.state !== "ready") return safeSetupError(capability.state === "unavailable" ? 503 : 403, "Notifications are not ready.")
+          try {
+            const draft = await parseSetupDraft(request)
+            const ticket = mintNotificationSetupTicket(draft)
+            return ticket ? Response.json(ticket, { headers: { "Cache-Control": "no-store" } }) : safeSetupError(503, "Notifications are not ready.")
+          } catch (error) {
+            return safeSetupError(error instanceof SetupRequestError ? error.status : 400, error instanceof SetupRequestError ? error.message : "Invalid setup request.")
+          }
+        }
        const imageMatch = imageContentRoute.exec(url.pathname)
        if (imageMatch) {
          if (request.method !== "GET") {
@@ -224,6 +244,43 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
       await Promise.all([imageResources.stopAll(), videoResources.stopAll()])
     },
   }
+}
+
+class SetupRequestError extends Error {
+  constructor(readonly status: number, message: string) { super(message) }
+}
+
+async function parseSetupDraft(request: Request): Promise<SetupDraft> {
+  const declared = Number(request.headers.get("content-length"))
+  if (Number.isFinite(declared) && declared > 4_096) throw new SetupRequestError(413, "Request body is too large.")
+  const bytes = await request.arrayBuffer()
+  if (bytes.byteLength > 4_096) throw new SetupRequestError(413, "Request body is too large.")
+  let body: unknown
+  try { body = JSON.parse(new TextDecoder().decode(bytes)) }
+  catch { throw new SetupRequestError(400, "Request body must be valid JSON.") }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new SetupRequestError(400, "Invalid setup request.")
+  const value = body as Record<string, unknown>
+  if (Object.keys(value).sort().join(",") !== "baseURL,profile,username") throw new SetupRequestError(400, "Invalid setup request fields.")
+  if (typeof value.baseURL !== "string" || typeof value.username !== "string" || (value.profile !== "legacy" && value.profile !== "v2")) throw new SetupRequestError(400, "Invalid setup request.")
+  const baseURL = value.baseURL.trim()
+  if (!baseURL || baseURL.length > 2_048 || /[\u0000-\u001f\u007f]/.test(baseURL) || value.username.length > 128 || /[\u0000-\u001f\u007f]/.test(value.username)) throw new SetupRequestError(400, "Invalid setup request.")
+  let parsed: URL
+  try { parsed = new URL(baseURL) } catch { throw new SetupRequestError(400, "Invalid server URL.") }
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new SetupRequestError(400, "Server URL must not contain credentials, a query, or a fragment.")
+  return { baseURL, username: value.username, profile: value.profile }
+}
+
+function safeSetupError(status: number, error: string): Response {
+  return Response.json({ error }, { status, headers: { "Cache-Control": "no-store" } })
+}
+
+function rateLimited(buckets: Map<string, number[]>, key: string, maximum: number, windowMS: number): boolean {
+  const now = Date.now()
+  const recent = (buckets.get(key) ?? []).filter((value) => value > now - windowMS)
+  if (recent.length >= maximum) return true
+  recent.push(now)
+  buckets.set(key, recent)
+  return false
 }
 
 function imageErrorResponse(error: unknown): Response {

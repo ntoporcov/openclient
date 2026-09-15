@@ -15,6 +15,7 @@ final class ModelConfigurationStore: ObservableObject {
     }
     @Published var availableProviders: [OpenCodeProvider]
     @Published var connectedProviderIDs: Set<String>
+    @Published private(set) var isProviderStateReady: Bool
     @Published var providerAuthMethodsByProviderID: [String: [OpenCodeProviderAuthMethod]]
     @Published var isLoadingProviders: Bool
     @Published var providerErrorMessage: String?
@@ -45,6 +46,7 @@ final class ModelConfigurationStore: ObservableObject {
         allProviders: [OpenCodeProvider] = [],
         availableProviders: [OpenCodeProvider] = [],
         connectedProviderIDs: Set<String> = [],
+        isProviderStateReady: Bool = false,
         providerAuthMethodsByProviderID: [String: [OpenCodeProviderAuthMethod]] = [:],
         isLoadingProviders: Bool = false,
         providerErrorMessage: String? = nil,
@@ -60,6 +62,7 @@ final class ModelConfigurationStore: ObservableObject {
         self.allProviders = allProviders
         self.availableProviders = availableProviders
         self.connectedProviderIDs = connectedProviderIDs
+        self.isProviderStateReady = isProviderStateReady
         self.providerAuthMethodsByProviderID = providerAuthMethodsByProviderID
         self.isLoadingProviders = isLoadingProviders
         self.providerErrorMessage = providerErrorMessage
@@ -78,6 +81,7 @@ final class ModelConfigurationStore: ObservableObject {
         allProviders = []
         availableProviders = []
         connectedProviderIDs = []
+        isProviderStateReady = false
         providerAuthMethodsByProviderID = [:]
         isLoadingProviders = false
         providerErrorMessage = nil
@@ -135,6 +139,7 @@ final class ModelConfigurationStore: ObservableObject {
         availableProviders = allProviders
         connectedProviderIDs = Set(allProviders.map(\.id))
         defaultModelsByProviderID = defaults
+        isProviderStateReady = true
     }
 
     func applyProviderState(_ state: OpenCodeProviderListResponse) {
@@ -142,6 +147,7 @@ final class ModelConfigurationStore: ObservableObject {
         connectedProviderIDs = Set(state.connected)
         availableProviders = sortedProviderList(allProviders.filter { connectedProviderIDs.contains($0.id) })
         defaultModelsByProviderID = state.default
+        isProviderStateReady = true
     }
 
     func removeConnectedProvider(id: String) {
@@ -171,6 +177,7 @@ final class ModelConfigurationStore: ObservableObject {
         connectedProviderIDs = []
         providerAuthMethodsByProviderID = [:]
         defaultModelsByProviderID = [:]
+        isProviderStateReady = false
     }
 
     func model(for reference: OpenCodeModelReference?) -> OpenCodeModel? {

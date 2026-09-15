@@ -147,9 +147,11 @@ struct RootView<ChatDestination: View>: View {
                 didFinishAutomaticConnection = true
 
                 if shell.isConnected {
-                    shell.selectAutomaticConnectionLandingDestination(
-                        shell.connection.autoConnectLandingDestination
-                    )
+                    if shell.selectedSessionID == nil {
+                        shell.selectAutomaticConnectionLandingDestination(
+                            shell.connection.autoConnectLandingDestination
+                        )
+                    }
                     withAnimation(opencodeSelectionAnimation) {
                         showCurrentRoute()
                     }
@@ -203,6 +205,7 @@ struct RootView<ChatDestination: View>: View {
                     configurations: shell.configurations,
                     games: shell.funAndGames,
                     bridge: bridge,
+                    providerUsage: shell.providerUsage,
                     isActivitySelected: shell.isActivitySelected,
                     onActivityChosen: {
                         shell.selectActivity()
@@ -237,7 +240,7 @@ struct RootView<ChatDestination: View>: View {
                         }
                     }
                 case .activity:
-                    ActivityView(facade: shell.activity, connection: shell.connection) {
+                    ActivityView(facade: shell.activity, connection: shell.connection, providerUsage: shell.providerUsage) {
                         withAnimation(opencodeSelectionAnimation) {
                             showDetailColumn()
                         }

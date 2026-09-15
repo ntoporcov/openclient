@@ -52,6 +52,18 @@ final class WidgetDeepLinkTests: XCTestCase {
         XCTAssertEqual(OpenCodeWidgetDeepLink.request(from: old)?.profile, .legacy)
     }
 
+    func testNotificationPWAHandoffURLParsesWithoutChangingIdentityOrLocation() throws {
+        let url = try XCTUnwrap(URL(string: "openclient://widget/session?profile=legacy&serverID=http%3A%2F%2Fmac.local%3A4096%2F%7Copencode&sessionID=ses_1&projectID=project_1&directory=%2Ftmp%2Fa%20b"))
+
+        let request = try XCTUnwrap(OpenCodeWidgetDeepLink.request(from: url))
+
+        XCTAssertEqual(request.profile, .legacy)
+        XCTAssertEqual(request.serverID, "http://mac.local:4096/|opencode")
+        XCTAssertEqual(request.kind, .session(sessionID: "ses_1"))
+        XCTAssertEqual(request.projectID, "project_1")
+        XCTAssertEqual(request.directory, "/tmp/a b")
+    }
+
     func testLegacyJSONDefaultsOnlyMissingProfileAndPreservesRawIDs() throws {
         let data = Data("""
         {"id":"raw|server","displayName":"Server","baseURL":"https://server.invalid","username":"user","generatedAt":0,"isLastConnected":true}
@@ -280,17 +292,119 @@ private func widgetSession(profile: OpenCodeProfileIdentity, serverID: String = 
 
 @MainActor
 final class WidgetSessionRoutingTests: XCTestCase {
+    func testColdLaunchPreparationReservesSessionBeforeAutomaticConnectionTaskRuns() throws {
+        let model = AppViewModel(backendFactory: HomeTestBackend())
+        defer { model.disconnect() }
+        model.config = .init(baseURL: "https://cold-reservation.invalid", password: "test", apiPreference: .automatic)
+        model.recentServerConfigs = [model.config]
+        let url = try XCTUnwrap(OpenCodeWidgetDeepLink.sessionURL(widgetSession(
+            profile: .v2,
+            serverID: model.config.recentServerID
+        )))
+
+        model.prepareOpenURLPresentation(url)
+
+        XCTAssertEqual(model.deepLinkRoutingStore.pendingWidgetSession?.request, OpenCodeWidgetDeepLink.request(from: url))
+        XCTAssertFalse(model.deepLinkRoutingStore.allowsAutomaticConnection)
+    }
+
     func testWarmAutomaticV2OpensCanonicalSessionWithoutChangingPreferenceOrCreating() async throws {
         let (model, backend) = try await warmModel()
         defer { model.disconnect() }
+        let previousPresentationRequest = model.chatDetailPresentationRequest
+        model.selectedProjectContentTab = .git
+        model.appShellFacade.selectActivity()
         await model.handleOpenURL(try link(model))
         XCTAssertEqual(model.selectedSession?.id, "home-session")
         XCTAssertEqual(model.selectedSession?.title, "Recent chat", "Never select the stale widget's title or location")
         XCTAssertEqual(model.currentProject?.id, "home-project")
+        XCTAssertEqual(model.selectedProjectContentTab, .sessions)
+        XCTAssertEqual(
+            model.appShellFacade.detailRoute(isCompact: true),
+            .chat(.init(sessionID: "home-session", presentationRequest: model.chatDetailPresentationRequest))
+        )
+        XCTAssertEqual(model.appShellFacade.contentRoute(isCompact: true), .projectContent)
+        XCTAssertEqual(model.chatDetailPresentationRequest, previousPresentationRequest + 1)
         XCTAssertEqual(model.config.apiPreference, .automatic)
         XCTAssertEqual(model.recentServerConfigs.first?.apiPreference, .automatic)
         XCTAssertEqual(backend.storedSessions.count, 1)
         XCTAssertTrue(backend.submissions.isEmpty)
+    }
+
+    func testProjectListDeepLinkRequestsDetailOnlyAfterSessionHydrationCommits() async throws {
+        let (model, backend) = try await warmModel()
+        defer { model.disconnect() }
+        model.currentProject = nil
+        model.selectedSession = nil
+        model.appShellFacade.selectProjectContent()
+        let previousPresentationRequest = model.chatDetailPresentationRequest
+        let transcriptRequested = expectation(description: "Transcript hydration started")
+        var releaseTranscript: CheckedContinuation<Void, Never>?
+        backend.beforeTranscript = {
+            await withCheckedContinuation { continuation in
+                releaseTranscript = continuation
+                transcriptRequested.fulfill()
+            }
+        }
+        defer {
+            releaseTranscript?.resume()
+            backend.beforeTranscript = nil
+        }
+
+        let url = try link(model)
+        let route = Task { await model.handleOpenURL(url) }
+        await fulfillment(of: [transcriptRequested], timeout: 2)
+
+        XCTAssertEqual(model.currentProject?.id, "home-project")
+        XCTAssertEqual(model.selectedSession?.id, "home-session")
+        XCTAssertEqual(model.chatDetailPresentationRequest, previousPresentationRequest)
+
+        releaseTranscript?.resume()
+        releaseTranscript = nil
+        await route.value
+
+        XCTAssertEqual(model.chatDetailPresentationRequest, previousPresentationRequest + 1)
+        XCTAssertEqual(model.appShellFacade.contentRoute(isCompact: true), .projectContent)
+        XCTAssertEqual(
+            model.appShellFacade.detailRoute(isCompact: true),
+            .chat(.init(sessionID: "home-session", presentationRequest: model.chatDetailPresentationRequest))
+        )
+    }
+
+    func testLegacyCanonicalSessionOpensBeforeProjectCatalogDiscoversItsProject() async throws {
+        let (model, backend) = try await warmModel()
+        defer { model.disconnect() }
+        backend.projectsSnapshotOverride = []
+        model.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)
+        let url = try XCTUnwrap(OpenCodeWidgetDeepLink.sessionURL(widgetSession(
+            profile: .legacy,
+            serverID: model.config.recentServerID
+        )))
+
+        await model.handleOpenURL(url)
+
+        XCTAssertEqual(model.selectedSession?.id, "home-session")
+        XCTAssertEqual(model.currentProject?.id, "home-project")
+        XCTAssertEqual(model.currentProject?.worktree, "/home-project")
+        XCTAssertEqual(model.projects.map(\.id), ["home-project"])
+        XCTAssertEqual(model.selectedProjectContentTab, .sessions)
+        XCTAssertEqual(
+            model.appShellFacade.detailRoute(isCompact: true),
+            .chat(.init(sessionID: "home-session", presentationRequest: model.chatDetailPresentationRequest))
+        )
+        XCTAssertTrue(backend.submissions.isEmpty)
+    }
+
+    func testMalformedWidgetHandoffLeavesSanitizedDiagnostic() async throws {
+        let (model, _) = try await warmModel()
+        defer { model.disconnect() }
+        model.isShowingDebugProbe = true
+        let url = try XCTUnwrap(URL(string: "openclient://widget/session?profile=unknown&serverID=secret&sessionID=ses_1&projectID=project_1"))
+
+        await model.handleOpenURL(url)
+
+        XCTAssertTrue(model.debugProbeLog.contains(where: { $0.contains("widget handoff rejected stage=parse") }))
+        XCTAssertFalse(model.debugProbeLog.contains(where: { $0.contains("secret") }))
     }
 
     func testWrongProfileUnknownServerAndLocationDoNotSelectOrFallback() async throws {
@@ -345,11 +459,13 @@ final class WidgetSessionRoutingTests: XCTestCase {
             // Yield until the route has subscribed to the connection's published completion.
             for _ in 0..<10 { await Task.yield() }
             XCTAssertNil(model.selectedSession)
+            XCTAssertNotNil(model.deepLinkRoutingStore.pendingWidgetSession)
             model.connectionStore.applySuccessfulV2Connection(version: "2", healthy: true)
             model.connectionStore.finishConnecting()
             model.connectionAttemptID = nil
             await route.value
             XCTAssertEqual(model.selectedSession?.id, legacy ? nil : "home-session")
+            XCTAssertNil(model.deepLinkRoutingStore.pendingWidgetSession)
             XCTAssertEqual(model.config.apiPreference, .automatic)
             XCTAssertTrue(backend.submissions.isEmpty)
         }
@@ -379,6 +495,31 @@ final class WidgetSessionRoutingTests: XCTestCase {
         XCTAssertEqual(model.connectionAttemptID, attempt)
         XCTAssertEqual(model.config, active)
         XCTAssertNil(model.selectedSession)
+        XCTAssertTrue(backend.submissions.isEmpty)
+    }
+
+    func testPendingLinkReplacesAutomaticConnectionAttemptForDifferentSavedServer() async throws {
+        let (model, backend) = try await warmModel()
+        defer { model.disconnect() }
+        let target = OpenCodeServerConfig(
+            baseURL: "https://notification-target.invalid",
+            password: "target",
+            apiPreference: .automatic
+        )
+        model.recentServerConfigs.append(target)
+        model.automaticConnectionRetryEnabled = true
+        model.connectionStore.beginConnecting()
+        model.connectionAttemptID = UUID()
+        let url = try XCTUnwrap(OpenCodeWidgetDeepLink.sessionURL(widgetSession(
+            profile: .v2,
+            serverID: target.recentServerID
+        )))
+
+        await model.handleOpenURL(url)
+
+        XCTAssertEqual(model.config.recentServerID, target.recentServerID)
+        XCTAssertFalse(model.automaticConnectionRetryEnabled)
+        XCTAssertNil(model.selectedSession, "The generic test backend cannot satisfy a resolved OpenCode profile")
         XCTAssertTrue(backend.submissions.isEmpty)
     }
 

@@ -49,6 +49,7 @@ describe("bridge port selection", () => {
         protocol: 1,
         port: server.port,
         openCodePort,
+        notifications: { version: 1, state: "unconfigured" },
       })
 
       const WebSocketWithOptions = WebSocket as unknown as {

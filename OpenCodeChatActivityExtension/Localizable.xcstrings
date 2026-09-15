@@ -1346,6 +1346,153 @@
           }
         }
       }
+    },
+    "%@ credits": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%@ credits" } },
+        "it": { "stringUnit": { "state": "translated", "value": "%@ crediti" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "%@ créditos" } }
+      }
+    },
+    "Choose and order usage metrics. Leave empty to use the synced order.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose and order usage metrics. Leave empty to use the synced order." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Scegli e ordina le metriche di utilizzo. Lascia vuoto per usare l'ordine sincronizzato." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Escolha e ordene as métricas de uso. Deixe vazio para usar a ordem sincronizada." } }
+      }
+    },
+    "Daily": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Daily" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Giornaliero" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Diário" } }
+      }
+    },
+    "In %@": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "In %@" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Tra %@" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Em %@" } }
+      }
+    },
+    "Lifetime": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Lifetime" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Sempre" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Todo o período" } }
+      }
+    },
+    "Monthly": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Monthly" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Mensile" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Mensal" } }
+      }
+    },
+    "No Usage Data": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No Usage Data" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Nessun dato di utilizzo" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Sem dados de uso" } }
+      }
+    },
+    "Now": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Now" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Ora" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Agora" } }
+      }
+    },
+    "Open OpenClient to sync usage.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open OpenClient to sync usage." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Apri OpenClient per sincronizzare l'utilizzo." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Abra o OpenClient para sincronizar o uso." } }
+      }
+    },
+    "Provider Usage": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Provider Usage" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Utilizzo provider" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Uso dos provedores" } }
+      }
+    },
+    "Provider Usage Bars": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Provider Usage Bars" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Barre utilizzo provider" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Barras de uso dos provedores" } }
+      }
+    },
+    "Provider Usage Rings": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Provider Usage Rings" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Anelli utilizzo provider" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Anéis de uso dos provedores" } }
+      }
+    },
+    "Reset %@": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Reset %@" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Ripristino %@" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Redefine %@" } }
+      }
+    },
+    "Track provider usage with compact progress bars.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Track provider usage with compact progress bars." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Monitora l'utilizzo dei provider con barre di avanzamento compatte." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Acompanhe o uso dos provedores com barras de progresso compactas." } }
+      }
+    },
+    "Track provider usage with compact progress rings.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Track provider usage with compact progress rings." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Monitora l'utilizzo dei provider con anelli di avanzamento compatti." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Acompanhe o uso dos provedores com anéis de progresso compactos." } }
+      }
+    },
+    "Unavailable": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Unavailable" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Non disponibile" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Indisponível" } }
+      }
+    },
+    "Unlimited": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Unlimited" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Illimitato" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Ilimitado" } }
+      }
+    },
+    "Usage": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Utilizzo" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Uso" } }
+      }
+    },
+    "Usage Metric": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage Metric" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Metrica di utilizzo" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Métrica de uso" } }
+      }
+    },
+    "Usage Metrics": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage Metrics" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Metriche di utilizzo" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Métricas de uso" } }
+      }
+    },
+    "Weekly": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Weekly" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Settimanale" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Semanal" } }
+      }
     }
   },
   "version": "1.0"

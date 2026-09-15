@@ -7,6 +7,8 @@ enum OpenCodeWidgetKind {
     static let newSessionShortcut = "OpenCodeNewSessionWidget"
     static let actionControl = "OpenCodeActionControl"
     static let newSessionControl = "OpenCodeNewSessionControl"
+    static let providerUsageBars = "OpenCodeProviderUsageBarsWidget"
+    static let providerUsageRings = "OpenCodeProviderUsageRingsWidget"
 }
 
 enum OpenCodeWidgetSessionStatus: String, Codable, Hashable, Sendable {

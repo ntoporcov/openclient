@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="OC Notify">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png?v=5">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css?v=8">
+  <title>OC Notify</title>
+</head>
+<body>
+  <main class="settings-shell">
+    <header class="page-header">
+      <div>
+        <p class="context" data-i18n="context">OpenCode</p>
+        <h1 data-i18n="title">OC Notify</h1>
+      </div>
+      <button class="circle-button" id="refresh" type="button" data-i18n-aria="refresh" aria-label="Refresh">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.7 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.3 15"/></svg>
+      </button>
+    </header>
+
+    <section class="device-card" aria-labelledby="device-title">
+      <span class="icon-tile" id="device-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9.8 21h4.4"/></svg>
+      </span>
+      <span class="row-copy"><strong id="device-title" data-i18n="thisDevice">This device</strong><span id="device-summary" data-i18n="notPaired">Not paired</span></span>
+      <span class="state-dot" id="device-dot" aria-hidden="true"></span>
+    </section>
+
+    <aside class="install-note" id="install-note" hidden>
+      <span class="install-glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3v11m-4-7 4-4 4 4M5 12v7h14v-7"/></svg>
+      </span>
+      <span><strong data-i18n="installTitle">Add to Home Screen</strong><span data-i18n="installBody">In Safari, tap Share, then Add to Home Screen. Open the installed app to enable notifications.</span></span>
+    </aside>
+
+    <section class="settings-section" id="setup-section" aria-labelledby="setup-heading">
+      <h2 id="setup-heading" data-i18n="setupTitle">Connection Setup Code</h2>
+      <div class="group">
+        <label class="field-row" for="setup-code"><span data-i18n="setupLabel">Connection setup code</span><input id="setup-code" autocomplete="one-time-code" autocapitalize="characters" maxlength="10" placeholder="A1B2C3D4E5"></label>
+        <button class="action-row" id="use-connection" type="button" data-i18n="useConnection">Use Connection</button>
+      </div>
+      <p class="section-footer" data-i18n="setupHint">Install or reopen this Home Screen app, enter this code, pair the device with a separate Mac pairing code if needed, then tap Use Connection. Review the draft and tap Save Changes.</p>
+    </section>
+
+    <details class="pairing-disclosure" id="pairing-details" open>
+      <summary><span data-i18n="pairTitle">Pair this device</span><span class="disclosure-label" id="pairing-summary" data-i18n="pairNeeded">Required</span></summary>
+      <div class="disclosure-content">
+        <label class="field-row" for="pair-code">
+          <span data-i18n="pairLabel">Pairing code</span>
+          <input id="pair-code" autocomplete="one-time-code" autocapitalize="characters" maxlength="10" placeholder="A1B2C3D4E5">
+        </label>
+        <button class="action-row" id="pair" type="button" data-i18n="pairButton">Pair Device</button>
+        <p class="section-footer" data-i18n="pairHint">Generate a fresh 10-minute code with npm run pair on the Mac.</p>
+      </div>
+    </details>
+
+    <section class="settings-section" aria-labelledby="permission-heading">
+      <h2 id="permission-heading" data-i18n="permissionHeading">Device Permissions</h2>
+      <div class="group">
+        <button class="navigation-row" id="enable" type="button">
+          <span class="small-icon blue" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9.8 21h4.4"/></svg>
+          </span>
+          <span class="row-copy"><strong data-i18n="notifyButton">Enable Notifications</strong><span id="permission-summary" data-i18n="permissionNotEnabled">Not enabled</span></span>
+          <svg class="chevron" viewBox="0 0 12 20" aria-hidden="true"><path d="m3 3 7 7-7 7"/></svg>
+        </button>
+      </div>
+      <p class="section-footer" data-i18n="notifyHint">iOS shows its permission prompt only after you tap this row.</p>
+    </section>
+
+    <section class="settings-section" aria-labelledby="destination-heading">
+      <h2 id="destination-heading" data-i18n="destinationTitle">OpenClient Destination</h2>
+      <details class="advanced-disclosure group" id="advanced-details">
+        <summary>
+          <span class="row-copy"><strong data-i18n="connectionLabel">Connection</strong><span id="connection-summary" data-i18n="manualSetup">Manual setup required</span></span>
+          <span class="suggested-label" id="suggested-label" data-i18n="suggested" hidden>Suggested</span>
+          <span class="advanced-label" data-i18n="advanced">Advanced</span>
+        </summary>
+        <div class="advanced-content">
+          <label class="field-row" for="base-url"><span data-i18n="baseURLLabel">Server URL</span><input id="base-url" type="url" inputmode="url" autocomplete="url" placeholder="http://127.0.0.1:4096"></label>
+          <label class="field-row" for="username"><span data-i18n="usernameLabel">Username</span><input id="username" autocomplete="username" value="opencode"></label>
+          <label class="field-row" for="profile"><span data-i18n="profileLabel">Server Profile</span><span class="select-wrap"><select id="profile"><option value="legacy" data-i18n="profileLegacy">Legacy</option><option value="v2" data-i18n="profileV2">V2</option></select><svg class="select-chevron" viewBox="0 0 12 20" aria-hidden="true"><path d="m3 3 7 7-7 7"/></svg></span></label>
+        </div>
+      </details>
+      <p class="section-footer" id="destination-help" data-i18n="destinationHelp">Suggested from this app. Must match the server saved in OpenClient; edit in Advanced if needed.</p>
+    </section>
+
+    <section class="settings-section" aria-labelledby="delivery-heading">
+      <h2 id="delivery-heading" data-i18n="deliveryHeading">Delivery</h2>
+      <div class="group">
+        <label class="switch-row" for="real-events"><span class="row-copy"><strong data-i18n="realEventsLabel">OpenCode Activity</strong><span data-i18n="realEventsSublabel">Notify for idle sessions and requests</span></span><span class="switch"><input id="real-events" type="checkbox" role="switch"><span aria-hidden="true"></span></span></label>
+        <label class="switch-row" for="auto-open"><span class="row-copy"><strong data-i18n="autoLabel">Try Auto-Open</strong><span data-i18n="autoSublabel">Continue from handoff automatically</span></span><span class="switch"><input id="auto-open" type="checkbox" role="switch"><span aria-hidden="true"></span></span></label>
+        <label class="field-row delay-row" for="delay"><span data-i18n="delayLabel">Notification Delay</span><span class="number-value"><input id="delay" type="number" inputmode="numeric" min="5" max="120" value="15"><span data-i18n="seconds">sec</span></span></label>
+      </div>
+      <p class="section-footer" data-i18n="deliveryHelp">OpenCode Activity starts only after you save. Auto-open is experimental and iOS may still require a tap.</p>
+      <div class="save-line"><span id="save-state" data-i18n="saved">Saved</span><button id="save-destination" type="button" data-i18n="saveDestination">Save Changes</button></div>
+    </section>
+
+    <section class="settings-section test-section" aria-labelledby="test-heading">
+      <h2 id="test-heading" data-i18n="testTitle">Test Notification</h2>
+      <div class="group single-action-group"><button class="action-row primary" id="schedule" type="button" data-i18n="testButton">Schedule Test Notification</button></div>
+      <p class="section-footer" data-i18n="leaveHint">Uses the delay above. After scheduling, close or leave this app; the server timer continues.</p>
+    </section>
+
+    <div class="status-banner" id="status-banner" role="status" aria-live="polite"><span class="status-glyph" aria-hidden="true">i</span><p id="status" data-i18n="ready">Ready to pair.</p></div>
+
+    <details class="activity-disclosure" id="activity-details">
+      <summary><span data-i18n="activityTitle">Recent Activity</span><span id="activity-count"></span></summary>
+      <ol id="jobs" class="jobs"></ol>
+      <p class="empty-activity" id="empty-activity" data-i18n="noActivity">No recent notification activity.</p>
+    </details>
+    <a class="events-navigation" href="/events.html"><span data-i18n="viewAllEvents">View All Events</span><svg class="chevron" viewBox="0 0 12 20" aria-hidden="true"><path d="m3 3 7 7-7 7"/></svg></a>
+
+    <section class="settings-section danger-section" data-i18n-aria="thisDevice" aria-label="This device">
+      <div class="group single-action-group"><button class="action-row destructive" id="reset" type="button" data-i18n="reset">Unsubscribe and Reset Device</button></div>
+    </section>
+  </main>
+  <script type="module" src="/app.js?v=8"></script>
+</body>
+</html>

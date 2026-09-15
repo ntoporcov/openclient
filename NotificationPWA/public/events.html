@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="OC Notify">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png?v=5">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css?v=8">
+  <title>Events · OC Notify</title>
+</head>
+<body>
+  <main class="settings-shell events-shell">
+    <a class="back-link" href="/" data-i18n-aria="backAccessibility" aria-label="Back to Notification Settings">
+      <svg viewBox="0 0 12 20" aria-hidden="true"><path d="m9 3-7 7 7 7"/></svg><span data-i18n="back">Notification Settings</span>
+    </a>
+    <header class="page-header events-header">
+      <div><p class="context" data-i18n="context">OC Notify</p><h1 data-i18n="title">Events</h1></div>
+      <button class="circle-button" id="events-refresh" type="button" data-i18n-aria="refresh" aria-label="Refresh events">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.7 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.3 15"/></svg>
+      </button>
+    </header>
+
+    <section class="source-card" aria-labelledby="source-title">
+      <span class="source-dot" id="source-dot" aria-hidden="true"></span>
+      <span class="row-copy"><strong id="source-title" data-i18n="sourceTitle">This project’s plugin</strong><span id="source-summary" data-i18n="noBridge">No bridge activity recorded</span></span>
+    </section>
+    <div class="events-banner" id="events-error" role="status" aria-live="polite" hidden></div>
+    <div class="events-banner warning" id="persistence-warning" role="status" hidden data-i18n="persistenceWarning">History could not be saved and may not survive a companion restart.</div>
+
+    <section class="events-unpaired" id="events-unpaired" hidden>
+      <h2 data-i18n="unpairedTitle">Pair this device first</h2>
+      <p data-i18n="unpairedBody">Events are private to each paired device.</p>
+      <a href="/" data-i18n="openSettings">Open Notification Settings</a>
+    </section>
+
+    <section class="events-empty" id="events-empty" hidden>
+      <span class="empty-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9.8 21h4.4"/></svg></span>
+      <h2 data-i18n="emptyTitle">No events received</h2>
+      <p data-i18n="emptyBody">No notification events have been recorded for this device since companion history began.</p>
+    </section>
+
+    <section id="events-content" hidden aria-labelledby="events-count">
+      <h2 id="events-count"></h2>
+      <ol class="event-list" id="event-list"></ol>
+    </section>
+
+    <footer class="events-footer">
+      <p data-i18n="coverage">Only events received by this companion appear here. Events ignored before forwarding, including skipped subagent completions, may not appear.</p>
+      <p data-i18n="proof">“Accepted by push service” confirms only that the push service accepted the request. It does not prove that iOS displayed it.</p>
+      <p id="last-updated" data-i18n="notUpdated">Not refreshed yet</p>
+    </footer>
+  </main>
+  <script type="module" src="/events.js?v=1"></script>
+</body>
+</html>

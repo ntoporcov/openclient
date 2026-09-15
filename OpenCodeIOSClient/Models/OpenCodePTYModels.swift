@@ -11,7 +11,7 @@ struct OpenCodePTY: Codable, Hashable, Identifiable, Sendable {
     var exitCode: Int? = nil
 }
 
-struct OpenCodePTYCreateRequest: Encodable, Sendable {
+struct OpenCodePTYCreateRequest: Encodable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     let command: String?
     let args: [String]?
     let cwd: String?
@@ -31,6 +31,9 @@ struct OpenCodePTYCreateRequest: Encodable, Sendable {
         self.title = title
         self.env = env
     }
+
+    var description: String { "OpenCodePTYCreateRequest(<redacted body>)" }
+    var debugDescription: String { description }
 }
 
 struct OpenCodePTYUpdateRequest: Encodable, Sendable {

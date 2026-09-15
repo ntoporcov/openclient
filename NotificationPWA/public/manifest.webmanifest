@@ -1,0 +1,14 @@
+{
+  "name": "OC Notify",
+  "short_name": "OC Notify",
+  "description": "An isolated Web Push and OpenClient handoff prototype.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F2F2F7",
+  "theme_color": "#F2F2F7",
+  "icons": [
+    { "src": "/icons/icon-192.png?v=5", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png?v=5", "sizes": "512x512", "type": "image/png" }
+  ]
+}

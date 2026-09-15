@@ -76,6 +76,8 @@
 	</array>
 	<key>OpenCodeSharedKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.ntoporcov.openclient.shared</string>
+	<key>ProviderUsagePrivateKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)com.ntoporcov.openclient</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -7,10 +7,12 @@ final class OpenClientBridgeTests: XCTestCase {
     override func setUp() {
         super.setUp()
         OpenClientImageMockURLProtocol.requestHandler = nil
+        OpenClientNotificationMockURLProtocol.requestHandler = nil
     }
 
     override func tearDown() {
         OpenClientImageMockURLProtocol.requestHandler = nil
+        OpenClientNotificationMockURLProtocol.requestHandler = nil
         super.tearDown()
     }
 
@@ -48,6 +50,440 @@ final class OpenClientBridgeTests: XCTestCase {
         XCTAssertEqual(endpoints.first?.healthURL.absoluteString, "http://100.64.0.10:4070/openclient/v1/health")
         XCTAssertEqual(endpoints.last?.webSocketURL.absoluteString, "ws://100.64.0.10:4090/openclient/v1/ws")
         XCTAssertEqual(endpoints.first?.openCodePort, 4096)
+    }
+
+    func testBridgeHealthDecodesOldAndNotificationAdvertisementsWithoutBreakingBridge() throws {
+        let old = try JSONDecoder().decode(
+            OpenClientBridgeHealth.self,
+            from: Data(#"{"service":"openclient-plugin","protocol":1,"port":4070,"openCodePort":4096}"#.utf8)
+        )
+        XCTAssertNil(old.notifications)
+        XCTAssertEqual(OpenClientBridgeNotificationsCapability(advertisement: old.notifications), .missing)
+
+        let ready = try JSONDecoder().decode(
+            OpenClientBridgeHealth.self,
+            from: Data(#"{"service":"openclient-plugin","protocol":1,"port":4070,"openCodePort":4096,"notifications":{"version":1,"state":"ready","publicOrigin":"https://notify.example.com"}}"#.utf8)
+        )
+        XCTAssertEqual(
+            OpenClientBridgeNotificationsCapability(advertisement: ready.notifications),
+            .ready(publicOrigin: "https://notify.example.com")
+        )
+
+        let unknownState = try JSONDecoder().decode(
+            OpenClientBridgeHealth.self,
+            from: Data(#"{"service":"openclient-plugin","protocol":1,"port":4070,"openCodePort":4096,"notifications":{"version":1,"state":"future"}}"#.utf8)
+        )
+        XCTAssertEqual(OpenClientBridgeNotificationsCapability(advertisement: unknownState.notifications), .unavailable)
+
+        let malformedCapability = try JSONDecoder().decode(
+            OpenClientBridgeHealth.self,
+            from: Data(#"{"service":"openclient-plugin","protocol":1,"port":4070,"openCodePort":4096,"notifications":"invalid"}"#.utf8)
+        )
+        XCTAssertNil(malformedCapability.notifications)
+    }
+
+    func testNotificationAdvertisementsFailClosedWithoutDisablingBridge() throws {
+        let invalidOrigins = [
+            "http://notify.example.com",
+            "https://user:password@notify.example.com",
+            "https://notify.example.com/path",
+            "https://notify.example.com?query=1",
+            "https://notify.example.com/#fragment",
+        ]
+        for origin in invalidOrigins {
+            let advertisement = OpenClientBridgeNotificationsAdvertisement(
+                version: 1,
+                state: .ready,
+                publicOrigin: origin
+            )
+            XCTAssertEqual(OpenClientBridgeNotificationsCapability(advertisement: advertisement), .unavailable)
+        }
+        XCTAssertEqual(
+            OpenClientBridgeNotificationsCapability(
+                advertisement: .init(version: 2, state: .ready, publicOrigin: "https://notify.example.com")
+            ),
+            .unsupportedVersion
+        )
+    }
+
+    func testDiscoveryPreservesNotificationMetadataOnEndpoint() {
+        let candidate = Self.bridgeEndpoint()
+        let endpoint = OpenClientBridgeEndpointDiscovery.endpoint(
+            candidate: candidate,
+            health: OpenClientBridgeHealth(
+                service: "openclient-plugin",
+                protocol: 1,
+                port: 4070,
+                openCodePort: 4096,
+                notifications: .init(version: 1, state: .ready, publicOrigin: "https://notify.example.com")
+            )
+        )
+        XCTAssertEqual(endpoint.notifications, .ready(publicOrigin: "https://notify.example.com"))
+    }
+
+    func testNotificationSetupClientSendsOnlyAllowlistedConnectionFields() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let expiry = ISO8601DateFormatter().string(from: now.addingTimeInterval(300))
+        OpenClientNotificationMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://100.64.0.10:4070/openclient/v1/notifications/setup")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            let body = try Self.notificationRequestBody(request)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+            XCTAssertEqual(object, [
+                "baseURL": "http://server.example:4096/",
+                "username": "",
+                "profile": "legacy",
+            ])
+            XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("password"))
+            return Self.notificationResponse(
+                request: request,
+                body: #"{"url":"https://notify.example.com/#setup=ABCDEF1234","code":"ABCDEF1234","expiresAt":"\#(expiry)"}"#
+            )
+        }
+        let config = OpenCodeServerConfig(
+            baseURL: "  http://server.example:4096/  ",
+            username: "   ",
+            password: "secret"
+        )
+        let context = try OpenClientNotificationSetupContext(
+            connectionID: "connection-1",
+            config: config,
+            profile: .legacy,
+            savedServerID: config.recentServerID
+        )
+        let setup = try await OpenClientNotificationSetupClient(
+            sessionConfiguration: Self.notificationSessionConfiguration(),
+            now: { now }
+        ).createSetup(endpoint: Self.notificationEndpoint(), context: context)
+        XCTAssertEqual(setup.code, "ABCDEF1234")
+    }
+
+    func testNotificationSetupContextRejectsCredentialAndURLComponentSmuggling() {
+        let invalidBaseURLs = [
+            "http://user:password@server.example:4096",
+            "http://server.example:4096?directory=/tmp",
+            "http://server.example:4096/#fragment",
+        ]
+        for baseURL in invalidBaseURLs {
+            let config = OpenCodeServerConfig(baseURL: baseURL, username: "opencode")
+            XCTAssertThrowsError(
+                try OpenClientNotificationSetupContext(
+                    connectionID: "connection-1",
+                    config: config,
+                    profile: .legacy,
+                    savedServerID: config.recentServerID
+                )
+            ) { error in
+                XCTAssertEqual(error as? OpenClientNotificationSetupError, .invalidConnection)
+            }
+        }
+    }
+
+    func testNotificationSetupContextEnforcesSavedIdentityLengthAndControlBounds() {
+        let validConfig = OpenCodeServerConfig(baseURL: "http://server.example:4096/", username: "")
+        XCTAssertNoThrow(
+            try OpenClientNotificationSetupContext(
+                connectionID: "connection-1",
+                config: validConfig,
+                profile: .legacy,
+                savedServerID: validConfig.recentServerID
+            )
+        )
+
+        let invalidConfigs = [
+            OpenCodeServerConfig(baseURL: "http://server.example:4096/\u{0007}", username: "opencode"),
+            OpenCodeServerConfig(baseURL: "http://server.example/" + String(repeating: "a", count: 2_049), username: "opencode"),
+            OpenCodeServerConfig(baseURL: "http://server.example:4096", username: String(repeating: "u", count: 129)),
+            OpenCodeServerConfig(baseURL: "http://server.example:4096", username: "open\u{0007}code"),
+        ]
+        for config in invalidConfigs {
+            XCTAssertThrowsError(
+                try OpenClientNotificationSetupContext(
+                    connectionID: "connection-1",
+                    config: config,
+                    profile: .legacy,
+                    savedServerID: config.recentServerID
+                )
+            )
+        }
+        XCTAssertThrowsError(
+            try OpenClientNotificationSetupContext(
+                connectionID: "connection-1",
+                config: validConfig,
+                profile: .legacy,
+                savedServerID: "another-server"
+            )
+        )
+    }
+
+    func testNotificationSetupClientRejectsMalformedHealthEndpointBeforeRequest() async throws {
+        OpenClientNotificationMockURLProtocol.requestHandler = { request in
+            XCTFail("Malformed endpoint must fail before transport: \(request)")
+            throw OpenClientNotificationSetupError.invalidResponse
+        }
+        let malformedURLs = [
+            "ftp://100.64.0.10:4070/openclient/v1/health",
+            "http://user:password@100.64.0.10:4070/openclient/v1/health",
+            "http://100.64.0.10:4070/untrusted/path",
+            "http://100.64.0.10:4070/openclient/v1/health?next=evil",
+        ]
+        for value in malformedURLs {
+            let endpoint = OpenClientBridgeEndpoint(
+                healthURL: try XCTUnwrap(URL(string: value)),
+                webSocketURL: try XCTUnwrap(URL(string: "ws://100.64.0.10:4070/openclient/v1/ws")),
+                port: 4070,
+                openCodePort: 4096,
+                notifications: .ready(publicOrigin: "https://notify.example.com")
+            )
+            do {
+                _ = try await OpenClientNotificationSetupClient(
+                    sessionConfiguration: Self.notificationSessionConfiguration()
+                ).createSetup(endpoint: endpoint, context: Self.notificationContext())
+                XCTFail("Expected malformed endpoint to fail")
+            } catch {
+                XCTAssertEqual(error as? OpenClientNotificationSetupError, .invalidResponse)
+            }
+        }
+    }
+
+    func testNotificationSetupClientRejectsWrongOriginCodeExpiryAndRedirect() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let validExpiry = ISO8601DateFormatter().string(from: now.addingTimeInterval(300))
+        let invalidResponses: [(Int, String, OpenClientNotificationSetupError)] = [
+            (200, #"{"url":"https://evil.example/#setup=ABCDEF1234","code":"ABCDEF1234","expiresAt":"\#(validExpiry)"}"#, .invalidResponse),
+            (200, #"{"url":"https://notify.example.com/#setup=abcdef1234","code":"abcdef1234","expiresAt":"\#(validExpiry)"}"#, .invalidResponse),
+            (200, #"{"url":"https://notify.example.com/#setup=ABCDEF1234","code":"ABCDEF1234","expiresAt":"2000-01-01T00:00:00Z"}"#, .invalidExpiry),
+            (200, "not-json", .invalidResponse),
+            (302, "{}", .invalidResponse),
+        ]
+        let context = try Self.notificationContext()
+        for (status, body, expected) in invalidResponses {
+            OpenClientNotificationMockURLProtocol.requestHandler = { request in
+                Self.notificationResponse(request: request, status: status, body: body)
+            }
+            do {
+                _ = try await OpenClientNotificationSetupClient(
+                    sessionConfiguration: Self.notificationSessionConfiguration(),
+                    now: { now }
+                ).createSetup(endpoint: Self.notificationEndpoint(), context: context)
+                XCTFail("Expected setup response to be rejected")
+            } catch {
+                XCTAssertEqual(error as? OpenClientNotificationSetupError, expected)
+            }
+        }
+    }
+
+    @MainActor
+    func testNotificationSetupDoesNotRequestUntilTappedOrWhileDisconnected() async throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let requester = RecordingNotificationSetupRequester()
+        let context = try Self.notificationContext()
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: ConnectionStore(),
+            chatStore: ChatStore(),
+            configProvider: { OpenCodeServerConfig() },
+            client: FlakyOpenClientBridgeConnection(),
+            notificationSetupClient: requester,
+            notificationContextProvider: { context }
+        )
+        var requestCount = await requester.requestCount
+        XCTAssertEqual(requestCount, 0)
+        await coordinator.setupNotifications()
+        requestCount = await requester.requestCount
+        XCTAssertEqual(requestCount, 0)
+
+        store.apply(.connected(Self.bridgeEndpoint()))
+        await coordinator.setupNotifications()
+        requestCount = await requester.requestCount
+        XCTAssertEqual(requestCount, 0)
+        store.apply(.connected(Self.notificationEndpoint()))
+        requestCount = await requester.requestCount
+        XCTAssertEqual(requestCount, 0)
+        await coordinator.setupNotifications()
+        requestCount = await requester.requestCount
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    @MainActor
+    func testNotificationSetupIgnoresResultWhenConnectionChangesDuringRequest() async throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.Stale.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let requester = SuspendedNotificationSetupRequester()
+        var context = try Self.notificationContext(connectionID: "connection-1")
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: ConnectionStore(),
+            chatStore: ChatStore(),
+            configProvider: { OpenCodeServerConfig() },
+            client: FlakyOpenClientBridgeConnection(),
+            notificationSetupClient: requester,
+            notificationContextProvider: { context }
+        )
+        store.apply(.connected(Self.notificationEndpoint()))
+        let task = Task { await coordinator.setupNotifications() }
+        while !(await requester.hasRequest) { await Task.yield() }
+        context = try Self.notificationContext(connectionID: "connection-2")
+        await requester.finish()
+        await task.value
+        XCTAssertEqual(store.notificationSetupPhase, .idle)
+    }
+
+    @MainActor
+    func testNotificationSetupIgnoresResponseFromEarlierBridgeLifecycle() async throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.Lifecycle.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let requester = SuspendedNotificationSetupRequester()
+        let connectionStore = ConnectionStore(backendMode: .server, isConnected: true, apiProfile: .legacy)
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: connectionStore,
+            chatStore: ChatStore(),
+            configProvider: { OpenCodeServerConfig(baseURL: "http://server.example:4096") },
+            client: PassiveOpenClientBridgeConnection(),
+            notificationSetupClient: requester,
+            notificationContextProvider: { try? Self.notificationContext() }
+        )
+        await Task.yield()
+        store.apply(.connected(Self.notificationEndpoint()))
+        let task = Task { await coordinator.setupNotifications() }
+        while !(await requester.hasRequest) { await Task.yield() }
+
+        coordinator.forceConnect()
+        await requester.finish()
+        await task.value
+
+        XCTAssertEqual(store.notificationSetupPhase, .idle)
+    }
+
+    @MainActor
+    func testNotificationSetupPreventsDuplicateRequestAndAllowsRetryAfterFailure() async throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.Retry.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let suspended = SuspendedNotificationSetupRequester()
+        let context = try Self.notificationContext()
+        let firstCoordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: ConnectionStore(),
+            chatStore: ChatStore(),
+            configProvider: { OpenCodeServerConfig() },
+            client: PassiveOpenClientBridgeConnection(),
+            notificationSetupClient: suspended,
+            notificationContextProvider: { context }
+        )
+        store.apply(.connected(Self.notificationEndpoint()))
+        let firstTask = Task { await firstCoordinator.setupNotifications() }
+        while !(await suspended.hasRequest) { await Task.yield() }
+        await firstCoordinator.setupNotifications()
+        let duplicateRequestCount = await suspended.requestCount
+        XCTAssertEqual(duplicateRequestCount, 1)
+        await suspended.finish()
+        await firstTask.value
+
+        let retrying = RetryingNotificationSetupRequester()
+        let retryStore = OpenClientBridgeStore(defaults: defaults)
+        let retryCoordinator = OpenClientBridgeCoordinator(
+            store: retryStore,
+            connectionStore: ConnectionStore(),
+            chatStore: ChatStore(),
+            configProvider: { OpenCodeServerConfig() },
+            client: PassiveOpenClientBridgeConnection(),
+            notificationSetupClient: retrying,
+            notificationContextProvider: { context }
+        )
+        retryStore.apply(.connected(Self.notificationEndpoint()))
+        await retryCoordinator.setupNotifications()
+        guard case .failed = retryStore.notificationSetupPhase else {
+            return XCTFail("Expected first retry request to fail")
+        }
+        await retryCoordinator.setupNotifications()
+        guard case .ready = retryStore.notificationSetupPhase else {
+            return XCTFail("Expected retry to generate a new setup code")
+        }
+        let retryRequestCount = await retrying.requestCount
+        XCTAssertEqual(retryRequestCount, 2)
+    }
+
+    @MainActor
+    func testNotificationOpenRevalidatesCurrentSetupAndReportsBrowserFailure() async throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.Open.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let requester = RecordingNotificationSetupRequester()
+        var context = try Self.notificationContext()
+        var now = Date()
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: ConnectionStore(),
+            chatStore: ChatStore(),
+            configProvider: { OpenCodeServerConfig() },
+            client: PassiveOpenClientBridgeConnection(),
+            notificationSetupClient: requester,
+            notificationContextProvider: { context },
+            now: { now }
+        )
+        store.apply(.connected(Self.notificationEndpoint()))
+        await coordinator.setupNotifications()
+        let oldOpenRequest = try XCTUnwrap(coordinator.notificationOpenRequest())
+        await coordinator.setupNotifications()
+        let currentOpenRequest = try XCTUnwrap(coordinator.notificationOpenRequest())
+        XCTAssertNotEqual(oldOpenRequest.requestID, currentOpenRequest.requestID)
+        coordinator.notificationBrowserOpenFailed(request: oldOpenRequest)
+        XCTAssertNil(store.notificationBrowserErrorMessage)
+
+        coordinator.notificationBrowserOpenFailed(request: currentOpenRequest)
+        XCTAssertEqual(
+            store.notificationBrowserErrorMessage,
+            OpenClientNotificationSetupError.browserOpenFailed.localizedDescription
+        )
+        guard case .ready = store.notificationSetupPhase else {
+            return XCTFail("Browser rejection should keep the current code available for retry")
+        }
+
+        await coordinator.setupNotifications()
+        XCTAssertNil(store.notificationBrowserErrorMessage)
+        context = try Self.notificationContext(connectionID: "connection-2")
+        XCTAssertNil(coordinator.notificationOpenRequest())
+        XCTAssertEqual(
+            store.notificationSetupPhase,
+            .failed(OpenClientNotificationSetupError.staleSetup.localizedDescription)
+        )
+
+        await coordinator.setupNotifications()
+        now = Date().addingTimeInterval(1_000)
+        XCTAssertNil(coordinator.notificationOpenRequest())
+        XCTAssertEqual(
+            store.notificationSetupPhase,
+            .failed(OpenClientNotificationSetupError.staleSetup.localizedDescription)
+        )
+    }
+
+    @MainActor
+    func testOldPluginNotificationGuideIsLocalizedAndDoesNotOfferSetup() throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.Guide.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        store.apply(.connected(Self.bridgeEndpoint()))
+        let facade = OpenClientBridgeFacade(store: store, forceConnect: {})
+        XCTAssertFalse(facade.snapshot.canSetUpNotifications)
+        XCTAssertEqual(
+            String(localized: facade.snapshot.notificationGuidance),
+            "Update the OpenClient plugin on the OpenCode host to set up OC Notify from this app."
+        )
     }
 
     func testDeviceRegistryPublishesAndExecutesStatusTool() async throws {
@@ -1393,6 +1829,63 @@ final class OpenClientBridgeTests: XCTestCase {
         )
     }
 
+    private static func notificationEndpoint() -> OpenClientBridgeEndpoint {
+        OpenClientBridgeEndpoint(
+            healthURL: URL(string: "http://100.64.0.10:4070/openclient/v1/health")!,
+            webSocketURL: URL(string: "ws://100.64.0.10:4070/openclient/v1/ws")!,
+            port: 4070,
+            openCodePort: 4096,
+            notifications: .ready(publicOrigin: "https://notify.example.com")
+        )
+    }
+
+    private static func notificationContext(connectionID: String = "connection-1") throws -> OpenClientNotificationSetupContext {
+        try OpenClientNotificationSetupContext(
+            connectionID: connectionID,
+            config: OpenCodeServerConfig(baseURL: "http://server.example:4096", username: "opencode"),
+            profile: .legacy,
+            savedServerID: "http://server.example:4096|opencode"
+        )
+    }
+
+    private static func notificationSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OpenClientNotificationMockURLProtocol.self]
+        return configuration
+    }
+
+    private static func notificationRequestBody(_ request: URLRequest) throws -> Data {
+        if let body = request.httpBody { return body }
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+
+        var body = Data()
+        var buffer = [UInt8](repeating: 0, count: 1_024)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count == 0 { return body }
+            if count < 0 { throw stream.streamError ?? OpenClientNotificationSetupError.invalidResponse }
+            body.append(contentsOf: buffer.prefix(count))
+        }
+    }
+
+    private static func notificationResponse(
+        request: URLRequest,
+        status: Int = 200,
+        body: String
+    ) -> (HTTPURLResponse, Data) {
+        (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: status,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!,
+            Data(body.utf8)
+        )
+    }
+
     private static func imageSessionConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OpenClientImageMockURLProtocol.self]
@@ -1506,6 +1999,100 @@ private final class OpenClientImageMockURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private final class OpenClientNotificationMockURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let requestHandler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: OpenClientNotificationSetupError.invalidResponse)
+            return
+        }
+        do {
+            let (response, data) = try requestHandler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private actor RecordingNotificationSetupRequester: OpenClientNotificationSetupRequesting {
+    private(set) var requestCount = 0
+
+    func createSetup(
+        endpoint: OpenClientBridgeEndpoint,
+        context: OpenClientNotificationSetupContext
+    ) async throws -> OpenClientNotificationSetup {
+        requestCount += 1
+        return OpenClientNotificationSetup(
+            url: URL(string: "https://notify.example.com/#setup=ABCDEF1234")!,
+            code: "ABCDEF1234",
+            expiresAt: Date().addingTimeInterval(300)
+        )
+    }
+}
+
+private actor SuspendedNotificationSetupRequester: OpenClientNotificationSetupRequesting {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var hasRequest = false
+    private(set) var requestCount = 0
+
+    func createSetup(
+        endpoint: OpenClientBridgeEndpoint,
+        context: OpenClientNotificationSetupContext
+    ) async throws -> OpenClientNotificationSetup {
+        requestCount += 1
+        hasRequest = true
+        await withCheckedContinuation { continuation = $0 }
+        return OpenClientNotificationSetup(
+            url: URL(string: "https://notify.example.com/#setup=ABCDEF1234")!,
+            code: "ABCDEF1234",
+            expiresAt: Date().addingTimeInterval(300)
+        )
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor RetryingNotificationSetupRequester: OpenClientNotificationSetupRequesting {
+    private(set) var requestCount = 0
+
+    func createSetup(
+        endpoint: OpenClientBridgeEndpoint,
+        context: OpenClientNotificationSetupContext
+    ) async throws -> OpenClientNotificationSetup {
+        requestCount += 1
+        if requestCount == 1 { throw URLError(.cannotConnectToHost) }
+        return OpenClientNotificationSetup(
+            url: URL(string: "https://notify.example.com/#setup=0123456789")!,
+            code: "0123456789",
+            expiresAt: Date().addingTimeInterval(300)
+        )
+    }
+}
+
+private actor PassiveOpenClientBridgeConnection: OpenClientBridgeConnecting {
+    func connect(
+        config: OpenCodeServerConfig,
+        registration: OpenClientBridgeRegistration,
+        initialSessionID: String?,
+        eventHandler: @escaping @Sendable (OpenClientBridgeClientEvent) -> Void
+    ) async throws {}
+
+    func updateSession(_ sessionID: String?) async {}
+    func disconnect() async {}
 }
 
 private actor FlakyOpenClientBridgeConnection: OpenClientBridgeConnecting {

@@ -1333,11 +1333,23 @@ struct OpenCodeAPIClient: Sendable {
         directory: String,
         workspaceID: String? = nil
     ) async throws -> OpenCodePTY {
+        try await createPTY(
+            request: OpenCodePTYCreateRequest(title: title),
+            directory: directory,
+            workspaceID: workspaceID
+        )
+    }
+
+    func createPTY(
+        request: OpenCodePTYCreateRequest,
+        directory: String,
+        workspaceID: String? = nil
+    ) async throws -> OpenCodePTY {
         try await send(
             path: "/pty",
             method: "POST",
             queryItems: scopedQueryItems(directory: directory, workspaceID: workspaceID),
-            body: OpenCodePTYCreateRequest(title: title),
+            body: request,
             directoryHeader: directory
         )
     }
@@ -2209,9 +2221,10 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     static func debugBodyDescription(_ body: Data?, url: URL? = nil) -> String {
-        // Auth responses and validation errors can echo keys, answers, codes, or OAuth URLs.
+        // Provider payloads can include resolved keys/options, while auth and validation
+        // responses can echo keys, answers, codes, or OAuth URLs.
         let path = url?.path.lowercased() ?? ""
-        if ["auth", "oauth", "integration", "credential", "config", "form", "question"].contains(where: { path.split(separator: "/").contains(Substring($0)) }) {
+        if ["auth", "oauth", "provider", "integration", "credential", "config", "form", "question", "pty"].contains(where: { path.split(separator: "/").contains(Substring($0)) }) {
             return "<redacted authentication/configuration body>"
         }
         let limit = 2_048

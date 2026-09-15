@@ -8,6 +8,8 @@ struct OpenCodeChatActivityExtensionBundle: WidgetBundle {
         OpenCodeTalkActivityWidget()
         OpenCodeRecentSessionsWidget()
         OpenCodePinnedSessionsWidget()
+        OpenCodeProviderUsageBarsWidget()
+        OpenCodeProviderUsageRingsWidget()
         OpenCodeActionShortcutWidget()
         OpenCodeNewSessionShortcutWidget()
         if #available(iOS 18.0, *) {

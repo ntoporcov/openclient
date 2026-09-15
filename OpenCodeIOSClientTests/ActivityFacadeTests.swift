@@ -15,7 +15,11 @@ private final class ActivityMetadataURLProtocol: URLProtocol {
         case "/api/permission/request":
             body = #"{"data":[]}"#
         case "/api/form/request":
-            body = #"{"data":[{"id":"external-form","sessionID":"sandbox-session","title":"Authenticate","fields":[{"key":"auth","type":"external","required":true}]}]}"#
+            let directory = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
+                .queryItems?.first { $0.name == "directory" }?.value
+            body = directory == "/home-sandbox"
+                ? #"{"data":[{"id":"external-form","sessionID":"sandbox-session","title":"Authenticate","fields":[{"key":"auth","type":"external","required":true}]}]}"#
+                : #"{"data":[]}"#
         default:
             XCTFail("Activity must not call legacy routes or bypass core session/transcript services: \(request.url?.path ?? "")")
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
@@ -748,6 +752,117 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertEqual(snapshot.workingRows.map(\.id), ["/tmp/project:working"])
         XCTAssertTrue(snapshot.recentRows.isEmpty)
         XCTAssertEqual(snapshot.needsInputRows.first?.statusTitle, "Needs input")
+    }
+
+    func testSnapshotTracksLiveChildInteractionsAndNativeFormSettlementBySessionTree() async throws {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "project", directory: "/tmp/project")
+        let root = makeSession(id: "root", title: "Root", directory: project.worktree, projectID: project.id, updated: 2_000)
+        let otherRoot = makeSession(id: "other-root", title: "Other", directory: project.worktree, projectID: project.id, updated: 1_000)
+        let childA = OpenCodeSession(id: "child-a", title: "Child A", workspaceID: nil,
+            directory: project.worktree, projectID: project.id, parentID: root.id)
+        let childB = OpenCodeSession(id: "child-b", title: "Child B", workspaceID: nil,
+            directory: project.worktree, projectID: project.id, parentID: root.id)
+        let otherChild = OpenCodeSession(id: "other-child", title: "Other child", workspaceID: nil,
+            directory: project.worktree, projectID: project.id, parentID: otherRoot.id)
+        viewModel.projects = [project]
+        viewModel.sessionListStore.setRecentSessions([root, otherRoot], for: project.worktree)
+        let store = viewModel.directoryStoreRegistry.store(for: project.worktree)
+        store.sessions = [root, childA, childB, otherRoot, otherChild]
+        let facade = ActivityFacade(viewModel: viewModel)
+
+        let childPermission = expectation(description: "Child permission moves root to Needs Input")
+        let permissionObservation = facade.$snapshot.filter {
+            $0.needsInputRows.first(where: { $0.recent.session.id == root.id })?.pendingInteractionCount == 1
+                && $0.needsInputRows.first(where: { $0.recent.session.id == otherRoot.id })?.pendingInteractionCount == 1
+        }.prefix(1).sink { _ in childPermission.fulfill() }
+        let permission = OpenCodePermission(id: "permission", sessionID: childA.id, permission: "bash",
+            patterns: ["xcodebuild"], always: nil, metadata: nil, tool: nil)
+        let unrelatedPermission = OpenCodePermission(id: "other-permission", sessionID: otherChild.id, permission: "edit",
+            patterns: [], always: nil, metadata: nil, tool: nil)
+        XCTAssertTrue(store.applyPermissions([permission, unrelatedPermission], ifUnchangedSince: store.permissionRevision))
+        await fulfillment(of: [childPermission], timeout: 1)
+
+        let questionsVisible = expectation(description: "Questions from sibling children aggregate under root")
+        let questionsObservation = facade.$snapshot.filter {
+            $0.needsInputRows.first(where: { $0.recent.session.id == root.id })?.pendingInteractionCount == 3
+        }.prefix(1).sink { _ in questionsVisible.fulfill() }
+        let questionA = OpenCodeQuestionRequest(id: "shared", sessionID: childA.id, questions: [], tool: nil)
+        let questionB = OpenCodeQuestionRequest(id: "shared", sessionID: childB.id, questions: [], tool: nil)
+        XCTAssertTrue(store.applyQuestions([questionA, questionB], ifUnchangedSince: store.questionRevision))
+        await fulfillment(of: [questionsVisible], timeout: 1)
+
+        let formsVisible = expectation(description: "Native forms refresh Activity and deduplicate by session and form ID")
+        let formsObservation = facade.$snapshot.filter {
+            $0.needsInputRows.first(where: { $0.recent.session.id == root.id })?.pendingInteractionCount == 4
+        }.prefix(1).sink { _ in formsVisible.fulfill() }
+        let duplicateForm = BackendForm(id: questionA.id, sessionID: childA.id, title: "Duplicate", fields: [])
+        let nativeForm = BackendForm(id: "native", sessionID: childA.id, title: "Native", fields: [])
+        store.sessionFormStore.upsert(duplicateForm)
+        store.sessionFormStore.upsert(nativeForm)
+        await fulfillment(of: [formsVisible], timeout: 1)
+        XCTAssertEqual(facade.snapshot.needsInputRows.first(where: { $0.recent.session.id == otherRoot.id })?.pendingInteractionCount, 1)
+
+        let nativeSettled = expectation(description: "Native form settlement refreshes Activity")
+        let nativeSettlementObservation = facade.$snapshot.filter {
+            $0.needsInputRows.first(where: { $0.recent.session.id == root.id })?.pendingInteractionCount == 3
+        }.prefix(1).sink { _ in nativeSettled.fulfill() }
+        store.applySessionFormSettled(nativeForm.key)
+        await fulfillment(of: [nativeSettled], timeout: 1)
+
+        let allRootInteractionsSettled = expectation(description: "Root leaves Needs Input after child interactions settle")
+        let settlementObservation = facade.$snapshot.filter {
+            $0.needsInputRows.allSatisfy { $0.recent.session.id != root.id }
+                && $0.recentRows.contains { $0.recent.session.id == root.id }
+                && $0.needsInputRows.first(where: { $0.recent.session.id == otherRoot.id })?.pendingInteractionCount == 1
+        }.prefix(1).sink { _ in allRootInteractionsSettled.fulfill() }
+        store.applySessionFormSettled(duplicateForm.key)
+        store.removeV2Question(id: questionB.id, sessionID: questionB.sessionID)
+        store.removeV2Permission(id: permission.id, sessionID: permission.sessionID)
+        await fulfillment(of: [allRootInteractionsSettled], timeout: 1)
+        withExtendedLifetime((permissionObservation, questionsObservation, formsObservation,
+            nativeSettlementObservation, settlementObservation)) {}
+    }
+
+    func testPreparationDiscoversMissingAncestorsWhenPendingChildIsAlreadyCached() async throws {
+        let backend = HomeTestBackend()
+        let child = OpenCodeSession(id: "sandbox-session", title: "Pending child", workspaceID: nil,
+            directory: "/home-sandbox", projectID: "home-project", parentID: "middle-session")
+        let middle = OpenCodeSession(id: "middle-session", title: "Middle", workspaceID: nil,
+            directory: "/home-sandbox", projectID: "home-project", parentID: "older-root")
+        let root = OpenCodeSession(id: "older-root", title: "Older root", workspaceID: nil,
+            directory: "/home-sandbox", projectID: "home-project", parentID: nil)
+        backend.storedSessions.append(child)
+        var fetchCount = 0
+        backend.beforeSessionFetch = {
+            fetchCount += 1
+            if !backend.storedSessions.contains(where: { $0.id == middle.id }) {
+                backend.storedSessions.append(contentsOf: [middle, root])
+            }
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ActivityMetadataURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let client = OpenCodeAPIClient(config: .init(baseURL: "https://activity.invalid", password: "test"), session: session)
+        let adapter = OpenCodeBackendAdapter(client: client, profile: .v2)
+        let viewModel = AppViewModel(backendFactory: backend)
+        viewModel.backendConnection = BackendConnection(descriptor: .init(id: "ancestor-test", name: "OpenCode", version: "next"),
+            capabilities: [.interactions], projects: adapter, sessions: backend, chat: backend, models: backend, events: backend)
+        viewModel.connectionStore.applySuccessfulV2Connection(version: "next", healthy: true)
+        viewModel.projects = try await backend.projectsSnapshot().projects
+        _ = viewModel.directoryStoreRegistry.store(for: child.directory).upsertSessions([child])
+        defer { viewModel.disconnect() }
+
+        await viewModel.activityFacade.prepareForPresentation()
+
+        let owner = viewModel.directoryStoreRegistry.store(for: "/home-sandbox")
+        XCTAssertEqual(fetchCount, 2)
+        XCTAssertTrue(owner.sessions.contains { $0.id == child.id })
+        XCTAssertTrue(owner.sessions.contains { $0.id == middle.id })
+        XCTAssertTrue(owner.sessions.contains { $0.id == root.id })
+        XCTAssertEqual(viewModel.activityFacade.snapshot.needsInputRows.map(\.recent.session.id), [root.id])
+        XCTAssertEqual(viewModel.activityFacade.snapshot.needsInputRows.first?.pendingInteractionCount, 1)
     }
 
     func testSnapshotFlattensMarkdownAndIncludesRunningTools() {

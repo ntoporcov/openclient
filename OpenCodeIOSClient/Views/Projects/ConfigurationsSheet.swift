@@ -101,6 +101,11 @@ struct ConfigurationsSheet: View {
                     }
                 }
 
+                UsageLevelsNavigationSection(
+                    facade: connection.providerUsageFacade,
+                    usesInsecureTransport: connection.providerUsageUsesInsecureTransport
+                )
+
                 if viewModel.supportsProviderManagement {
                     Section("Server") {
                         NavigationLink(value: ConfigurationRoute.plugins) {
@@ -308,35 +313,52 @@ struct ProviderConfigurationRow: View {
 
 }
 
-private struct ProviderLogo: View {
+struct ProviderLogo: View {
+    enum Style {
+        case tile
+        case plain
+    }
+
     let providerID: String
+    var size: CGFloat = 32
+    var style: Style = .tile
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(brand.background)
-
-            Group {
-                if let image = UIImage(named: assetName) {
-                    Image(uiImage: image)
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(7)
-                } else {
-                    Image(systemName: "server.rack")
-                        .font(.system(size: 15, weight: .semibold))
+        Group {
+            switch style {
+            case .tile:
+                ZStack {
+                    RoundedRectangle(cornerRadius: size / 4, style: .continuous)
+                        .fill(brand.background)
+                    artwork
+                        .padding(size * 7 / 32)
+                        .foregroundStyle(brand.foreground)
                 }
+                .overlay {
+                    RoundedRectangle(cornerRadius: size / 4, style: .continuous)
+                        .stroke(.white.opacity(brand.usesLightStroke ? 0.3 : 0), lineWidth: 1)
+                }
+                .shadow(color: brand.shadow.opacity(0.18), radius: 4, x: 0, y: 2)
+            case .plain:
+                artwork
+                    .foregroundStyle(.primary)
             }
-            .foregroundStyle(brand.foreground)
         }
-        .frame(width: 32, height: 32)
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(.white.opacity(brand.usesLightStroke ? 0.3 : 0), lineWidth: 1)
-        }
-        .shadow(color: brand.shadow.opacity(0.18), radius: 4, x: 0, y: 2)
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var artwork: some View {
+        if let image = UIImage(named: assetName) {
+            Image(uiImage: image)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Image(systemName: "server.rack")
+                .font(.system(size: size * 15 / 32, weight: .semibold))
+        }
     }
 
     private var assetName: String {

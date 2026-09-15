@@ -1,7 +1,7 @@
 import Foundation
 
 // The existing normalized domain values are shared deliberately; transport DTOs are not.
-struct BackendDescriptor: Equatable, Sendable {
+struct BackendDescriptor: Equatable, Hashable, Sendable {
     /// Stable, non-secret namespace chosen by the factory. Never put credentials here.
     let id: String
     let name: String
@@ -19,7 +19,7 @@ enum BackendError: Error, Equatable {
     case invalidScope
 }
 
-struct BackendScope: Equatable, Sendable {
+struct BackendScope: Equatable, Hashable, Sendable {
     var projectID: String? = nil
     var directory: String? = nil
     var workspaceID: String? = nil

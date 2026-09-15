@@ -11,6 +11,7 @@ struct ProjectListView: View {
     @ObservedObject var configurations: ConfigurationsFacade
     @ObservedObject var games: FunAndGamesFacade
     let bridge: OpenClientBridgeFacade?
+    let providerUsage: ProviderUsageFacade
     let isActivitySelected: Bool
     let onActivityChosen: () -> Void
     let onProjectChosen: () -> Void
@@ -25,6 +26,7 @@ struct ProjectListView: View {
         configurations: ConfigurationsFacade,
         games: FunAndGamesFacade,
         bridge: OpenClientBridgeFacade? = nil,
+        providerUsage: ProviderUsageFacade,
         isActivitySelected: Bool = false,
         onActivityChosen: @escaping () -> Void = {},
         onProjectChosen: @escaping () -> Void
@@ -34,6 +36,7 @@ struct ProjectListView: View {
         self.configurations = configurations
         self.games = games
         self.bridge = bridge
+        self.providerUsage = providerUsage
         self.isActivitySelected = isActivitySelected
         self.onActivityChosen = onActivityChosen
         self.onProjectChosen = onProjectChosen
@@ -95,6 +98,11 @@ struct ProjectListView: View {
                     .listRowInsets(projectListRowInsets)
                 }
                 }
+
+                ProviderUsageDisplayRows(
+                    metrics: providerUsage.displayStore.metrics(for: .home),
+                    mode: providerUsage.displayStore.displayMode
+                )
 
                 Section {
                     if displayedProjects.isEmpty, !isEditingProjects {
@@ -270,6 +278,8 @@ struct ProjectListView: View {
             guard !isScreenshotScene else { return }
             await facade.loadRecentSessions()
         }
+        .task { await providerUsage.displayAppeared(.home) }
+        .onDisappear { providerUsage.displayDisappeared(.home) }
         .task(id: snapshot.searchQuery) {
             guard !isScreenshotScene else { return }
             let query = snapshot.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)

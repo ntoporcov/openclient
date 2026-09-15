@@ -36,6 +36,35 @@ final class AppViewModel: ObservableObject {
     let appCustomizationStore = AppCustomizationStore()
     let appIconStore = AppIconStore()
     let speechVoiceStore = SpeechVoiceStore()
+    let deepLinkRoutingStore = OpenClientDeepLinkRoutingStore()
+    let providerUsageStore: ProviderUsageStore
+    let providerUsageDisplayStore: ProviderUsageDisplayStore
+    let providerUsageAccountRepository: any ProviderUsageAccountRepository
+    let providerUsageClient: any ProviderUsageFetching
+    private let providerUsageImporterFactoryOverride: ProviderUsageFacade.ImporterFactory?
+    lazy var providerUsageFacade = ProviderUsageFacade(
+        store: providerUsageStore,
+        displayStore: providerUsageDisplayStore,
+        accounts: providerUsageAccountRepository,
+        providerClient: providerUsageClient,
+        contextProvider: { [weak self] in self?.currentProviderUsageDiscoveryContext },
+        legacyStateProvider: { [weak self] in
+            guard let self else { return .init(readiness: .notHydrated, connectedProviders: []) }
+            return ProviderUsageDiscovery.legacyState(from: self.modelConfigurationStore)
+        },
+        v2StateProvider: { [weak self] in
+            guard let self else { return .init(readiness: .notHydrated, integrations: []) }
+            return ProviderUsageDiscovery.v2State(from: self.configurationsFacade.v2ProviderStore)
+        },
+        importerFactory: providerUsageImporterFactoryOverride ?? { [weak self] candidate, allowsInsecureHTTP, currentContext in
+            try OpenCodeProviderUsageComposition.makeImporter(
+                candidate: candidate,
+                allowsInsecureHTTP: allowsInsecureHTTP,
+                currentContext: currentContext,
+                connection: self?.backendConnection
+            )
+        }
+    )
     lazy var talkSessionCoordinator = TalkSessionCoordinator(viewModel: self)
     lazy var localCacheRepository: any OpenCodeLocalCacheRepository = OpenCodeLocalCacheRepositoryFactory.makeDefault()
     var localCacheDirectoryRefreshedAtByKey: [String: Date] = [:]
@@ -169,6 +198,7 @@ final class AppViewModel: ObservableObject {
         set {
             objectWillChange.send()
             projectStore.currentProject = newValue
+            providerUsageFacade.backendContextChanged()
         }
         _modify {
             objectWillChange.send()
@@ -184,6 +214,7 @@ final class AppViewModel: ObservableObject {
             objectWillChange.send()
             projectStore.selectedDirectory = newValue
             directoryStoreRegistry.activate(newValue)
+            providerUsageFacade.backendContextChanged()
         }
     }
     var selectedProjectContentTab: OpenClientProjectContentTab {
@@ -765,6 +796,7 @@ final class AppViewModel: ObservableObject {
             globalFormsFacade.configure(backendConnection)
             if let oldValue { projectActionCoordinator.cancel(connectionID: oldValue.id) }
             refreshProjectActionVisibility()
+            providerUsageFacade.backendContextChanged()
         }
     }
     var backendEventTask: Task<Void, Never>?
@@ -839,10 +871,26 @@ final class AppViewModel: ObservableObject {
     let defaultSearchRoot = NSHomeDirectory()
     static let actionSessionTitlePrefix = "__openclient_action__:"
 
-    init(backendFactory: (any BackendFactory)? = nil) {
+    init(
+        backendFactory: (any BackendFactory)? = nil,
+        providerUsageStore: ProviderUsageStore? = nil,
+        providerUsageDisplayStore: ProviderUsageDisplayStore? = nil,
+        providerUsageAccountRepository: (any ProviderUsageAccountRepository)? = nil,
+        providerUsageClient: (any ProviderUsageFetching)? = nil,
+        providerUsageImporterFactory: ProviderUsageFacade.ImporterFactory? = nil
+    ) {
         self.backendFactory = backendFactory
+        self.providerUsageStore = providerUsageStore ?? ProviderUsageStore()
+        self.providerUsageDisplayStore = providerUsageDisplayStore ?? ProviderUsageDisplayStore()
+        self.providerUsageAccountRepository = providerUsageAccountRepository ?? Self.makeDefaultProviderUsageAccountRepository()
+        self.providerUsageClient = providerUsageClient ?? RoutedProviderUsageClient()
+        self.providerUsageImporterFactoryOverride = providerUsageImporterFactory
         bindFunAndGamesScope()
         observeStores()
+
+        if backendFactory == nil || providerUsageAccountRepository != nil {
+            Task { [weak self] in await self?.providerUsageFacade.loadPersistedAccountsOnce() }
+        }
 
         // Injected harnesses own their configuration, not the saved OpenCode/Keychain state.
         if backendFactory != nil { return }
@@ -872,6 +920,45 @@ final class AppViewModel: ObservableObject {
         if let savedConfig = recentConfigs.first {
             config = savedConfig
         }
+    }
+
+    private static func makeDefaultProviderUsageAccountRepository() -> any ProviderUsageAccountRepository {
+        let credentials: any ProviderUsageCredentialRepository
+        do {
+            credentials = try KeychainProviderUsageCredentialRepository()
+        } catch let error as ProviderUsageCredentialRepositoryError {
+            credentials = UnavailableProviderUsageCredentialRepository(error: error)
+        } catch {
+            credentials = UnavailableProviderUsageCredentialRepository()
+        }
+        return TransactionalProviderUsageAccountRepository(
+            credentials: credentials,
+            metadata: FileProviderUsageMetadataRepository()
+        )
+    }
+
+    var currentProviderUsageDiscoveryContext: ProviderUsageDiscoveryContext? {
+        guard isConnected, let connection = backendConnection, !connection.isClosed,
+              let adapter = connection.openCodeCompatibility else { return nil }
+        let profile: ProviderUsageAPIProfile = adapter.profile == .legacy ? .legacy : .v2
+        let directory = effectiveSelectedDirectory
+        let scope: BackendScope
+        if let project = currentProject {
+            let executionScope = projectExecutionScope(for: project, directory: directory)
+            scope = .init(
+                projectID: executionScope.projectID,
+                directory: directory,
+                workspaceID: executionScope.directory == directory ? executionScope.workspaceID : nil
+            )
+        } else {
+            scope = .init(directory: directory)
+        }
+        return .init(
+            backend: connection.descriptor,
+            connectionLifetimeID: connection.id,
+            apiProfile: profile,
+            scope: scope
+        )
     }
 
     private func observeStores() {

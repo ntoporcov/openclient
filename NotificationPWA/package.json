@@ -1,0 +1,20 @@
+{
+  "name": "openclient-notification-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "icons": "node scripts/generate-icons.mjs",
+    "pair": "node src/cli.mjs pair",
+    "prestart": "npm run icons",
+    "start": "node src/server.mjs",
+    "pretest": "npm run icons",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

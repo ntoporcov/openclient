@@ -527,7 +527,7 @@ final class V2ConfigurationTests: XCTestCase {
 
     func testSharedDebugLoggingRedactsCredentialBodiesAndSensitiveURLValues() throws {
         let body = Data(#"{"key":"fixture-secret","answer":{"tenant":"private"},"url":"https://example.com?code=secret"}"#.utf8)
-        for path in ["/auth/provider", "/provider/provider/oauth/authorize", "/api/integration", "/api/integration/provider/connect/key", "/api/integration/provider/connect/oauth/con_attempt/complete", "/api/credential/cred_fixture", "/config", "/global/config"] {
+        for path in ["/provider", "/api/provider", "/auth/provider", "/provider/provider/oauth/authorize", "/api/integration", "/api/integration/provider/connect/key", "/api/integration/provider/connect/oauth/con_attempt/complete", "/api/credential/cred_fixture", "/config", "/global/config"] {
             let url = try XCTUnwrap(URL(string: "https://example.com\(path)"))
             XCTAssertEqual(OpenCodeAPIClient.debugBodyDescription(body, url: url), "<redacted authentication/configuration body>")
         }

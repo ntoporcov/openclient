@@ -5,6 +5,7 @@
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)com.ntoporcov.openclient.shared</string>
+		<string>$(AppIdentifierPrefix)com.ntoporcov.openclient</string>
 	</array>
 	<key>com.apple.security.application-groups</key>
 	<array>

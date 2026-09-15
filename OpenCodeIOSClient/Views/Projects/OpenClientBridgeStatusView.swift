@@ -23,42 +23,167 @@ struct OpenClientBridgeStatusView: View {
 
     var body: some View {
         let snapshot = bridge.snapshot
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text("OpenClient Plugin")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                OpenClientBridgeSheetHeader(dismiss: dismiss)
+                OpenClientBridgeConnectedStatus(snapshot: snapshot)
+                Divider()
+                OpenClientNotificationSetupSection(bridge: bridge, snapshot: snapshot)
             }
-
-            HStack(spacing: 14) {
-                Image(systemName: snapshot.isConnected ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
-                    .font(.system(size: 34))
-                    .foregroundStyle(snapshot.isConnected ? .green : .secondary)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(bridgeStatusTitle(snapshot))
-                        .font(.title3.weight(.semibold))
-                    Text(snapshot.isConnected ? LocalizedStringResource("Plugin tools are ready in OpenCode.") : LocalizedStringResource("OpenClient will reconnect automatically."))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            .frame(maxWidth: 600, alignment: .leading)
+            .padding(20)
+            .frame(maxWidth: .infinity)
         }
-        .padding(20)
         .accessibilityIdentifier("projects.bridge.compact-status")
 #if os(iOS)
-        .presentationDetents([.height(190)])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
 #endif
+    }
+}
+
+private struct OpenClientBridgeSheetHeader: View {
+    let dismiss: DismissAction
+
+    var body: some View {
+        HStack {
+            Text("OpenClient Plugin")
+                .font(.headline)
+            Spacer()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close")
+        }
+    }
+}
+
+private struct OpenClientBridgeConnectedStatus: View {
+    let snapshot: OpenClientBridgeSnapshot
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: snapshot.isConnected ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
+                .font(.largeTitle)
+                .foregroundStyle(snapshot.isConnected ? .green : .secondary)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(bridgeStatusTitle(snapshot))
+                    .font(.title3.weight(.semibold))
+                Text(snapshot.isConnected ? LocalizedStringResource("Plugin tools are ready in OpenCode.") : LocalizedStringResource("OpenClient will reconnect automatically."))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct OpenClientNotificationSetupSection: View {
+    @ObservedObject var bridge: OpenClientBridgeFacade
+    let snapshot: OpenClientBridgeSnapshot
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("OC Notify", systemImage: "bell.badge")
+                .font(.headline)
+            Text(snapshot.notificationGuidance)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            if case .ready(let setup) = snapshot.notificationSetupPhase {
+                OpenClientNotificationSetupResult(
+                    setup: setup,
+                    open: {
+                        guard let request = bridge.notificationOpenRequest() else { return }
+                        openURL(request.url) { accepted in
+                            guard !accepted else { return }
+                            Task { @MainActor in
+                                bridge.notificationBrowserOpenFailed(request: request)
+                            }
+                        }
+                    },
+                    generate: {
+                        Task { await bridge.setupNotifications() }
+                    }
+                )
+            } else if snapshot.canSetUpNotifications {
+                Button("Set Up Notifications") {
+                    Task { await bridge.setupNotifications() }
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("projects.bridge.notifications.setup")
+            }
+
+            if case .requesting = snapshot.notificationSetupPhase {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Preparing notification setup...")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if case .failed(let message) = snapshot.notificationSetupPhase {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+            }
+
+            if let message = snapshot.notificationBrowserErrorMessage {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+}
+
+private struct OpenClientNotificationSetupResult: View {
+    let setup: OpenClientNotificationSetup
+    let open: () -> Void
+    let generate: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Connection setup code")
+                .font(.subheadline.weight(.semibold))
+            HStack {
+                Text(setup.code)
+                    .font(.title3.monospaced().weight(.semibold))
+                    .textSelection(.enabled)
+                Spacer()
+                Button {
+                    OpenCodeClipboard.copy(setup.code)
+                } label: {
+                    Label("Copy Code", systemImage: "doc.on.doc")
+                }
+                .accessibilityLabel("Copy connection setup code")
+                .accessibilityIdentifier("projects.bridge.notifications.copy-code")
+            }
+
+            Button(action: open) {
+                Label("Open OC Notify", systemImage: "arrow.up.right.square")
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("projects.bridge.notifications.open")
+
+            Button("Generate New Code", action: generate)
+                .accessibilityIdentifier("projects.bridge.notifications.generate")
+
+            Text("Code expires at \(setup.expiresAt, format: .dateTime.hour().minute())")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            Text("If OC Notify is already installed, open it from your Home Screen and paste this code. Notification permission is granted in OC Notify, not OpenClient.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Text("First-time devices still use the separate pairing code shown on your Mac.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

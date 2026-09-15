@@ -4,6 +4,7 @@ import UIKit
 struct ActivityView: View {
     @ObservedObject var facade: ActivityFacade
     let connection: ConnectionFacade
+    let providerUsage: ProviderUsageFacade
     let onSessionChosen: () -> Void
     @State private var excludedProjectIDs: Set<String> = []
     @State private var isShowingSettings = false
@@ -21,6 +22,8 @@ struct ActivityView: View {
             excludedProjectIDs: excludedProjectIDs,
             searchQuery: searchQuery,
             showsLastUserMessage: facade.snapshot.showsLastUserMessage,
+            usageMetrics: providerUsage.displayStore.metrics(for: .activity),
+            usageDisplayMode: providerUsage.displayStore.displayMode,
             onSessionChosen: onSessionChosen
         )
         .equatable()
@@ -61,6 +64,8 @@ struct ActivityView: View {
         .task {
             await facade.prepareForPresentation()
         }
+        .task { await providerUsage.displayAppeared(.activity) }
+        .onDisappear { providerUsage.displayDisappeared(.activity) }
     }
 
     private var newChatBottomPadding: CGFloat {
@@ -210,6 +215,8 @@ private struct ActivityContent: View, Equatable {
     let excludedProjectIDs: Set<String>
     let searchQuery: String
     let showsLastUserMessage: Bool
+    let usageMetrics: [OpenCodeProviderUsageDisplayMetric]
+    let usageDisplayMode: OpenCodeProviderUsageDisplayMode
     let onSessionChosen: () -> Void
     @State private var renamingRow: ActivityFacade.RowSnapshot?
     @State private var renameTitle = ""
@@ -220,6 +227,8 @@ private struct ActivityContent: View, Equatable {
             && lhs.excludedProjectIDs == rhs.excludedProjectIDs
             && lhs.searchQuery == rhs.searchQuery
             && lhs.showsLastUserMessage == rhs.showsLastUserMessage
+            && lhs.usageMetrics == rhs.usageMetrics
+            && lhs.usageDisplayMode == rhs.usageDisplayMode
     }
 
     var body: some View {
@@ -241,6 +250,8 @@ private struct ActivityContent: View, Equatable {
 
     private var activityList: some View {
         List {
+            ProviderUsageDisplayRows(metrics: usageMetrics, presentation: .card, mode: usageDisplayMode)
+
             if snapshot.isEmpty {
                 ContentUnavailableView(
                     "No Recent Activity",

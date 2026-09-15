@@ -60,6 +60,7 @@ extension AppViewModel {
 
     private func connect(attemptID: UUID) async {
         guard isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
+        deepLinkRoutingStore.connectionWillStart(config: config)
         liveActivityFacade.connectionWillStart(config: config)
         let wasBrowsingLocalCache = backendMode == .cachedServer
         stopEventStream()
@@ -194,6 +195,7 @@ extension AppViewModel {
         }
         guard isCurrentConnectionAttempt(attemptID), Task.isCancelled == false else { return }
         if isConnected {
+            providerUsageFacade.backendContextChanged()
             // Both profiles restore the OS inventory under the newly established connection lifetime.
             if backendConnection?.isClosed == false { reconcileLiveActivities() }
             scheduleWidgetSnapshotPublication(includeModelOptions: true)
@@ -213,6 +215,10 @@ extension AppViewModel {
         } else {
             liveActivityFacade.discardPendingDeepLink()
             scheduleAutomaticConnectionRetryIfNeeded()
+        }
+        guard isCurrentConnectionAttempt(attemptID), !Task.isCancelled else { return }
+        if isConnected {
+            await resumePendingWidgetSessionDeepLink()
         }
         guard isCurrentConnectionAttempt(attemptID), !Task.isCancelled else { return }
         await liveActivityFacade.resumePendingDeepLink()
@@ -301,7 +307,8 @@ extension AppViewModel {
 
     @discardableResult
     func startAutomaticConnectionIfConfigured() -> Bool {
-        guard backendFactory == nil, !hasAttemptedAutomaticConnection else { return false }
+        guard backendFactory == nil, !hasAttemptedAutomaticConnection,
+              deepLinkRoutingStore.allowsAutomaticConnection else { return false }
 
         let environment = ProcessInfo.processInfo.environment
         guard environment["OPENCODE_UI_TEST_MODE"] != "1",
@@ -319,6 +326,7 @@ extension AppViewModel {
 
     func applicationActivityChanged(isActive: Bool) {
         isApplicationActive = isActive
+        providerUsageFacade.applicationActivityChanged(isActive: isActive)
         guard isActive else {
             chatFacade.foregroundChatRefreshCoordinator.invalidate()
             foregroundChatCatchUpTask = nil
@@ -394,6 +402,7 @@ extension AppViewModel {
     }
 
     func cancelConnectionAttempt() {
+        deepLinkRoutingStore.discardPendingRoutes()
         liveActivityFacade.discardPendingDeepLink()
         stopAutomaticConnectionRetries()
         connectionAttemptID = nil
@@ -466,6 +475,7 @@ extension AppViewModel {
     }
 
     func disconnect() {
+        deepLinkRoutingStore.discardPendingRoutes()
         liveActivityFacade.discardPendingDeepLink()
         terminalFacade.resetForConnectionChange()
         projectStore.defaultServerDirectory = nil

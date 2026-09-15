@@ -83,6 +83,10 @@ final class ConnectionFacade: ObservableObject {
     var appIcons: [OpenClientAppIcon] { viewModel.appIconStore.icons }
     var selectedAppIcon: OpenClientAppIcon { viewModel.appIconStore.selectedIcon }
     var speechVoiceStore: SpeechVoiceStore { viewModel.speechVoiceStore }
+    var providerUsageFacade: ProviderUsageFacade { viewModel.providerUsageFacade }
+    var providerUsageUsesInsecureTransport: Bool {
+        viewModel.backendConnection?.openCodeCompatibility?.client.config.usesInsecureHTTP ?? false
+    }
     var showsChatActivityShimmer: Bool { viewModel.appCustomizationStore.showsChatActivityShimmer }
     var showsToolCalls: Bool { viewModel.appCustomizationStore.showsToolCalls }
     var showsReasoningBlocks: Bool { viewModel.appCustomizationStore.showsReasoningBlocks }

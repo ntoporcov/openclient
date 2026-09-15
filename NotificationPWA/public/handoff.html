@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="/styles.css?v=4">
+  <meta name="apple-mobile-web-app-title" content="OC Notify">
+  <title>OC Notify</title>
+</head>
+<body class="handoff-body">
+  <main class="handoff-shell">
+    <p class="context" id="context">OC Notify</p>
+    <section class="handoff-panel">
+      <span class="handoff-icon" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M24 12a8 8 0 0 0-16 0c0 9-4 9-4 12h24c0-3-4-3-4-12M13 28h6"/><path class="check" d="m11.5 16 3 3 6-7"/></svg>
+      </span>
+      <h1 id="title">Notification received</h1>
+      <p class="lede" id="body">Continue to the matching session in OpenClient.</p>
+      <a class="handoff-action" id="open" href="openclient://">Open in OpenClient</a>
+      <p class="section-footer" id="fallback">iOS may require this tap even when auto-open is enabled.</p>
+    </section>
+    <a class="settings-link" id="settings" href="/">Notification Settings</a>
+  </main>
+  <script src="/handoff-core.js"></script>
+  <script type="module" src="/handoff.js?v=3"></script>
+</body>
+</html>

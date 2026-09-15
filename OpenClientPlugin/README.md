@@ -5,13 +5,23 @@ visuals, and in-app browser automation.
 
 ## Install
 
-Add the npm package to your OpenCode configuration:
+Bundled notifications are currently an unreleased development feature. The
+published `0.2.0` package provides the native tools bridge but does not include
+OC Notify. Build this repository's plugin and replace the existing plugin entry
+with the absolute URL of its built entrypoint:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "@openclient-ios/opencode-plugin@0.2.0"
+    ["file:///absolute/path/to/OpenClientPlugin/dist/index.js", {
+      "notifications": {
+        "enabled": true,
+        "publicOrigin": "https://notify.example.com",
+        "port": 4319,
+        "dataDir": "/absolute/path/to/notification-state"
+      }
+    }]
   ]
 }
 ```
@@ -19,12 +29,15 @@ Add the npm package to your OpenCode configuration:
 Quit and restart OpenCode after changing plugin configuration. OpenCode loads
 plugins at startup and does not hot-reload them.
 
+OpenCode `1.18.5` or newer is required so the host invokes the plugin disposal
+hook during shutdown and reload.
+
 The OpenClient iOS app discovers the bridge on the connected OpenCode host and
 advertises the native tools supported by that app build.
 
-For repository development, the plugin is loaded locally from `src/index.ts`
-through the repository's `opencode.json`. OpenCode must be restarted after
-changing plugin code.
+For repository development, run `npm run build` before loading `dist/index.js`.
+Do not also load the old npm entry or the standalone notification adapter.
+OpenCode must be restarted after changing plugin code or configuration.
 
 The first feature is a dual-stack WebSocket bridge that binds the first
 available port in `4070...4090` on all IPv4 and IPv6 interfaces. It exposes two
@@ -41,6 +54,7 @@ VPN, firewall, or equivalent trusted-network architecture. Do not expose ports
 Endpoints:
 
 - `GET /openclient/v1/health`
+- `POST /openclient/v1/notifications/setup`
 - `GET /openclient/v1/ws`
 - `GET /openclient/v1/image/resources/:resourceID/content`
 - `POST /openclient/v1/video/resources/:resourceID/stream`
@@ -48,6 +62,34 @@ Endpoints:
 - `DELETE /openclient/v1/video/streams/:streamID`
 - `GET /openclient/v1/video/streams/:streamID/playlist.m3u8`
 - `GET /openclient/v1/video/streams/:streamID/{init.mp4,segment-NNNNNN.m4s}`
+
+Notifications are disabled by default. When enabled, `publicOrigin` is required
+and must be a path-free HTTPS origin. The PWA listens only on `127.0.0.1` at
+`port` (default `4319`). `dataDir` defaults to
+`$XDG_STATE_HOME/opencode/openclient/notifications` or
+`~/.local/state/opencode/openclient/notifications`; configure an absolute path
+when migrating existing OC Notify state.
+
+For migration, stop the old standalone OC Notify process before starting the
+plugin so it releases the PWA port and data directory. Use the exact same
+absolute `dataDir` in the plugin options and every pairing command; do not rely
+on `npm run pair` defaults for an existing prototype `.data` directory. Perform
+the final controlled restart only when active OpenCode work can be interrupted.
+
+The native setup endpoint creates a one-use, 10-minute connection-prefill code.
+It does not pair a browser, authorize a device, save a destination, enable push,
+or opt into activity notifications. A first-time Home Screen PWA must still be
+paired using a separate code generated on the Mac:
+
+```bash
+openclient-notify pair --data-dir /absolute/path/to/notification-state
+```
+
+For the repository prototype state, the explicit command is:
+
+```bash
+openclient-notify pair --data-dir /absolute/path/to/NotificationPWA/.data
+```
 
 `openclient_visual_image` accepts an absolute path to a readable regular JPEG,
 PNG, or WebP file up to 20 MiB. Tool execution canonicalizes and validates the

@@ -166,6 +166,182 @@ struct OpenClientBridgeHealth: Decodable, Equatable, Sendable {
     let `protocol`: Int
     let port: Int
     let openCodePort: Int
+    let notifications: OpenClientBridgeNotificationsAdvertisement?
+
+    init(
+        service: String,
+        protocol: Int,
+        port: Int,
+        openCodePort: Int,
+        notifications: OpenClientBridgeNotificationsAdvertisement? = nil
+    ) {
+        self.service = service
+        self.protocol = `protocol`
+        self.port = port
+        self.openCodePort = openCodePort
+        self.notifications = notifications
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case service
+        case `protocol`
+        case port
+        case openCodePort
+        case notifications
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        service = try container.decode(String.self, forKey: .service)
+        `protocol` = try container.decode(Int.self, forKey: .protocol)
+        port = try container.decode(Int.self, forKey: .port)
+        openCodePort = try container.decode(Int.self, forKey: .openCodePort)
+        notifications = (try? container.decodeIfPresent(
+            OpenClientBridgeNotificationsAdvertisement.self,
+            forKey: .notifications
+        )) ?? nil
+    }
+}
+
+struct OpenClientBridgeNotificationsAdvertisement: Decodable, Equatable, Sendable {
+    enum State: Decodable, Equatable, Sendable {
+        case ready
+        case unconfigured
+        case unavailable
+        case unknown
+
+        init(from decoder: Decoder) throws {
+            switch try decoder.singleValueContainer().decode(String.self) {
+            case "ready": self = .ready
+            case "unconfigured": self = .unconfigured
+            case "unavailable": self = .unavailable
+            default: self = .unknown
+            }
+        }
+    }
+
+    let version: Int
+    let state: State
+    let publicOrigin: String?
+}
+
+enum OpenClientBridgeNotificationsCapability: Equatable, Sendable {
+    case missing
+    case ready(publicOrigin: String)
+    case unconfigured
+    case unavailable
+    case unsupportedVersion
+
+    init(advertisement: OpenClientBridgeNotificationsAdvertisement?) {
+        guard let advertisement else {
+            self = .missing
+            return
+        }
+        guard advertisement.version == 1 else {
+            self = .unsupportedVersion
+            return
+        }
+        switch advertisement.state {
+        case .ready:
+            guard let origin = advertisement.publicOrigin,
+                  Self.isValidPublicOrigin(origin) else {
+                self = .unavailable
+                return
+            }
+            self = .ready(publicOrigin: origin)
+        case .unconfigured:
+            self = .unconfigured
+        case .unavailable, .unknown:
+            self = .unavailable
+        }
+    }
+
+    private static func isValidPublicOrigin(_ value: String) -> Bool {
+        guard !value.isEmpty,
+              let components = URLComponents(string: value),
+              components.scheme == "https",
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil,
+              components.path.isEmpty,
+              components.query == nil,
+              components.fragment == nil,
+              components.url?.absoluteString == value else { return false }
+        return true
+    }
+}
+
+enum OpenClientNotificationSetupError: LocalizedError, Equatable {
+    case unavailable
+    case invalidConnection
+    case invalidResponse
+    case invalidExpiry
+    case staleSetup
+    case browserOpenFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable:
+            String(localized: "OC Notify setup is not available from this plugin.")
+        case .invalidConnection:
+            String(localized: "The saved OpenCode connection cannot be used for notification setup.")
+        case .invalidResponse:
+            String(localized: "OC Notify returned an invalid setup response.")
+        case .invalidExpiry:
+            String(localized: "The OC Notify setup code is expired or invalid.")
+        case .staleSetup:
+            String(localized: "This OC Notify setup code is no longer valid. Generate a new code.")
+        case .browserOpenFailed:
+            String(localized: "OC Notify could not be opened. Try again or generate a new code.")
+        }
+    }
+}
+
+struct OpenClientNotificationSetupContext: Equatable, Sendable {
+    let connectionID: String
+    let baseURL: String
+    let username: String
+    let profile: OpenCodeAPIProfile
+    let savedServerID: String
+
+    init(
+        connectionID: String,
+        config: OpenCodeServerConfig,
+        profile: OpenCodeAPIProfile,
+        savedServerID: String
+    ) throws {
+        let baseURL = config.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let username = config.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !connectionID.isEmpty,
+              !baseURL.isEmpty,
+              baseURL.utf16.count <= 2_048,
+              username.utf16.count <= 128,
+              !baseURL.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              !username.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              savedServerID == config.recentServerID,
+              let components = URLComponents(string: baseURL),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              components.url?.absoluteString == baseURL else {
+            throw OpenClientNotificationSetupError.invalidConnection
+        }
+        self.connectionID = connectionID
+        self.baseURL = baseURL
+        self.username = username
+        self.profile = profile
+        self.savedServerID = savedServerID
+    }
+}
+
+struct OpenClientNotificationSetup: Decodable, Equatable, Sendable {
+    let url: URL
+    let code: String
+    let expiresAt: Date
 }
 
 enum OpenClientBridgeProtocolError: LocalizedError, Equatable {

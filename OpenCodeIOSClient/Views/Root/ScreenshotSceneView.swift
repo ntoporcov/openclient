@@ -65,7 +65,11 @@ struct ScreenshotSceneView: View {
             }
         case .activity:
             NavigationStack {
-                ActivityView(facade: viewModel.activityFacade, connection: viewModel.connectionFacade) {}
+                ActivityView(
+                    facade: viewModel.activityFacade,
+                    connection: viewModel.connectionFacade,
+                    providerUsage: viewModel.providerUsageFacade
+                ) {}
             }
         case .chat:
             #if os(iOS) && !targetEnvironment(macCatalyst)

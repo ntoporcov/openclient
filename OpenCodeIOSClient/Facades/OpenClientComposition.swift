@@ -52,13 +52,41 @@ final class OpenClientComposition: ObservableObject {
             connectionStore: viewModel.connectionStore,
             chatStore: viewModel.chatStore,
             configProvider: { [weak viewModel] in viewModel?.compatibilityClient(for: .bridge)?.config ?? OpenCodeServerConfig() },
-            client: bridgeClient
+            client: bridgeClient,
+            notificationContextProvider: { [weak viewModel] in
+                guard let viewModel,
+                      viewModel.connectionStore.isConnected,
+                      let connection = viewModel.backendConnection,
+                      !connection.isClosed,
+                      let adapter = connection.openCodeCompatibility,
+                      viewModel.connectionStore.recentServerConfigs.contains(where: {
+                          $0.recentServerID == adapter.client.config.recentServerID
+                      }) else { return nil }
+                return try? OpenClientNotificationSetupContext(
+                    connectionID: connection.id.uuidString,
+                    config: adapter.client.config,
+                    profile: adapter.profile,
+                    savedServerID: adapter.client.config.recentServerID
+                )
+            }
         )
         self.bridgeCoordinator = bridgeCoordinator
-        bridge = OpenClientBridgeFacade(store: bridgeStore) { [weak bridgeCoordinator, weak viewModel] in
-            guard viewModel?.compatibilityClient(for: .bridge) != nil else { return }
-            bridgeCoordinator?.forceConnect()
-        }
+        bridge = OpenClientBridgeFacade(
+            store: bridgeStore,
+            forceConnect: { [weak bridgeCoordinator, weak viewModel] in
+                guard viewModel?.compatibilityClient(for: .bridge) != nil else { return }
+                bridgeCoordinator?.forceConnect()
+            },
+            setupNotifications: { [weak bridgeCoordinator] in
+                await bridgeCoordinator?.setupNotifications()
+            },
+            notificationOpenRequest: { [weak bridgeCoordinator] in
+                bridgeCoordinator?.notificationOpenRequest()
+            },
+            notificationBrowserOpenFailed: { [weak bridgeCoordinator] request in
+                bridgeCoordinator?.notificationBrowserOpenFailed(request: request)
+            }
+        )
         viewModel.chatFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
         viewModel.connectionFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
         viewModel.sessionListFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
