@@ -190,7 +190,7 @@ struct MessageComposer: View {
     }
 #endif
 
-    @State private var selectedCommandName: String?
+    @State private var suggestionSelection = ComposerSuggestionSelection()
     @State private var accessoryPopoverHeight: CGFloat = 315
     @State private var accessoryNavigationPath: [AccessoryDestination] = []
     @Namespace private var accessoryGlassNamespace
@@ -440,6 +440,7 @@ struct MessageComposer: View {
     }
 
     private var slashQuery: String? {
+        guard text.last?.isWhitespace != true else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.first == "/" else { return nil }
         let body = String(trimmed.dropFirst())
@@ -449,16 +450,7 @@ struct MessageComposer: View {
 
     private var filteredCommands: [OpenCodeCommand] {
         guard let query = slashQuery else { return [] }
-        if query.isEmpty {
-            return commands.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        }
-
-        return commands
-            .filter { command in
-                command.name.localizedCaseInsensitiveContains(query) ||
-                    (command.description?.localizedCaseInsensitiveContains(query) ?? false)
-            }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return ComposerSuggestionSelection.rankedCommands(commands, query: query)
     }
 
     private var agentMentionQuery: String? {
@@ -483,14 +475,21 @@ struct MessageComposer: View {
     }
 
     private var selectedCommand: OpenCodeCommand? {
-        if let selectedCommandName {
-            return filteredCommands.first(where: { $0.name == selectedCommandName })
-        }
-        return filteredCommands.first
+        filteredCommands.first { $0.name == suggestionSelection.selectedID(in: suggestionContext) }
     }
 
     private var showsCommandPicker: Bool {
         allowsTextTools && slashQuery != nil && !isBusy
+    }
+
+    private var suggestionContext: ComposerSuggestionSelection.Context? {
+        if showsAgentMentionPicker {
+            return .init(kind: .agent, query: agentMentionQuery ?? "", ids: filteredMentionableAgents.map(\.name))
+        }
+        if showsCommandPicker {
+            return .init(kind: .command, query: slashQuery ?? "", ids: filteredCommands.map(\.name))
+        }
+        return nil
     }
 
     private var expandedAccessorySheetDetentHeight: CGFloat {
@@ -515,11 +514,10 @@ struct MessageComposer: View {
             .onPreferenceChange(MessageComposerHeightPreferenceKey.self) { height in
                 onHeightChange(height)
             }
-            .onAppear {
-                syncSelectedCommand()
+            .onChange(of: suggestionContext, initial: true) { _, context in
+                suggestionSelection.synchronize(to: context)
             }
             .onChange(of: draftStore.text) { _, _ in
-                syncSelectedCommand()
                 reconcileAgentMentions()
                 if !text.isEmpty {
                     isAccessoryMenuOpen = false
@@ -619,6 +617,7 @@ struct MessageComposer: View {
             if showsAgentMentionPicker {
                 AgentMentionPicker(
                     agents: filteredMentionableAgents,
+                    selectedAgentName: suggestionSelection.selectedID(in: suggestionContext),
                     onSelect: insertAgentMention
                 )
                 .transition(
@@ -1169,8 +1168,12 @@ struct MessageComposer: View {
             placeholder: "Message",
             maxLines: 6,
             canSubmit: canSend && !isDictating,
+            hasSuggestionMenu: suggestionContext != nil,
             autoFocus: autoFocus,
             onPasteImages: pastedImageHandler,
+            onMoveSuggestion: moveSuggestion,
+            onCommitSuggestion: { commitSuggestion() },
+            onCompleteSuggestion: { commitSuggestion(completesOnly: true) },
             onSubmit: onSend,
             onFocusChange: onFocusChange
         )
@@ -1700,18 +1703,31 @@ struct MessageComposer: View {
         }
     }
 
-    private func syncSelectedCommand() {
-        guard showsCommandPicker else {
-            selectedCommandName = nil
-            return
-        }
+    private func moveSuggestion(by offset: Int) -> Bool {
+        guard let context = suggestionContext else { return false }
+        suggestionSelection.move(by: offset, in: context)
+        return true
+    }
 
-        if let selectedCommandName,
-           filteredCommands.contains(where: { $0.name == selectedCommandName }) {
-            return
+    private func commitSuggestion(completesOnly: Bool = false) -> Bool {
+        guard let context = suggestionContext else { return false }
+        let selectedID = suggestionSelection.selectedID(in: context)
+        switch context.kind {
+        case .command:
+            if let command = filteredCommands.first(where: { $0.name == selectedID }) {
+                if completesOnly {
+                    setText("/\(command.name) ")
+                } else {
+                    onSelectCommand(command)
+                }
+            }
+        case .agent:
+            if let agent = filteredMentionableAgents.first(where: { $0.name == selectedID }) {
+                insertAgentMention(agent)
+            }
         }
-
-        selectedCommandName = filteredCommands.first?.name
+        // Empty menus consume acceptance keys without sending or changing focus.
+        return true
     }
 
     private func insertSlashCommand() {
@@ -2243,8 +2259,12 @@ private struct ComposerTextView: UIViewRepresentable {
     let placeholder: LocalizedStringResource
     let maxLines: Int
     let canSubmit: Bool
+    let hasSuggestionMenu: Bool
     let autoFocus: Bool
     let onPasteImages: ([UIImage]) -> Bool
+    let onMoveSuggestion: (Int) -> Bool
+    let onCommitSuggestion: () -> Bool
+    let onCompleteSuggestion: () -> Bool
     let onSubmit: () -> Void
     let onFocusChange: (Bool) -> Void
 
@@ -2271,7 +2291,11 @@ private struct ComposerTextView: UIViewRepresentable {
         textView.keyboardDismissMode = .interactive
         textView.placeholder = String(localized: placeholder)
         textView.canSubmit = canSubmit
+        textView.hasSuggestionMenu = hasSuggestionMenu
         textView.onPasteImages = onPasteImages
+        textView.onMoveSuggestion = onMoveSuggestion
+        textView.onCommitSuggestion = onCommitSuggestion
+        textView.onCompleteSuggestion = onCompleteSuggestion
         textView.onSubmit = onSubmit
         textView.applyText(text, agentMentions: agentMentions)
         textView.updatePlaceholderVisibility()
@@ -2314,7 +2338,11 @@ private struct ComposerTextView: UIViewRepresentable {
         }
 
         textView.canSubmit = canSubmit
+        textView.hasSuggestionMenu = hasSuggestionMenu
         textView.onPasteImages = onPasteImages
+        textView.onMoveSuggestion = onMoveSuggestion
+        textView.onCommitSuggestion = onCommitSuggestion
+        textView.onCompleteSuggestion = onCompleteSuggestion
         textView.onSubmit = onSubmit
         context.coordinator.requestAutoFocusIfNeeded(on: textView)
 
@@ -2395,7 +2423,11 @@ final class ComposerPlaceholderTextView: UITextView {
     private var highlightedFont: UIFont?
     var maximumLineCount = ComposerTextViewMetrics.maxLines
     var canSubmit = false
+    var hasSuggestionMenu = false
     var onPasteImages: (([UIImage]) -> Bool)?
+    var onMoveSuggestion: ((Int) -> Bool)?
+    var onCommitSuggestion: (() -> Bool)?
+    var onCompleteSuggestion: (() -> Bool)?
     var onSubmit: (() -> Void)?
 
     var placeholder: String = "" {
@@ -2551,6 +2583,17 @@ final class ComposerPlaceholderTextView: UITextView {
         if let switchCommand = SessionSwitcherKeyboardController.command(for: window) {
             commands.insert(switchCommand, at: 0)
         }
+        guard markedTextRange == nil else { return commands }
+
+        if hasSuggestionMenu {
+            let previous = UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(selectPreviousSuggestion))
+            let next = UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(selectNextSuggestion))
+            let complete = UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(completeSelectedSuggestion))
+            previous.wantsPriorityOverSystemBehavior = true
+            next.wantsPriorityOverSystemBehavior = true
+            complete.wantsPriorityOverSystemBehavior = true
+            commands.insert(contentsOf: [previous, next, complete], at: 0)
+        }
 
         let submitCommand = UIKeyCommand(
             title: "",
@@ -2558,6 +2601,7 @@ final class ComposerPlaceholderTextView: UITextView {
             input: "\r",
             modifierFlags: []
         )
+        submitCommand.wantsPriorityOverSystemBehavior = hasSuggestionMenu
         commands.append(submitCommand)
 
         let submitEnterCommand = UIKeyCommand(
@@ -2566,6 +2610,7 @@ final class ComposerPlaceholderTextView: UITextView {
             input: "\n",
             modifierFlags: []
         )
+        submitEnterCommand.wantsPriorityOverSystemBehavior = hasSuggestionMenu
         commands.append(submitEnterCommand)
 
         let newlineCommand = UIKeyCommand(
@@ -2580,11 +2625,43 @@ final class ComposerPlaceholderTextView: UITextView {
     }
 
     @objc private func submitIfPossible() {
-        guard canSubmit else { return }
-        onSubmit?()
+        _ = handleKeyboardInput("\r", modifiers: [])
+    }
+
+    @objc private func selectPreviousSuggestion() {
+        _ = handleKeyboardInput(UIKeyCommand.inputUpArrow, modifiers: [])
+    }
+
+    @objc private func selectNextSuggestion() {
+        _ = handleKeyboardInput(UIKeyCommand.inputDownArrow, modifiers: [])
+    }
+
+    @objc private func completeSelectedSuggestion() {
+        _ = handleKeyboardInput("\t", modifiers: [])
+    }
+
+    @discardableResult
+    func handleKeyboardInput(_ input: String, modifiers: UIKeyModifierFlags) -> Bool {
+        guard markedTextRange == nil,
+              modifiers.intersection([.shift, .control, .alternate, .command]).isEmpty else { return false }
+        switch input {
+        case UIKeyCommand.inputUpArrow:
+            return onMoveSuggestion?(-1) ?? false
+        case UIKeyCommand.inputDownArrow:
+            return onMoveSuggestion?(1) ?? false
+        case "\t":
+            return onCompleteSuggestion?() ?? false
+        case "\r", "\n":
+            if onCommitSuggestion?() == true { return true }
+            if canSubmit { onSubmit?() }
+            return true
+        default:
+            return false
+        }
     }
 
     @objc private func insertShiftNewline() {
+        guard markedTextRange == nil else { return }
         insertText("\n")
     }
 
@@ -2601,26 +2678,31 @@ final class ComposerPlaceholderTextView: UITextView {
             SessionSwitcherKeyboardController.dispatch(command)
             return
         }
-        guard
-            presses.contains(where: { press in
-                guard let key = press.key else { return false }
-                let characters = key.charactersIgnoringModifiers
-                let isReturn = key.keyCode == .keyboardReturnOrEnter || characters == "\r" || characters == "\n"
-                return isReturn && !key.modifierFlags.contains(.shift)
-            })
-        else {
-            super.pressesBegan(presses, with: event)
-            return
+        for press in presses {
+            guard let key = press.key else { continue }
+            let input: String
+            switch key.keyCode {
+            case .keyboardUpArrow: input = UIKeyCommand.inputUpArrow
+            case .keyboardDownArrow: input = UIKeyCommand.inputDownArrow
+            case .keyboardReturnOrEnter, .keypadEnter: input = "\r"
+            case .keyboardTab: input = "\t"
+            default: input = key.charactersIgnoringModifiers
+            }
+            if handleKeyboardInput(input, modifiers: key.modifierFlags) { return }
         }
-
-        if canSubmit {
-            onSubmit?()
-        }
+        super.pressesBegan(presses, with: event)
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(openClientCycleSession(_:)) {
             return SessionSwitcherKeyboardController.command(for: window) != nil
+        }
+        if action == #selector(selectPreviousSuggestion) || action == #selector(selectNextSuggestion)
+            || action == #selector(completeSelectedSuggestion) {
+            return hasSuggestionMenu && markedTextRange == nil
+        }
+        if action == #selector(submitIfPossible) || action == #selector(insertShiftNewline) {
+            return markedTextRange == nil
         }
         if action == #selector(paste(_:)), UIPasteboard.general.hasImages {
             return true
@@ -2682,59 +2764,73 @@ private struct CommandPicker: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
             } else {
-                ScrollView {
-                    VStack(spacing: 6) {
-                        ForEach(commands) { command in
-                            Button {
-                                onSelect(command)
-                            } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                    HStack(spacing: 1) {
-                                        Text("/")
-                                            .foregroundStyle(.secondary.opacity(0.7))
-                                        Text(command.name)
-                                            .foregroundStyle(.primary)
-                                    }
-                                    .font(.subheadline.weight(.semibold))
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            ForEach(commands) { command in
+                                Button {
+                                    onSelect(command)
+                                } label: {
+                                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                        HStack(spacing: 1) {
+                                            Text("/")
+                                                .foregroundStyle(.secondary.opacity(0.7))
+                                            Text(command.name)
+                                                .foregroundStyle(.primary)
+                                        }
+                                        .font(.subheadline.weight(.semibold))
 
-                                    if let description = command.description, !description.isEmpty {
-                                        Text(description)
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .lineLimit(1)
+                                        if let description = command.description, !description.isEmpty {
+                                            Text(description)
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .lineLimit(1)
+                                        } else {
+                                            Spacer(minLength: 0)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .fill(command.name == selectedCommandName ? Color.primary.opacity(0.08) : Color.clear)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    if pinnedCommandNames.contains(command.name) {
+                                        Button {
+                                            onUnpin(command)
+                                        } label: {
+                                            Label("Unpin", systemImage: "pin.slash")
+                                        }
                                     } else {
-                                        Spacer(minLength: 0)
+                                        Button {
+                                            onPin(command)
+                                        } label: {
+                                            Label("Pin", systemImage: "pin")
+                                        }
                                     }
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .fill(command.name == selectedCommandName ? Color.primary.opacity(0.08) : Color.clear)
-                                )
+                                .id(command.name)
+                                .accessibilityAddTraits(command.name == selectedCommandName ? .isSelected : [])
+                                .accessibilityIdentifier("chat.command.\(command.name)")
                             }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                if pinnedCommandNames.contains(command.name) {
-                                    Button {
-                                        onUnpin(command)
-                                    } label: {
-                                        Label("Unpin", systemImage: "pin.slash")
-                                    }
-                                } else {
-                                    Button {
-                                        onPin(command)
-                                    } label: {
-                                        Label("Pin", systemImage: "pin")
-                                    }
-                                }
-                            }
-                            .accessibilityIdentifier("chat.command.\(command.name)")
+                        }
+                        .padding(8)
+                    }
+                    .onChange(of: selectedCommandName, initial: true) { _, name in
+                        if let name {
+                            proxy.scrollTo(name)
                         }
                     }
-                    .padding(8)
+                    .onChange(of: commands.map(\.name)) { _, _ in
+                        if let selectedCommandName {
+                            proxy.scrollTo(selectedCommandName)
+                        }
+                    }
                 }
                 .frame(maxHeight: 220)
             }
@@ -2745,6 +2841,7 @@ private struct CommandPicker: View {
 
 private struct AgentMentionPicker: View {
     let agents: [OpenCodeAgent]
+    let selectedAgentName: String?
     let onSelect: (OpenCodeAgent) -> Void
 
     var body: some View {
@@ -2764,40 +2861,54 @@ private struct AgentMentionPicker: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
             } else {
-                ScrollView {
-                    VStack(spacing: 6) {
-                        ForEach(agents) { agent in
-                            Button {
-                                onSelect(agent)
-                            } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                    Text("@\(agent.name)")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.primary)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            ForEach(agents) { agent in
+                                Button {
+                                    onSelect(agent)
+                                } label: {
+                                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                        Text("@\(agent.name)")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
 
-                                    if let description = agent.description, !description.isEmpty {
-                                        Text(description)
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .lineLimit(1)
-                                    } else {
-                                        Spacer(minLength: 0)
+                                        if let description = agent.description, !description.isEmpty {
+                                            Text(description)
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .lineLimit(1)
+                                        } else {
+                                            Spacer(minLength: 0)
+                                        }
                                     }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .fill(Color.primary.opacity(agent.name == selectedAgentName ? 0.08 : 0.05))
+                                    )
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .fill(Color.primary.opacity(0.05))
-                                )
+                                .buttonStyle(.plain)
+                                .id(agent.name)
+                                .accessibilityAddTraits(agent.name == selectedAgentName ? .isSelected : [])
+                                .accessibilityIdentifier("chat.agentMention.\(agent.name)")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("chat.agentMention.\(agent.name)")
+                        }
+                        .padding(8)
+                    }
+                    .onChange(of: selectedAgentName, initial: true) { _, name in
+                        if let name {
+                            proxy.scrollTo(name)
                         }
                     }
-                    .padding(8)
+                    .onChange(of: agents.map(\.name)) { _, _ in
+                        if let selectedAgentName {
+                            proxy.scrollTo(selectedAgentName)
+                        }
+                    }
                 }
                 .frame(maxHeight: 220)
             }

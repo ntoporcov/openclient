@@ -375,9 +375,10 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
         let current = context()
         let transport = SyntheticImportTransport(mode: .hang)
         let importer = deterministicImporter(transport: transport, box: ImportContextBox(current))
+        let setup = candidate(context: current, provider: .codex)
         let task = Task {
             try await importer.renewCredential(
-                for: candidate(context: current, provider: .codex),
+                for: setup,
                 expectedAccountID: "synthetic-account",
                 currentAccessToken: "current-access"
             )
