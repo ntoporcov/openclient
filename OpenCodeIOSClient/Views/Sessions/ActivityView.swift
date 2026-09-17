@@ -462,6 +462,7 @@ private struct ActivityContent: View, Equatable {
                         presentation: presentation,
                         selectionFeedback: rowSelectionFeedback
                     )
+                    .equatable()
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
@@ -615,7 +616,7 @@ private struct ActivityRecentSection: Identifiable {
     var id: ActivityRecentBucket.ID { bucket.id }
 }
 
-struct ActivitySessionRow: View {
+struct ActivitySessionRow: View, Equatable {
     let row: ActivityFacade.RowSnapshot
     let showsLastUserMessage: Bool
     var isSelected = false
@@ -623,6 +624,14 @@ struct ActivitySessionRow: View {
     var selectionFeedback: SessionSelectionFeedback?
 
     private static let regularLayoutMinimumWidth: CGFloat = 200
+
+    nonisolated static func == (lhs: ActivitySessionRow, rhs: ActivitySessionRow) -> Bool {
+        lhs.row == rhs.row
+            && lhs.showsLastUserMessage == rhs.showsLastUserMessage
+            && lhs.isSelected == rhs.isSelected
+            && lhs.presentation == rhs.presentation
+            && lhs.selectionFeedback === rhs.selectionFeedback
+    }
 
     var body: some View {
         Group {
@@ -989,13 +998,31 @@ private struct ActivityTranscriptLine: View {
 struct ActivityTailPreview: View {
     let text: String
     let tint: Color
+    @State private var layoutCache = LayoutCache()
+
+    // Cache only bounded windows, never the whole growing answer or its hash.
+    @MainActor
+    final class LayoutCache {
+        fileprivate struct Key: Equatable {
+            let tail: String
+            let isComplete: Bool
+            let width: CGFloat
+            let font: UIFont
+            let maximumLines: Int
+        }
+
+        fileprivate var entry: (key: Key, result: String)?
+    }
+
+    static let initialWindowCharacterCount = 256
 
     var body: some View {
         GeometryReader { geometry in
             Text(Self.fittingText(
                 text,
                 width: geometry.size.width,
-                font: .preferredFont(forTextStyle: .subheadline)
+                font: .preferredFont(forTextStyle: .subheadline),
+                cache: layoutCache
             ))
             .font(.subheadline)
             .foregroundStyle(tint)
@@ -1005,18 +1032,49 @@ struct ActivityTailPreview: View {
         }
     }
 
-    static func fittingText(_ text: String, width: CGFloat, font: UIFont, maximumLines: Int = 2) -> String {
+    static func fittingText(
+        _ text: String,
+        width: CGFloat,
+        font: UIFont,
+        maximumLines: Int = 2,
+        cache: LayoutCache? = nil
+    ) -> String {
         guard width > 0, maximumLines > 0, !text.isEmpty else { return text }
+        var windowSize = initialWindowCharacterCount
+        var start = text.index(text.endIndex, offsetBy: -windowSize, limitedBy: text.startIndex) ?? text.startIndex
+        let initialStart = start
+        var window = String(text[start...])
+        let key = LayoutCache.Key(
+            tail: window, isComplete: start == text.startIndex,
+            width: width, font: font, maximumLines: maximumLines
+        )
+        if let entry = cache?.entry, entry.key == key { return entry.result }
+
+        func remember(_ result: String) -> String {
+            // An expanded window depends on older text absent from the key. Also bound
+            // bytes: a single grapheme can contain arbitrarily many combining marks.
+            if start == initialStart, key.tail.utf8.count <= 16_384 {
+                cache?.entry = (key, result)
+            }
+            return result
+        }
+
         let maximumHeight = measuredHeight(
             of: Array(repeating: "Ag", count: maximumLines).joined(separator: "\n"),
             width: width,
             font: font
         )
-        if measuredHeight(of: text, width: width, font: font) <= maximumHeight {
-            return text
+
+        // Test without an ellipsis before stopping: a window that only overflows
+        // with the ellipsis could still be part of a source that fits in full.
+        while measuredHeight(of: window, width: width, font: font) <= maximumHeight {
+            if start == text.startIndex { return remember(text) }
+            start = text.index(start, offsetBy: -windowSize, limitedBy: text.startIndex) ?? text.startIndex
+            windowSize *= 2
+            window = String(text[start...])
         }
 
-        let characters = Array(text)
+        let characters = Array(window)
         var lowerBound = 0
         var upperBound = characters.count
         while lowerBound < upperBound {
@@ -1032,7 +1090,7 @@ struct ActivityTailPreview: View {
         let suffix = String(characters[lowerBound...]).drop(while: {
             $0.isWhitespace || $0 == "." || $0 == "·"
         })
-        return "…" + suffix
+        return remember("…" + suffix)
     }
 
     private static func measuredHeight(of text: String, width: CGFloat, font: UIFont) -> CGFloat {

@@ -1040,6 +1040,7 @@ extension AppViewModel {
     }
 
     func resetRecentProjectSessionsForConnectionChange() {
+        activityFacade.resetForConnectionChange()
         recentProjectSessionsLoadGeneration &+= 1
         recentProjectSessionsLoadTask?.cancel()
         recentProjectSessionsLoadTask = nil

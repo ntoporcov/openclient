@@ -16,7 +16,7 @@ private final class ActivityMetadataURLProtocol: URLProtocol {
             body = #"{"data":[]}"#
         case "/api/form/request":
             let directory = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
-                .queryItems?.first { $0.name == "directory" }?.value
+                .queryItems?.first { $0.name == "location[directory]" }?.value
             body = directory == "/home-sandbox"
                 ? #"{"data":[{"id":"external-form","sessionID":"sandbox-session","title":"Authenticate","fields":[{"key":"auth","type":"external","required":true}]}]}"#
                 : #"{"data":[]}"#
@@ -31,6 +31,86 @@ private final class ActivityMetadataURLProtocol: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+private final class ActivityLegacyMetadataURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let body: String
+        switch request.url?.path {
+        case "/session/status":
+            body = #"{"home-session":{"type":"busy"},"sandbox-session":{"type":"busy"}}"#
+        case "/permission", "/question", "/session/preload-0/todo":
+            body = "[]"
+        default:
+            XCTFail("Unexpected legacy Activity request: \(request.url?.path ?? "")")
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+private final class ActivityPreloadChatBackend: BackendChatService {
+    struct Request: Equatable {
+        let sessionID: String
+        let scope: BackendScope
+        let cursor: String?
+        let limit: Int
+    }
+
+    var requests: [Request] = []
+    var gatedSessionID: String?
+    var onSuspension: (() -> Void)?
+    var onReturn: (() -> Void)?
+    var transcriptFailuresRemaining = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func transcript(sessionID: String, scope: BackendScope, cursor: String?, limit: Int) async throws -> BackendTranscriptPage {
+        requests.append(.init(sessionID: sessionID, scope: scope, cursor: cursor, limit: limit))
+        if transcriptFailuresRemaining > 0 {
+            transcriptFailuresRemaining -= 1
+            throw URLError(.timedOut)
+        }
+        let foreground = limit == 200
+        let page = BackendTranscriptPage(messages: [
+            .local(role: "user", text: "Prompt for \(sessionID)", messageID: "z-user-\(sessionID)", sessionID: sessionID),
+            .local(role: "assistant", text: "\(foreground ? "Foreground" : "Preloaded") \(sessionID)",
+                messageID: "a-answer-\(sessionID)", sessionID: sessionID),
+        ], olderCursor: foreground ? "foreground-older" : "preload-older")
+        if gatedSessionID == sessionID, !foreground {
+            gatedSessionID = nil
+            // Deliberately ignore cancellation so a late HTTP success can exercise the commit guards.
+            await withCheckedContinuation {
+                continuation = $0
+                onSuspension?()
+            }
+        }
+        onReturn?()
+        return page
+    }
+
+    func release() {
+        let pending = continuation
+        continuation = nil
+        pending?.resume()
+    }
+
+    func submit(_ request: BackendSubmission) async throws -> BackendAdmission {
+        XCTFail("Activity preloading must not submit prompts")
+        throw BackendError.disconnected
+    }
+
+    func interrupt(sessionID: String, scope: BackendScope) async throws {
+        XCTFail("Activity preloading must not interrupt sessions")
+        throw BackendError.disconnected
+    }
 }
 
 @MainActor
@@ -98,6 +178,457 @@ final class ActivityFacadeTests: XCTestCase {
         await fulfillment(of: [liveRow], timeout: 1)
         XCTAssertEqual(backend.listScopes.count, listRequestCount)
         withExtendedLifetime(observation) {}
+    }
+
+    func testPreparationEagerlyPreloadsEveryLiteralRecentInitialPageWithoutRowHydration() async throws {
+        let recent = makePreloadSessions(count: 21)
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.startOfDay(for: Date())
+        let older = try [1, 4, 8].map { days in
+            let date = try XCTUnwrap(calendar.date(byAdding: .day, value: -days, to: today))
+            return makeSession(id: "older-\(days)", title: "Older", directory: "/home-project",
+                projectID: "home-project", updated: date.timeIntervalSince1970 * 1_000)
+        }
+        let (viewModel, backend, chat) = try await makePreloadFixture(sessions: recent + older)
+        let navigationGeneration = viewModel.sessionNavigationGeneration
+
+        await viewModel.activityFacade.prepareForPresentation()
+
+        XCTAssertEqual(chat.requests.count, recent.count, "All offscreen Recent cards must preload, not just the first five")
+        XCTAssertEqual(Set(chat.requests.map(\.sessionID)), Set(recent.map(\.id)))
+        XCTAssertEqual(backend.listScopes.count, 3)
+        XCTAssertTrue(chat.requests.allSatisfy { $0.cursor == nil && $0.limit == 20 },
+            "Preloading must fetch only the initial page even when an older cursor is returned")
+        let snapshot = viewModel.activityFacade.snapshot
+        XCTAssertEqual(snapshot.workingRows.map(\.recent.session.id), ["home-session"])
+        XCTAssertEqual(snapshot.needsInputRows.map(\.recent.session.id), ["sandbox-session"])
+        XCTAssertEqual(Set(snapshot.recentRows.map(\.recent.session.id)), Set((recent + older).map(\.id)))
+        for session in recent {
+            let request = try XCTUnwrap(chat.requests.first { $0.sessionID == session.id })
+            XCTAssertEqual(request.scope, .init(projectID: session.projectID, directory: session.directory))
+            let owner = try XCTUnwrap(viewModel.directoryStoreRegistry.existingStore(for: session.directory))
+            let messages = owner.syncState.messageEnvelopes(forSessionID: session.id)
+            XCTAssertEqual(messages.map(\.id), ["z-user-\(session.id)", "a-answer-\(session.id)"],
+                "The backend's v2 transcript order must survive cache seeding")
+            XCTAssertEqual(viewModel.chatStore.cachedMessagesBySessionID[session.id], messages)
+            XCTAssertEqual(viewModel.sessionPreviews[session.id]?.text, "Preloaded \(session.id)")
+            let row = try XCTUnwrap(snapshot.recentRows.first { $0.recent.session.id == session.id })
+            XCTAssertEqual(row.latestUserText, "Prompt for \(session.id)")
+            XCTAssertEqual(row.latestAssistantText, "Preloaded \(session.id)")
+            XCTAssertFalse(row.isHydrating)
+            XCTAssertFalse(viewModel.chatStore.isHydratingV2Transcript(sessionID: session.id))
+            XCTAssertEqual(viewModel.chatStore.v2StreamRevision(sessionID: session.id), 0)
+        }
+        for id in older.map(\.id) + ["home-session", "sandbox-session"] {
+            XCTAssertNil(viewModel.chatStore.cachedMessagesBySessionID[id])
+            XCTAssertNil(viewModel.sessionPreviews[id])
+        }
+        XCTAssertNil(viewModel.selectedSession)
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertTrue(viewModel.chatStore.v2TranscriptStates.isEmpty)
+        XCTAssertFalse(viewModel.isLoadingSelectedSession)
+        XCTAssertEqual(viewModel.sessionNavigationGeneration, navigationGeneration)
+    }
+
+    func testRepeatedPreparationAndVisibleRowHydrationJoinTheEagerPreload() async throws {
+        let sessions = makePreloadSessions(count: 1)
+        let target = try XCTUnwrap(sessions.first)
+        let (viewModel, backend, chat) = try await makePreloadFixture(sessions: sessions)
+        let suspended = expectation(description: "Eager preload suspended")
+        chat.gatedSessionID = target.id
+        chat.onSuspension = { suspended.fulfill() }
+        let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+        await fulfillment(of: [suspended], timeout: 2)
+        let row = try XCTUnwrap(viewModel.activityFacade.snapshot.recentRows.first)
+        let joined = expectation(description: "Both callers join the suspended preload")
+        joined.expectedFulfillmentCount = 2
+        let repeatedPreparation = Task {
+            joined.fulfill()
+            await viewModel.activityFacade.prepareForPresentation()
+        }
+        let rowHydration = Task {
+            joined.fulfill()
+            await viewModel.activityFacade.hydrateIfNeeded(row)
+        }
+        await fulfillment(of: [joined], timeout: 1)
+        XCTAssertEqual(chat.requests.count, 1)
+        XCTAssertEqual(backend.listScopes.count, 3)
+
+        chat.release()
+        await preparation.value
+        await repeatedPreparation.value
+        await rowHydration.value
+        await viewModel.activityFacade.prepareForPresentation()
+        let hydratedRow = try XCTUnwrap(viewModel.activityFacade.snapshot.recentRows.first)
+        await viewModel.activityFacade.hydrateIfNeeded(hydratedRow)
+
+        XCTAssertEqual(chat.requests.count, 1)
+        XCTAssertEqual(backend.listScopes.count, 3)
+        XCTAssertEqual(hydratedRow.latestAssistantText, "Preloaded \(target.id)")
+        XCTAssertFalse(hydratedRow.isHydrating)
+    }
+
+    func testEagerPreloadCannotResurrectADeletedSession() async throws {
+        let sessions = makePreloadSessions(count: 1)
+        let target = try XCTUnwrap(sessions.first)
+        let (viewModel, _, chat) = try await makePreloadFixture(sessions: sessions)
+        let suspended = expectation(description: "Preload suspended before deletion")
+        chat.gatedSessionID = target.id
+        chat.onSuspension = { suspended.fulfill() }
+        let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+        await fulfillment(of: [suspended], timeout: 2)
+        let row = try XCTUnwrap(viewModel.activityFacade.snapshot.recentRows.first)
+        let owner = try XCTUnwrap(viewModel.directoryStoreRegistry.existingStore(for: target.directory))
+
+        await viewModel.activityFacade.delete(row)
+        XCTAssertTrue(viewModel.directoryStoreRegistry.isV2SessionDeleted(target.id))
+        chat.release()
+        await preparation.value
+
+        XCTAssertNil(viewModel.directoryStoreRegistry.session(matching: target.id))
+        XCTAssertTrue(owner.syncState.messageEnvelopes(forSessionID: target.id).isEmpty)
+        XCTAssertNil(viewModel.chatStore.cachedMessagesBySessionID[target.id])
+        XCTAssertNil(viewModel.sessionPreviews[target.id])
+        XCTAssertFalse(viewModel.activityFacade.snapshot.recentRows.contains { $0.recent.session.id == target.id })
+        XCTAssertEqual(chat.requests.count, 1)
+    }
+
+    func testEagerPreloadDropsAResponseAfterAStreamRevisionEvenWithoutMessageChanges() async throws {
+        let sessions = makePreloadSessions(count: 1)
+        let target = try XCTUnwrap(sessions.first)
+        let (viewModel, _, chat) = try await makePreloadFixture(sessions: sessions)
+        let suspended = expectation(description: "Preload suspended before stream event")
+        chat.gatedSessionID = target.id
+        chat.onSuspension = { suspended.fulfill() }
+        let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+        await fulfillment(of: [suspended], timeout: 2)
+        let owner = try XCTUnwrap(viewModel.directoryStoreRegistry.existingStore(for: target.directory))
+        let revision = viewModel.chatStore.v2StreamRevision(sessionID: target.id)
+        let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from:
+            """
+            {"type":"session.input.cancelled","data":{"sessionID":"\(target.id)","inputID":"cancelled-input"}}
+            """))
+
+        _ = viewModel.chatStore.applyV2StreamEvent(event, sessionID: target.id)
+        XCTAssertGreaterThan(viewModel.chatStore.v2StreamRevision(sessionID: target.id), revision)
+        XCTAssertTrue(owner.syncState.messageEnvelopes(forSessionID: target.id).isEmpty)
+        chat.release()
+        await preparation.value
+
+        XCTAssertTrue(owner.syncState.messageEnvelopes(forSessionID: target.id).isEmpty)
+        XCTAssertTrue(viewModel.chatStore.cachedMessagesBySessionID[target.id]?.isEmpty != false)
+        XCTAssertNil(viewModel.sessionPreviews[target.id])
+        XCTAssertNil(viewModel.activityFacade.snapshot.recentRows.first?.latestAssistantText)
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        XCTAssertEqual(chat.requests.count, 1)
+    }
+
+    func testForegroundSelectionOwnsHydrationWhileAnEagerPreloadIsInFlight() async throws {
+        for completesForeground in [false, true] {
+            let sessions = makePreloadSessions(count: 1)
+            let target = try XCTUnwrap(sessions.first)
+            let (viewModel, _, chat) = try await makePreloadFixture(sessions: sessions)
+            let suspended = expectation(description: "Preload suspended before foreground selection")
+            chat.gatedSessionID = target.id
+            chat.onSuspension = { suspended.fulfill() }
+            let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+            await fulfillment(of: [suspended], timeout: 2)
+            let row = try XCTUnwrap(viewModel.activityFacade.snapshot.recentRows.first)
+
+            viewModel.activityFacade.prepareSelection(row)
+            XCTAssertEqual(viewModel.selectedSession?.id, target.id)
+            XCTAssertTrue(viewModel.chatStore.isHydratingV2Transcript(sessionID: target.id))
+            if completesForeground {
+                let hydrated = await viewModel.hydrateV2Transcript(for: target,
+                    navigationGeneration: viewModel.sessionNavigationGeneration,
+                    expectedDirectoryKey: DirectoryStoreRegistry.key(for: target.directory))
+                XCTAssertTrue(hydrated)
+                XCTAssertEqual(viewModel.chatStore.preparedSessionID, target.id)
+            }
+            let owner = viewModel.directoryStore
+            let directoryMessages = owner.syncState.messageEnvelopes(forSessionID: target.id)
+            let cached = viewModel.chatStore.cachedMessagesBySessionID[target.id]
+            let active = viewModel.messages
+            let preview = viewModel.sessionPreviews[target.id]
+            let generation = viewModel.sessionNavigationGeneration
+            let transcriptState = viewModel.chatStore.v2TranscriptStates[target.id]
+            chat.release()
+            await preparation.value
+
+            XCTAssertEqual(owner.syncState.messageEnvelopes(forSessionID: target.id), directoryMessages)
+            XCTAssertEqual(viewModel.chatStore.cachedMessagesBySessionID[target.id], cached)
+            XCTAssertEqual(viewModel.messages, active)
+            XCTAssertEqual(viewModel.sessionPreviews[target.id], preview)
+            XCTAssertEqual(viewModel.sessionNavigationGeneration, generation)
+            XCTAssertEqual(viewModel.chatStore.v2TranscriptStates[target.id], transcriptState)
+            XCTAssertEqual(viewModel.chatStore.isHydratingV2Transcript(sessionID: target.id), !completesForeground)
+            XCTAssertEqual(viewModel.isLoadingSelectedSession, !completesForeground)
+            XCTAssertEqual(chat.requests.map(\.limit), completesForeground ? [20, 200] : [20])
+            if completesForeground {
+                XCTAssertEqual(viewModel.sessionPreviews[target.id]?.text, "Foreground \(target.id)")
+                XCTAssertEqual(viewModel.chatStore.v2TranscriptStates[target.id]?.olderCursor, "foreground-older")
+            } else {
+                XCTAssertNil(viewModel.chatStore.preparedSessionID)
+                XCTAssertTrue(active.isEmpty)
+            }
+            viewModel.disconnect()
+        }
+    }
+
+    func testDisconnectedEagerPreloadCannotRepopulateCachesWithALateSuccess() async throws {
+        let sessions = makePreloadSessions(count: 1)
+        let target = try XCTUnwrap(sessions.first)
+        let (viewModel, _, chat) = try await makePreloadFixture(sessions: sessions)
+        let suspended = expectation(description: "Preload suspended before disconnect")
+        chat.gatedSessionID = target.id
+        chat.onSuspension = { suspended.fulfill() }
+        let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+        await fulfillment(of: [suspended], timeout: 2)
+        let owner = try XCTUnwrap(viewModel.directoryStoreRegistry.existingStore(for: target.directory))
+
+        viewModel.disconnect()
+        let staleCache = expectation(description: "Late response must not repopulate the disconnected cache")
+        staleCache.isInverted = true
+        let observation = viewModel.chatStore.$cachedMessagesBySessionID
+            .filter { $0[target.id]?.isEmpty == false }
+            .sink { _ in staleCache.fulfill() }
+        let returned = expectation(description: "Cancelled backend still returns its captured response")
+        chat.onReturn = { returned.fulfill() }
+        chat.release()
+        await preparation.value
+        await fulfillment(of: [returned], timeout: 1)
+        // Disconnect releases queue waiters before cancelled workers finish, so observe a bounded rejection window.
+        await fulfillment(of: [staleCache], timeout: 0.1)
+
+        XCTAssertNil(viewModel.directoryStoreRegistry.session(matching: target.id))
+        XCTAssertTrue(owner.syncState.messageEnvelopes(forSessionID: target.id).isEmpty)
+        XCTAssertTrue(viewModel.chatStore.cachedMessagesBySessionID.isEmpty)
+        XCTAssertNil(viewModel.sessionPreviews[target.id])
+        XCTAssertTrue(viewModel.activityFacade.snapshot.isEmpty)
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        withExtendedLifetime(observation) {}
+    }
+
+    func testAcceptedEagerPreloadRefreshesNonemptyChatCacheAlongsideDirectory() async throws {
+        let sessions = makePreloadSessions(count: 1)
+        let target = try XCTUnwrap(sessions.first)
+        let (viewModel, _, chat) = try await makePreloadFixture(sessions: sessions)
+        let stale = [makeMessage(id: "stale", sessionID: target.id, role: "assistant", text: "Old cache", created: 1_000)]
+        let owner = viewModel.directoryStoreRegistry.store(for: target.directory)
+        owner.sessions = sessions
+        owner.applyV2Messages(stale, forSessionID: target.id)
+        viewModel.chatStore.cacheMessages(stale, forSessionID: target.id)
+        viewModel.refreshSessionPreview(for: target.id, messages: stale)
+
+        await viewModel.activityFacade.prepareForPresentation()
+
+        let messages = owner.syncState.messageEnvelopes(forSessionID: target.id)
+        XCTAssertEqual(messages.map(\.id), ["z-user-\(target.id)", "a-answer-\(target.id)"])
+        XCTAssertEqual(viewModel.chatStore.cachedMessagesBySessionID[target.id], messages)
+        XCTAssertEqual(viewModel.sessionPreviews[target.id]?.text, "Preloaded \(target.id)")
+        XCTAssertEqual(viewModel.activityFacade.snapshot.recentRows.first?.latestAssistantText, "Preloaded \(target.id)")
+        XCTAssertEqual(chat.requests.count, 1)
+        XCTAssertNil(viewModel.selectedSession)
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertTrue(viewModel.chatStore.v2TranscriptStates.isEmpty)
+    }
+
+    func testInterveningChatCacheWriteRejectsEagerPreloadWithoutAStreamRevisionChange() async throws {
+        let sessions = makePreloadSessions(count: 1)
+        let target = try XCTUnwrap(sessions.first)
+        let (viewModel, _, chat) = try await makePreloadFixture(sessions: sessions)
+        let previous = [makeMessage(id: "previous", sessionID: target.id, role: "assistant", text: "Previous", created: 1_000)]
+        let newer = [makeMessage(id: "newer", sessionID: target.id, role: "assistant", text: "New cache writer", created: 2_000)]
+        let owner = viewModel.directoryStoreRegistry.store(for: target.directory)
+        owner.sessions = sessions
+        owner.applyV2Messages(previous, forSessionID: target.id)
+        viewModel.chatStore.cacheMessages(previous, forSessionID: target.id)
+        viewModel.refreshSessionPreview(for: target.id, messages: previous)
+        let suspended = expectation(description: "Preload suspended before independent cache write")
+        chat.gatedSessionID = target.id
+        chat.onSuspension = { suspended.fulfill() }
+        let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+        await fulfillment(of: [suspended], timeout: 2)
+        let revision = viewModel.chatStore.v2StreamRevision(sessionID: target.id)
+
+        viewModel.chatStore.cacheMessages(newer, forSessionID: target.id)
+        chat.release()
+        await preparation.value
+
+        XCTAssertEqual(viewModel.chatStore.v2StreamRevision(sessionID: target.id), revision)
+        XCTAssertEqual(owner.syncState.messageEnvelopes(forSessionID: target.id), previous)
+        XCTAssertEqual(viewModel.chatStore.cachedMessagesBySessionID[target.id], newer)
+        XCTAssertEqual(viewModel.sessionPreviews[target.id]?.text, "Previous")
+        XCTAssertEqual(viewModel.activityFacade.snapshot.recentRows.first?.latestAssistantText, "Previous")
+        XCTAssertEqual(chat.requests.count, 1)
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+    }
+
+    func testEagerPreloadRejectsLiveScopeMovement() async throws {
+        let target = try XCTUnwrap(makePreloadSessions(count: 1).first)
+        for moved in scopeMovements(of: target) {
+            let (viewModel, _, chat) = try await makePreloadFixture(sessions: [target])
+            let suspended = expectation(description: "Preload suspended before live scope movement")
+            chat.gatedSessionID = target.id
+            chat.onSuspension = { suspended.fulfill() }
+            let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+            await fulfillment(of: [suspended], timeout: 2)
+            let owner = try XCTUnwrap(viewModel.directoryStoreRegistry.existingStore(for: target.directory))
+
+            owner.insertV2Session(moved)
+            chat.release()
+            await preparation.value
+
+            XCTAssertEqual(owner.sessions.first { $0.id == target.id }, moved)
+            XCTAssertTrue(owner.syncState.messageEnvelopes(forSessionID: target.id).isEmpty)
+            XCTAssertNil(viewModel.chatStore.cachedMessagesBySessionID[target.id])
+            XCTAssertNil(viewModel.sessionPreviews[target.id])
+            XCTAssertEqual(chat.requests.count, 1)
+            XCTAssertEqual(chat.requests.first?.scope, .init(projectID: target.projectID, directory: target.directory))
+            viewModel.disconnect()
+        }
+    }
+
+    func testEagerPreloadRejectsCanonicalResponseScopeMovement() async throws {
+        let target = try XCTUnwrap(makePreloadSessions(count: 1).first)
+        for moved in scopeMovements(of: target) {
+            let (viewModel, backend, chat) = try await makePreloadFixture(sessions: [target])
+            // The list establishes the original scope; the subsequent detail read discovers the move.
+            backend.beforeSessionFetch = {
+                backend.storedSessions = backend.storedSessions.map { $0.id == target.id ? moved : $0 }
+            }
+
+            await viewModel.activityFacade.prepareForPresentation()
+
+            let owner = try XCTUnwrap(viewModel.directoryStoreRegistry.existingStore(for: target.directory))
+            XCTAssertEqual(owner.sessions.first { $0.id == target.id }, target, "Moved detail must not be installed into the old scope")
+            XCTAssertTrue(owner.syncState.messageEnvelopes(forSessionID: target.id).isEmpty, "Moved scope: \(moved)")
+            XCTAssertNil(viewModel.chatStore.cachedMessagesBySessionID[target.id], "Moved scope: \(moved)")
+            XCTAssertNil(viewModel.sessionPreviews[target.id])
+            XCTAssertEqual(chat.requests.count, 1)
+            XCTAssertEqual(chat.requests.first?.scope, .init(projectID: target.projectID, directory: target.directory))
+            backend.beforeSessionFetch = nil
+            viewModel.disconnect()
+        }
+    }
+
+    func testFailedEagerPreloadCanBeRetriedByRowHydrationWithoutRepeatingPreparation() async throws {
+        let sessions = makePreloadSessions(count: 1)
+        let target = try XCTUnwrap(sessions.first)
+        let (viewModel, backend, chat) = try await makePreloadFixture(sessions: sessions)
+        chat.transcriptFailuresRemaining = 1
+
+        await viewModel.activityFacade.prepareForPresentation()
+
+        let failedRow = try XCTUnwrap(viewModel.activityFacade.snapshot.recentRows.first)
+        XCTAssertFalse(failedRow.isHydrating)
+        XCTAssertNil(failedRow.latestAssistantText)
+        XCTAssertNil(viewModel.chatStore.cachedMessagesBySessionID[target.id])
+        XCTAssertEqual(chat.requests.count, 1)
+        await viewModel.activityFacade.prepareForPresentation()
+        XCTAssertEqual(chat.requests.count, 1, "Failed eager attempts must not create an automatic retry loop")
+
+        await viewModel.activityFacade.hydrateIfNeeded(failedRow)
+
+        let retriedRow = try XCTUnwrap(viewModel.activityFacade.snapshot.recentRows.first)
+        XCTAssertFalse(retriedRow.isHydrating)
+        XCTAssertEqual(retriedRow.latestAssistantText, "Preloaded \(target.id)")
+        XCTAssertEqual(viewModel.chatStore.cachedMessagesBySessionID[target.id]?.count, 2)
+        XCTAssertEqual(viewModel.sessionPreviews[target.id]?.text, "Preloaded \(target.id)")
+        XCTAssertEqual(chat.requests.count, 2)
+        await viewModel.activityFacade.hydrateIfNeeded(retriedRow)
+        XCTAssertEqual(chat.requests.count, 2)
+        XCTAssertEqual(backend.listScopes.count, 3)
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testV2DiskTranscriptsNeverSeedCanonicalActivityStateBeforeGatedHTTP() async throws {
+        let target = try XCTUnwrap(makePreloadSessions(count: 1).first)
+        let calendar = Calendar.autoupdatingCurrent
+        let yesterday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: Date())))
+        let older = makeSession(id: "disk-only-older", title: "Yesterday", directory: "/home-project",
+            projectID: "home-project", updated: yesterday.timeIntervalSince1970 * 1_000)
+        let (viewModel, _, chat) = try await makePreloadFixture(sessions: [target, older], usesLocalCache: true)
+        let namespace = try XCTUnwrap(viewModel.localCacheNamespace)
+        XCTAssertTrue(OpenCodeLocalCacheIdentity.isV2(namespace))
+        let repository = viewModel.localCacheRepository
+        try await repository.saveDirectorySessions([target, older], serverID: namespace,
+            directory: OpenCodeLocalCacheIdentity.directory(target.directory, workspaceID: nil, namespace: namespace))
+        for session in [target, older] {
+            try await repository.saveChatMessages([
+                makeMessage(id: "disk-\(session.id)", sessionID: session.id, role: "assistant", text: "Unvalidated disk text", created: 1_000),
+            ], serverID: namespace, sessionID: session.id)
+        }
+        let suspended = expectation(description: "HTTP suspended after the disk hydration phase")
+        chat.gatedSessionID = target.id
+        chat.onSuspension = { suspended.fulfill() }
+        let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+        await fulfillment(of: [suspended], timeout: 2)
+        let owner = try XCTUnwrap(viewModel.directoryStoreRegistry.existingStore(for: target.directory))
+
+        for session in [target, older] {
+            XCTAssertTrue(owner.sessions.contains { $0.id == session.id })
+            XCTAssertTrue(owner.syncState.messageEnvelopes(forSessionID: session.id).isEmpty)
+            XCTAssertNil(viewModel.chatStore.cachedMessagesBySessionID[session.id])
+            XCTAssertNil(viewModel.sessionPreviews[session.id])
+            XCTAssertNil(viewModel.activityFacade.snapshot.recentRows.first { $0.recent.session.id == session.id }?.latestAssistantText)
+        }
+        XCTAssertNil(viewModel.selectedSession)
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertTrue(viewModel.chatStore.v2TranscriptStates.isEmpty)
+
+        chat.release()
+        await preparation.value
+
+        let canonical = owner.syncState.messageEnvelopes(forSessionID: target.id)
+        XCTAssertEqual(canonical.map(\.id), ["z-user-\(target.id)", "a-answer-\(target.id)"])
+        XCTAssertEqual(viewModel.chatStore.cachedMessagesBySessionID[target.id], canonical)
+        XCTAssertTrue(owner.syncState.messageEnvelopes(forSessionID: older.id).isEmpty)
+        XCTAssertNil(viewModel.chatStore.cachedMessagesBySessionID[older.id])
+        XCTAssertEqual(chat.requests.map(\.sessionID), [target.id])
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        for task in Array(viewModel.localCacheWriteTasksByKey.values) { await task.value }
+    }
+
+    func testLegacyEagerPreloadPersistsMergedHistoryInsteadOfOnlyTheHTTPPage() async throws {
+        let target = try XCTUnwrap(makePreloadSessions(count: 1).first)
+        let (viewModel, _, chat) = try await makePreloadFixture(sessions: [target], profile: .legacy, usesLocalCache: true)
+        let namespace = try XCTUnwrap(viewModel.localCacheNamespace)
+        XCTAssertFalse(OpenCodeLocalCacheIdentity.isV2(namespace))
+        let repository = viewModel.localCacheRepository
+        let history = [makeMessage(id: "old-history", sessionID: target.id, role: "assistant", text: "Keep old history", created: 1_000)]
+        try await repository.saveDirectorySessions([target], serverID: namespace, directory: target.directory)
+        try await repository.saveChatMessages(history, serverID: namespace, sessionID: target.id)
+        let suspended = expectation(description: "Legacy HTTP suspended after restoring old disk history")
+        chat.gatedSessionID = target.id
+        chat.onSuspension = { suspended.fulfill() }
+        let preparation = Task { await viewModel.activityFacade.prepareForPresentation() }
+        await fulfillment(of: [suspended], timeout: 2)
+        let owner = try XCTUnwrap(viewModel.directoryStoreRegistry.existingStore(for: target.directory))
+        XCTAssertEqual(owner.syncState.messageEnvelopes(forSessionID: target.id), history)
+
+        chat.release()
+        await preparation.value
+        for task in Array(viewModel.localCacheWriteTasksByKey.values) { await task.value }
+
+        let loaded = try await repository.loadChat(serverID: namespace, sessionID: target.id)
+        let persisted = try XCTUnwrap(loaded)
+        let expectedIDs: Set<String> = ["old-history", "z-user-\(target.id)", "a-answer-\(target.id)"]
+        let merged = owner.syncState.messageEnvelopes(forSessionID: target.id)
+        XCTAssertEqual(Set(merged.map(\.id)), expectedIDs)
+        XCTAssertEqual(Set(persisted.messages.map(\.id)), expectedIDs)
+        XCTAssertEqual(persisted.messages.first { $0.id == "old-history" }, history.first)
+        XCTAssertEqual(viewModel.chatStore.cachedMessagesBySessionID[target.id], merged)
+        XCTAssertEqual(chat.requests.count, 1)
+        XCTAssertNil(viewModel.selectedSession)
+        XCTAssertNil(viewModel.chatStore.preparedSessionID)
+        XCTAssertTrue(viewModel.messages.isEmpty)
     }
 
     func testRecentBucketsUseCalendarDayBoundaries() throws {
@@ -981,6 +1512,69 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertTrue(fitted.hasPrefix("…"))
         XCTAssertTrue(fitted.hasSuffix("The newest sentence remains visible."))
         XCTAssertGreaterThan(height, font.lineHeight)
+    }
+
+    private func makePreloadSessions(count: Int) -> [OpenCodeSession] {
+        let today = Calendar.autoupdatingCurrent.startOfDay(for: Date())
+        let time = today.addingTimeInterval(12 * 3_600).timeIntervalSince1970 * 1_000
+        let directories: [String?] = ["/home-project", "/home-sandbox", nil]
+        return (0..<count).map { index in
+            let directory = directories[index % directories.count]
+            var session = OpenCodeSession(id: "preload-\(index)", title: "Recent \(index)", workspaceID: nil,
+                directory: directory, projectID: directory == nil ? "global" : "home-project", parentID: nil)
+            session.time = .init(created: time, updated: time)
+            return session
+        }
+    }
+
+    private func scopeMovements(of session: OpenCodeSession) -> [OpenCodeSession] {
+        [
+            OpenCodeSession(id: session.id, title: "Moved directory", workspaceID: session.workspaceID,
+                directory: "/home-sandbox", projectID: session.projectID, parentID: nil),
+            OpenCodeSession(id: session.id, title: "Moved workspace", workspaceID: "remote-workspace",
+                directory: session.directory, projectID: session.projectID, parentID: nil),
+            OpenCodeSession(id: session.id, title: "Moved project", workspaceID: session.workspaceID,
+                directory: session.directory, projectID: "other-project", parentID: nil),
+        ].map { moved in
+            var moved = moved
+            moved.time = session.time
+            return moved
+        }
+    }
+
+    private func makePreloadFixture(
+        sessions: [OpenCodeSession], profile: OpenCodeAPIProfile = .v2, usesLocalCache: Bool = false
+    ) async throws -> (AppViewModel, HomeTestBackend, ActivityPreloadChatBackend) {
+        let backend = HomeTestBackend()
+        let time = Calendar.autoupdatingCurrent.startOfDay(for: Date()).addingTimeInterval(12 * 3_600).timeIntervalSince1970 * 1_000
+        backend.storedSessions = sessions + [
+            makeSession(id: "home-session", title: "Working", directory: "/home-project", projectID: "home-project", updated: time),
+            makeSession(id: "sandbox-session", title: "Needs input", directory: "/home-sandbox", projectID: "home-project", updated: time),
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = profile == .v2 ? [ActivityMetadataURLProtocol.self] : [ActivityLegacyMetadataURLProtocol.self]
+        let transport = URLSession(configuration: configuration)
+        let viewModel = usesLocalCache ? AppViewModel() : AppViewModel(backendFactory: backend)
+        if usesLocalCache { viewModel.localCacheRepository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory() }
+        let chat = ActivityPreloadChatBackend()
+        viewModel.config = .init(baseURL: "https://activity-preload.invalid", password: "test", apiPreference: profile == .v2 ? .v2 : .legacy)
+        let adapter = OpenCodeBackendAdapter(client: .init(config: viewModel.config, session: transport), profile: profile)
+        viewModel.backendConnection = BackendConnection(descriptor: .init(id: "activity-preload", name: "OpenCode", version: "next"),
+            capabilities: usesLocalCache ? [.interactions, .localCache] : [.interactions],
+            projects: adapter, sessions: backend, chat: chat, models: backend, events: backend)
+        if profile == .v2 {
+            viewModel.connectionStore.applySuccessfulV2Connection(version: "next", healthy: true)
+        } else {
+            viewModel.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)
+        }
+        viewModel.projects = try await backend.projectsSnapshot().projects
+        addTeardownBlock { @MainActor in
+            backend.beforeSessionFetch = nil
+            chat.release()
+            viewModel.disconnect()
+            transport.invalidateAndCancel()
+        }
+        return (viewModel, backend, chat)
     }
 
     private func makeProject(id: String, directory: String) -> OpenCodeProject {

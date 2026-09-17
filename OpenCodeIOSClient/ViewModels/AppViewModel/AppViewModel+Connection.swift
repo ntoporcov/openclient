@@ -208,6 +208,10 @@ extension AppViewModel {
                 beginRecentProjectSessionsLoadingIfPossible()
             }
             automaticConnectionRetryAttempt = 0
+            Task { [weak self, weak connection = backendConnection] in
+                guard let self, let connection, self.isCurrentBackendConnection(connection) else { return }
+                await self.activityFacade.prepareForPresentation()
+            }
             cancelAutomaticConnectionRetryTask()
             await widgetSnapshotPublisher.publishNow(includeModelOptions: true,
                 commandsAreAuthoritative: didLoadBootstrapCatalog && backendConnection?.capabilities.contains(.commands) == true,

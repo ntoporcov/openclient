@@ -471,7 +471,7 @@ final class ChatStore: ObservableObject {
         var reconciled = preservingV2LiveText(Array(prefix) + newestPage, sessionID: sessionID)
 
         reconciled = Self.deduplicatedMessages(reconciled, preservingOrder: true)
-        cacheMessages(reconciled, forSessionID: sessionID)
+        cacheMessages(reconciled, forSessionID: sessionID, preservingOrder: true)
         if preparedSessionID == sessionID {
             messages = reconciled
         }
@@ -515,7 +515,7 @@ final class ChatStore: ObservableObject {
         let original = cachedMessagesBySessionID[sessionID] ?? []
         var transcript = withoutRecoveryMessages(original, sessionID: sessionID)
         if transcript != original {
-            cacheMessages(transcript, forSessionID: sessionID)
+            cacheMessages(transcript, forSessionID: sessionID, preservingOrder: true)
             if preparedSessionID == sessionID { messages = transcript }
         }
         if event.affectsTranscript {
@@ -883,7 +883,7 @@ final class ChatStore: ObservableObject {
         guard transcript != original else { return false }
         // Keep the server's projection order. Local recovery is never transcript data.
         if v2TranscriptStates[sessionID] == nil { v2TranscriptStates[sessionID] = V2TranscriptState() }
-        cacheMessages(transcript, forSessionID: sessionID)
+        cacheMessages(transcript, forSessionID: sessionID, preservingOrder: true)
         if preparedSessionID == sessionID {
             messages = transcript
         }
@@ -1215,9 +1215,29 @@ final class ChatStore: ObservableObject {
         }
     }
 
-    func cacheMessages(_ messages: [OpenCodeMessageEnvelope], forSessionID sessionID: String) {
+    func cachePreloadedMessages(
+        _ messages: [OpenCodeMessageEnvelope],
+        forSessionID sessionID: String,
+        preservingOrder: Bool
+    ) {
+        guard preparedSessionID != sessionID, v2HydratingSessionID != sessionID else { return }
+        // The caller has validated this server response against the request-start cache.
+        cacheMessages(messages, forSessionID: sessionID, preservingOrder: preservingOrder)
+    }
+
+    nonisolated static func mergingPreloadedV2Page(
+        _ page: [OpenCodeMessageEnvelope],
+        into existing: [OpenCodeMessageEnvelope],
+        hasOlder: Bool
+    ) -> [OpenCodeMessageEnvelope] {
+        let anchor = page.first.flatMap { first in existing.firstIndex { $0.id == first.id } }
+        let prefix = existing.prefix(hasOlder ? anchor ?? 0 : 0)
+        return deduplicatedMessages(Array(prefix) + page, preservingOrder: true)
+    }
+
+    func cacheMessages(_ messages: [OpenCodeMessageEnvelope], forSessionID sessionID: String, preservingOrder: Bool? = nil) {
         let canonicalMessages = Self.deduplicatedMessages(withoutRecoveryMessages(messages, sessionID: sessionID),
-            preservingOrder: v2TranscriptStates[sessionID] != nil)
+            preservingOrder: preservingOrder ?? (v2TranscriptStates[sessionID] != nil))
         if cachedMessagesBySessionID[sessionID] != canonicalMessages {
             cachedMessagesBySessionID[sessionID] = canonicalMessages
         }

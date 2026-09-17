@@ -64,6 +64,174 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertEqual(cached?.first?.parts.first?.text, "Replacement")
     }
 
+    func testPreloadedMessagesSeedMissingOrEmptyTargetWithoutChangingActiveState() {
+        let active = message(id: "msg_active", role: "assistant", text: "Active", sessionID: "ses_active")
+        let preloaded = message(id: "msg_preloaded", role: "assistant", text: "Preloaded", sessionID: "ses_target")
+        for targetCache in [nil, []] as [[OpenCodeMessageEnvelope]?] {
+            let store = ChatStore(messages: [active], cachedMessagesBySessionID: ["ses_active": [active]],
+                isLoadingSelectedSession: true, preparedSessionID: "ses_active", activeChatSessionID: "ses_active")
+            store.cachedMessagesBySessionID["ses_target"] = targetCache
+            store.applyMessageHistoryPage(nextCursor: "active-cursor", forSessionID: "ses_active")
+            let history = store.messageHistoryBySessionID
+
+            store.cachePreloadedMessages([preloaded], forSessionID: "ses_target", preservingOrder: true)
+
+            XCTAssertEqual(store.cachedMessagesBySessionID, ["ses_active": [active], "ses_target": [preloaded]])
+            XCTAssertEqual(store.messages, [active])
+            XCTAssertEqual(store.preparedSessionID, "ses_active")
+            XCTAssertEqual(store.activeChatSessionID, "ses_active")
+            XCTAssertTrue(store.isLoadingSelectedSession)
+            XCTAssertEqual(store.messageHistoryBySessionID, history)
+            XCTAssertTrue(store.v2TranscriptStates.isEmpty)
+            XCTAssertFalse(store.isHydratingV2Transcript(sessionID: "ses_target"))
+        }
+    }
+
+    func testAcceptedPreloadedMessagesReplaceOlderNonemptyCache() {
+        let existing = message(id: "msg_existing", role: "assistant", text: "Existing", sessionID: "ses_target")
+        let replacement = message(id: existing.id, role: "assistant", text: "Replacement", sessionID: "ses_target")
+        let newest = message(id: "msg_newest", role: "assistant", text: "Newest", sessionID: "ses_target")
+        let store = ChatStore(cachedMessagesBySessionID: ["ses_target": [existing]])
+
+        store.cachePreloadedMessages([replacement, newest], forSessionID: "ses_target", preservingOrder: true)
+
+        XCTAssertEqual(store.cachedMessagesBySessionID["ses_target"], [replacement, newest])
+    }
+
+    func testPreloadedV2OrderSurvivesBackgroundProjectionBeforeInitialHydration() {
+        let first = message(id: "z-first", role: "user", text: "First", sessionID: "ses_target")
+        let second = message(id: "a-second", role: "assistant", text: "Second", sessionID: "ses_target")
+        let store = ChatStore()
+        store.cachePreloadedMessages([first, second], forSessionID: "ses_target", preservingOrder: true)
+        XCTAssertTrue(store.v2TranscriptStates.isEmpty)
+
+        store.applyV2EventProjection([first, second], olderCursor: "older", sessionID: "ses_target")
+
+        XCTAssertEqual(store.cachedMessagesBySessionID["ses_target"], [first, second])
+        XCTAssertNil(store.preparedSessionID)
+        XCTAssertTrue(store.messages.isEmpty)
+    }
+
+    func testPreloadedMessagesDoNotSeedPreparedOrHydratingSession() {
+        let preloaded = message(id: "msg_preloaded", role: "assistant", text: "Preloaded", sessionID: "ses_target")
+        for v2Hydration in [false, true] {
+            let store = ChatStore()
+            if v2Hydration {
+                store.beginV2TranscriptHydration(sessionID: "ses_target")
+            } else {
+                store.beginSelectingSession(sessionID: "ses_target", cachedMessages: [])
+            }
+            let preparedSessionID = store.preparedSessionID
+            let transcriptStates = store.v2TranscriptStates
+
+            store.cachePreloadedMessages([preloaded], forSessionID: "ses_target", preservingOrder: true)
+
+            XCTAssertNil(store.cachedMessagesBySessionID["ses_target"])
+            XCTAssertTrue(store.messages.isEmpty)
+            XCTAssertEqual(store.preparedSessionID, preparedSessionID)
+            XCTAssertTrue(store.isLoadingSelectedSession)
+            XCTAssertEqual(store.isHydratingV2Transcript(sessionID: "ses_target"), v2Hydration)
+            XCTAssertEqual(store.v2TranscriptStates, transcriptStates)
+            XCTAssertTrue(store.messageHistoryBySessionID.isEmpty)
+        }
+
+        let prepared = ChatStore(preparedSessionID: "ses_target")
+        prepared.cachePreloadedMessages([preloaded], forSessionID: "ses_target", preservingOrder: true)
+        XCTAssertNil(prepared.cachedMessagesBySessionID["ses_target"])
+        XCTAssertFalse(prepared.isLoadingSelectedSession)
+    }
+
+    func testPreloadedMessagesDeduplicateAndRespectExplicitOrderingWithoutV2State() {
+        let page = zip(["msg_z", "msg_a", "msg_m"], [30.0, 10.0, 20.0]).map { id, created in
+            OpenCodeMessageEnvelope(
+                info: OpenCodeMessage(id: id, role: "assistant", sessionID: "ses_target",
+                    time: OpenCodeMessageTime(created: created), agent: nil, model: nil), parts: []
+            )
+        }
+        var replacement = page[0]
+        let part = message(id: replacement.id, role: "assistant", text: "Replacement", sessionID: "ses_target").parts[0]
+        replacement.parts = [part, part]
+        let merged = ChatStore.mergingPreloadedV2Page(page + [replacement], into: [], hasOlder: true)
+        XCTAssertEqual(merged.map(\.id), ["msg_z", "msg_a", "msg_m"])
+        XCTAssertEqual(merged.first?.parts, [part])
+        for preservingOrder in [false, true] {
+            let store = ChatStore()
+
+            store.cachePreloadedMessages(page + [replacement], forSessionID: "ses_target", preservingOrder: preservingOrder)
+
+            XCTAssertEqual(store.cachedMessagesBySessionID["ses_target"]?.map(\.id),
+                preservingOrder ? ["msg_z", "msg_a", "msg_m"] : ["msg_a", "msg_m", "msg_z"])
+            XCTAssertEqual(store.cachedMessagesBySessionID["ses_target"]?.first { $0.id == "msg_z" }?.parts, [part])
+            XCTAssertNil(store.preparedSessionID)
+            XCTAssertFalse(store.isLoadingSelectedSession)
+            XCTAssertTrue(store.messages.isEmpty)
+            XCTAssertTrue(store.v2TranscriptStates.isEmpty)
+            XCTAssertTrue(store.messageHistoryBySessionID.isEmpty)
+        }
+    }
+
+    func testPreloadedMessagesFilterRecoveryWithoutChangingAdmissionOrReadState() {
+        let store = ChatStore()
+        let connectionID = UUID()
+        store.selectSubmissionOwner("server", connectionID: connectionID)
+        let request = BackendSubmission(sessionID: "ses_target", messageID: "msg_pending", text: "Pending", scope: .init())
+        XCTAssertTrue(store.beginPromptAdmission(request, connectionID: connectionID))
+        let pending = message(id: request.messageID, role: "user", text: "Pending", sessionID: request.sessionID)
+        let preloaded = message(id: "msg_preloaded", role: "assistant", text: "Preloaded", sessionID: request.sessionID)
+        let recoveries = store.submissionRecoveries
+        let admissions = store.promptAdmissions
+        let readID = store.beginV2CanonicalRead(sessionID: request.sessionID)
+        store.applyMessageHistoryPage(nextCursor: "older", forSessionID: request.sessionID)
+        XCTAssertEqual(store.beginLoadingOlderMessages(forSessionID: request.sessionID), "older")
+        let history = store.messageHistoryBySessionID
+
+        store.cachePreloadedMessages([pending, preloaded], forSessionID: request.sessionID, preservingOrder: true)
+
+        XCTAssertEqual(store.cachedMessagesBySessionID[request.sessionID], [preloaded])
+        XCTAssertEqual(store.submissionRecoveries, recoveries)
+        XCTAssertEqual(store.promptAdmissions, admissions)
+        XCTAssertTrue(store.canonicalSubmissionSessions.isEmpty)
+        XCTAssertEqual(store.v2CanonicalReadID(sessionID: request.sessionID), readID)
+        XCTAssertEqual(store.v2StreamRevision(sessionID: request.sessionID), 0)
+        XCTAssertEqual(store.messageHistoryBySessionID, history)
+        XCTAssertTrue(store.v2TranscriptStates.isEmpty)
+    }
+
+    func testMergingPreloadedV2PageKeepsOnlyPrefixBeforeFirstRowAnchor() {
+        let older = message(id: "msg_z", role: "user", text: "Older", sessionID: "ses_v2")
+        let anchor = message(id: "msg_a", role: "assistant", text: "Stale anchor", sessionID: "ses_v2")
+        let stale = message(id: "msg_stale", role: "assistant", text: "Reverted", sessionID: "ses_v2")
+        let canonical = message(id: anchor.id, role: "assistant", text: "Canonical", sessionID: "ses_v2")
+        let newest = message(id: "msg_m", role: "assistant", text: "Newest", sessionID: "ses_v2")
+
+        let merged = ChatStore.mergingPreloadedV2Page([canonical, newest, newest],
+            into: [older, older, anchor, stale], hasOlder: true)
+
+        XCTAssertEqual(merged, [older, canonical, newest])
+    }
+
+    func testMergingPreloadedV2CompletePageReplacesEvenWithAnchor() {
+        let older = message(id: "msg_older", role: "user", text: "Older", sessionID: "ses_v2")
+        let anchor = message(id: "msg_z", role: "assistant", text: "Anchor", sessionID: "ses_v2")
+        let newest = message(id: "msg_a", role: "assistant", text: "Newest", sessionID: "ses_v2")
+
+        XCTAssertEqual(ChatStore.mergingPreloadedV2Page([anchor, newest], into: [older, anchor], hasOlder: false),
+            [anchor, newest])
+    }
+
+    func testMergingPreloadedV2PageRequiresFirstRowAnchorNotLaterOverlap() {
+        let older = message(id: "msg_older", role: "user", text: "Older", sessionID: "ses_v2")
+        let overlap = message(id: "msg_a", role: "assistant", text: "Overlap", sessionID: "ses_v2")
+        let first = message(id: "msg_z", role: "assistant", text: "First", sessionID: "ses_v2")
+
+        XCTAssertEqual(ChatStore.mergingPreloadedV2Page([first, overlap], into: [older, overlap], hasOlder: true),
+            [first, overlap])
+        XCTAssertEqual(ChatStore.mergingPreloadedV2Page([first], into: [older], hasOlder: true), [first])
+        for hasOlder in [false, true] {
+            XCTAssertEqual(ChatStore.mergingPreloadedV2Page([], into: [older], hasOlder: hasOlder), [])
+        }
+    }
+
     func testMessageHistoryTracksCursorLoadingAndCompletion() {
         let store = ChatStore()
 
