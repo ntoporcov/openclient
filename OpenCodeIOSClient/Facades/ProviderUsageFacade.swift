@@ -202,9 +202,14 @@ final class ProviderUsageFacade {
             await refreshTasks[accountID]?.value
             return
         }
+        let renewal = sourceRenewal(for: accountID)
         let task = Task { [store, accounts, providerClient] in
             await ProviderUsageCoordinator(
-                store: store, importer: nil, accounts: accounts, providerClient: providerClient
+                store: store,
+                importer: renewal?.importer,
+                renewalCandidate: renewal?.candidate,
+                accounts: accounts,
+                providerClient: providerClient
             ).refresh(accountID: accountID)
         }
         let taskID = UUID()
@@ -345,6 +350,38 @@ final class ProviderUsageFacade {
                     && $0.credentialKind == credentialKind
             }
             .max { $0.updatedAt < $1.updatedAt }
+    }
+
+    private func sourceRenewal(
+        for accountID: UUID
+    ) -> (importer: any ProviderUsageCredentialImporter, candidate: ProviderUsageSetupCandidate)? {
+        guard isActive,
+              let account = store.accounts.first(where: { $0.id == accountID }),
+              account.provider == .codex,
+              account.sourceKind == .openCodeAuth,
+              account.apiProfile == .legacy,
+              account.sourceRenewalApprovedAt != nil,
+              let providerAccountID = account.providerAccountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !providerAccountID.isEmpty,
+              let sourceScope = account.sourceScope,
+              let context = contextProvider(),
+              context.backend.id == account.sourceConnectionID,
+              context.apiProfile == account.apiProfile,
+              sourceScope.matches(context.scope) else { return nil }
+        let candidate = ProviderUsageSetupCandidate(
+            id: UUID(),
+            provider: .codex,
+            discoveryContext: context,
+            sourceIdentity: .legacyProvider(providerID: "openai"),
+            sourceKind: .openCodeAuth,
+            credentialKind: .oauthAccessToken,
+            replacingAccountID: account.id
+        )
+        let currentContext: PTYProviderUsageCredentialImporter.ContextProvider = { [weak self] in
+            await self?.contextProvider()
+        }
+        guard let importer = try? importerFactory(candidate, false, currentContext) else { return nil }
+        return (importer, candidate)
     }
 
     private func cancelSetupTask() {

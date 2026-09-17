@@ -70,7 +70,7 @@ The intended journey is:
 5. Review account information, credential type, and expiry without displaying the credential value.
 6. Approve saving the credential and using it with the named provider API.
 7. See current usage, relevant reset times, last-updated time, and credential health.
-8. Refresh, replace credentials, or remove local tracking without changing OpenCode authentication.
+8. Refresh usage, replace credentials, or remove local tracking. For an explicitly approved Codex account, OpenClient may ask the original connected OpenCode source to renew its OAuth credential and update that source's authentication file.
 
 Do not promise that every configured provider has an exportable credential, that inference credentials always authorize usage APIs, or that copied OAuth access tokens remain valid indefinitely.
 
@@ -81,14 +81,14 @@ Do not promise that every configured provider has an exportable credential, that
 | Area | Decision |
 | --- | --- |
 | First documented API integration | OpenRouter API-key spend/cap information through `/api/v1/key`. |
-| First subscription integration | OpenAI Codex quota through a supported OpenCode OAuth entry, access-token-only, subject to endpoint and policy verification. |
+| First subscription integration | OpenAI Codex quota through a supported OpenCode OAuth entry. The iPhone stores only the access token; approved renewal remains source-owned. |
 | Small optional extension | DeepSeek balance, if useful to the audience. Do not let it delay the first two adapters. |
 | Initial credential source | Explicitly selected entries from a verified OpenCode auth-file format. |
 | Optional next source | Codex CLI auth file, selected and approved separately from OpenCode authentication. |
 | Remote platforms | macOS/Linux POSIX hosts with a verified JSON-capable runtime. Report unsupported runtime/platform rather than improvising shell parsing. |
 | Server profiles | Read-only provider discovery for legacy and v2. Enable import only for profile/version/source combinations validated with fixtures and an isolated server. |
 | Storage | App-only, non-synchronizing iOS Keychain for secrets; separate protected local metadata. |
-| Credential renewal | Remote owner renews OAuth credentials. User explicitly reimports access tokens. No copied OAuth refresh-token redemption. |
+| Credential renewal | The refresh token remains on the selected OpenCode source. After explicit review consent, OpenClient may invoke a source-side renewal helper, which atomically updates the source auth file and returns only the new access token, account ID, and expiry. |
 | Usage networking | Direct iPhone-to-provider HTTPS, independent of OpenCode's API client. |
 | Refresh | On opening a stale screen, manual pull-to-refresh, and conservative foreground refresh while visible. |
 | Connection security | HTTPS/WSS required by default for credential extraction; no new permissive ATS exceptions. |
@@ -100,7 +100,7 @@ These are recommended implementation defaults, not previously approved product r
 
 - Browser-cookie harvesting, browser database decryption, remote macOS Keychain extraction, or `security` CLI prompts.
 - Filesystem crawling, environment dumps, arbitrary user-supplied extraction commands, or LLM-driven credential discovery.
-- Copying/refreshing OAuth refresh tokens, remotely writing auth files, logging in through another app's OAuth client ID, or triggering inference to renew a login.
+- Copying OAuth refresh tokens to the device, logging in through another app's OAuth client ID, or triggering inference to renew a login.
 - Claude subscription-token import pending policy clarification/approval; see Section 4.
 - OpenAI/Anthropic organization billing using admin keys, OpenRouter management keys, historical charts, forecasting, alerts, Live Activities, or background refresh promises.
 - New AWS/backend storage of provider credentials, a new SSE stream, changes to chat reducers, or a generic plugin execution system.
@@ -160,15 +160,15 @@ No real credential files were read and no authenticated provider requests were m
 
 - OpenCode provider ID is normally `openai`, but only a supported subscription OAuth credential qualifies. OpenAI Platform API keys do not imply Codex subscription access.
 - Initial source: selected `openai` entry from a verified OpenCode auth file, with `{type: "oauth", access, expires, accountId?}`. `expires` is Unix milliseconds in the inspected schema.
-- Do not transfer `refresh`, even though it is present in the source file.
+- Do not transfer `refresh`, even though it is present in the source file. Approved renewal executes on that source and returns only refreshed access metadata.
 - Optional next source: `$CODEX_HOME/auth.json` or `~/.codex/auth.json`, with nested `tokens.access_token`, optional `account_id`, and available expiry hints. This is a distinct source/account and requires a separate choice. Native Codex can also use an OS keyring; a missing file is not proof that the CLI is signed out.
 - Request: `GET https://chatgpt.com/backend-api/wham/usage`, bearer access token, JSON accept header, and `ChatGPT-Account-Id` when available.
 - Decode `plan_type`, `rate_limit.primary_window`, `secondary_window`, and optional `additional_rate_limits`. Windows expose `used_percent`, `reset_at` in Unix seconds, and `limit_window_seconds`.
 - Preserve returned durations instead of hardcoding every account to five hours/seven days. Preserve unavailable/null windows.
 - `credits` can describe a separate balance, with `has_credits`, `unlimited`, and a numeric or string `balance`. Do not label credits as USD without an authoritative unit.
 - Treat this as an internal first-party endpoint that can change without notice. Recheck current access requirements and applicable terms before enabling shipping behavior. Do not spoof another product's identity as a shortcut around access restrictions.
-- If expiry is known, mark the credential as needing reimport when expired. JWT claims are unverified hints for expiry/account selection, not authenticated identity. Unknown expiry stays unknown; a 401 requires user action, not refresh-token redemption.
-- Imported access tokens only work while valid. Monitoring can continue with the remote host disconnected until token expiry/revocation, but reimport requires connecting to the owner again.
+- If expiry is known, renew only through the exact approved source/account/scope. JWT claims remain unverified routing hints and must match the persisted provider account identity. Unknown expiry stays unknown; a 401 may use the same approved source-renewal path.
+- Imported access tokens work while valid. Monitoring can continue with the remote host disconnected until token expiry/revocation, but renewal or reimport requires reconnecting to the exact owner and scope.
 
 ### Copilot: Next Wave, Verification Required
 

@@ -170,6 +170,22 @@ final class ProviderUsageStore {
         return true
     }
 
+    func reconcileCredentialRotation(
+        _ account: ProviderUsageAccount,
+        replacing previous: ProviderUsageAccount,
+        handle: RefreshHandle
+    ) -> RefreshHandle? {
+        guard account.id == previous.id,
+              let index = accounts.firstIndex(where: { $0.id == account.id }),
+              accounts[index] == previous else { return nil }
+        let refreshWasActive = isRefreshActive(handle)
+        accounts[index] = account
+        guard refreshWasActive else { return nil }
+        let updated = RefreshHandle(account: account, token: handle.token, previousStatus: handle.previousStatus)
+        refreshes[account.id] = updated
+        return updated
+    }
+
     func applyRefreshFailure(_ error: ProviderUsageError, handle: RefreshHandle) -> Bool {
         guard takeRefresh(handle) else { return false }
         statuses[handle.account.id] = .usageFailed(error)

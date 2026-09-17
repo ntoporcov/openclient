@@ -28,6 +28,13 @@ enum ProviderUsageCredentialImportError: Error, Equatable, Sendable, CustomStrin
     case multipleEntries
     case unsupportedEntry
     case cleanupFailed
+    case sourceRefreshNetwork
+    case sourceRefreshRejected
+    case sourceRefreshMalformed
+    case sourceRefreshWriteFailed
+    case sourceChanged
+    case accountMismatch
+    case unsupportedRuntime
 
     var description: String { "ProviderUsageCredentialImportError(\(code))" }
 
@@ -59,6 +66,13 @@ enum ProviderUsageCredentialImportError: Error, Equatable, Sendable, CustomStrin
         case .multipleEntries: "MULTIPLE_ENTRIES"
         case .unsupportedEntry: "UNSUPPORTED_ENTRY"
         case .cleanupFailed: "CLEANUP_FAILED"
+        case .sourceRefreshNetwork: "SOURCE_REFRESH_NETWORK"
+        case .sourceRefreshRejected: "SOURCE_REFRESH_REJECTED"
+        case .sourceRefreshMalformed: "SOURCE_REFRESH_MALFORMED"
+        case .sourceRefreshWriteFailed: "SOURCE_REFRESH_WRITE_FAILED"
+        case .sourceChanged: "SOURCE_CHANGED"
+        case .accountMismatch: "ACCOUNT_MISMATCH"
+        case .unsupportedRuntime: "UNSUPPORTED_RUNTIME"
         }
     }
 }
@@ -71,11 +85,20 @@ enum ProviderUsageCredentialImportProtocol {
     static let maximumOutputBytes = 65_536
 
     struct Selection: Equatable, Sendable {
+        enum Action: String, Equatable, Sendable { case read, renew }
         let provider: String
         let source: String
         let credentialKind: ProviderUsageCredentialKind
+        let action: Action
+        let expectedAccountBinding: String
+        let currentAccessBinding: String
 
-        init(candidate: ProviderUsageSetupCandidate) throws {
+        init(
+            candidate: ProviderUsageSetupCandidate,
+            action: Action = .read,
+            expectedAccountID: String? = nil,
+            currentAccessToken: String? = nil
+        ) throws {
             guard candidate.apiProfile == .legacy,
                   candidate.sourceKind == .openCodeAuth,
                   case let .legacyProvider(providerID) = candidate.sourceIdentity else {
@@ -89,8 +112,27 @@ enum ProviderUsageCredentialImportProtocol {
             default:
                 throw ProviderUsageCredentialImportError.unsupportedSource
             }
-            source = "legacy-opencode-auth-v1"
+            if action == .renew, candidate.provider != .codex {
+                throw ProviderUsageCredentialImportError.unsupportedSource
+            }
+            if action == .renew {
+                guard let expectedAccountID, !expectedAccountID.isEmpty,
+                      let currentAccessToken, !currentAccessToken.isEmpty else {
+                    throw ProviderUsageCredentialImportError.accountMismatch
+                }
+                expectedAccountBinding = Self.binding(expectedAccountID)
+                currentAccessBinding = Self.binding(currentAccessToken)
+            } else {
+                expectedAccountBinding = "-"
+                currentAccessBinding = "-"
+            }
+            source = action == .read ? "legacy-opencode-auth-v1" : "legacy-opencode-auth-renew-v1"
             credentialKind = candidate.credentialKind
+            self.action = action
+        }
+
+        private static func binding(_ value: String) -> String {
+            SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
         }
     }
 
@@ -116,6 +158,7 @@ enum ProviderUsageCredentialImportProtocol {
         operationID: UUID, selection: Selection, clientPublicKey: Data, serverPublicKey: Data
     ) -> String {
         [marker, version, operationID.uuidString.lowercased(), selection.provider, selection.source,
+         selection.expectedAccountBinding, selection.currentAccessBinding,
          clientPublicKey.base64EncodedString(), serverPublicKey.base64EncodedString()].joined(separator: "|")
     }
 
@@ -250,16 +293,21 @@ enum ProviderUsageCredentialImportHelper {
 const c=require('node:crypto'),fs=require('node:fs'),path=require('node:path');
 const M='OCPI',V='1',MAX=1048576,OUT=16384;
 const op=process.env.OCPI_OPERATION_ID,provider=process.env.OCPI_PROVIDER,source=process.env.OCPI_SOURCE;
+const expected=process.env.OCPI_EXPECTED_ACCOUNT_BINDING,currentAccess=process.env.OCPI_CURRENT_ACCESS_BINDING;
 const client=Buffer.from(process.env.OCPI_CLIENT_PUBLIC_KEY||'','base64'),psk=Buffer.from(process.env.OCPI_PSK||'','base64');
 const b64=x=>Buffer.from(x).toString('base64'),rawPublic=k=>k.export({type:'spki',format:'der'}).subarray(-32);
 const spki=x=>Buffer.concat([Buffer.from('302a300506032b656e032100','hex'),x]);
+const sha=x=>c.createHash('sha256').update(x).digest('hex');
 const fail=code=>{process.stdout.write('OCPI|1|ERROR|'+code+'\n');process.exit(2)};
 if(provider!=='openai'&&provider!=='openrouter')fail('INVALID_PROVIDER');
-if(source!=='legacy-opencode-auth-v1')fail('INVALID_SOURCE');
+if(source!=='legacy-opencode-auth-v1'&&source!=='legacy-opencode-auth-renew-v1')fail('INVALID_SOURCE');
 if(client.length!==32)fail('INVALID_CLIENT_KEY');
 if(psk.length!==32)fail('INVALID_PSK');
+if(!fs.promises||typeof fs.promises.open!=='function'||typeof fs.promises.rename!=='function'||typeof fs.promises.mkdir!=='function'||typeof fs.promises.rmdir!=='function'||typeof fs.constants.O_NOFOLLOW!=='number'||typeof c.hkdfSync!=='function')fail('UNSUPPORTED_RUNTIME');
+if(source==='legacy-opencode-auth-renew-v1'&&(typeof fetch!=='function'||typeof URLSearchParams!=='function'||typeof AbortSignal==='undefined'||typeof AbortSignal.timeout!=='function'))fail('UNSUPPORTED_RUNTIME');
+if(source==='legacy-opencode-auth-renew-v1'&&(!/^[0-9a-f]{64}$/.test(expected||'')||!/^[0-9a-f]{64}$/.test(currentAccess||'')))fail('INVALID_SOURCE');
 const pair=c.generateKeyPairSync('x25519'),server=rawPublic(pair.publicKey);
-const transcript=[M,V,op,provider,source,b64(client),b64(server)].join('|');
+const transcript=[M,V,op,provider,source,expected,currentAccess,b64(client),b64(server)].join('|');
 const auth=c.createHmac('sha256',psk).update(transcript+'|READY|0').digest();
 process.stdin.setRawMode?.(true);process.stdin.setEncoding('utf8');
 process.stdout.write([M,V,'READY',op,provider,source,'0',b64(server),b64(auth)].join('|')+'\n');
@@ -273,14 +321,19 @@ function openStart(line){const f=line.split('|');if(f.length!==9||f.slice(0,7).j
 function sealResult(payload){if(finished)return;finished=true;clearTimeout(timer);const plain=Buffer.from(JSON.stringify(payload));if(plain.length>OUT)fail('SELECTED_PAYLOAD_TOO_LARGE');const n=c.randomBytes(12),ns=b64(n);
  const e=c.createCipheriv('chacha20-poly1305',key('s2c'),n,{authTagLength:16});e.setAAD(aad('s2c','RESULT',1,ns));const box=Buffer.concat([e.update(plain),e.final(),e.getAuthTag()]);
  process.stdout.write([M,V,'RESULT',op,provider,source,'1',ns,b64(box)].join('|')+'\n',()=>process.exit(0))}
- function result(){if(process.env.OPENCODE_AUTH_CONTENT)return sealResult({ok:false,error:'UNSUPPORTED_SOURCE'});const base=process.env.XDG_DATA_HOME||(process.env.HOME?path.join(process.env.HOME,'.local','share'):null);if(!base)return sealResult({ok:false,error:'SOURCE_MISSING'});let file=path.join(base,'opencode','auth.json'),chunks=[],size=0,s=fs.createReadStream(file,{highWaterMark:65536});
- s.on('data',x=>{size+=x.length;if(size>MAX){s.destroy(Object.assign(new Error(),{code:'SOURCE_TOO_LARGE'}));return}chunks.push(x)});
- s.on('error',e=>sealResult({ok:false,error:e.code==='ENOENT'?'SOURCE_MISSING':e.code==='SOURCE_TOO_LARGE'?'SOURCE_TOO_LARGE':'MALFORMED_SOURCE'}));
- s.on('end',()=>{let root;try{root=JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch{return sealResult({ok:false,error:'MALFORMED_SOURCE'})}
-  if(!root||Array.isArray(root)||typeof root!=='object')return sealResult({ok:false,error:'MALFORMED_SOURCE'});const entry=root[provider];if(entry===undefined)return sealResult({ok:false,error:'ENTRY_MISSING'});
-  if(Array.isArray(entry))return sealResult({ok:false,error:entry.length>1?'MULTIPLE_ENTRIES':'UNSUPPORTED_ENTRY'});if(!entry||typeof entry!=='object')return sealResult({ok:false,error:'UNSUPPORTED_ENTRY'});
-  if(provider==='openai'&&entry.type==='oauth'&&typeof entry.access==='string'&&entry.access.length)return sealResult({ok:true,credential:entry.access,accountID:typeof entry.accountId==='string'?entry.accountId:null,expires:Number.isFinite(entry.expires)?entry.expires:null});
-  if(provider==='openrouter'&&entry.type==='api'&&typeof entry.key==='string'&&entry.key.length)return sealResult({ok:true,credential:entry.key});return sealResult({ok:false,error:'UNSUPPORTED_ENTRY'})})}
+ const coded=(code,error)=>Object.assign(error||new Error(),{code}),jwtAccount=t=>{if(typeof t!=='string')return null;const p=t.split('.');if(p.length!==3)return null;try{const x=JSON.parse(Buffer.from(p[1],'base64url'));return x.chatgpt_account_id||x['https://api.openai.com/auth']?.chatgpt_account_id||x.organizations?.[0]?.id||null}catch{return null}};
+ const accountOf=entry=>(typeof entry?.accountId==='string'&&entry.accountId.trim())||jwtAccount(entry?.access);
+ async function readAuth(file){let handle,data;try{handle=await fs.promises.open(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);const stat=await handle.stat();if(!stat.isFile())throw coded('MALFORMED_SOURCE');if(stat.size>MAX)throw coded('SOURCE_TOO_LARGE');data=await handle.readFile();if(data.length>MAX)throw coded('SOURCE_TOO_LARGE')}catch(e){if(e.code==='SOURCE_TOO_LARGE'||e.code==='MALFORMED_SOURCE')throw e;throw coded(e.code==='ENOENT'?'SOURCE_MISSING':'MALFORMED_SOURCE')}finally{try{await handle?.close()}catch{}}let root;try{root=JSON.parse(data.toString('utf8'))}catch{throw coded('MALFORMED_SOURCE')}if(!root||Array.isArray(root)||typeof root!=='object')throw coded('MALFORMED_SOURCE');return {bytes:data,root}}
+ async function acquireLock(file){const lock=path.join(path.dirname(file),'.auth.json.ocpi-renew.lock'),until=Date.now()+2000;for(;;){try{await fs.promises.mkdir(lock,{mode:0o700});let owned=true;return async()=>{if(!owned)return;owned=false;try{await fs.promises.rmdir(lock)}catch{}}}catch(e){if(e.code!=='EEXIST')throw coded('SOURCE_REFRESH_WRITE_FAILED');if(Date.now()>=until)throw coded('SOURCE_CHANGED');await new Promise(resolve=>setTimeout(resolve,50))}}}
+ const currentResult=entry=>{const accountId=accountOf(entry);if(!accountId||sha(accountId)!==expected)throw coded('ACCOUNT_MISMATCH');if(typeof entry.access!=='string'||!entry.access.length||!Number.isFinite(entry.expires))throw coded('SOURCE_REFRESH_MALFORMED');return {ok:true,credential:entry.access,accountID:accountId,expires:entry.expires}};
+ async function renew(file,entry){if(provider!=='openai'||entry.type!=='oauth'||typeof entry.refresh!=='string'||!entry.refresh.length||typeof entry.access!=='string'||!entry.access.length)throw coded('SOURCE_REFRESH_MALFORMED');const sourceAccount=accountOf(entry);if(!sourceAccount||sha(sourceAccount)!==expected)throw coded('ACCOUNT_MISMATCH');if(sha(entry.access)!==currentAccess)return currentResult(entry);let response;
+  try{response=await fetch('https://auth.openai.com/oauth/token',{method:'POST',redirect:'error',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',refresh_token:entry.refresh,client_id:'app_EMoamEEZ73f0CkXaXp7hrann'}).toString(),signal:AbortSignal.timeout(5000)})}catch{throw Object.assign(new Error(),{code:'SOURCE_REFRESH_NETWORK'})}
+  if(!response.ok)throw Object.assign(new Error(),{code:'SOURCE_REFRESH_REJECTED'});let chunks=[],total=0;try{const reader=response.body.getReader();for(;;){const x=await reader.read();if(x.done)break;total+=x.value.length;if(total>OUT){await reader.cancel();throw new Error()}chunks.push(Buffer.from(x.value))}}catch{throw Object.assign(new Error(),{code:'SOURCE_REFRESH_MALFORMED'})}
+  let tokens;try{tokens=JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch{throw Object.assign(new Error(),{code:'SOURCE_REFRESH_MALFORMED'})}if(!tokens||typeof tokens.access_token!=='string'||!tokens.access_token.length||tokens.expires_in!==undefined&&(!Number.isFinite(tokens.expires_in)||tokens.expires_in<=0))throw Object.assign(new Error(),{code:'SOURCE_REFRESH_MALFORMED'});
+  const accountId=jwtAccount(tokens.id_token)||jwtAccount(tokens.access_token)||sourceAccount;if(!accountId||sha(accountId)!==expected)throw coded('ACCOUNT_MISMATCH');const refreshed={access:tokens.access_token,refresh:typeof tokens.refresh_token==='string'&&tokens.refresh_token.length?tokens.refresh_token:entry.refresh,expires:Date.now()+(tokens.expires_in??3600)*1000,accountId};
+  for(let attempt=0;attempt<3;attempt++){const latest=await readAuth(file),currentEntry=latest.root[provider];if(!currentEntry||Array.isArray(currentEntry)||typeof currentEntry!=='object')throw coded('SOURCE_REFRESH_MALFORMED');const currentAccount=accountOf(currentEntry);if(!currentAccount||sha(currentAccount)!==expected)throw coded('ACCOUNT_MISMATCH');if(currentEntry.access!==entry.access||currentEntry.refresh!==entry.refresh)return currentResult(currentEntry);const merged={...latest.root,[provider]:{...currentEntry,...refreshed}},temp=path.join(path.dirname(file),'.auth.json.ocpi-'+op+'-'+process.pid+'-'+attempt);let handle;try{handle=await fs.promises.open(temp,'wx',0o600);await handle.writeFile(JSON.stringify(merged,null,2)+'\n',{encoding:'utf8'});await handle.sync();await handle.chmod(0o600);await handle.close();handle=null;const verified=await readAuth(file);if(!verified.bytes.equals(latest.bytes)){await fs.promises.unlink(temp);continue}await fs.promises.rename(temp,file)}catch(e){try{await handle?.close()}catch{}try{await fs.promises.unlink(temp)}catch{}if(e.code==='SOURCE_CHANGED')throw e;throw coded('SOURCE_REFRESH_WRITE_FAILED')}try{const dir=await fs.promises.open(path.dirname(file),'r');try{await dir.sync()}finally{await dir.close()}}catch{}return {ok:true,credential:refreshed.access,accountID:accountId,expires:refreshed.expires}}throw coded('SOURCE_CHANGED')}
+ async function selectedResult(){if(process.env.OPENCODE_AUTH_CONTENT)throw coded('UNSUPPORTED_SOURCE');const base=process.env.XDG_DATA_HOME||(process.env.HOME?path.join(process.env.HOME,'.local','share'):null);if(!base)throw coded('SOURCE_MISSING');const file=path.join(base,'opencode','auth.json');let release;try{if(source==='legacy-opencode-auth-renew-v1')release=await acquireLock(file);const original=await readAuth(file),entry=original.root[provider];if(entry===undefined)throw coded('ENTRY_MISSING');if(Array.isArray(entry))throw coded(entry.length>1?'MULTIPLE_ENTRIES':'UNSUPPORTED_ENTRY');if(!entry||typeof entry!=='object')throw coded('UNSUPPORTED_ENTRY');if(source==='legacy-opencode-auth-renew-v1')return await renew(file,entry);if(provider==='openai'&&entry.type==='oauth'&&typeof entry.access==='string'&&entry.access.length)return {ok:true,credential:entry.access,accountID:typeof entry.accountId==='string'?entry.accountId:null,expires:Number.isFinite(entry.expires)?entry.expires:null};if(provider==='openrouter'&&entry.type==='api'&&typeof entry.key==='string'&&entry.key.length)return {ok:true,credential:entry.key};throw coded('UNSUPPORTED_ENTRY')}finally{if(release)await release()}}
+ function result(){selectedResult().then(sealResult).catch(e=>{const allowed=['UNSUPPORTED_SOURCE','SOURCE_MISSING','SOURCE_TOO_LARGE','MALFORMED_SOURCE','ENTRY_MISSING','MULTIPLE_ENTRIES','UNSUPPORTED_ENTRY','SOURCE_REFRESH_NETWORK','SOURCE_REFRESH_REJECTED','SOURCE_REFRESH_MALFORMED','SOURCE_REFRESH_WRITE_FAILED','SOURCE_CHANGED','ACCOUNT_MISMATCH'];sealResult({ok:false,error:allowed.includes(e.code)?e.code:'SOURCE_REFRESH_WRITE_FAILED'})})}
 process.stdin.on('data',x=>{input+=x;if(input.length>32768)fail('INVALID_FRAME');let i;while((i=input.indexOf('\n'))>=0){let line=input.slice(0,i).replace(/\r$/,'');input=input.slice(i+1);if(!line.startsWith('OCPI|'))continue;if(started)fail('REPLAY');started=true;clearTimeout(timer);openStart(line);result()}});
 """#
 

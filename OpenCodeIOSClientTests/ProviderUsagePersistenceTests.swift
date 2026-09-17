@@ -209,6 +209,270 @@ final class ProviderUsagePersistenceTests: XCTestCase {
         XCTAssertEqual(store.statuses[account.id], .ready)
     }
 
+    func testRejectedCodexAccessRefreshesPersistsThenRetriesOnce() async throws {
+        let old = Self.codexAccount()
+        let newReference = UUID(uuidString: "EFEFEFEF-EFEF-EFEF-EFEF-EFEFEFEFEFEF")!
+        let credentials = ProviderUsageCredentialMemoryFake(values: [
+            old.credentialReference: .init(value: "old-access"),
+        ])
+        let metadata = ProviderUsageMetadataFake(accounts: [old])
+        let repository = TransactionalProviderUsageAccountRepository(
+            credentials: credentials,
+            metadata: metadata,
+            now: { Date(timeIntervalSince1970: 200) },
+            makeUUID: { newReference }
+        )
+        let provider = RefreshingProviderUsageFake()
+        let source = RenewingProviderUsageImporterFake()
+        let store = ProviderUsageStore()
+        store.replaceAccounts([old])
+        let coordinator = ProviderUsageCoordinator(
+            store: store,
+            importer: source,
+            renewalCandidate: Self.renewalCandidate(),
+            accounts: repository,
+            providerClient: provider
+        )
+
+        await coordinator.refresh(accountID: old.id)
+
+        let fetchCount = await provider.fetchCount
+        let refreshCount = await source.renewalCount
+        XCTAssertEqual(fetchCount, 2)
+        XCTAssertEqual(refreshCount, 1)
+        let savedAccounts = await metadata.load()
+        let committed = try XCTUnwrap(savedAccounts.first)
+        XCTAssertEqual(committed.credentialRevision, 2)
+        XCTAssertEqual(committed.providerAccountID, old.providerAccountID)
+        XCTAssertEqual(store.accounts, [committed])
+        XCTAssertEqual(store.statuses[old.id], .ready)
+        XCTAssertEqual(
+            try credentials.read(reference: newReference),
+            .init(value: "new-access")
+        )
+        XCTAssertThrowsError(try credentials.read(reference: old.credentialReference))
+    }
+
+    func testRefreshFailureDoesNotRetryAndOpenRouterNeverUsesOAuthRefresh() async {
+        let codex = Self.codexAccount()
+        let codexRepository = ProviderUsageAccountRepositoryFake(
+            initialAccounts: [codex],
+            credentialSecret: .init(value: "old-access")
+        )
+        let failedProvider = RefreshingProviderUsageFake()
+        let failedSource = RenewingProviderUsageImporterFake(error: .sourceRefreshRejected)
+        let codexStore = ProviderUsageStore()
+        codexStore.replaceAccounts([codex])
+        await ProviderUsageCoordinator(
+            store: codexStore,
+            importer: failedSource,
+            renewalCandidate: Self.renewalCandidate(),
+            accounts: codexRepository,
+            providerClient: failedProvider
+        ).refresh(accountID: codex.id)
+        let failedFetchCount = await failedProvider.fetchCount
+        let failedRefreshCount = await failedSource.renewalCount
+        XCTAssertEqual(failedFetchCount, 1)
+        XCTAssertEqual(failedRefreshCount, 1)
+        XCTAssertEqual(codexStore.statuses[codex.id], .usageFailed(.unauthorized))
+
+        let router = Self.account()
+        let routerRepository = ProviderUsageAccountRepositoryFake(
+            initialAccounts: [router],
+            credentialSecret: .init(value: "router-key")
+        )
+        let routerProvider = RefreshingProviderUsageFake()
+        let routerSource = RenewingProviderUsageImporterFake()
+        let routerStore = ProviderUsageStore()
+        routerStore.replaceAccounts([router])
+        await ProviderUsageCoordinator(
+            store: routerStore,
+            importer: routerSource,
+            renewalCandidate: Self.renewalCandidate(),
+            accounts: routerRepository,
+            providerClient: routerProvider
+        ).refresh(accountID: router.id)
+        let routerFetchCount = await routerProvider.fetchCount
+        let routerRefreshCount = await routerSource.renewalCount
+        XCTAssertEqual(routerFetchCount, 1)
+        XCTAssertEqual(routerRefreshCount, 0)
+        XCTAssertEqual(routerStore.statuses[router.id], .usageFailed(.unauthorized))
+    }
+
+    func testRenewalAccountMismatchDoesNotRotateCredential() async throws {
+        let account = Self.codexAccount()
+        let credentials = ProviderUsageCredentialMemoryFake(values: [
+            account.credentialReference: .init(value: "old-access"),
+        ])
+        let metadata = ProviderUsageMetadataFake(accounts: [account])
+        let store = ProviderUsageStore()
+        store.replaceAccounts([account])
+
+        await ProviderUsageCoordinator(
+            store: store,
+            importer: RenewingProviderUsageImporterFake(returnedAccountID: "different-account"),
+            renewalCandidate: Self.renewalCandidate(),
+            accounts: TransactionalProviderUsageAccountRepository(
+                credentials: credentials,
+                metadata: metadata
+            ),
+            providerClient: RefreshingProviderUsageFake()
+        ).refresh(accountID: account.id)
+
+        XCTAssertEqual(store.statuses[account.id], .usageFailed(.accountMismatch))
+        let persisted = await metadata.load()
+        XCTAssertEqual(persisted, [account])
+        XCTAssertEqual(try credentials.read(reference: account.credentialReference).value, "old-access")
+    }
+
+    func testCancellationAndRefreshInvalidationAfterTokenIssuanceStillCommitAndReconcile() async {
+        let old = Self.codexAccount()
+        let committed = Self.replacingCredential(
+            old,
+            reference: UUID(uuidString: "ABABABAB-ABAB-ABAB-ABAB-ABABABABABAB")!,
+            revision: 2,
+            providerAccountID: old.providerAccountID
+        )
+        let repository = DeferredRotationAccountRepository(original: old, committed: committed)
+        let provider = RefreshingProviderUsageFake()
+        let source = RenewingProviderUsageImporterFake()
+        let store = ProviderUsageStore()
+        store.replaceAccounts([old])
+        let coordinator = ProviderUsageCoordinator(
+            store: store,
+            importer: source,
+            renewalCandidate: Self.renewalCandidate(),
+            accounts: repository,
+            providerClient: provider
+        )
+
+        let task = Task { await coordinator.refresh(accountID: old.id) }
+        await repository.waitUntilRotationStarted()
+        task.cancel()
+        store.invalidateRefreshes()
+        await repository.finishRotation()
+        await task.value
+
+        XCTAssertEqual(store.accounts, [committed])
+        XCTAssertEqual(store.statuses[old.id], .savedNotChecked)
+        let rotationCount = await repository.rotationCount
+        let fetchCount = await provider.fetchCount
+        XCTAssertEqual(rotationCount, 1)
+        XCTAssertEqual(fetchCount, 1)
+    }
+
+    func testCancellationWhileRenewalResultIsPendingStillPersistsReturnedCredential() async throws {
+        let old = Self.codexAccount()
+        let newReference = UUID(uuidString: "ACACACAC-ACAC-ACAC-ACAC-ACACACACACAC")!
+        let credentials = ProviderUsageCredentialMemoryFake(values: [
+            old.credentialReference: .init(value: "old-access"),
+        ])
+        let metadata = ProviderUsageMetadataFake(accounts: [old])
+        let source = DeferredRenewingProviderUsageImporterFake()
+        let store = ProviderUsageStore()
+        store.replaceAccounts([old])
+        let coordinator = ProviderUsageCoordinator(
+            store: store,
+            importer: source,
+            renewalCandidate: Self.renewalCandidate(),
+            accounts: TransactionalProviderUsageAccountRepository(
+                credentials: credentials,
+                metadata: metadata,
+                makeUUID: { newReference }
+            ),
+            providerClient: RefreshingProviderUsageFake()
+        )
+
+        let task = Task { await coordinator.refresh(accountID: old.id) }
+        await source.waitUntilRenewalRequested()
+        task.cancel()
+        await source.resolve()
+        await task.value
+
+        let persistedAccounts = await metadata.load()
+        let persisted = try XCTUnwrap(persistedAccounts.first)
+        XCTAssertEqual(persisted.credentialRevision, 2)
+        XCTAssertEqual(persisted.providerAccountID, old.providerAccountID)
+        XCTAssertEqual(try credentials.read(reference: newReference).value, "new-access")
+        XCTAssertThrowsError(try credentials.read(reference: old.credentialReference))
+    }
+
+    func testRepositorySerializesRotateAndRemoveAcrossSuspendedMetadataSave() async throws {
+        let first = Self.codexAccount()
+        let second = Self.account(
+            id: UUID(uuidString: "12121212-1212-1212-1212-121212121212")!,
+            credentialReference: UUID(uuidString: "34343434-3434-3434-3434-343434343434")!,
+            sourceConnectionID: "server-two"
+        )
+        let newReference = UUID(uuidString: "56565656-5656-5656-5656-565656565656")!
+        let credentials = ProviderUsageCredentialMemoryFake(values: [
+            first.credentialReference: .init(value: "old-access"),
+            second.credentialReference: .init(value: "router-key"),
+        ])
+        let metadata = SuspendingProviderUsageMetadataFake(accounts: [first, second])
+        let repository = TransactionalProviderUsageAccountRepository(
+            credentials: credentials,
+            metadata: metadata,
+            makeUUID: { newReference }
+        )
+
+        let rotate = Task {
+            try await repository.rotateCredential(
+                accountID: first.id,
+                credentialRevision: first.credentialRevision,
+                secret: .init(value: "new-access"),
+                expiresAt: Date(timeIntervalSince1970: 500),
+                providerAccountID: "rotated-provider-account"
+            )
+        }
+        await metadata.waitUntilSaveStarted()
+        let remove = Task { try await repository.remove(accountID: second.id) }
+        await Task.yield()
+        let blockedLoadCount = await metadata.loadCount
+        XCTAssertEqual(blockedLoadCount, 1)
+        await metadata.finishSave()
+        let rotatedResult = try await rotate.value
+        let rotated = rotatedResult.account
+        try await remove.value
+
+        let currentAccounts = await metadata.currentAccounts()
+        XCTAssertEqual(currentAccounts, [rotated])
+        XCTAssertEqual(rotated.providerAccountID, first.providerAccountID)
+        XCTAssertEqual(try credentials.read(reference: newReference).value, "new-access")
+        XCTAssertThrowsError(try credentials.read(reference: first.credentialReference))
+        XCTAssertThrowsError(try credentials.read(reference: second.credentialReference))
+    }
+
+    func testCredentialReadWaitsUntilRemovalMetadataCommit() async throws {
+        let account = Self.account()
+        let credentials = ProviderUsageCredentialMemoryFake(values: [
+            account.credentialReference: .init(value: "router-key"),
+        ])
+        let metadata = SuspendingProviderUsageMetadataFake(accounts: [account])
+        let repository = TransactionalProviderUsageAccountRepository(credentials: credentials, metadata: metadata)
+
+        let remove = Task { try await repository.remove(accountID: account.id) }
+        await metadata.waitUntilSaveStarted()
+        XCTAssertThrowsError(try credentials.read(reference: account.credentialReference))
+        let read = Task {
+            try await repository.readCredential(
+                accountID: account.id,
+                credentialRevision: account.credentialRevision
+            )
+        }
+        await Task.yield()
+        await metadata.finishSave()
+        try await remove.value
+        do {
+            _ = try await read.value
+            XCTFail("Expected removed account read to fail")
+        } catch let error as ProviderUsageAccountRepositoryError {
+            XCTAssertEqual(error, .credentialRevisionMismatch)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testStaleRevisionIsRejectedBeforeReadingCredential() async throws {
         let account = Self.account()
         let credentials = ProviderUsageCredentialMemoryFake(values: [account.credentialReference: .init(value: "persisted-secret")])
@@ -312,6 +576,34 @@ final class ProviderUsagePersistenceTests: XCTestCase {
         XCTAssertThrowsError(try credentials.read(reference: newReference))
     }
 
+    func testMetadataFailureSurfacesCredentialCleanupFailure() async throws {
+        let old = Self.account()
+        let newReference = UUID(uuidString: "BEBEBEBE-BEBE-BEBE-BEBE-BEBEBEBEBEBE")!
+        let credentials = ProviderUsageCredentialMemoryFake(
+            values: [old.credentialReference: .init(value: "old-secret")],
+            deleteError: .deleteFailed
+        )
+        let repository = TransactionalProviderUsageAccountRepository(
+            credentials: credentials,
+            metadata: ProviderUsageMetadataFake(accounts: [old], saveError: .writeFailed),
+            makeUUID: { newReference }
+        )
+
+        do {
+            _ = try await repository.save(review: Self.review(replacing: old.id))
+            XCTFail("Expected cleanup failure")
+        } catch let error as ProviderUsageAccountRepositoryError {
+            XCTAssertEqual(
+                error,
+                .credentialCleanupFailed(metadata: .writeFailed, credential: .deleteFailed)
+            )
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(try credentials.read(reference: old.credentialReference).value, "old-secret")
+        XCTAssertEqual(try credentials.read(reference: newReference).value, "fixture-secret")
+    }
+
     func testReplacementPublishesNewBeforeDeletingOldAndWriteFailureKeepsOld() async throws {
         let old = Self.account()
         let newReference = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
@@ -328,6 +620,7 @@ final class ProviderUsagePersistenceTests: XCTestCase {
 
         XCTAssertEqual(result.account.credentialRevision, 2)
         XCTAssertEqual(result.account.credentialReference, newReference)
+        XCTAssertNil(result.account.sourceRenewalApprovedAt)
         XCTAssertEqual(events.values, ["write", "metadata", "delete:\(old.credentialReference.uuidString)"])
         XCTAssertThrowsError(try credentials.read(reference: old.credentialReference))
         XCTAssertEqual(try credentials.read(reference: newReference).value, "fixture-secret")
@@ -346,6 +639,45 @@ final class ProviderUsagePersistenceTests: XCTestCase {
         let untouchedAccounts = await untouchedMetadata.load()
         XCTAssertEqual(untouchedAccounts, [old])
         XCTAssertEqual(try failingCredentials.read(reference: old.credentialReference).value, "old")
+    }
+
+    func testExplicitCodexSaveRecordsRenewalApprovalAndLegacyMetadataDefaultsToNil() async throws {
+        let date = Date(timeIntervalSince1970: 200)
+        let reference = UUID(uuidString: "ABCDABCD-ABCD-ABCD-ABCD-ABCDABCDABCD")!
+        let candidate = Self.renewalCandidate()
+        let review = ProviderUsageCredentialReview(
+            candidate: .init(
+                id: candidate.id,
+                provider: candidate.provider,
+                discoveryContext: candidate.discoveryContext,
+                sourceIdentity: candidate.sourceIdentity,
+                sourceKind: candidate.sourceKind,
+                credentialKind: candidate.credentialKind,
+                replacingAccountID: nil
+            ),
+            secret: .init(value: "access-only"),
+            providerAccountID: "provider-account",
+            credentialExpiresAt: Date(timeIntervalSince1970: 500)
+        )
+        let repository = TransactionalProviderUsageAccountRepository(
+            credentials: ProviderUsageCredentialMemoryFake(),
+            metadata: ProviderUsageMetadataFake(),
+            now: { date },
+            makeUUID: { reference }
+        )
+
+        let saved = try await repository.save(review: review).account
+        XCTAssertEqual(saved.sourceRenewalApprovedAt, date)
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any]
+        )
+        object.removeValue(forKey: "sourceRenewalApprovedAt")
+        let legacy = try JSONDecoder().decode(
+            ProviderUsageAccount.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertNil(legacy.sourceRenewalApprovedAt)
     }
 
     func testExactRemovalAndDeleteFailureDoesNotRemoveMetadata() async throws {
@@ -468,6 +800,50 @@ final class ProviderUsagePersistenceTests: XCTestCase {
         XCTAssertEqual(delete[kSecAttrSynchronizable as String] as? Bool, false)
     }
 
+    func testKeychainStoresOnlyAccessToken() throws {
+        let security = ProviderUsageSecurityFake()
+        let repository = KeychainProviderUsageCredentialRepository(accessGroup: "TEAM.private", security: security)
+        let reference = UUID()
+        let credential = ProviderUsageTransientSecret(value: "new-access")
+
+        try repository.write(credential, reference: reference)
+
+        XCTAssertEqual(try repository.read(reference: reference), credential)
+        XCTAssertEqual(security.storedValue, Data("new-access".utf8))
+    }
+
+    func testCredentialRotationCommitsNewBundleBeforeDeletingOld() async throws {
+        let old = Self.account()
+        let newReference = UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!
+        let events = ProviderUsageEventRecorder()
+        let credentials = ProviderUsageCredentialMemoryFake(
+            values: [old.credentialReference: .init(value: "old-access")],
+            events: events
+        )
+        let metadata = ProviderUsageMetadataFake(accounts: [old], events: events)
+        let repository = TransactionalProviderUsageAccountRepository(
+            credentials: credentials,
+            metadata: metadata,
+            now: { Date(timeIntervalSince1970: 250) },
+            makeUUID: { newReference }
+        )
+        let rotated = ProviderUsageTransientSecret(value: "new-access")
+
+        let result = try await repository.rotateCredential(
+            accountID: old.id,
+            credentialRevision: old.credentialRevision,
+            secret: rotated,
+            expiresAt: Date(timeIntervalSince1970: 500)
+        )
+
+        XCTAssertEqual(result.account.credentialRevision, 2)
+        XCTAssertEqual(result.account.credentialExpiresAt, Date(timeIntervalSince1970: 500))
+        XCTAssertEqual(result.account.providerAccountID, old.providerAccountID)
+        XCTAssertEqual(try credentials.read(reference: newReference), rotated)
+        XCTAssertThrowsError(try credentials.read(reference: old.credentialReference))
+        XCTAssertEqual(events.values, ["write", "metadata", "delete:\(old.credentialReference.uuidString)"])
+    }
+
     func testSignedHostStoresProviderCredentialOnlyInPrivateAccessGroup() throws {
         let bundle = Bundle.main
         let privateGroup = try XCTUnwrap(
@@ -541,12 +917,31 @@ final class ProviderUsagePersistenceTests: XCTestCase {
             sourceConnectionID: sourceConnectionID,
             apiProfile: .legacy,
             sourceKind: .openCodeAuth,
+            sourceScope: ProviderUsageSourceScope(.init(projectID: "project-one", directory: "/workspace/one", workspaceID: "workspace-one")),
             credentialKind: .apiKey,
             providerAccountID: "provider-account",
             credentialReference: credentialReference,
             credentialRevision: 1,
             createdAt: Date(timeIntervalSince1970: 100),
             updatedAt: Date(timeIntervalSince1970: 100)
+        )
+    }
+
+    nonisolated private static func codexAccount() -> ProviderUsageAccount {
+        .init(
+            id: UUID(uuidString: "CDCDCDCD-CDCD-CDCD-CDCD-CDCDCDCDCDCD")!,
+            provider: .codex,
+            sourceConnectionID: "server-one",
+            apiProfile: .legacy,
+            sourceKind: .openCodeAuth,
+            sourceScope: ProviderUsageSourceScope(.init(projectID: "project-one", directory: "/workspace/one", workspaceID: "workspace-one")),
+            credentialKind: .oauthAccessToken,
+            providerAccountID: "provider-account",
+            credentialReference: UUID(uuidString: "DCDCDCDC-DCDC-DCDC-DCDC-DCDCDCDCDCDC")!,
+            credentialRevision: 1,
+            credentialExpiresAt: Date(timeIntervalSince1970: 100),
+            createdAt: Date(timeIntervalSince1970: 50),
+            updatedAt: Date(timeIntervalSince1970: 50)
         )
     }
 
@@ -557,6 +952,7 @@ final class ProviderUsagePersistenceTests: XCTestCase {
             sourceConnectionID: account.sourceConnectionID,
             apiProfile: account.apiProfile,
             sourceKind: account.sourceKind,
+            sourceScope: account.sourceScope,
             credentialKind: account.credentialKind,
             providerAccountID: account.providerAccountID,
             credentialReference: account.credentialReference,
@@ -567,8 +963,48 @@ final class ProviderUsagePersistenceTests: XCTestCase {
         )
     }
 
+    nonisolated private static func replacingCredential(
+        _ account: ProviderUsageAccount,
+        reference: UUID,
+        revision: Int,
+        providerAccountID: String?
+    ) -> ProviderUsageAccount {
+        .init(
+            id: account.id,
+            provider: account.provider,
+            sourceConnectionID: account.sourceConnectionID,
+            apiProfile: account.apiProfile,
+            sourceKind: account.sourceKind,
+            sourceScope: account.sourceScope,
+            credentialKind: account.credentialKind,
+            providerAccountID: providerAccountID ?? account.providerAccountID,
+            credentialReference: reference,
+            credentialRevision: revision,
+            credentialExpiresAt: Date(timeIntervalSince1970: 500),
+            createdAt: account.createdAt,
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+    }
+
     nonisolated private static func savedResult() -> ProviderUsageAccountSaveResult {
         .init(account: account(), supersededCredentialCleanupPending: false)
+    }
+
+    nonisolated private static func renewalCandidate() -> ProviderUsageSetupCandidate {
+        .init(
+            id: UUID(uuidString: "78787878-7878-7878-7878-787878787878")!,
+            provider: .codex,
+            discoveryContext: .init(
+                backend: .init(id: "server-one", name: "Synthetic Backend", version: "1"),
+                connectionLifetimeID: UUID(uuidString: "89898989-8989-8989-8989-898989898989")!,
+                apiProfile: .legacy,
+                scope: .init(projectID: "project-one", directory: "/workspace/one", workspaceID: "workspace-one")
+            ),
+            sourceIdentity: .legacyProvider(providerID: "openai"),
+            sourceKind: .openCodeAuth,
+            credentialKind: .oauthAccessToken,
+            replacingAccountID: codexAccount().id
+        )
     }
 
     nonisolated fileprivate static func snapshot() -> ProviderUsageSnapshot {
@@ -696,6 +1132,55 @@ private actor DeferredProviderUsageCredentialReadRepository: ProviderUsageAccoun
     }
 }
 
+private actor DeferredRotationAccountRepository: ProviderUsageAccountRepository {
+    private let original: ProviderUsageAccount
+    private let committed: ProviderUsageAccount
+    private var rotationContinuation: CheckedContinuation<Void, Never>?
+    private var rotationWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var rotationCount = 0
+
+    init(original: ProviderUsageAccount, committed: ProviderUsageAccount) {
+        self.original = original
+        self.committed = committed
+    }
+
+    func load() -> [ProviderUsageAccount] { [original] }
+
+    func readCredential(accountID: UUID, credentialRevision: Int) throws -> ProviderUsageTransientSecret {
+        .init(value: "old-access")
+    }
+
+    func save(review: ProviderUsageCredentialReview) throws -> ProviderUsageAccountSaveResult {
+        throw ProviderUsageAccountRepositoryError.accountMissing
+    }
+
+    func rotateCredential(
+        accountID: UUID,
+        credentialRevision: Int,
+        secret: ProviderUsageTransientSecret,
+        expiresAt: Date,
+        providerAccountID: String?
+    ) async throws -> ProviderUsageAccountSaveResult {
+        rotationCount += 1
+        rotationWaiters.forEach { $0.resume() }
+        rotationWaiters = []
+        await withCheckedContinuation { rotationContinuation = $0 }
+        return .init(account: committed, supersededCredentialCleanupPending: false)
+    }
+
+    func remove(accountID: UUID) throws {}
+
+    func waitUntilRotationStarted() async {
+        if rotationContinuation != nil { return }
+        await withCheckedContinuation { rotationWaiters.append($0) }
+    }
+
+    func finishRotation() {
+        rotationContinuation?.resume()
+        rotationContinuation = nil
+    }
+}
+
 private actor ProviderUsageFetchingFake: ProviderUsageFetching {
     struct Request: Equatable, Sendable {
         let provider: ProviderUsageProvider
@@ -735,6 +1220,96 @@ private actor ProviderUsageFetchingFake: ProviderUsageFetching {
     }
 }
 
+private actor RefreshingProviderUsageFake: ProviderUsageFetching {
+    private(set) var fetchCount = 0
+
+    func fetchUsage(
+        provider: ProviderUsageProvider,
+        credentialKind: ProviderUsageCredentialKind,
+        secret: ProviderUsageTransientSecret,
+        providerAccountID: String?,
+        credentialExpiresAt: Date?
+    ) async throws -> ProviderUsageSnapshot {
+        fetchCount += 1
+        if provider == .openRouter || fetchCount == 1 { throw ProviderUsageError.unauthorized }
+        return .init(
+            provider: provider,
+            accountLabel: nil,
+            fetchedAt: Date(timeIntervalSince1970: 300),
+            credentialExpiresAt: credentialExpiresAt,
+            metrics: []
+        )
+    }
+
+}
+
+private actor RenewingProviderUsageImporterFake: ProviderUsageCredentialImporter {
+    private(set) var renewalCount = 0
+    private let error: ProviderUsageCredentialImportError?
+    private let returnedAccountID: String?
+
+    init(
+        error: ProviderUsageCredentialImportError? = nil,
+        returnedAccountID: String? = nil
+    ) {
+        self.error = error
+        self.returnedAccountID = returnedAccountID
+    }
+
+    func importCredential(for candidate: ProviderUsageSetupCandidate) throws -> ProviderUsageCredentialReview {
+        throw ProviderUsageCredentialImportError.unsupportedSource
+    }
+
+    func renewCredential(
+        for candidate: ProviderUsageSetupCandidate,
+        expectedAccountID: String,
+        currentAccessToken: String
+    ) throws -> ProviderUsageCredentialRenewal {
+        renewalCount += 1
+        if let error { throw error }
+        return .init(
+            secret: .init(value: "new-access"),
+            expiresAt: Date(timeIntervalSince1970: 500),
+            providerAccountID: returnedAccountID ?? expectedAccountID
+        )
+    }
+}
+
+private actor DeferredRenewingProviderUsageImporterFake: ProviderUsageCredentialImporter {
+    private var continuation: CheckedContinuation<ProviderUsageCredentialRenewal, Never>?
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var expectedAccountID: String?
+
+    func importCredential(for candidate: ProviderUsageSetupCandidate) throws -> ProviderUsageCredentialReview {
+        throw ProviderUsageCredentialImportError.unsupportedSource
+    }
+
+    func renewCredential(
+        for candidate: ProviderUsageSetupCandidate,
+        expectedAccountID: String,
+        currentAccessToken: String
+    ) async -> ProviderUsageCredentialRenewal {
+        self.expectedAccountID = expectedAccountID
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilRenewalRequested() async {
+        if continuation != nil { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func resolve() {
+        continuation?.resume(returning: .init(
+            secret: .init(value: "new-access"),
+            expiresAt: Date(timeIntervalSince1970: 500),
+            providerAccountID: expectedAccountID
+        ))
+        continuation = nil
+    }
+}
+
 private actor ProviderUsageMetadataFake: ProviderUsageMetadataRepository {
     private var accounts: [ProviderUsageAccount]
     private let saveError: ProviderUsageMetadataRepositoryError?
@@ -750,6 +1325,45 @@ private actor ProviderUsageMetadataFake: ProviderUsageMetadataRepository {
         if let saveError { throw saveError }
         self.accounts = accounts
     }
+}
+
+private actor SuspendingProviderUsageMetadataFake: ProviderUsageMetadataRepository {
+    private var accounts: [ProviderUsageAccount]
+    private var shouldSuspendSave = true
+    private var saveContinuation: CheckedContinuation<Void, Never>?
+    private var saveWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var loadCount = 0
+
+    init(accounts: [ProviderUsageAccount]) {
+        self.accounts = accounts
+    }
+
+    func load() -> [ProviderUsageAccount] {
+        loadCount += 1
+        return accounts
+    }
+
+    func save(_ accounts: [ProviderUsageAccount]) async {
+        if shouldSuspendSave {
+            shouldSuspendSave = false
+            saveWaiters.forEach { $0.resume() }
+            saveWaiters = []
+            await withCheckedContinuation { saveContinuation = $0 }
+        }
+        self.accounts = accounts
+    }
+
+    func waitUntilSaveStarted() async {
+        if saveContinuation != nil { return }
+        await withCheckedContinuation { saveWaiters.append($0) }
+    }
+
+    func finishSave() {
+        saveContinuation?.resume()
+        saveContinuation = nil
+    }
+
+    func currentAccounts() -> [ProviderUsageAccount] { accounts }
 }
 
 private final class ProviderUsageCredentialMemoryFake: ProviderUsageCredentialRepository, @unchecked Sendable {
@@ -801,6 +1415,7 @@ private final class ProviderUsageSecurityFake: ProviderUsageSecurityClient {
     private(set) var readQueries: [[String: Any]] = []
     private(set) var deleteQueries: [[String: Any]] = []
     private var value: Data?
+    var storedValue: Data? { value }
     func add(_ attributes: [String: Any]) -> OSStatus {
         addQueries.append(attributes)
         value = attributes[kSecValueData as String] as? Data

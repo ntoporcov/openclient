@@ -163,6 +163,108 @@ final class ProviderUsageFacadeTests: XCTestCase {
         XCTAssertEqual(removeCount, 1)
     }
 
+    func testInactiveOrMismatchedSourceContextDoesNotCreateRenewalImporter() async {
+        let context = Self.context()
+        let account = ProviderUsageAccount(
+            id: Self.uuid("CDCDCDCD-CDCD-CDCD-CDCD-CDCDCDCDCDCD"),
+            provider: .codex,
+            sourceConnectionID: context.backend.id,
+            apiProfile: .legacy,
+            sourceKind: .openCodeAuth,
+            sourceScope: ProviderUsageSourceScope(context.scope),
+            credentialKind: .oauthAccessToken,
+            providerAccountID: "provider-account",
+            credentialReference: Self.uuid("DCDCDCDC-DCDC-DCDC-DCDC-DCDCDCDCDCDC"),
+            credentialRevision: 1,
+            credentialExpiresAt: Date(timeIntervalSince1970: 1),
+            sourceRenewalApprovedAt: Date(timeIntervalSince1970: 1),
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        let recorder = ProviderUsageImporterFactoryRecorder()
+        let store = ProviderUsageStore()
+        let facade = makeFacade(
+            store: store,
+            accounts: FacadeProviderUsageAccountRepository(accounts: [account]),
+            providerClient: FacadeRejectedProviderUsageFetching(),
+            context: { context },
+            importerFactory: { candidate, allowsHTTP, _ in
+                recorder.calls.append((candidate, allowsHTTP))
+                return ImmediateProviderUsageImporter(candidate: candidate)
+            }
+        )
+        await facade.loadPersistedAccountsOnce()
+        facade.applicationActivityChanged(isActive: false)
+        await facade.refresh(accountID: account.id)
+        XCTAssertTrue(recorder.calls.isEmpty)
+
+        let mismatched = ProviderUsageDiscoveryContext(
+            backend: context.backend,
+            connectionLifetimeID: context.connectionLifetimeID,
+            apiProfile: context.apiProfile,
+            scope: .init(projectID: "project", directory: "/other", workspaceID: "workspace")
+        )
+        let mismatchStore = ProviderUsageStore()
+        let mismatchFacade = makeFacade(
+            store: mismatchStore,
+            accounts: FacadeProviderUsageAccountRepository(accounts: [account]),
+            providerClient: FacadeRejectedProviderUsageFetching(),
+            context: { mismatched },
+            importerFactory: { candidate, allowsHTTP, _ in
+                recorder.calls.append((candidate, allowsHTTP))
+                return ImmediateProviderUsageImporter(candidate: candidate)
+            }
+        )
+        await mismatchFacade.loadPersistedAccountsOnce()
+        await mismatchFacade.refresh(accountID: account.id)
+        XCTAssertTrue(recorder.calls.isEmpty)
+
+        let unapproved = ProviderUsageAccount(
+            id: account.id,
+            provider: account.provider,
+            sourceConnectionID: account.sourceConnectionID,
+            apiProfile: account.apiProfile,
+            sourceKind: account.sourceKind,
+            sourceScope: account.sourceScope,
+            credentialKind: account.credentialKind,
+            providerAccountID: account.providerAccountID,
+            credentialReference: account.credentialReference,
+            credentialRevision: account.credentialRevision,
+            credentialExpiresAt: account.credentialExpiresAt,
+            sourceRenewalApprovedAt: nil,
+            createdAt: account.createdAt,
+            updatedAt: account.updatedAt
+        )
+        let unapprovedFacade = makeFacade(
+            store: ProviderUsageStore(),
+            accounts: FacadeProviderUsageAccountRepository(accounts: [unapproved]),
+            providerClient: FacadeRejectedProviderUsageFetching(),
+            context: { context },
+            importerFactory: { candidate, allowsHTTP, _ in
+                recorder.calls.append((candidate, allowsHTTP))
+                return ImmediateProviderUsageImporter(candidate: candidate)
+            }
+        )
+        await unapprovedFacade.loadPersistedAccountsOnce()
+        await unapprovedFacade.refresh(accountID: unapproved.id)
+        XCTAssertTrue(recorder.calls.isEmpty)
+
+        let approvedStore = ProviderUsageStore()
+        let approvedFacade = makeFacade(
+            store: approvedStore,
+            accounts: FacadeProviderUsageAccountRepository(accounts: [account]),
+            providerClient: FacadeRejectedProviderUsageFetching(),
+            context: { context },
+            importerFactory: { candidate, allowsHTTP, _ in
+                recorder.calls.append((candidate, allowsHTTP))
+                return ImmediateProviderUsageImporter(candidate: candidate)
+            }
+        )
+        await approvedFacade.loadPersistedAccountsOnce()
+        await approvedFacade.refresh(accountID: account.id)
+        XCTAssertEqual(recorder.calls.count, 1)
+    }
+
     func testVisibleScreenRefreshesOnlyStaleAccounts() async throws {
         let account = Self.account()
         let repository = FacadeProviderUsageAccountRepository(accounts: [account])
@@ -561,6 +663,18 @@ private actor FacadeProviderUsageFetching: ProviderUsageFetching {
             credentialExpiresAt: credentialExpiresAt,
             metrics: []
         )
+    }
+}
+
+private actor FacadeRejectedProviderUsageFetching: ProviderUsageFetching {
+    func fetchUsage(
+        provider: ProviderUsageProvider,
+        credentialKind: ProviderUsageCredentialKind,
+        secret: ProviderUsageTransientSecret,
+        providerAccountID: String?,
+        credentialExpiresAt: Date?
+    ) throws -> ProviderUsageSnapshot {
+        throw ProviderUsageError.unauthorized
     }
 }
 

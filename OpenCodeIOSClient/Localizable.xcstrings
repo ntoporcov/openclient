@@ -3090,6 +3090,28 @@
         }
       }
     },
+    "Automatic renewal: when this access token expires or is rejected, OpenClient may ask this connected OpenCode source to renew it and update the source authentication file. The refresh token remains on the source.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic renewal: when this access token expires or is rejected, OpenClient may ask this connected OpenCode source to renew it and update the source authentication file. The refresh token remains on the source."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rinnovo automatico: quando questo token di accesso scade o viene rifiutato, OpenClient può chiedere a questa origine OpenCode connessa di rinnovarlo e aggiornare il file di autenticazione dell'origine. Il token di aggiornamento rimane nell'origine."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renovação automática: quando este token de acesso expirar ou for rejeitado, o OpenClient poderá solicitar que esta origem conectada do OpenCode o renove e atualize o arquivo de autenticação da origem. O token de atualização permanece na origem."
+          }
+        }
+      }
+    },
     "Automatic sends after silence. Hold to Talk sends when you release the sphere.": {
       "localizations": {
         "pt-BR": {

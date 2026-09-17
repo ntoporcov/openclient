@@ -511,6 +511,13 @@ private struct ProviderUsageCredentialReviewView: View {
         Text("The credential was read successfully and remains hidden. Saving authorizes OpenClient to store it in Keychain and send it only to the selected provider's usage API for this check and future refreshes.")
             .font(.footnote)
             .foregroundStyle(.secondary)
+        if review.candidate.provider == .codex,
+           review.candidate.apiProfile == .legacy,
+           review.candidate.sourceKind == .openCodeAuth {
+            Text("Automatic renewal: when this access token expires or is rejected, OpenClient may ask this connected OpenCode source to renew it and update the source authentication file. The refresh token remains on the source.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
         Button(action: onSave) { Text(saveTitle) }
         Button("Cancel", role: .cancel, action: onCancel)
     }
@@ -550,7 +557,7 @@ private func providerUsageCredentialImportReason(
         "The selected connection or workspace changed. Start setup again."
     case .insecureTransport:
         "Credential reading requires secure transport."
-    case .connectionFailed:
+    case .connectionFailed, .sourceRefreshNetwork, .sourceRefreshRejected:
         "The credential helper could not connect. Check the server connection and try again."
     case .ptyCreateFailed:
         "The server could not start the credential helper."
@@ -568,17 +575,17 @@ private func providerUsageCredentialImportReason(
         "The selected authentication file was not found."
     case .sourceTooLarge:
         "The selected authentication file is too large to read safely."
-    case .malformedSource:
+    case .malformedSource, .sourceRefreshMalformed:
         "The selected authentication file is malformed."
     case .entryMissing:
         "The selected provider entry was not found."
     case .multipleEntries:
         "Multiple matching provider entries were found."
-    case .unsupportedEntry, .unsupportedSource, .unsupportedProfile:
+    case .unsupportedEntry, .unsupportedSource, .unsupportedProfile, .accountMismatch, .unsupportedRuntime:
         "The selected provider credential format is not supported."
     case .outputTooLarge, .selectedPayloadTooLarge:
         "The credential helper returned more data than allowed."
-    case .cleanupFailed:
+    case .cleanupFailed, .sourceRefreshWriteFailed, .sourceChanged:
         "The credential helper could not be cleaned up safely."
     }
 }

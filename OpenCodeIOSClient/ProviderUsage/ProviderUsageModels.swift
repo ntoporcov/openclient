@@ -165,11 +165,13 @@ struct ProviderUsageAccount: Codable, Identifiable, Hashable, Sendable {
     let sourceConnectionID: String
     let apiProfile: ProviderUsageAPIProfile
     let sourceKind: ProviderUsageCredentialSourceKind
+    let sourceScope: ProviderUsageSourceScope?
     let credentialKind: ProviderUsageCredentialKind
     let providerAccountID: String?
     let credentialReference: UUID
     let credentialRevision: Int
     let credentialExpiresAt: Date?
+    let sourceRenewalApprovedAt: Date?
     let createdAt: Date
     let updatedAt: Date
 
@@ -180,11 +182,13 @@ struct ProviderUsageAccount: Codable, Identifiable, Hashable, Sendable {
         sourceConnectionID: String,
         apiProfile: ProviderUsageAPIProfile,
         sourceKind: ProviderUsageCredentialSourceKind,
+        sourceScope: ProviderUsageSourceScope? = nil,
         credentialKind: ProviderUsageCredentialKind,
         providerAccountID: String? = nil,
         credentialReference: UUID,
         credentialRevision: Int,
         credentialExpiresAt: Date? = nil,
+        sourceRenewalApprovedAt: Date? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -194,13 +198,31 @@ struct ProviderUsageAccount: Codable, Identifiable, Hashable, Sendable {
         self.sourceConnectionID = sourceConnectionID
         self.apiProfile = apiProfile
         self.sourceKind = sourceKind
+        self.sourceScope = sourceScope
         self.credentialKind = credentialKind
         self.providerAccountID = providerAccountID
         self.credentialReference = credentialReference
         self.credentialRevision = credentialRevision
         self.credentialExpiresAt = credentialExpiresAt
+        self.sourceRenewalApprovedAt = sourceRenewalApprovedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+}
+
+struct ProviderUsageSourceScope: Codable, Equatable, Hashable, Sendable {
+    let projectID: String?
+    let directory: String?
+    let workspaceID: String?
+
+    init(_ scope: BackendScope) {
+        projectID = scope.projectID
+        directory = scope.directory
+        workspaceID = scope.workspaceID
+    }
+
+    func matches(_ scope: BackendScope) -> Bool {
+        self == ProviderUsageSourceScope(scope)
     }
 }
 
@@ -317,6 +339,18 @@ struct ProviderUsageTransientSecret: Equatable, Sendable, CustomStringConvertibl
     var maskedPreview: String {
         let suffix = value.suffix(4)
         return suffix.isEmpty ? "****" : "****\(suffix)"
+    }
+}
+
+struct ProviderUsageCredentialRenewal: Equatable, Sendable {
+    let secret: ProviderUsageTransientSecret
+    let expiresAt: Date
+    let providerAccountID: String?
+
+    init(secret: ProviderUsageTransientSecret, expiresAt: Date, providerAccountID: String? = nil) {
+        self.secret = secret
+        self.expiresAt = expiresAt
+        self.providerAccountID = providerAccountID
     }
 }
 

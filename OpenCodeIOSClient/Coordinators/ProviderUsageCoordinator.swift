@@ -2,6 +2,21 @@ import Foundation
 
 protocol ProviderUsageCredentialImporter: Sendable {
     func importCredential(for candidate: ProviderUsageSetupCandidate) async throws -> ProviderUsageCredentialReview
+    func renewCredential(
+        for candidate: ProviderUsageSetupCandidate,
+        expectedAccountID: String,
+        currentAccessToken: String
+    ) async throws -> ProviderUsageCredentialRenewal
+}
+
+extension ProviderUsageCredentialImporter {
+    func renewCredential(
+        for candidate: ProviderUsageSetupCandidate,
+        expectedAccountID: String,
+        currentAccessToken: String
+    ) async throws -> ProviderUsageCredentialRenewal {
+        throw ProviderUsageCredentialImportError.unsupportedSource
+    }
 }
 
 protocol ProviderUsageFetching: Sendable {
@@ -52,6 +67,7 @@ struct RoutedProviderUsageClient: ProviderUsageFetching {
 struct ProviderUsageCoordinator {
     let store: ProviderUsageStore
     let importer: (any ProviderUsageCredentialImporter)?
+    var renewalCandidate: ProviderUsageSetupCandidate? = nil
     let accounts: any ProviderUsageAccountRepository
     let providerClient: any ProviderUsageFetching
 
@@ -145,12 +161,96 @@ struct ProviderUsageCoordinator {
         } catch is CancellationError {
             store.cancelRefresh(refresh)
         } catch let error as ProviderUsageError {
-            if Task.isCancelled { store.cancelRefresh(refresh) }
-            else { _ = store.applyRefreshFailure(error, handle: refresh) }
+            if Task.isCancelled {
+                store.cancelRefresh(refresh)
+            } else if shouldRenewCredential(after: error, account: refresh.account),
+                      let importer,
+                      let renewalCandidate {
+                await renewCredentialAndRetry(
+                    refresh,
+                    currentSecret: secret,
+                    importer: importer,
+                    candidate: renewalCandidate
+                )
+            } else {
+                _ = store.applyRefreshFailure(error, handle: refresh)
+            }
         } catch {
             if Task.isCancelled { store.cancelRefresh(refresh) }
             else { _ = store.applyRefreshFailure(.network, handle: refresh) }
         }
+    }
+
+    private func renewCredentialAndRetry(
+        _ refresh: ProviderUsageStore.RefreshHandle,
+        currentSecret: ProviderUsageTransientSecret,
+        importer: any ProviderUsageCredentialImporter,
+        candidate: ProviderUsageSetupCandidate
+    ) async {
+        var activeRefresh = refresh
+        do {
+            guard let expectedAccountID = refresh.account.providerAccountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !expectedAccountID.isEmpty else {
+                throw ProviderUsageError.accountMismatch
+            }
+            let rotated = try await importer.renewCredential(
+                for: candidate,
+                expectedAccountID: expectedAccountID,
+                currentAccessToken: currentSecret.value
+            )
+            guard rotated.providerAccountID == expectedAccountID else {
+                throw ProviderUsageError.accountMismatch
+            }
+            // Once the provider issues a token, persist it even if UI work was cancelled.
+            let saved = try await accounts.rotateCredential(
+                accountID: refresh.account.id,
+                credentialRevision: refresh.account.credentialRevision,
+                secret: rotated.secret,
+                expiresAt: rotated.expiresAt,
+                providerAccountID: expectedAccountID
+            )
+            guard let retry = store.reconcileCredentialRotation(
+                saved.account,
+                replacing: refresh.account,
+                handle: refresh
+            ) else {
+                store.cancelRefresh(refresh)
+                return
+            }
+            activeRefresh = retry
+            try Task.checkCancellation()
+            let snapshot = try await providerClient.fetchUsage(
+                provider: saved.account.provider,
+                credentialKind: saved.account.credentialKind,
+                secret: rotated.secret,
+                providerAccountID: saved.account.providerAccountID,
+                credentialExpiresAt: saved.account.credentialExpiresAt
+            )
+            if Task.isCancelled { store.cancelRefresh(activeRefresh) }
+            else { _ = store.applyRefresh(snapshot, handle: activeRefresh) }
+        } catch is CancellationError {
+            store.cancelRefresh(activeRefresh)
+        } catch let error as ProviderUsageCredentialImportError {
+            if Task.isCancelled { store.cancelRefresh(activeRefresh) }
+            else { _ = store.applyRefreshFailure(mapRenewalError(error), handle: activeRefresh) }
+        } catch let error as ProviderUsageError {
+            if Task.isCancelled { store.cancelRefresh(activeRefresh) }
+            else { _ = store.applyRefreshFailure(error, handle: activeRefresh) }
+        } catch let error as ProviderUsageAccountRepositoryError {
+            if Task.isCancelled { store.cancelRefresh(activeRefresh) }
+            else { _ = store.applyRefreshFailure(mapRepositoryError(error), handle: activeRefresh) }
+        } catch {
+            if Task.isCancelled { store.cancelRefresh(activeRefresh) }
+            else { _ = store.applyRefreshFailure(.network, handle: activeRefresh) }
+        }
+    }
+
+    private func shouldRenewCredential(
+        after error: ProviderUsageError,
+        account: ProviderUsageAccount
+    ) -> Bool {
+        guard account.provider == .codex, account.credentialKind == .oauthAccessToken else { return false }
+        return error == .credentialExpired || error == .unauthorized
     }
 
     private func mapRepositoryError(_ error: ProviderUsageAccountRepositoryError) -> ProviderUsageError {
@@ -158,7 +258,18 @@ struct ProviderUsageCoordinator {
         case .credential(.missing), .credential(.readBackFailed), .accountMissing, .credentialRevisionMismatch:
             return .invalidCredential
         case .credential(.unavailable), .credential(.writeFailed), .credential(.deleteFailed), .credential(.invalidConfiguration),
-             .metadata, .removalRollbackFailed:
+             .metadata, .removalRollbackFailed, .credentialCleanupFailed:
+            return .credentialUnavailable
+        }
+    }
+
+    private func mapRenewalError(_ error: ProviderUsageCredentialImportError) -> ProviderUsageError {
+        switch error {
+        case .sourceRefreshRejected:
+            return .unauthorized
+        case .accountMismatch:
+            return .accountMismatch
+        default:
             return .credentialUnavailable
         }
     }

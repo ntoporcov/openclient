@@ -86,19 +86,50 @@ private actor ProviderUsagePTYStopRequest {
     var wasRequested: Bool { requested }
 }
 
+private final class ProviderUsageRenewalPhaseBoundary: @unchecked Sendable {
+    private enum State { case pending, committed, cancelled }
+
+    private let lock = NSLock()
+    private let enabled: Bool
+    private var state = State.pending
+
+    init(enabled: Bool) { self.enabled = enabled }
+
+    func commit() -> Bool {
+        guard enabled else { return true }
+        return lock.withLock {
+            guard state != .cancelled else { return false }
+            state = .committed
+            return true
+        }
+    }
+
+    func cancelUnlessCommitted() -> Bool {
+        guard enabled else { return true }
+        return lock.withLock {
+            guard state != .committed else { return false }
+            state = .cancelled
+            return true
+        }
+    }
+
+    var isProtected: Bool { enabled && lock.withLock { state == .committed } }
+}
+
 actor ProviderUsageCredentialImportProcessor {
     enum ConsumeOutcome: Sendable {
         case continueReceiving(outbound: [UInt8]?)
         case complete
     }
 
-    private enum State: Equatable { case awaitingReady, awaitingResult, complete, failed }
+    private enum State: Equatable { case awaitingReady, startPrepared, awaitingResult, complete, failed }
 
     private let operationID: UUID
     private let selection: ProviderUsageCredentialImportProtocol.Selection
     private let privateKey: Curve25519.KeyAgreement.PrivateKey
     private let psk: Data
     private let nonce: Data
+    private nonisolated let renewalBoundary: ProviderUsageRenewalPhaseBoundary
     private var state = State.awaitingReady
     private var lineBuffer = ""
     private var outputBytes = 0
@@ -116,6 +147,7 @@ actor ProviderUsageCredentialImportProcessor {
         self.privateKey = privateKey
         self.psk = psk
         self.nonce = nonce
+        renewalBoundary = ProviderUsageRenewalPhaseBoundary(enabled: selection.action == .renew)
     }
 
     func fail(_ error: ProviderUsageCredentialImportError) {
@@ -127,6 +159,15 @@ actor ProviderUsageCredentialImportProcessor {
     func failureOrConnectionError() -> ProviderUsageCredentialImportError {
         failure ?? .ptyConnectFailed
     }
+
+    func commitStartSend() throws {
+        guard state == .startPrepared else { throw ProviderUsageCredentialImportError.invalidFrame }
+        guard renewalBoundary.commit() else { throw CancellationError() }
+        state = .awaitingResult
+    }
+
+    nonisolated func protectsRenewalFromCancellation() -> Bool { renewalBoundary.isProtected }
+    nonisolated func shouldCancelOperation() -> Bool { renewalBoundary.cancelUnlessCommitted() }
 
     func consume(_ text: String) throws -> ConsumeOutcome {
         guard failure == nil else { throw failure! }
@@ -188,11 +229,14 @@ actor ProviderUsageCredentialImportProcessor {
             )
             transcript = ready.transcript
             keys = derived
-            state = .awaitingResult
+            state = .startPrepared
             return try ProviderUsageCredentialImportProtocol.startFrame(
                 operationID: operationID, selection: selection, transcript: ready.transcript,
                 key: derived.clientToServer, nonce: nonce
             )
+        case .startPrepared:
+            fail(.invalidFrame)
+            throw ProviderUsageCredentialImportError.invalidFrame
         case .awaitingResult:
             guard line.contains("|RESULT|"), let transcript, let keys else {
                 fail(.invalidFrame)
@@ -230,6 +274,13 @@ actor ProviderUsageCredentialImportProcessor {
         case "UNSUPPORTED_ENTRY": .unsupportedEntry
         case "UNSUPPORTED_SOURCE": .unsupportedSource
         case "SELECTED_PAYLOAD_TOO_LARGE": .selectedPayloadTooLarge
+        case "SOURCE_REFRESH_NETWORK": .sourceRefreshNetwork
+        case "SOURCE_REFRESH_REJECTED": .sourceRefreshRejected
+        case "SOURCE_REFRESH_MALFORMED": .sourceRefreshMalformed
+        case "SOURCE_REFRESH_WRITE_FAILED": .sourceRefreshWriteFailed
+        case "SOURCE_CHANGED": .sourceChanged
+        case "ACCOUNT_MISMATCH": .accountMismatch
+        case "UNSUPPORTED_RUNTIME": .unsupportedRuntime
         default: .invalidFrame
         }
     }
@@ -252,7 +303,9 @@ actor ProviderUsageCredentialImportProcessor {
             "TIMED_OUT", "INVALID_FRAME", "AUTHENTICATION_FAILED", "REPLAY",
             "INVALID_PROVIDER", "INVALID_SOURCE", "INVALID_CLIENT_KEY", "INVALID_PSK",
             "SOURCE_MISSING", "SOURCE_TOO_LARGE", "MALFORMED_SOURCE", "ENTRY_MISSING",
-            "MULTIPLE_ENTRIES", "UNSUPPORTED_ENTRY", "UNSUPPORTED_SOURCE", "SELECTED_PAYLOAD_TOO_LARGE"
+            "MULTIPLE_ENTRIES", "UNSUPPORTED_ENTRY", "UNSUPPORTED_SOURCE", "SELECTED_PAYLOAD_TOO_LARGE",
+            "SOURCE_REFRESH_NETWORK", "SOURCE_REFRESH_REJECTED", "SOURCE_REFRESH_MALFORMED",
+            "SOURCE_REFRESH_WRITE_FAILED", "SOURCE_CHANGED", "ACCOUNT_MISMATCH", "UNSUPPORTED_RUNTIME"
         ]
         guard fields.count == 4, knownCodes.contains(fields[3]) else { return nil }
         return candidate
@@ -294,6 +347,7 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
     private let currentContext: ContextProvider
     private let allowsInsecureTransport: Bool
     private let timeout: Duration
+    private let renewalTimeout: Duration
     private let randomBytes: RandomBytes
     private let privateKeyFactory: PrivateKeyFactory
     private let cleanupTimeout: Duration = .milliseconds(250)
@@ -303,6 +357,7 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
         currentContext: @escaping ContextProvider,
         allowsInsecureTransport: Bool = false,
         timeout: Duration = .seconds(15),
+        renewalTimeout: Duration = .seconds(20),
         randomBytes: @escaping RandomBytes = { count in
             var data = Data(count: count)
             let status = data.withUnsafeMutableBytes { bytes in
@@ -317,17 +372,53 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
         self.currentContext = currentContext
         self.allowsInsecureTransport = allowsInsecureTransport
         self.timeout = timeout
+        self.renewalTimeout = renewalTimeout
         self.randomBytes = randomBytes
         self.privateKeyFactory = privateKeyFactory
     }
 
     func importCredential(for candidate: ProviderUsageSetupCandidate) async throws -> ProviderUsageCredentialReview {
+        try await perform(candidate: candidate, action: .read)
+    }
+
+    func renewCredential(
+        for candidate: ProviderUsageSetupCandidate,
+        expectedAccountID: String,
+        currentAccessToken: String
+    ) async throws -> ProviderUsageCredentialRenewal {
+        let review = try await perform(
+            candidate: candidate,
+            action: .renew,
+            expectedAccountID: expectedAccountID,
+            currentAccessToken: currentAccessToken
+        )
+        guard let expiresAt = review.credentialExpiresAt else {
+            throw ProviderUsageCredentialImportError.sourceRefreshMalformed
+        }
+        return ProviderUsageCredentialRenewal(
+            secret: review.secret,
+            expiresAt: expiresAt,
+            providerAccountID: review.providerAccountID
+        )
+    }
+
+    private func perform(
+        candidate: ProviderUsageSetupCandidate,
+        action: ProviderUsageCredentialImportProtocol.Selection.Action,
+        expectedAccountID: String? = nil,
+        currentAccessToken: String? = nil
+    ) async throws -> ProviderUsageCredentialReview {
         guard candidate.apiProfile == .legacy else { throw ProviderUsageCredentialImportError.unsupportedProfile }
         try validateTransport()
         guard await currentContext() == candidate.discoveryContext else {
             throw ProviderUsageCredentialImportError.contextChanged
         }
-        let selection = try ProviderUsageCredentialImportProtocol.Selection(candidate: candidate)
+        let selection = try ProviderUsageCredentialImportProtocol.Selection(
+            candidate: candidate,
+            action: action,
+            expectedAccountID: expectedAccountID,
+            currentAccessToken: currentAccessToken
+        )
         let operationID = UUID()
         let privateKey = try privateKeyFactory()
         let psk = try randomBytes(32)
@@ -346,6 +437,8 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
                 "OCPI_OPERATION_ID": operationID.uuidString.lowercased(),
                 "OCPI_PROVIDER": selection.provider,
                 "OCPI_SOURCE": selection.source,
+                "OCPI_EXPECTED_ACCOUNT_BINDING": selection.expectedAccountBinding,
+                "OCPI_CURRENT_ACCESS_BINDING": selection.currentAccessBinding,
                 "OCPI_CLIENT_PUBLIC_KEY": privateKey.publicKey.rawRepresentation.base64EncodedString(),
                 "OCPI_PSK": psk.base64EncodedString()
             ]
@@ -354,16 +447,23 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
         let createdBox = ProviderUsageCreatedPTYBox()
         var primaryError: Error?
         var review: ProviderUsageCredentialReview?
-        do {
-            review = try await withTimeout(timeout) {
+        let deadline = action == .renew ? renewalTimeout : timeout
+        let operationTransport = transport
+        let contextProvider = currentContext
+        let operationTask = Task.detached {
+            try await Self.withTimeout(deadline) {
                 try Task.checkCancellation()
-                guard await self.currentContext() == candidate.discoveryContext else {
+                guard await contextProvider() == candidate.discoveryContext else {
                     throw ProviderUsageCredentialImportError.contextChanged
                 }
                 let pty: OpenCodePTY
                 do {
-                    pty = try await self.transport.create(request: request, scope: candidate.discoveryContext.scope)
+                    pty = try await operationTransport.create(request: request, scope: candidate.discoveryContext.scope)
                 } catch is CancellationError {
+                    if action == .renew,
+                       let result = try? await processor.finish(candidate: candidate) {
+                        return result
+                    }
                     throw CancellationError()
                 } catch let error as ProviderUsageCredentialImportError {
                     throw error
@@ -374,12 +474,14 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
                 }
                 await createdBox.set(pty)
                 try Task.checkCancellation()
-                guard await self.currentContext() == candidate.discoveryContext else {
+                guard await contextProvider() == candidate.discoveryContext else {
                     throw ProviderUsageCredentialImportError.contextChanged
                 }
                 do {
-                    try await self.transport.connect(id: pty.id, scope: candidate.discoveryContext.scope) { event in
-                        guard await self.currentContext() == candidate.discoveryContext else {
+                    try await operationTransport.connect(id: pty.id, scope: candidate.discoveryContext.scope) { event in
+                        let protectedRenewal = processor.protectsRenewalFromCancellation()
+                        if !protectedRenewal,
+                           await contextProvider() != candidate.discoveryContext {
                             await processor.fail(.contextChanged)
                             return false
                         }
@@ -387,11 +489,20 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
                         do {
                             switch try await processor.consume(text) {
                             case let .continueReceiving(outbound):
-                                if let outbound { try await self.transport.send(outbound) }
+                                if let outbound {
+                                    guard await contextProvider() == candidate.discoveryContext else {
+                                        await processor.fail(.contextChanged)
+                                        return false
+                                    }
+                                    try await processor.commitStartSend()
+                                    try await operationTransport.send(outbound)
+                                }
                                 return true
                             case .complete:
                                 return false
                             }
+                        } catch is CancellationError {
+                            return false
                         } catch let error as ProviderUsageCredentialImportError {
                             await processor.fail(error)
                             return false
@@ -401,17 +512,33 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
                         }
                     }
                 } catch is CancellationError {
+                    if action == .renew,
+                       let result = try? await processor.finish(candidate: candidate) {
+                        return result
+                    }
                     throw CancellationError()
                 } catch {
                     if let result = try? await processor.finish(candidate: candidate) { return result }
                     throw await processor.failureOrConnectionError()
                 }
-                try Task.checkCancellation()
-                guard await self.currentContext() == candidate.discoveryContext else {
-                    throw ProviderUsageCredentialImportError.contextChanged
+                if !processor.protectsRenewalFromCancellation() {
+                    try Task.checkCancellation()
+                    guard await contextProvider() == candidate.discoveryContext else {
+                        throw ProviderUsageCredentialImportError.contextChanged
+                    }
                 }
                 return try await processor.finish(candidate: candidate)
             }
+        }
+        do {
+            review = try await withTaskCancellationHandler {
+                try await operationTask.value
+            } onCancel: {
+                if processor.shouldCancelOperation() {
+                    operationTask.cancel()
+                }
+            }
+            if action == .read { try Task.checkCancellation() }
         } catch is CancellationError {
             primaryError = CancellationError()
         } catch let error as ProviderUsageCredentialImportError {
@@ -475,7 +602,7 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
         }
     }
 
-    private func withTimeout<T: Sendable>(
+    private nonisolated static func withTimeout<T: Sendable>(
         _ duration: Duration, operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
@@ -489,7 +616,6 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
             }
             group.cancelAll()
             while await group.nextResult() != nil {}
-            try Task.checkCancellation()
             return try result.get()
         }
     }

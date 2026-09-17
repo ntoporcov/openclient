@@ -19,7 +19,7 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
         )
         let ready = ["OCPI", "1", "READY", operationID.uuidString.lowercased(), "openrouter",
                      "legacy-opencode-auth-v1", "0", server.publicKey.rawRepresentation.base64EncodedString(),
-                     data("a53f6dfc996b76299c0c32fb1f2e970c2c4f221f24cf087f833110d5b69bb10c").base64EncodedString()]
+                      data("1d1d3b0de89ca8cdbb49c603416507b2e9737c63ae7f4050fe4c10cad24e0a56").base64EncodedString()]
             .joined(separator: "|")
         XCTAssertEqual(try ProviderUsageCredentialImportProtocol.authenticateReady(
             ready, operationID: operationID, selection: selection,
@@ -28,13 +28,13 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
         let keys = try ProviderUsageCredentialImportProtocol.deriveKeys(
             privateKey: client, peerPublicKey: server.publicKey.rawRepresentation, psk: psk, transcript: transcript
         )
-        XCTAssertEqual(keys.clientToServer.withUnsafeBytes { Data($0).hex }, "199871da0a5bb495e565e203962d416b8d197fe272b7bd83d8e8811c365d01f6")
-        XCTAssertEqual(keys.serverToClient.withUnsafeBytes { Data($0).hex }, "fc78d54dde5cbfc68ffbd390ee10046b4e24238661082eeff852a1d09052d43d")
+        XCTAssertEqual(keys.clientToServer.withUnsafeBytes { Data($0).hex }, "68c5e53fdad51c9f38d21479b04f15f33b673391a6b301985c9635eee16379c2")
+        XCTAssertEqual(keys.serverToClient.withUnsafeBytes { Data($0).hex }, "a8950097492b0c3e0e38554a176796cae6129f8b3efc422e5f4deaaac1166a2f")
         let start = try ProviderUsageCredentialImportProtocol.startFrame(
             operationID: operationID, selection: selection, transcript: transcript,
             key: keys.clientToServer, nonce: data("606162636465666768696a6b")
         )
-        XCTAssertEqual(String(start.split(separator: "|").last ?? ""), "ilw7dpUxQsV2WlwHlePD7xVP")
+        XCTAssertEqual(String(start.split(separator: "|").last ?? ""), "EVM5XRW9In2OqXjELBVYMhJx")
         try ProviderUsageCredentialImportProtocol.openStart(
             start, operationID: operationID, selection: selection, transcript: transcript, key: keys.clientToServer
         )
@@ -50,7 +50,7 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
             start.replacingOccurrences(of: "|openrouter|", with: "|openai|"), operationID: operationID,
             selection: selection, transcript: transcript, key: keys.clientToServer
         ))
-        let result = "OCPI|1|RESULT|00112233-4455-6677-8899-aabbccddeeff|openrouter|legacy-opencode-auth-v1|1|cHFyc3R1dnd4eXp7|oDvtNeqWHn6Xf8PHnm9kDLaEdYWb/8ytYziMdYgsuukAfdbzODteoo2BdMzzQvRngkx70fA3WxU="
+        let result = "OCPI|1|RESULT|00112233-4455-6677-8899-aabbccddeeff|openrouter|legacy-opencode-auth-v1|1|cHFyc3R1dnd4eXp7|3GwpjM6WAEPJ3uYqbZ8w12YGSP/bzw+umRk8jGDc8KtkgW5o0F8Brti7LgZYQI2j8ctzeaEiLOk="
         let opened = try ProviderUsageCredentialImportProtocol.openResult(
             result, operationID: operationID, selection: selection, transcript: transcript, key: keys.serverToClient
         )
@@ -97,6 +97,75 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
         XCTAssertEqual(snapshot.deleted, ["pty_import"])
     }
 
+    func testRenewalActionIsAuthenticatedAndReturnsAccessOnly() async throws {
+        let current = context()
+        let setup = candidate(context: current, provider: .codex)
+        let readSelection = try ProviderUsageCredentialImportProtocol.Selection(candidate: setup)
+        let renewSelection = try ProviderUsageCredentialImportProtocol.Selection(
+            candidate: setup,
+            action: .renew,
+            expectedAccountID: "synthetic-account",
+            currentAccessToken: "current-access"
+        )
+        XCTAssertNotEqual(readSelection.source, renewSelection.source)
+        XCTAssertEqual(renewSelection.expectedAccountBinding.count, 64)
+        XCTAssertEqual(renewSelection.currentAccessBinding.count, 64)
+        XCTAssertFalse(renewSelection.expectedAccountBinding.contains("synthetic-account"))
+        XCTAssertFalse(renewSelection.currentAccessBinding.contains("current-access"))
+        let readTranscript = ProviderUsageCredentialImportProtocol.transcript(
+                operationID: UUID(uuidString: "10101010-1010-1010-1010-101010101010")!,
+                selection: readSelection,
+                clientPublicKey: Data(repeating: 1, count: 32),
+                serverPublicKey: Data(repeating: 2, count: 32)
+            )
+        let renewTranscript = ProviderUsageCredentialImportProtocol.transcript(
+                operationID: UUID(uuidString: "10101010-1010-1010-1010-101010101010")!,
+                selection: renewSelection,
+                clientPublicKey: Data(repeating: 1, count: 32),
+                serverPublicKey: Data(repeating: 2, count: 32)
+            )
+        XCTAssertNotEqual(readTranscript, renewTranscript)
+        XCTAssertTrue(renewTranscript.contains(renewSelection.expectedAccountBinding))
+        XCTAssertTrue(renewTranscript.contains(renewSelection.currentAccessBinding))
+        XCTAssertFalse(renewTranscript.contains("synthetic-account"))
+        XCTAssertFalse(renewTranscript.contains("current-access"))
+        let transport = SyntheticImportTransport(mode: .success)
+        let importer = deterministicImporter(transport: transport, box: ImportContextBox(current))
+
+        let renewal = try await importer.renewCredential(
+            for: setup,
+            expectedAccountID: "synthetic-account",
+            currentAccessToken: "current-access"
+        )
+
+        XCTAssertEqual(renewal.secret.value, "synthetic-access")
+        XCTAssertEqual(renewal.providerAccountID, "synthetic-account")
+        XCTAssertEqual(renewal.expiresAt, Date(timeIntervalSince1970: 123))
+        let snapshot = await transport.snapshot()
+        XCTAssertTrue(snapshot.authenticatedStart)
+        XCTAssertEqual(snapshot.deleted, ["pty_import"])
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("legacy-opencode-auth-renew-v1"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("fs.promises.rename(temp,file)"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("new URLSearchParams"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("const merged={...latest.root"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("currentEntry.access!==entry.access||currentEntry.refresh!==entry.refresh"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("verified.bytes.equals(latest.bytes)"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains(".auth.json.ocpi-renew.lock"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("return currentResult(currentEntry)"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("handle.chmod(0o600)"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("redirect:'error'"))
+        XCTAssertTrue(ProviderUsageCredentialImportHelper.source.contains("ACCOUNT_MISMATCH"))
+        XCTAssertFalse(ProviderUsageCredentialImportHelper.source.contains("refreshToken:"))
+        XCTAssertFalse(ProviderUsageCredentialImportHelper.source.contains("credential:entry.refresh"))
+        XCTAssertFalse(ProviderUsageCredentialImportHelper.source.contains("credential:tokens.refresh_token"))
+        let helper = ProviderUsageCredentialImportHelper.source
+        let modeBeforeRename = try XCTUnwrap(helper.range(of: "handle.chmod(0o600)"))
+        let compareBeforeRename = try XCTUnwrap(helper.range(of: "verified.bytes.equals(latest.bytes)"))
+        let rename = try XCTUnwrap(helper.range(of: "fs.promises.rename(temp,file)"))
+        XCTAssertLessThan(modeBeforeRename.lowerBound, rename.lowerBound)
+        XCTAssertLessThan(compareBeforeRename.lowerBound, rename.lowerBound)
+    }
+
     func testForgedReadyAndResultAndDuplicateFramesAreRejectedAndCleaned() async {
         for mode in [SyntheticImportTransport.Mode.forgedReady, .forgedResult, .duplicateResult, .extraResult, .truncatedResult] {
             let context = context()
@@ -131,17 +200,24 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
                                 candidate: candidate(context: current, provider: .openRouter), expected: .helperProviderInvalid)
     }
 
-    func testFixtureExtractionAllowlistLimitsAndNeverReturnsRefresh() throws {
+    func testFixtureExtractionNeverReturnsRefreshAndLeavesOpenRouterUnchanged() throws {
         let codex = try ProviderUsageCredentialImportProtocol.Selection(candidate: candidate(provider: .codex))
-        let source = Data(#"{"openai":{"type":"oauth","access":"synthetic-access","refresh":"must-not-transfer","expires":123000,"accountId":"acct"}}"#.utf8)
+        let source = Data(#"{"openai":{"type":"oauth","access":"synthetic-access","refresh":"synthetic-refresh","expires":123000,"accountId":"acct"}}"#.utf8)
         let result = try ProviderUsageCredentialImportFixtureExtractor.extract(source, selection: codex)
         XCTAssertEqual(result.credential, "synthetic-access")
         XCTAssertEqual(result.accountID, "acct")
-        XCTAssertFalse(String(data: try JSONEncoder().encode(result), encoding: .utf8)!.contains("must-not-transfer"))
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(result), as: UTF8.self).contains("synthetic-refresh"))
+        let accessOnly = try ProviderUsageCredentialImportFixtureExtractor.extract(
+            Data(#"{"openai":{"type":"oauth","access":"legacy-access"}}"#.utf8), selection: codex
+        )
+        XCTAssertEqual(accessOnly.credential, "legacy-access")
 
         let router = try ProviderUsageCredentialImportProtocol.Selection(candidate: candidate(provider: .openRouter))
         XCTAssertEqual(try ProviderUsageCredentialImportFixtureExtractor.extract(
             Data(#"{"openrouter":{"type":"api","key":"synthetic-key"},"other":{"key":"ignored"}}"#.utf8), selection: router
+        ).credential, "synthetic-key")
+        XCTAssertEqual(try ProviderUsageCredentialImportFixtureExtractor.extract(
+            Data(#"{"openrouter":{"type":"api","key":"synthetic-key","refresh":"ignored"}}"#.utf8), selection: router
         ).credential, "synthetic-key")
         XCTAssertThrowsError(try ProviderUsageCredentialImportFixtureExtractor.extract(Data("{}".utf8), selection: router)) {
             XCTAssertEqual($0 as? ProviderUsageCredentialImportError, .entryMissing)
@@ -180,6 +256,17 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
         XCTAssertEqual(httpSnapshot.created, 0)
         let optedIn = deterministicImporter(transport: http, box: box, allowsInsecureTransport: true)
         _ = try await optedIn.importCredential(for: candidate(context: original, provider: .openRouter))
+        do {
+            _ = try await deterministicImporter(transport: http, box: box)
+                .renewCredential(
+                    for: candidate(context: original, provider: .codex),
+                    expectedAccountID: "synthetic-account",
+                    currentAccessToken: "current-access"
+                )
+            XCTFail("Expected insecure renewal rejection")
+        } catch let error as ProviderUsageCredentialImportError {
+            XCTAssertEqual(error, .insecureTransport)
+        }
 
         var v2 = original
         v2 = .init(backend: v2.backend, connectionLifetimeID: v2.connectionLifetimeID, apiProfile: .v2, scope: v2.scope)
@@ -255,6 +342,59 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
             let snapshot = await transport.snapshot()
             XCTAssertEqual(snapshot.deleted, ["pty_import"])
         }
+    }
+
+    func testRenewalIgnoresCancellationAndContextInvalidationAfterStart() async throws {
+        let original = context()
+        let box = ImportContextBox(original)
+        let transport = SyntheticImportTransport(mode: .deferredRenewalResult)
+        let importer = deterministicImporter(transport: transport, box: box)
+        let setup = candidate(context: original, provider: .codex)
+        let task = Task {
+            try await importer.renewCredential(
+                for: setup,
+                expectedAccountID: "synthetic-account",
+                currentAccessToken: "current-access"
+            )
+        }
+
+        await transport.waitUntilStartSent()
+        await box.set(context(directory: "/tmp/other", lifetime: UUID()))
+        task.cancel()
+        await transport.releaseDeferredResult()
+
+        let renewal = try await task.value
+        XCTAssertEqual(renewal.secret.value, "synthetic-access")
+        XCTAssertEqual(renewal.providerAccountID, "synthetic-account")
+        let snapshot = await transport.snapshot()
+        XCTAssertTrue(snapshot.authenticatedStart)
+        XCTAssertEqual(snapshot.deleted, ["pty_import"])
+    }
+
+    func testRenewalRemainsCancellableBeforeStart() async {
+        let current = context()
+        let transport = SyntheticImportTransport(mode: .hang)
+        let importer = deterministicImporter(transport: transport, box: ImportContextBox(current))
+        let task = Task {
+            try await importer.renewCredential(
+                for: candidate(context: current, provider: .codex),
+                expectedAccountID: "synthetic-account",
+                currentAccessToken: "current-access"
+            )
+        }
+
+        await transport.waitUntilCreated()
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Cancellation before START must stop renewal")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        let snapshot = await transport.snapshot()
+        XCTAssertFalse(snapshot.authenticatedStart)
+        XCTAssertEqual(snapshot.deleted, ["pty_import"])
     }
 
     func testTimeoutDoesNotWaitForUnresponsiveCleanup() async {
@@ -374,7 +514,7 @@ private actor ImportContextBox {
 
 private actor SyntheticImportTransport: ProviderUsagePTYTransport {
     enum Mode: Sendable, Equatable {
-        case success, keepOpenAfterResult, fragmented, shellMarkerNoise, helperError
+        case success, keepOpenAfterResult, deferredRenewalResult, fragmented, shellMarkerNoise, helperError
         case forgedReady, forgedResult, duplicateResult, extraResult, truncatedResult
         case oversizedOutput, hang, createLate, createFailure, createHTTPFailure, connectFailure, deleteMissing, cleanupFailure, cleanupHang
         case switchContext(@Sendable () async -> Void)
@@ -405,6 +545,8 @@ private actor SyntheticImportTransport: ProviderUsagePTYTransport {
     private var transcript: String?
     private var keys: ProviderUsageCredentialImportProtocol.Keys?
     private var createWaiters: [CheckedContinuation<Void, Never>] = []
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var deferredResultContinuation: CheckedContinuation<Void, Never>?
 
     init(mode: Mode, serverURL: URL = URL(string: "https://example.com")!) {
         self.mode = mode
@@ -471,6 +613,11 @@ private actor SyntheticImportTransport: ProviderUsagePTYTransport {
         )
         authenticatedStart = true
         sourceRead = true
+        startWaiters.forEach { $0.resume() }
+        startWaiters.removeAll()
+        if mode == .deferredRenewalResult {
+            await withCheckedContinuation { deferredResultContinuation = $0 }
+        }
         let payload: ProviderUsageCredentialImportProtocol.ResultPayload = selection.provider == "openai"
             ? .init(ok: true, credential: "synthetic-access", accountID: "synthetic-account", expires: 123_000, error: nil)
             : .init(ok: true, credential: "synthetic-key", accountID: nil, expires: nil, error: nil)
@@ -511,6 +658,16 @@ private actor SyntheticImportTransport: ProviderUsagePTYTransport {
         await withCheckedContinuation { createWaiters.append($0) }
     }
 
+    func waitUntilStartSent() async {
+        if authenticatedStart { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func releaseDeferredResult() {
+        deferredResultContinuation?.resume()
+        deferredResultContinuation = nil
+    }
+
     private func prepareReady(forged: Bool) throws -> String {
         guard let env = request?.env,
               let operationID = UUID(uuidString: env["OCPI_OPERATION_ID"] ?? ""),
@@ -522,13 +679,20 @@ private actor SyntheticImportTransport: ProviderUsagePTYTransport {
         let provider = env["OCPI_PROVIDER"]!
         let source = env["OCPI_SOURCE"]!
         let credentialKind: ProviderUsageCredentialKind = provider == "openai" ? .oauthAccessToken : .apiKey
-        let selection = try ProviderUsageCredentialImportProtocol.Selection(candidate: .init(
+        let candidate = ProviderUsageSetupCandidate(
             id: UUID(), provider: provider == "openai" ? .codex : .openRouter,
             discoveryContext: .init(backend: .init(id: "server", name: "", version: ""), connectionLifetimeID: UUID(),
                                     apiProfile: .legacy, scope: .init()),
             sourceIdentity: .legacyProvider(providerID: provider), sourceKind: .openCodeAuth,
             credentialKind: credentialKind, replacingAccountID: nil
-        ))
+        )
+        let action: ProviderUsageCredentialImportProtocol.Selection.Action = source.contains("renew") ? .renew : .read
+        let selection = try ProviderUsageCredentialImportProtocol.Selection(
+            candidate: candidate,
+            action: action,
+            expectedAccountID: action == .renew ? "synthetic-account" : nil,
+            currentAccessToken: action == .renew ? "current-access" : nil
+        )
         let transcript = ProviderUsageCredentialImportProtocol.transcript(
             operationID: operationID, selection: selection, clientPublicKey: clientPublic,
             serverPublicKey: server.publicKey.rawRepresentation

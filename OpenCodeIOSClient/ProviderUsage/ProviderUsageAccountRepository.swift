@@ -81,6 +81,10 @@ enum ProviderUsageAccountRepositoryError: Error, Equatable, Sendable {
         metadata: ProviderUsageMetadataRepositoryError,
         credential: ProviderUsageCredentialRepositoryError
     )
+    case credentialCleanupFailed(
+        metadata: ProviderUsageMetadataRepositoryError,
+        credential: ProviderUsageCredentialRepositoryError
+    )
     case accountMissing
     case credentialRevisionMismatch
 }
@@ -94,7 +98,26 @@ protocol ProviderUsageAccountRepository: Sendable {
     func load() async throws -> [ProviderUsageAccount]
     func readCredential(accountID: UUID, credentialRevision: Int) async throws -> ProviderUsageTransientSecret
     func save(review: ProviderUsageCredentialReview) async throws -> ProviderUsageAccountSaveResult
+    func rotateCredential(
+        accountID: UUID,
+        credentialRevision: Int,
+        secret: ProviderUsageTransientSecret,
+        expiresAt: Date,
+        providerAccountID: String?
+    ) async throws -> ProviderUsageAccountSaveResult
     func remove(accountID: UUID) async throws
+}
+
+extension ProviderUsageAccountRepository {
+    func rotateCredential(
+        accountID: UUID,
+        credentialRevision: Int,
+        secret: ProviderUsageTransientSecret,
+        expiresAt: Date,
+        providerAccountID: String? = nil
+    ) async throws -> ProviderUsageAccountSaveResult {
+        throw ProviderUsageAccountRepositoryError.credential(.unavailable)
+    }
 }
 
 actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepository {
@@ -102,6 +125,8 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
     private let metadata: any ProviderUsageMetadataRepository
     private let now: @Sendable () -> Date
     private let makeUUID: @Sendable () -> UUID
+    private var accessInProgress = false
+    private var accessWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(
         credentials: any ProviderUsageCredentialRepository,
@@ -116,11 +141,15 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
     }
 
     func load() async throws -> [ProviderUsageAccount] {
+        await acquireAccess()
+        defer { releaseAccess() }
         do { return try await metadata.load() }
         catch let error as ProviderUsageMetadataRepositoryError { throw ProviderUsageAccountRepositoryError.metadata(error) }
     }
 
     func readCredential(accountID: UUID, credentialRevision: Int) async throws -> ProviderUsageTransientSecret {
+        await acquireAccess()
+        defer { releaseAccess() }
         let committedAccounts: [ProviderUsageAccount]
         do { committedAccounts = try await metadata.load() }
         catch let error as ProviderUsageMetadataRepositoryError {
@@ -138,6 +167,8 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
     }
 
     func save(review: ProviderUsageCredentialReview) async throws -> ProviderUsageAccountSaveResult {
+        await acquireAccess()
+        defer { releaseAccess() }
         let previousAccounts: [ProviderUsageAccount]
         do { previousAccounts = try await metadata.load() }
         catch let error as ProviderUsageMetadataRepositoryError { throw ProviderUsageAccountRepositoryError.metadata(error) }
@@ -151,17 +182,30 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
 
         let date = now()
         let credentialReference = makeUUID()
+        let approvesSourceRenewal: Bool
+        if review.candidate.provider == .codex,
+           review.candidate.apiProfile == .legacy,
+           review.candidate.sourceKind == .openCodeAuth,
+           review.candidate.credentialKind == .oauthAccessToken,
+           case .legacyProvider(providerID: "openai") = review.candidate.sourceIdentity,
+           !(review.providerAccountID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+            approvesSourceRenewal = true
+        } else {
+            approvesSourceRenewal = false
+        }
         let account = ProviderUsageAccount(
             id: previous?.id ?? makeUUID(),
             provider: review.candidate.provider,
             sourceConnectionID: review.candidate.sourceConnectionID,
             apiProfile: review.candidate.apiProfile,
             sourceKind: review.candidate.sourceKind,
+            sourceScope: ProviderUsageSourceScope(review.candidate.discoveryContext.scope),
             credentialKind: review.candidate.credentialKind,
             providerAccountID: review.providerAccountID,
             credentialReference: credentialReference,
             credentialRevision: (previous?.credentialRevision ?? 0) + 1,
             credentialExpiresAt: review.credentialExpiresAt,
+            sourceRenewalApprovedAt: approvesSourceRenewal ? date : nil,
             createdAt: previous?.createdAt ?? date,
             updatedAt: date
         )
@@ -176,16 +220,18 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
         do {
             try await metadata.save(updated)
         } catch let error as ProviderUsageMetadataRepositoryError {
-            // A failed cleanup can leave only an item in this feature's private namespace.
-            // TODO: reconcile service-owned references against committed metadata after startup.
-            try? credentials.delete(reference: credentialReference)
+            if let credentialError = cleanupCredential(reference: credentialReference) {
+                throw ProviderUsageAccountRepositoryError.credentialCleanupFailed(
+                    metadata: error,
+                    credential: credentialError
+                )
+            }
             throw ProviderUsageAccountRepositoryError.metadata(error)
         }
 
         var cleanupPending = false
         if let previous {
-            do { try credentials.delete(reference: previous.credentialReference) }
-            catch { cleanupPending = true }
+            cleanupPending = cleanupCredential(reference: previous.credentialReference) != nil
         }
         return ProviderUsageAccountSaveResult(
             account: account,
@@ -193,7 +239,64 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
         )
     }
 
+    func rotateCredential(
+        accountID: UUID,
+        credentialRevision: Int,
+        secret: ProviderUsageTransientSecret,
+        expiresAt: Date,
+        providerAccountID: String? = nil
+    ) async throws -> ProviderUsageAccountSaveResult {
+        await acquireAccess()
+        defer { releaseAccess() }
+        let committed: [ProviderUsageAccount]
+        do { committed = try await metadata.load() }
+        catch let error as ProviderUsageMetadataRepositoryError { throw ProviderUsageAccountRepositoryError.metadata(error) }
+        guard let previous = committed.first(where: { $0.id == accountID }) else {
+            throw ProviderUsageAccountRepositoryError.accountMissing
+        }
+        guard previous.credentialRevision == credentialRevision else {
+            throw ProviderUsageAccountRepositoryError.credentialRevisionMismatch
+        }
+
+        let reference = makeUUID()
+        let replacement = ProviderUsageAccount(
+            id: previous.id,
+            provider: previous.provider,
+            sourceConnectionID: previous.sourceConnectionID,
+            apiProfile: previous.apiProfile,
+            sourceKind: previous.sourceKind,
+            sourceScope: previous.sourceScope,
+            credentialKind: previous.credentialKind,
+            providerAccountID: previous.providerAccountID,
+            credentialReference: reference,
+            credentialRevision: previous.credentialRevision + 1,
+            credentialExpiresAt: expiresAt,
+            sourceRenewalApprovedAt: previous.sourceRenewalApprovedAt,
+            createdAt: previous.createdAt,
+            updatedAt: now()
+        )
+        do { try credentials.write(secret, reference: reference) }
+        catch let error as ProviderUsageCredentialRepositoryError { throw ProviderUsageAccountRepositoryError.credential(error) }
+        var updated = committed.filter { $0.id != accountID }
+        updated.append(replacement)
+        do { try await metadata.save(updated) }
+        catch let error as ProviderUsageMetadataRepositoryError {
+            if let credentialError = cleanupCredential(reference: reference) {
+                throw ProviderUsageAccountRepositoryError.credentialCleanupFailed(
+                    metadata: error,
+                    credential: credentialError
+                )
+            }
+            throw ProviderUsageAccountRepositoryError.metadata(error)
+        }
+        var cleanupPending = false
+        cleanupPending = cleanupCredential(reference: previous.credentialReference) != nil
+        return .init(account: replacement, supersededCredentialCleanupPending: cleanupPending)
+    }
+
     func remove(accountID: UUID) async throws {
+        await acquireAccess()
+        defer { releaseAccess() }
         let accounts: [ProviderUsageAccount]
         do { accounts = try await metadata.load() }
         catch let error as ProviderUsageMetadataRepositoryError { throw ProviderUsageAccountRepositoryError.metadata(error) }
@@ -224,5 +327,36 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
             }
             throw ProviderUsageAccountRepositoryError.metadata(error)
         }
+    }
+
+    private func acquireAccess() async {
+        guard accessInProgress else {
+            accessInProgress = true
+            return
+        }
+        await withCheckedContinuation { accessWaiters.append($0) }
+    }
+
+    private func cleanupCredential(reference: UUID) -> ProviderUsageCredentialRepositoryError? {
+        var lastError: ProviderUsageCredentialRepositoryError?
+        for _ in 0..<2 {
+            do {
+                try credentials.delete(reference: reference)
+                return nil
+            } catch let error as ProviderUsageCredentialRepositoryError {
+                lastError = error
+            } catch {
+                lastError = .deleteFailed
+            }
+        }
+        return lastError ?? .deleteFailed
+    }
+
+    private func releaseAccess() {
+        guard !accessWaiters.isEmpty else {
+            accessInProgress = false
+            return
+        }
+        accessWaiters.removeFirst().resume()
     }
 }
