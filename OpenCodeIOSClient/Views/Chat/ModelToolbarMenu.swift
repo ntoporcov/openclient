@@ -4,6 +4,8 @@ struct ChatToolbarWidthBudget {
     let header: CGFloat
     let model: CGFloat
     let spacing: CGFloat
+    let assistantHeader: CGFloat
+    let assistantHeaderWithTrailingItem: CGFloat
 
     init(containerWidth: CGFloat) {
         // The leading pill includes the fixed context target; the trailing pill is model-only.
@@ -11,6 +13,12 @@ struct ChatToolbarWidthBudget {
         spacing = containerWidth < 360 ? 0 : 4
         model = (pillSpace * 0.48).rounded() - 10
         header = pillSpace - model
+
+        // The phone Assistant group is trailing-anchored, leaving Back, the native
+        // inter-item gap, and the native 20-point trailing margin outside this width.
+        assistantHeader = max(92, containerWidth - 104)
+        // A separate trailing control needs its 44-point target plus native item spacing.
+        assistantHeaderWithTrailingItem = max(92, assistantHeader - 56)
     }
 }
 
@@ -23,15 +31,18 @@ struct ModelToolbarMenu: View {
     let reasoningTitle: String
     let glassNamespace: Namespace.ID
     let onSelectModel: (OpenCodeModelReference) -> Void
-    let onSelectReasoningVariant: (String) -> Void
+    let onSelectReasoningVariant: ((String) -> Void)?
     var maximumWidth: CGFloat? = nil
+    var contentAlignment: HorizontalAlignment = .trailing
+    var accessibilityIdentifier = "chat.toolbar.model"
+    var providerAccessibilityIdentifier = "chat.toolbar.providerLogo"
 
     var body: some View {
         StablePickerMenu(
             elements: menuElements,
             accessibilityLabel: String(localized: "Model"),
             accessibilityValue: accessibilityValue,
-            accessibilityIdentifier: "chat.toolbar.model",
+            accessibilityIdentifier: accessibilityIdentifier,
             onSelect: select
         ) {
             HStack(spacing: maximumWidth == nil ? 4 : 0) {
@@ -43,15 +54,15 @@ struct ModelToolbarMenu: View {
                         .foregroundStyle(.primary.opacity(0.72))
                 }
                 if let reasoningSubtitle {
-                    VStack(alignment: .trailing, spacing: 0) {
+                    VStack(alignment: contentAlignment, spacing: 0) {
                         Text(modelTitle)
                             .font(.caption)
                             .truncationMode(.head)
-                            .accessibilityIdentifier("chat.toolbar.model.title")
+                            .accessibilityIdentifier("\(accessibilityIdentifier).title")
                         Text(reasoningSubtitle)
                             .font(.caption2)
                             .foregroundStyle(.primary.opacity(0.72))
-                            .accessibilityIdentifier("chat.toolbar.model.reasoning")
+                            .accessibilityIdentifier("\(accessibilityIdentifier).reasoning")
                     }
                 } else {
                     Text(modelTitle)
@@ -63,18 +74,23 @@ struct ModelToolbarMenu: View {
                         .foregroundStyle(.primary.opacity(0.72))
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(Text(verbatim: providerName ?? providerID))
-                        .accessibilityIdentifier("chat.toolbar.providerLogo")
+                        .accessibilityIdentifier(providerAccessibilityIdentifier)
                         .accessibilityHidden(false)
                         .padding(.leading, 4)
                         .fixedSize()
                         .layoutPriority(1)
                 }
             }
-            .lineLimit(maximumWidth == nil ? nil : 1)
+            .lineLimit(contentAlignment == .leading || maximumWidth != nil ? 1 : nil)
             .truncationMode(.tail)
             .padding(.trailing, maximumWidth == nil ? 12 : 6)
-            .frame(minWidth: maximumWidth == nil ? (modelReference == nil ? 72 : 108) : 44,
-                idealWidth: maximumWidth, maxWidth: maximumWidth, minHeight: maximumWidth == nil ? nil : 44, alignment: .leading)
+            .frame(
+                minWidth: contentAlignment == .leading ? 44 : maximumWidth == nil ? (modelReference == nil ? 72 : 108) : 44,
+                idealWidth: maximumWidth,
+                maxWidth: contentAlignment == .leading && maximumWidth == nil ? .infinity : maximumWidth,
+                minHeight: contentAlignment == .leading || maximumWidth != nil ? 44 : nil,
+                alignment: .leading
+            )
             .opencodeToolbarGlassID("model-toolbar", in: glassNamespace)
         }
         .help(Text(verbatim: providerName ?? modelTitle))
@@ -84,7 +100,7 @@ struct ModelToolbarMenu: View {
     }
 
     private var reasoningSubtitle: String? {
-        guard !reasoningVariants.isEmpty else { return nil }
+        guard onSelectReasoningVariant != nil, !reasoningVariants.isEmpty else { return nil }
         return reasoningTitle
     }
 
@@ -112,7 +128,7 @@ struct ModelToolbarMenu: View {
             }
         )]
 
-        if !reasoningVariants.isEmpty {
+        if onSelectReasoningVariant != nil, !reasoningVariants.isEmpty {
             elements.append(.submenu(
                 id: "reasoning",
                 title: String(localized: "Reasoning"),
@@ -130,7 +146,7 @@ struct ModelToolbarMenu: View {
     }
 
     private func select(_ actionID: String) {
-        if actionID.hasPrefix("reasoning:") {
+        if actionID.hasPrefix("reasoning:"), let onSelectReasoningVariant {
             let variantID = String(actionID.dropFirst("reasoning:".count))
             onSelectReasoningVariant(variantID)
             return

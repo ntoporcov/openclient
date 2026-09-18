@@ -76,6 +76,8 @@ struct ChatHeaderFixture: View {
         model.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)
         model.localCacheRepository = NoOpOpenCodeLocalCacheRepository()
         model.commerceFacade.debugEntitlementOverride = .unlocked
+        let usesAssistantComposer = ProcessInfo.processInfo.environment["OPENCLIENT_HEADER_ASSISTANT"] == "1"
+        model.appCustomizationStore.setComposerStyleForFixture(usesAssistantComposer ? .assistant : .messenger)
         model.directoryStoreRegistry.activate("/header")
         let shortTitle = ProcessInfo.processInfo.environment["OPENCLIENT_HEADER_SHORT_TITLE"] == "1"
         let session = OpenCodeSession(id: "header-b", title: shortTitle ? "V2 work" : "A long chat title about building a thoughtful native client without losing the full session name",

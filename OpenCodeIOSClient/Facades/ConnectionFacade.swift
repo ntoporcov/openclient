@@ -90,6 +90,7 @@ final class ConnectionFacade: ObservableObject {
     var showsChatActivityShimmer: Bool { viewModel.appCustomizationStore.showsChatActivityShimmer }
     var showsToolCalls: Bool { viewModel.appCustomizationStore.showsToolCalls }
     var showsReasoningBlocks: Bool { viewModel.appCustomizationStore.showsReasoningBlocks }
+    var composerStyle: ComposerStyle { viewModel.appCustomizationStore.composerStyle }
     var showsFunAndGamesSection: Bool { viewModel.funAndGamesPreferences.showsSection }
     var autoConnectServerID: String? { viewModel.appCustomizationStore.autoConnectServerID }
     var autoConnectLandingDestination: AutoConnectLandingDestination {
@@ -174,6 +175,10 @@ final class ConnectionFacade: ObservableObject {
 
     func setShowsReasoningBlocks(_ shows: Bool) {
         viewModel.appCustomizationStore.setShowsReasoningBlocks(shows)
+    }
+
+    func setComposerStyle(_ style: ComposerStyle) {
+        viewModel.appCustomizationStore.setComposerStyle(style)
     }
 
     func setShowsFunAndGamesSection(_ shows: Bool) {

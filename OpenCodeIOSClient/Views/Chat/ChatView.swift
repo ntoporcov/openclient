@@ -1633,6 +1633,7 @@ private struct MessageComposerSnapshot: Equatable {
     let conversationState: ConversationModeController.State
     let conversationInputLevel: CGFloat
     let blocksNewInput: Bool
+    let prefersAssistantLayout: Bool
     let toolbarSnapshot: ChatFacade.ToolbarSnapshot
 }
 
@@ -2174,7 +2175,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
             onShowContextMetrics: onShowContextMetrics,
             conversationState: conversationState,
             conversationInputLevel: conversationInputLevel,
-            onToggleConversation: onToggleConversation
+            onToggleConversation: onToggleConversation,
+            prefersAssistantLayout: snapshot.prefersAssistantLayout
         )
     }
 }
@@ -2185,6 +2187,7 @@ struct ChatView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 #endif
 
     @ObservedObject private var connectionStore: ConnectionStore
@@ -2499,14 +2502,24 @@ struct ChatView: View {
 #endif
     }
 
-    private var usesCatalystComposerLayout: Bool {
+    private var usesAssistantComposerLayout: Bool {
 #if targetEnvironment(macCatalyst)
         true
 #elseif os(iOS)
-        UIDevice.current.userInterfaceIdiom == .pad
+        UIDevice.current.userInterfaceIdiom == .pad || appCustomizationStore.composerStyle == .assistant
 #else
         false
 #endif
+    }
+
+    private var supportsSessionSwitcherKeyboardBridge: Bool {
+        #if targetEnvironment(macCatalyst)
+        true
+        #elseif os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        false
+        #endif
     }
 
     var body: some View {
@@ -2688,7 +2701,7 @@ struct ChatView: View {
         )
         .background {
             #if canImport(UIKit)
-            if usesCatalystComposerLayout, onDismissChildSession == nil {
+            if supportsSessionSwitcherKeyboardBridge, onDismissChildSession == nil {
                 SessionSwitcherKeyboardBridge(onAdvance: { isActive in
                     advanceRecentlyOpenedSessionSwitcher(isActive: isActive)
                 }, onCancel: {
@@ -3383,6 +3396,7 @@ struct ChatView: View {
             conversationState: conversationController.state,
             conversationInputLevel: conversationController.inputLevel,
             blocksNewInput: chatFacade.hasGlobalForms(sessionID: sessionID) || funAndGamesStore.hasPendingSetup(for: sessionID),
+            prefersAssistantLayout: appCustomizationStore.composerStyle == .assistant,
             toolbarSnapshot: toolbarSnapshot
         )
 
@@ -3574,7 +3588,7 @@ struct ChatView: View {
         #if targetEnvironment(macCatalyst)
         8
         #else
-        usesCatalystComposerLayout || isComposerInputFocused ? 8 : 0
+        isComposerInputFocused ? 8 : 0
         #endif
     }
 
@@ -5052,10 +5066,21 @@ struct ChatView: View {
 
         #if os(iOS) && !targetEnvironment(macCatalyst)
         let headerBudget = ChatToolbarWidthBudget(containerWidth: chatViewportWidth)
-        let headerWidth = usesCatalystComposerLayout
-            ? min(220, max(92, chatViewportWidth - 208))
-            : headerBudget.header
-        ToolbarItem(placement: .topBarLeading) {
+        let isPhoneLandscape = UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact
+        let assistantHeaderWidth = !chatFacade.isReadOnly && toolbarSnapshot.isLoading
+            ? headerBudget.assistantHeaderWithTrailingItem
+            : headerBudget.assistantHeader
+        let headerWidth: CGFloat = if usesAssistantComposerLayout, UIDevice.current.userInterfaceIdiom == .phone {
+            isPhoneLandscape
+                ? min(360, assistantHeaderWidth)
+                : assistantHeaderWidth
+        } else if usesAssistantComposerLayout {
+            min(220, max(92, chatViewportWidth - 208))
+        } else {
+            headerBudget.header
+        }
+        ToolbarItem(placement: usesAssistantComposerLayout && UIDevice.current.userInterfaceIdiom == .phone && !isPhoneLandscape
+            ? .topBarTrailing : .topBarLeading) {
             HStack(spacing: headerBudget.spacing) {
                 ChatHeaderMenu(facade: chatFacade, session: liveSession,
                     containerWidth: chatViewportWidth, containerHeight: chatViewportHeight,
@@ -5096,7 +5121,7 @@ struct ChatView: View {
             }
         } else if !chatFacade.isReadOnly {
             #if !targetEnvironment(macCatalyst)
-            if !usesCatalystComposerLayout {
+            if !usesAssistantComposerLayout {
                 #if os(macOS)
                 if toolbarSnapshot.showsAgentMenu {
                     ToolbarItem(placement: .opencodeTrailing) {

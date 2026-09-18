@@ -22,6 +22,20 @@ final class ChatFacadeTests: XCTestCase {
         XCTAssertLessThan(ChatToolbarWidthBudget(containerWidth: 320).model, ChatToolbarWidthBudget(containerWidth: 440).model)
     }
 
+    func testAssistantToolbarUsesSinglePillNativeBarAllowance() {
+        for width: CGFloat in [320, 375, 390, 440, 844] {
+            let budget = ChatToolbarWidthBudget(containerWidth: width)
+            XCTAssertEqual(budget.assistantHeader, max(92, width - 104))
+            XCTAssertEqual(budget.assistantHeaderWithTrailingItem, max(92, width - 160))
+            XCTAssertGreaterThanOrEqual(budget.assistantHeader - 44 - budget.spacing, 44)
+        }
+
+        XCTAssertEqual(ChatToolbarWidthBudget(containerWidth: 320).assistantHeader, 216)
+        XCTAssertEqual(ChatToolbarWidthBudget(containerWidth: 390).assistantHeader, 286)
+        XCTAssertEqual(ChatToolbarWidthBudget(containerWidth: 440).assistantHeader, 336)
+        XCTAssertEqual(ChatToolbarWidthBudget(containerWidth: 844).assistantHeader, 740)
+    }
+
     func testProviderLogoUsesExactBundledProviderIDWithSyntheticFallback() {
         for id in ["openai", "openrouter", "amazon-bedrock", "azure", "github-copilot"] {
             XCTAssertEqual(ProviderIcon.assetName(for: id), "ProviderIcon_\(id)")

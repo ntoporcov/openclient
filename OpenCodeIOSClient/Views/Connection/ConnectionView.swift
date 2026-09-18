@@ -288,6 +288,16 @@ struct RootConfigurationsView: View {
                 }
                 .accessibilityIdentifier("configurations.app-icon")
 
+                Picker("Composer Style", selection: Binding(
+                    get: { facade.composerStyle },
+                    set: { facade.setComposerStyle($0) }
+                )) {
+                    ForEach(ComposerStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .accessibilityIdentifier("configurations.composer-style")
+
                 Toggle("Show Chat Activity Shimmer", isOn: Binding(
                     get: { facade.showsChatActivityShimmer },
                     set: { facade.setShowsChatActivityShimmer($0) }

@@ -3,6 +3,11 @@ import XCTest
 
 @MainActor
 final class AppCustomizationStoreTests: XCTestCase {
+    func testComposerStylesUseLocalizedLabels() {
+        XCTAssertEqual(ComposerStyle.allCases, [.messenger, .assistant])
+        XCTAssertEqual(ComposerStyle.allCases.map { String(localized: $0.title) }, ["Messenger", "Assistant"])
+    }
+
     func testSessionCardStylesUseRequestedOrderAndLabels() {
         XCTAssertEqual(SessionCardStyle.allCases, [.compact, .simple, .activity])
         XCTAssertEqual(SessionCardStyle.allCases.map(\.title), ["Compact", "Default", "Activity"])
@@ -20,6 +25,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         XCTAssertTrue(store.showsActivityLastUserMessage)
         XCTAssertFalse(store.isTodoStripMinimized)
         XCTAssertEqual(store.sessionCardStyle, .simple)
+        XCTAssertEqual(store.composerStyle, .messenger)
         XCTAssertNil(store.autoConnectServerID)
         XCTAssertEqual(store.autoConnectLandingDestination, .projects)
 
@@ -29,6 +35,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         store.setShowsActivityLastUserMessage(false)
         store.setTodoStripMinimized(true)
         store.setSessionCardStyle(.activity)
+        store.setComposerStyle(.assistant)
         store.setAutoConnectServerID("server-one")
         store.setAutoConnectLandingDestination(.activity)
 
@@ -39,6 +46,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         XCTAssertFalse(restored.showsActivityLastUserMessage)
         XCTAssertTrue(restored.isTodoStripMinimized)
         XCTAssertEqual(restored.sessionCardStyle, .activity)
+        XCTAssertEqual(restored.composerStyle, .assistant)
         XCTAssertEqual(restored.autoConnectServerID, "server-one")
         XCTAssertEqual(restored.autoConnectLandingDestination, .activity)
     }
@@ -63,6 +71,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         XCTAssertTrue(store.showsActivityLastUserMessage)
         XCTAssertFalse(store.isTodoStripMinimized)
         XCTAssertEqual(store.sessionCardStyle, .simple)
+        XCTAssertEqual(store.composerStyle, .messenger)
         XCTAssertEqual(store.autoConnectServerID, "server-one")
         XCTAssertEqual(store.autoConnectLandingDestination, .projects)
     }
@@ -75,6 +84,7 @@ final class AppCustomizationStoreTests: XCTestCase {
             try JSONSerialization.data(withJSONObject: [
                 "showsChatActivityShimmer": false,
                 "sessionCardStyle": "future-style",
+                "composerStyle": "future-style",
                 "autoConnectServerID": "server-one",
                 "autoConnectLandingDestination": "future-destination",
             ]),
@@ -85,6 +95,7 @@ final class AppCustomizationStoreTests: XCTestCase {
 
         XCTAssertFalse(store.showsChatActivityShimmer)
         XCTAssertEqual(store.sessionCardStyle, .simple)
+        XCTAssertEqual(store.composerStyle, .messenger)
         XCTAssertEqual(store.autoConnectServerID, "server-one")
         XCTAssertEqual(store.autoConnectLandingDestination, .projects)
     }

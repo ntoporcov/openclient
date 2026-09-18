@@ -181,6 +181,7 @@ struct MessageComposer: View {
     var conversationState: ConversationModeController.State = .inactive
     var conversationInputLevel: CGFloat = 0
     var onToggleConversation: (() -> Void)?
+    var prefersAssistantLayout = false
 
 #if canImport(PhotosUI) && canImport(UIKit)
     private enum AttachmentImportLimits {
@@ -339,7 +340,17 @@ struct MessageComposer: View {
         44
     }
 
-    private var usesCatalystComposerLayout: Bool {
+    private var usesAssistantComposerLayout: Bool {
+        #if targetEnvironment(macCatalyst)
+        true
+        #elseif os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad || prefersAssistantLayout
+        #else
+        false
+        #endif
+    }
+
+    private var usesWideAccessoryPopover: Bool {
         #if targetEnvironment(macCatalyst)
         true
         #elseif os(iOS)
@@ -703,7 +714,7 @@ struct MessageComposer: View {
 
     private var iosComposer: some View {
         Group {
-            if usesCatalystComposerLayout {
+            if usesAssistantComposerLayout {
                 catalystComposer
             } else {
                 mobileComposer
@@ -771,7 +782,9 @@ struct MessageComposer: View {
                 .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .onTapGesture {}
         }
+        #if targetEnvironment(macCatalyst)
         .padding(.bottom, 10)
+        #endif
     }
 
     private var catalystComposerControlBar: some View {
@@ -783,6 +796,7 @@ struct MessageComposer: View {
 
             Spacer()
 
+#if targetEnvironment(macCatalyst)
             if let onShowContextMetrics {
                 SessionContextUsageToolbarButton(
                     context: contextSnapshot,
@@ -790,6 +804,7 @@ struct MessageComposer: View {
                     action: onShowContextMetrics
                 )
             }
+#endif
 
             if showsStopStreamButton {
                 catalystStopStreamButton
@@ -808,7 +823,9 @@ struct MessageComposer: View {
         .frame(height: catalystControlHitTargetSize)
     }
 
+    @ViewBuilder
     private var catalystSelectorMenuRow: some View {
+#if targetEnvironment(macCatalyst)
         HStack(spacing: 4) {
             if !agentTitle.isEmpty, let onSelectAgent {
                 StablePickerMenu(
@@ -834,7 +851,6 @@ struct MessageComposer: View {
                     transaction.animation = nil
                 }
             }
-
             if !modelTitle.isEmpty, onSelectModel != nil {
                 StablePickerMenu(
                     elements: modelMenuElements,
@@ -879,6 +895,26 @@ struct MessageComposer: View {
                 }
             }
         }
+#else
+        if !modelTitle.isEmpty, let onSelectModel {
+            ModelToolbarMenu(
+                modelTitle: modelTitle,
+                modelReference: modelReference,
+                providerName: modelProviderName,
+                providerGroups: providerGroups,
+                reasoningVariants: reasoningVariants,
+                reasoningTitle: reasoningTitle,
+                glassNamespace: accessoryGlassNamespace,
+                onSelectModel: onSelectModel,
+                onSelectReasoningVariant: onSelectReasoningVariant.map { onSelect in
+                    { variantID in onSelect(variantID) }
+                },
+                contentAlignment: .leading,
+                accessibilityIdentifier: "chat.composer.model",
+                providerAccessibilityIdentifier: "chat.composer.model.providerLogo"
+            )
+        }
+#endif
     }
 
     private var catalystAccessoryButton: some View {
@@ -1177,7 +1213,7 @@ struct MessageComposer: View {
             onSubmit: onSend,
             onFocusChange: onFocusChange
         )
-        .frame(minHeight: usesCatalystComposerLayout ? ComposerTextViewMetrics.compactMinimumHeight : ComposerTextViewMetrics.minimumHeight)
+        .frame(minHeight: usesAssistantComposerLayout ? ComposerTextViewMetrics.compactMinimumHeight : ComposerTextViewMetrics.minimumHeight)
         .disabled(isConversationModeActive || blocksNewInput)
         .accessibilityIdentifier("chat.input")
         #else
@@ -1692,7 +1728,7 @@ struct MessageComposer: View {
                     }
                 }
         }
-        .frame(width: usesCatalystComposerLayout ? 400 : 350, height: accessoryPopoverHeight)
+        .frame(width: usesWideAccessoryPopover ? 400 : 350, height: accessoryPopoverHeight)
         .presentationCompactAdaptation(.popover)
         .composerAccessoryTransitionDestination(in: accessoryPresentationNamespace)
     }

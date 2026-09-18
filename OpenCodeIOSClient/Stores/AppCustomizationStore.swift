@@ -31,6 +31,19 @@ enum AutoConnectLandingDestination: String, Codable, CaseIterable, Identifiable 
     }
 }
 
+enum ComposerStyle: String, Codable, CaseIterable, Identifiable {
+    case messenger
+    case assistant
+
+    var id: Self { self }
+    var title: LocalizedStringResource {
+        switch self {
+        case .messenger: "Messenger"
+        case .assistant: "Assistant"
+        }
+    }
+}
+
 struct AppCustomizationPreferences: Codable, Equatable {
     var showsChatActivityShimmer: Bool
     var showsToolCalls: Bool
@@ -38,6 +51,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
     var showsActivityLastUserMessage: Bool
     var isTodoStripMinimized: Bool
     var sessionCardStyle: SessionCardStyle
+    var composerStyle: ComposerStyle
     var autoConnectServerID: String?
     var autoConnectLandingDestination: AutoConnectLandingDestination
 
@@ -48,6 +62,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         showsActivityLastUserMessage: Bool = true,
         isTodoStripMinimized: Bool = false,
         sessionCardStyle: SessionCardStyle = .simple,
+        composerStyle: ComposerStyle = .messenger,
         autoConnectServerID: String? = nil,
         autoConnectLandingDestination: AutoConnectLandingDestination = .projects
     ) {
@@ -57,6 +72,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         self.showsActivityLastUserMessage = showsActivityLastUserMessage
         self.isTodoStripMinimized = isTodoStripMinimized
         self.sessionCardStyle = sessionCardStyle
+        self.composerStyle = composerStyle
         self.autoConnectServerID = autoConnectServerID
         self.autoConnectLandingDestination = autoConnectLandingDestination
     }
@@ -68,6 +84,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         case showsActivityLastUserMessage
         case isTodoStripMinimized
         case sessionCardStyle
+        case composerStyle
         case autoConnectServerID
         case autoConnectLandingDestination
     }
@@ -81,6 +98,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
         isTodoStripMinimized = try container.decodeIfPresent(Bool.self, forKey: .isTodoStripMinimized) ?? false
         sessionCardStyle = try container.decodeIfPresent(String.self, forKey: .sessionCardStyle)
             .flatMap(SessionCardStyle.init(rawValue:)) ?? .simple
+        composerStyle = try container.decodeIfPresent(String.self, forKey: .composerStyle)
+            .flatMap(ComposerStyle.init(rawValue:)) ?? .messenger
         autoConnectServerID = try container.decodeIfPresent(String.self, forKey: .autoConnectServerID)
         autoConnectLandingDestination = try container.decodeIfPresent(String.self, forKey: .autoConnectLandingDestination)
             .flatMap(AutoConnectLandingDestination.init(rawValue:)) ?? .projects
@@ -140,6 +159,10 @@ final class AppCustomizationStore: ObservableObject {
         preferences.sessionCardStyle
     }
 
+    var composerStyle: ComposerStyle {
+        preferences.composerStyle
+    }
+
     func setShowsChatActivityShimmer(_ shows: Bool) {
         guard preferences.showsChatActivityShimmer != shows else { return }
         preferences.showsChatActivityShimmer = shows
@@ -175,6 +198,18 @@ final class AppCustomizationStore: ObservableObject {
         preferences.sessionCardStyle = style
         persist()
     }
+
+    func setComposerStyle(_ style: ComposerStyle) {
+        guard preferences.composerStyle != style else { return }
+        preferences.composerStyle = style
+        persist()
+    }
+
+#if DEBUG
+    func setComposerStyleForFixture(_ style: ComposerStyle) {
+        preferences.composerStyle = style
+    }
+#endif
 
     func setAutoConnectServerID(_ serverID: String?) {
         guard preferences.autoConnectServerID != serverID else { return }

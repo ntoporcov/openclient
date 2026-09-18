@@ -472,6 +472,7 @@ extension AppViewModel {
             draftAttachments: [],
             toolMessageDetails: OpenClientScreenshotData.toolMessageDetails
         )
+        viewModel.appCustomizationStore.setComposerStyleForFixture(.messenger)
         viewModel.config = OpenClientScreenshotData.secureConfig
         viewModel.backendMode = .server
         viewModel.errorMessage = nil

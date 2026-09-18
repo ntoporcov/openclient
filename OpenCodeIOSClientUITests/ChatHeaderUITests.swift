@@ -28,31 +28,30 @@ final class ChatHeaderUITests: XCTestCase {
     }
 
     private func assertEssentialControls(_ app: XCUIApplication, modelTitle: String, reasoning: String) {
-        let isPhone = !app.buttons["chat.composer.model"].exists
-        let model = app.buttons[isPhone ? "chat.toolbar.model" : "chat.composer.model"]
+        let usesToolbarModel = app.buttons["chat.toolbar.model"].exists
+        let modelIdentifier = usesToolbarModel ? "chat.toolbar.model" : "chat.composer.model"
+        let model = app.buttons[modelIdentifier]
         XCTAssertTrue(model.exists)
         XCTAssertTrue(model.isHittable)
         XCTAssertTrue((model.value as? String ?? "").contains(modelTitle))
-        if isPhone {
-            XCTAssertTrue((model.value as? String ?? "").contains(reasoning))
+        XCTAssertTrue((model.value as? String ?? "").contains(reasoning))
+        let title = app.staticTexts["\(modelIdentifier).title"]
+        let variant = app.staticTexts["\(modelIdentifier).reasoning"]
+        XCTAssertTrue(title.exists)
+        XCTAssertTrue(variant.exists)
+        XCTAssertLessThanOrEqual(title.frame.maxX, model.frame.maxX)
+        XCTAssertLessThanOrEqual(variant.frame.maxX, model.frame.maxX)
+        if usesToolbarModel {
             XCTAssertLessThanOrEqual(model.frame.width, 192)
             XCTAssertGreaterThanOrEqual(model.frame.height, 44)
-            let title = app.staticTexts["chat.toolbar.model.title"]
-            let variant = app.staticTexts["chat.toolbar.model.reasoning"]
-            XCTAssertTrue(title.exists)
-            XCTAssertTrue(variant.exists)
-            XCTAssertLessThanOrEqual(title.frame.maxX, model.frame.maxX)
-            XCTAssertLessThanOrEqual(variant.frame.maxX, model.frame.maxX)
             let logo = app.descendants(matching: .any).matching(identifier: "chat.toolbar.providerLogo").firstMatch
             XCTAssertTrue(logo.exists)
             XCTAssertGreaterThanOrEqual(logo.frame.minX, max(title.frame.maxX, variant.frame.maxX))
             XCTAssertLessThanOrEqual(logo.frame.maxX, model.frame.maxX)
-        } else {
-            XCTAssertTrue(app.buttons["chat.composer.reasoning"].isHittable)
         }
         let ring = app.buttons["chat.toolbar.context"]
         XCTAssertTrue(ring.isHittable)
-        if isPhone {
+        if usesToolbarModel {
             XCTAssertEqual(ring.frame.width, 44, accuracy: 1)
             XCTAssertGreaterThanOrEqual(ring.frame.minX, app.buttons["chat.header"].frame.maxX)
             XCTAssertGreaterThanOrEqual(model.frame.minX, ring.frame.maxX)
@@ -66,7 +65,7 @@ final class ChatHeaderUITests: XCTestCase {
             add(geometry)
         }
         let bar = app.navigationBars.firstMatch
-        if isPhone {
+        if usesToolbarModel {
             XCTAssertEqual(bar.buttons.count, 4, "Back, header, context, and model must remain in the bar without an overflow item")
             XCTAssertLessThanOrEqual(model.frame.maxX, bar.frame.maxX)
         }
@@ -83,15 +82,14 @@ final class ChatHeaderUITests: XCTestCase {
             let app = launch(window: window)
             XCTAssertTrue(app.buttons["chat.header"].waitForExistence(timeout: 15))
             assertEssentialControls(app, modelTitle: "GPT-6 Astra", reasoning: "High")
-            let usesComposer = app.buttons["chat.composer.model"].exists
-            let picker = app.buttons[usesComposer ? "chat.composer.model" : "chat.toolbar.model"]
+            let picker = app.buttons[app.buttons["chat.toolbar.model"].exists ? "chat.toolbar.model" : "chat.composer.model"]
             picker.tap()
             app.collectionViews.buttons["Model"].firstMatch.tap()
             app.collectionViews.buttons["OpenAI"].firstMatch.tap()
             app.buttons["GPT-6 Astra Extended Context Research Preview"].tap()
             XCTAssertTrue((picker.value as? String ?? "").contains("GPT-6 Astra Extended Context Research Preview"))
-            if usesComposer { app.buttons["chat.composer.reasoning"].tap() }
-            else { picker.tap(); app.collectionViews.buttons["Reasoning"].firstMatch.tap() }
+            picker.tap()
+            app.collectionViews.buttons["Reasoning"].firstMatch.tap()
             app.buttons["Extended Deliberation For Complex Tasks"].tap()
             assertEssentialControls(app, modelTitle: "GPT-6 Astra Extended Context Research Preview", reasoning: "Extended Deliberation For Complex Tasks")
             if window { XCTAssertEqual(app.staticTexts["chat.header.fixture.root"].value as? String, "astra|high") }
@@ -190,7 +188,118 @@ final class ChatHeaderUITests: XCTestCase {
         app.terminate()
     }
 
-    private func launch(window: Bool, large: Bool = false, longModel: Bool = false, narrow: Bool = false, shortTitle: Bool = false) -> XCUIApplication {
+    func testAssistantHeaderAndContextStayInNavigationBarWhileKeyboardIsVisible() {
+        for fixture in [(name: "Root", window: false, narrow: false), (name: "Window-320", window: true, narrow: true)] {
+            let app = launch(window: fixture.window, narrow: fixture.narrow, assistant: true)
+            let input = app.textViews["chat.input"]
+            XCTAssertTrue(input.waitForExistence(timeout: 15))
+            capture(app, "Header-Assistant-Before-Keyboard-\(fixture.name)")
+            assertAssistantHeaderLayout(app)
+
+            input.tap()
+            if !app.keyboards.firstMatch.waitForExistence(timeout: 3) {
+                input.tap()
+            }
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+            input.typeText("Keep the Assistant composer active")
+            capture(app, "Header-Assistant-Keyboard-\(fixture.name)")
+            assertAssistantHeaderLayout(app)
+
+            app.buttons["chat.header"].tap()
+            let list = app.collectionViews["chat.header.list"]
+            XCTAssertTrue(list.waitForExistence(timeout: 3))
+            app.buttons["chat.header.agent.build"].tap()
+            XCTAssertTrue(list.waitForNonExistence(timeout: 3))
+
+            app.buttons["chat.toolbar.context"].tap()
+            XCTAssertTrue(app.navigationBars["Context"].waitForExistence(timeout: 3))
+            capture(app, "Header-Assistant-Context-\(fixture.name)")
+            app.terminate()
+        }
+    }
+
+    func testAssistantHeaderUsesLeadingLandscapeAndTrailingPortrait() {
+        let app = launch(window: false, assistant: true)
+        addTeardownBlock {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCTAssertTrue(app.buttons["chat.header"].waitForExistence(timeout: 15))
+        capture(app, "Header-Assistant-Portrait")
+        assertAssistantHeaderLayout(app)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitForLandscape(app))
+        capture(app, "Header-Assistant-Landscape")
+        assertAssistantHeaderLayout(app, expectsLeading: true)
+
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(waitForPortrait(app))
+        capture(app, "Header-Assistant-Portrait-After-Rotation")
+        assertAssistantHeaderLayout(app)
+    }
+
+    private func assertAssistantHeaderLayout(_ app: XCUIApplication, expectsLeading: Bool = false) {
+        let header = app.buttons["chat.header"]
+        let context = app.buttons["chat.toolbar.context"]
+        let bar = app.navigationBars.firstMatch
+        let back = bar.buttons["Sessions"]
+        let headerFrame = header.exists ? header.frame : .null
+        let contextFrame = context.exists ? context.frame : .null
+        let trailingGap = context.exists ? bar.frame.maxX - contextFrame.maxX : .infinity
+        let leadingSafeGap = back.exists ? back.frame.minX - bar.frame.minX : .infinity
+        let geometry = XCTAttachment(string: "app=\(app.frame) navigationBar=\(bar.frame) back=\(back.exists ? back.frame : .null) headerExists=\(header.exists) headerHittable=\(header.isHittable) header=\(headerFrame) contextExists=\(context.exists) contextHittable=\(context.isHittable) context=\(contextFrame) leadingSafeGap=\(leadingSafeGap) trailingGap=\(trailingGap)")
+        geometry.name = "Assistant-Toolbar-Frame-Evidence"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+
+        XCTAssertTrue(header.isHittable)
+        XCTAssertTrue(context.isHittable)
+        XCTAssertEqual(context.frame.width, 44, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(context.frame.minX, header.frame.maxX)
+        XCTAssertLessThanOrEqual(context.frame.minX - header.frame.maxX, 4.5)
+
+        XCTAssertLessThanOrEqual(context.frame.maxX, bar.frame.maxX)
+        if expectsLeading {
+            XCTAssertTrue(back.exists)
+            XCTAssertGreaterThanOrEqual(header.frame.minX, back.frame.maxX - 8,
+                "The Assistant title should remain beside the native back control in landscape")
+            XCTAssertLessThanOrEqual(header.frame.minX - back.frame.maxX, 24,
+                "The Assistant title should not leave a large gap after the native back control")
+            XCTAssertLessThan(header.frame.midX, bar.frame.midX,
+                "The Assistant group should remain leading in landscape")
+        }
+        if !expectsLeading && app.frame.width < 600 {
+            XCTAssertGreaterThan(context.frame.midX, bar.frame.midX,
+                "The Assistant pill should remain trailing in portrait")
+            // Liquid Glass extends four points beyond the context button's AX hit frame.
+            XCTAssertEqual(trailingGap, 24, accuracy: 1, "The single Assistant pill should reach the 20-point visual margin")
+        }
+        XCTAssertFalse(bar.buttons["More"].exists)
+        XCTAssertFalse(bar.buttons["ellipsis"].exists)
+        XCTAssertFalse(bar.buttons["More actions"].exists)
+    }
+
+    private func waitForLandscape(_ app: XCUIApplication) -> Bool {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if app.frame.width > app.frame.height { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return false
+    }
+
+    private func waitForPortrait(_ app: XCUIApplication) -> Bool {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if app.frame.height > app.frame.width { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return false
+    }
+
+    private func launch(window: Bool, large: Bool = false, longModel: Bool = false, narrow: Bool = false,
+                        shortTitle: Bool = false, assistant: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "chat"
         app.launchEnvironment["OPENCLIENT_HEADER_FIXTURE"] = "1"
@@ -199,6 +308,7 @@ final class ChatHeaderUITests: XCTestCase {
         app.launchEnvironment["OPENCLIENT_HEADER_LONG_MODEL"] = longModel ? "1" : "0"
         app.launchEnvironment["OPENCLIENT_HEADER_NARROW"] = narrow ? "1" : "0"
         app.launchEnvironment["OPENCLIENT_HEADER_SHORT_TITLE"] = shortTitle ? "1" : "0"
+        app.launchEnvironment["OPENCLIENT_HEADER_ASSISTANT"] = assistant ? "1" : "0"
         app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
         app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "0"
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]

@@ -6150,6 +6150,12 @@
     },
     "Assistant": {
       "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant"
+          }
+        },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
@@ -7404,6 +7410,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Compatta"
+          }
+        }
+      }
+    },
+    "Composer Style": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Composer Style"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estilo do compositor"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stile del compositore"
           }
         }
       }
@@ -12209,6 +12237,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Messaggio"
+          }
+        }
+      }
+    },
+    "Messenger": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mensagens"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messaggi"
           }
         }
       }

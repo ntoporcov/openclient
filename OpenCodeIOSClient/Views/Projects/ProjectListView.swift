@@ -835,6 +835,7 @@ struct ProjectNewChatSheet: View, Equatable {
                             canSend: canStartChat,
                             autoFocus: autoFocusInput && !isEditingChatTitle && !isChatTitleFocused,
                             usesKeyboardBottomPadding: isEditingChatTitle || isChatTitleFocused,
+                            prefersAssistantLayout: viewModel.usesAssistantComposerLayout,
                             onSend: startChat,
                             onAddAttachments: addAttachments
                         )
@@ -1681,6 +1682,7 @@ private struct NewChatInputBar: View {
     let canSend: Bool
     let autoFocus: Bool
     let usesKeyboardBottomPadding: Bool
+    let prefersAssistantLayout: Bool
     let onSend: () -> Void
     let onAddAttachments: ([OpenCodeComposerAttachment]) -> Void
 
@@ -1722,7 +1724,8 @@ private struct NewChatInputBar: View {
             glassNamespace: glassNamespace,
             allowsTextTools: false,
             allowsSessionTools: false,
-            autoFocus: autoFocus
+            autoFocus: autoFocus,
+            prefersAssistantLayout: prefersAssistantLayout
         )
         .disabled(!canSend || isSending)
         .padding(.horizontal, 12)
