@@ -3,6 +3,48 @@ import XCTest
 
 @MainActor
 final class OpenCodeLocalCacheIntegrationTests: XCTestCase {
+    func testCachedSelectionCompletionDoesNotReplaceNewerViewLocalDraftWithPersistedPrefix() async throws {
+        let originalDrafts = UserDefaults.standard.data(forKey: OpenClientStorageKey.messageDraftsByChat)
+        defer { UserDefaults.standard.set(originalDrafts, forKey: OpenClientStorageKey.messageDraftsByChat) }
+        let model = AppViewModel()
+        model.config = serverConfig
+        model.backendMode = .cachedServer
+        let repository = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+        model.localCacheRepository = repository
+        try await repository.saveChatMessages([message], serverID: serverConfig.recentServerID, sessionID: session.id)
+        model.selectedDirectory = session.directory
+        model.allSessions = [session]
+        model.composerStore.draftsByChatKey = [:]
+
+        let ticket = model.sessionListFacade.beginSelection(session)
+        let prepared = await model.sessionListFacade.prepareSelectionForNavigation(ticket)
+        XCTAssertTrue(prepared)
+
+        let persistedMention = OpenCodeAgentMention(name: "build", content: "@build", start: 0, end: 6)
+        let activeAttachment = OpenCodeComposerAttachment(id: "active", kind: .file, filename: "active.txt",
+            mime: "text/plain", dataURL: "data:text/plain;base64,YQ==")
+        let localDraft = MessageComposerDraftStore(text: "Persisted prefix")
+        model.saveMessageDraft(localDraft.text, agentMentions: [persistedMention], forSessionID: session.id,
+            updateActiveDraft: false)
+        localDraft.text = "Persisted prefix with newer local input"
+        localDraft.agentMentions = [OpenCodeAgentMention(name: "review", content: "@review", start: 0, end: 7)]
+        model.composerStore.draftAttachments = [activeAttachment]
+        let resetToken = model.composerStore.resetToken
+        let activeMentions = model.composerStore.draftAgentMentions
+        let activeAttachments = model.composerStore.draftAttachments
+
+        await model.sessionListFacade.completeSelection(ticket)
+
+        XCTAssertEqual(localDraft.text, "Persisted prefix with newer local input")
+        XCTAssertEqual(localDraft.agentMentions.map(\.name), ["review"])
+        XCTAssertEqual(model.draftMessage, "")
+        XCTAssertEqual(model.composerStore.resetToken, resetToken)
+        XCTAssertEqual(model.composerStore.draftAgentMentions, activeMentions)
+        XCTAssertEqual(model.composerStore.draftAttachments, activeAttachments)
+        XCTAssertEqual(model.composerStore.draftsByChatKey[model.messageDraftStorageKey(for: session)]?.text,
+            "Persisted prefix")
+    }
+
     func testSelectionPreservesOutgoingDraftOnceAndKeepsTypingDuringDiskHydration() async throws {
         let originalDrafts = UserDefaults.standard.data(forKey: OpenClientStorageKey.messageDraftsByChat)
         defer { UserDefaults.standard.set(originalDrafts, forKey: OpenClientStorageKey.messageDraftsByChat) }

@@ -705,11 +705,219 @@ private struct ProjectNewChatModelSection: Identifiable, Equatable {
     let models: [ProjectNewChatModelItem]
 }
 
+private struct ProjectNewChatModelPicker: View {
+    let sections: [ProjectNewChatModelSection]
+    let selectedReference: OpenCodeModelReference?
+    let onSelect: (OpenCodeModelReference?) -> Void
+    @State private var searchText = ""
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if normalizedSearchText.isEmpty {
+                    ProjectNewChatModelProviderList(sections: sections)
+                } else {
+                    ProjectNewChatModelSearchResults(
+                        sections: filteredSections,
+                        selectedReference: selectedReference,
+                        onSelect: onSelect
+                    )
+                }
+            }
+                .navigationTitle("Models")
+                .navigationBarTitleDisplayMode(.inline)
+                .searchable(
+                    text: $searchText,
+                    placement: .toolbar,
+                    prompt: "Search models"
+                )
+                .navigationDestination(for: String.self) { providerID in
+                    if let section = sections.first(where: { $0.id == providerID }) {
+                        ProjectNewChatProviderModels(
+                            section: section,
+                            selectedReference: selectedReference,
+                            onSelect: onSelect
+                        )
+                    }
+                }
+        }
+        .frame(width: 320, height: 320)
+        .accessibilityIdentifier("projects.newChat.model.popover")
+    }
+
+    private var normalizedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredSections: [ProjectNewChatModelSection] {
+        let query = normalizedSearchText
+        guard !query.isEmpty else { return sections }
+        return sections.compactMap { section in
+            let models = section.models.filter {
+                $0.name.localizedCaseInsensitiveContains(query)
+                    || $0.modelID.localizedCaseInsensitiveContains(query)
+            }
+            guard !models.isEmpty else { return nil }
+            return ProjectNewChatModelSection(id: section.id, name: section.name, models: models)
+        }
+    }
+}
+
+private struct ProjectNewChatModelProviderList: View {
+    let sections: [ProjectNewChatModelSection]
+
+    var body: some View {
+        List {
+            Section("Providers") {
+                ForEach(sections) { section in
+                    NavigationLink(value: section.id) {
+                        HStack(spacing: 10) {
+                            ProviderIcon(providerID: section.id, size: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(section.name)
+                                    .foregroundStyle(.primary)
+                                Text(section.id)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("projects.newChat.model.provider.\(section.id)")
+                }
+
+                if sections.isEmpty {
+                    ContentUnavailableView("No Models", systemImage: "magnifyingglass")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .opencodeSoftScrollEdgeEffect()
+    }
+}
+
+private struct ProjectNewChatModelSearchResults: View {
+    let sections: [ProjectNewChatModelSection]
+    let selectedReference: OpenCodeModelReference?
+    let onSelect: (OpenCodeModelReference?) -> Void
+
+    var body: some View {
+        List {
+            ForEach(sections) { section in
+                Section {
+                    ForEach(section.models) { model in
+                        ProjectNewChatModelOptionButton(
+                            title: model.name,
+                            providerID: section.id,
+                            providerName: section.name,
+                            identifier: "projects.newChat.model.\(model.id)",
+                            isSelected: selectedReference == model.reference
+                        ) {
+                            onSelect(model.reference)
+                        }
+                    }
+                }
+            }
+
+            if sections.isEmpty {
+                ContentUnavailableView("No Models", systemImage: "magnifyingglass")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .opencodeSoftScrollEdgeEffect()
+    }
+}
+
+private struct ProjectNewChatProviderModels: View {
+    let section: ProjectNewChatModelSection
+    let selectedReference: OpenCodeModelReference?
+    let onSelect: (OpenCodeModelReference?) -> Void
+    @State private var searchText = ""
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(filteredModels) { model in
+                    ProjectNewChatModelOptionButton(
+                        title: model.name,
+                        identifier: "projects.newChat.model.\(model.id)",
+                        isSelected: selectedReference == model.reference
+                    ) {
+                        onSelect(model.reference)
+                    }
+                }
+            } header: {
+                HStack(spacing: 8) {
+                    ProviderIcon(providerID: section.id, size: 18)
+                    Text(section.name)
+                }
+            }
+
+            if filteredModels.isEmpty {
+                ContentUnavailableView("No Models", systemImage: "magnifyingglass")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .opencodeSoftScrollEdgeEffect()
+        .navigationTitle(section.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(
+            text: $searchText,
+            placement: UIDevice.current.userInterfaceIdiom == .pad
+                ? .navigationBarDrawer(displayMode: .always)
+                : .toolbar,
+            prompt: "Search models"
+        )
+        .accessibilityIdentifier("projects.newChat.model.provider.\(section.id).content")
+    }
+
+    private var filteredModels: [ProjectNewChatModelItem] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return section.models }
+        return section.models.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.modelID.localizedCaseInsensitiveContains(query)
+        }
+    }
+}
+
+private struct ProjectNewChatModelOptionButton: View {
+    let title: String
+    var providerID: String?
+    var providerName: String?
+    let identifier: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                if let providerID {
+                    ProviderIcon(providerID: providerID, size: 20)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(.primary)
+                    if let providerName {
+                        Text(providerName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: "checkmark")
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.clear)
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier(identifier)
+        .accessibilityLabel(title)
+    }
+}
+
 private enum ProjectNewChatQuickPicker: Equatable {
     case project
     case workspace
     case agent
-    case model
     case reasoning
 }
 
@@ -735,6 +943,7 @@ struct ProjectNewChatSheet: View, Equatable {
     @State private var selectedAgentName: String?
     @State private var selectedModelReference: OpenCodeModelReference?
     @State private var selectedReasoningVariant: String?
+    @State private var isModelPickerPresented = false
     @State private var hasInitializedComposerSettings = false
     @State private var chatTitleDraft = ""
     @State private var isEditingChatTitle = false
@@ -1192,16 +1401,77 @@ struct ProjectNewChatSheet: View, Equatable {
         }
     }
 
+    @ViewBuilder
     private var modelSelectTrigger: some View {
-        StablePickerMenu(
-            elements: quickPickerMenuElements(.model),
-            accessibilityLabel: String(localized: "Model"),
-            accessibilityValue: modelTitle,
-            accessibilityIdentifier: "projects.newChat.model",
-            onSelect: { selectQuickPickerOption($0, in: .model) }
-        ) {
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            StablePickerMenu(
+                elements: modelMenuElements,
+                accessibilityLabel: String(localized: "Model"),
+                accessibilityValue: modelTitle,
+                accessibilityIdentifier: "projects.newChat.model",
+                onSelect: selectModelMenuOption
+            ) {
+                modelSelectLabel
+            }
+        } else {
+            Button {
+                isModelPickerPresented = true
+            } label: {
+                modelSelectLabel
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "Model"))
+            .accessibilityValue(modelTitle)
+            .accessibilityIdentifier("projects.newChat.model")
+            .popover(isPresented: $isModelPickerPresented) {
+                ProjectNewChatModelPicker(
+                    sections: modelPickerSourceSections,
+                    selectedReference: selectedModelReference,
+                    onSelect: { reference in
+                        selectedModelReference = reference
+                        syncReasoningSelection()
+                        isModelPickerPresented = false
+                    }
+                )
+                .presentationCompactAdaptation(.popover)
+            }
+        }
+    }
+
+    private var modelSelectLabel: some View {
+        HStack(spacing: 6) {
+            if let providerID = effectiveModelReference?.providerID {
+                ProviderIcon(providerID: providerID, size: 20)
+                    .foregroundStyle(.primary.opacity(0.72))
+                    .accessibilityIdentifier("projects.newChat.model.providerLogo")
+            }
             InlineSubtitleSelectTrigger(title: modelTitle)
         }
+    }
+
+    private var modelMenuElements: [StablePickerMenuElement] {
+        modelPickerSourceSections.map { section in
+            .submenu(
+                id: "provider:\(section.id)",
+                title: section.name,
+                children: section.models.map { model in
+                    .action(
+                        id: "model:\(model.id)",
+                        title: model.name,
+                        systemImage: nil,
+                        isSelected: selectedModelReference == model.reference
+                    )
+                }
+            )
+        }
+    }
+
+    private func selectModelMenuOption(_ optionID: String) {
+        guard let model = modelPickerSourceSections.lazy.flatMap(\.models).first(where: {
+            optionID == "model:\($0.id)"
+        }) else { return }
+        selectedModelReference = model.reference
+        syncReasoningSelection()
     }
 
     private var reasoningSelectTrigger: some View {
@@ -1273,33 +1543,6 @@ struct ProjectNewChatSheet: View, Equatable {
             }
             return [.inline(id: "agents", title: nil, children: options)]
 
-        case .model:
-            var sections = [StablePickerMenuElement.inline(
-                id: "default",
-                title: nil,
-                children: [.action(
-                    id: "default",
-                    title: modelDefaultOptionTitle,
-                    systemImage: nil,
-                    isSelected: selectedModelReference == nil
-                )]
-            )]
-            sections += modelPickerSourceSections.map { section in
-                .inline(
-                    id: section.id,
-                    title: section.name,
-                    children: section.models.map { model in
-                        .action(
-                            id: model.id,
-                            title: model.name,
-                            systemImage: nil,
-                            isSelected: selectedModelReference == model.reference
-                        )
-                    }
-                )
-            }
-            return sections
-
         case .reasoning:
             let options = [StablePickerMenuElement.action(
                 id: "default",
@@ -1339,14 +1582,6 @@ struct ProjectNewChatSheet: View, Equatable {
         case .agent:
             selectedAgentName = optionID == "default" ? nil : optionID
 
-        case .model:
-            if optionID == "default" {
-                selectedModelReference = nil
-            } else if let model = modelPickerSourceSections.lazy.flatMap(\.models).first(where: { $0.id == optionID }) {
-                selectedModelReference = model.reference
-            }
-            syncReasoningSelection()
-
         case .reasoning:
             selectedReasoningVariant = optionID == "default" ? nil : optionID
         }
@@ -1377,14 +1612,6 @@ struct ProjectNewChatSheet: View, Equatable {
         if let defaultModelReference = viewModel.defaultModelReference(),
            let model = viewModel.model(for: defaultModelReference) {
             return model.name
-        }
-        return String(localized: "Default")
-    }
-
-    private var modelDefaultOptionTitle: String {
-        if let defaultModelReference = viewModel.defaultModelReference(),
-           let model = viewModel.model(for: defaultModelReference) {
-            return String(localized: "Default (\(model.name))", comment: "Default model picker option. The variable is a server-provided model name.")
         }
         return String(localized: "Default")
     }

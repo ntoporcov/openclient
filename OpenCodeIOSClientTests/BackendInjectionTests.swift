@@ -160,6 +160,56 @@ final class BackendInjectionTests: XCTestCase {
         XCTAssertNil(viewModel.selectedSession)
     }
 
+    func testOnlineSelectionCompletionDoesNotReplaceNewerViewLocalDraftWithPersistedPrefix() async throws {
+        let factory = InjectionTestFactory()
+        let viewModel = AppViewModel(backendFactory: factory)
+        await viewModel.connectionFacade.connect()
+        defer { viewModel.disconnect() }
+        viewModel.composerStore.draftsByChatKey = [:]
+        let project = try XCTUnwrap(viewModel.projects.first)
+        await viewModel.projectFacade.completeSelection(viewModel.projectFacade.beginSelection(project))
+        let session = try XCTUnwrap(viewModel.sessions.first)
+        let harness = try XCTUnwrap(factory.harnesses.last)
+        let transcriptRequested = expectation(description: "Transcript hydration suspended")
+        var releaseTranscript: CheckedContinuation<Void, Never>?
+        harness.beforeTranscript = {
+            await withCheckedContinuation { continuation in
+                releaseTranscript = continuation
+                transcriptRequested.fulfill()
+            }
+        }
+
+        let ticket = viewModel.sessionListFacade.beginSelection(session)
+        let completion = Task { await viewModel.sessionListFacade.completeSelection(ticket) }
+        await fulfillment(of: [transcriptRequested], timeout: 1)
+
+        let persistedMention = OpenCodeAgentMention(name: "build", content: "@build", start: 0, end: 6)
+        let activeAttachment = OpenCodeComposerAttachment(id: "active", kind: .file, filename: "active.txt",
+            mime: "text/plain", dataURL: "data:text/plain;base64,YQ==")
+        let localDraft = MessageComposerDraftStore(text: "Persisted prefix")
+        viewModel.saveMessageDraft(localDraft.text, agentMentions: [persistedMention], forSessionID: session.id,
+            updateActiveDraft: false)
+        localDraft.text = "Persisted prefix with newer local input"
+        localDraft.agentMentions = [OpenCodeAgentMention(name: "review", content: "@review", start: 0, end: 7)]
+        viewModel.composerStore.draftAttachments = [activeAttachment]
+        let resetToken = viewModel.composerStore.resetToken
+        let activeMentions = viewModel.composerStore.draftAgentMentions
+        let activeAttachments = viewModel.composerStore.draftAttachments
+
+        releaseTranscript?.resume()
+        releaseTranscript = nil
+        await completion.value
+
+        XCTAssertEqual(localDraft.text, "Persisted prefix with newer local input")
+        XCTAssertEqual(localDraft.agentMentions.map(\.name), ["review"])
+        XCTAssertEqual(viewModel.draftMessage, "")
+        XCTAssertEqual(viewModel.composerStore.resetToken, resetToken)
+        XCTAssertEqual(viewModel.composerStore.draftAgentMentions, activeMentions)
+        XCTAssertEqual(viewModel.composerStore.draftAttachments, activeAttachments)
+        XCTAssertEqual(viewModel.composerStore.draftsByChatKey[viewModel.messageDraftStorageKey(for: session)]?.text,
+            "Persisted prefix")
+    }
+
     func testCapabilityNamesWithoutFeatureMethodsDoNotEnableOpenCodeActions() async throws {
         let factory = InjectionTestFactory()
         factory.capabilities = [.commands, .fork, .compaction, .interactions, .liveActivities, .worktrees]

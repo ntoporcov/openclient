@@ -1511,7 +1511,6 @@ extension AppViewModel {
         }
         if isBrowsingLocalCache {
             chatStore.finishLoadingSelectedSession()
-            restoreMessageDraftIfComposerIsEmpty(for: session)
             return
         }
 
@@ -1528,7 +1527,6 @@ extension AppViewModel {
                 generation: navigationGeneration,
                 directoryKey: navigationDirectoryKey
             ) else { return }
-            restoreMessageDraftIfComposerIsEmpty(for: session)
             errorMessage = nil
         } catch {
             guard isCurrentBackendConnection(connection), isSessionNavigationCurrent(

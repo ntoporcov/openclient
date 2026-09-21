@@ -487,7 +487,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
     }
 
     @MainActor
-    func testNewSessionUIKitPickerRemainsInContext() {
+    func testNewSessionModelPickerNavigatesProviderTree() {
         let app = XCUIApplication()
         app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "new-session"
         app.launch()
@@ -497,13 +497,43 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         XCTAssertTrue(modelTrigger.waitForExistence(timeout: 10))
         modelTrigger.tap()
 
+        let anthropicMenu = app.collectionViews.buttons["Anthropic"]
+        if anthropicMenu.waitForExistence(timeout: 2) {
+            XCTAssertFalse(app.collectionViews.buttons["Model"].exists)
+            anthropicMenu.tap()
+
+            let option = app.buttons["Claude Sonnet 4.5"]
+            XCTAssertTrue(option.waitForExistence(timeout: 10))
+            option.tap()
+            XCTAssertTrue(waitForAccessibilityValue(of: modelTrigger, equalTo: "Claude Sonnet 4.5"))
+            return
+        }
+
+        XCTAssertFalse(app.buttons["projects.newChat.model.default"].exists)
+        let search = app.searchFields["Search models"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        search.typeText("Sonnet")
+
         let option = app.buttons["Claude Sonnet 4.5"]
         XCTAssertTrue(option.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["projects.newChat.model.provider.anthropic"].exists)
         XCTAssertTrue(app.navigationBars["New Session"].exists)
         option.tap()
 
         XCTAssertTrue(modelTrigger.exists)
-        XCTAssertEqual(modelTrigger.value as? String, "Claude Sonnet 4.5")
+        XCTAssertTrue(waitForAccessibilityValue(of: modelTrigger, equalTo: "Claude Sonnet 4.5"))
+
+        modelTrigger.tap()
+        let anthropic = app.buttons["projects.newChat.model.provider.anthropic"]
+        XCTAssertTrue(anthropic.waitForExistence(timeout: 10))
+        anthropic.tap()
+
+        let providerSearch = app.searchFields["Search models"]
+        XCTAssertTrue(providerSearch.waitForExistence(timeout: 10))
+        providerSearch.tap()
+        providerSearch.typeText("GPT-5.4")
+        XCTAssertTrue(app.staticTexts["No Models"].waitForExistence(timeout: 10))
     }
 
     @MainActor
