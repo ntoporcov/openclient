@@ -57,6 +57,7 @@ final class NewProjectChatFacade: ObservableObject {
     }
     private unowned let viewModel: AppViewModel
     private var observations: Set<AnyCancellable> = []
+    private var directorySessionObservations: Set<AnyCancellable> = []
     private class ChatHandoff {
         let sheetID: UUID
         let serverID: String
@@ -113,6 +114,10 @@ final class NewProjectChatFacade: ObservableObject {
             viewModel.projectStore.$currentProject.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.projectStore.$worktreeInventories.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.projectStore.$worktreeDestinationParents.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            viewModel.sessionListStore.$recentSessionsByDirectory.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            viewModel.sessionListStore.$previews.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            viewModel.projectActionStore.$runs.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            viewModel.directoryStoreRegistry.$v2DeletedSessionIDs.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.commerceFacade.objectWillChange.eraseToAnyPublisher(),
@@ -128,6 +133,14 @@ final class NewProjectChatFacade: ObservableObject {
         .sink { [weak self] _ in self?.objectWillChange.send() }
         .store(in: &observations)
 
+        observeDirectorySessions()
+        viewModel.directoryStoreRegistry.$storeCollectionRevision.dropFirst()
+            .sink { [weak self] _ in
+                self?.observeDirectorySessions()
+                self?.objectWillChange.send()
+            }
+            .store(in: &observations)
+
         viewModel.$newProjectChatSheetRequest.dropFirst()
             .sink { [weak self] request in
                 guard let self else { return }
@@ -142,6 +155,31 @@ final class NewProjectChatFacade: ObservableObject {
     }
 
     var projects: [OpenCodeProject] { viewModel.projects }
+    var rankedProjects: [OpenCodeProject] {
+        var liveSessionsByProjectID: [String: [OpenCodeSession]] = [:]
+        for scope in viewModel.homeSessionScopes {
+            guard let projectID = scope.projectID,
+                  let store = viewModel.directoryStoreRegistry.existingStore(for: scope.directory) else { continue }
+            liveSessionsByProjectID[projectID, default: []].append(contentsOf: store.sessions)
+        }
+        return viewModel.sessionListStore.projectsRankedByRecentSessions(
+            projects: viewModel.projects,
+            previews: viewModel.sessionPreviews,
+            hiddenActionSessionIDs: viewModel.hiddenProjectActionSessionIDs,
+            deletedSessionIDs: viewModel.directoryStoreRegistry.v2DeletedSessionIDs,
+            liveSessionsByProjectID: liveSessionsByProjectID
+        )
+    }
+
+    private func observeDirectorySessions() {
+        directorySessionObservations.removeAll()
+        for store in viewModel.directoryStoreRegistry.allStores {
+            store.$sessions.dropFirst()
+                .sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &directorySessionObservations)
+        }
+    }
+
     var globalForms: GlobalFormsFacade { viewModel.globalFormsFacade }
     func globalFormLocation(project: OpenCodeProject?, directory: String?) -> BackendFormLocation? {
         guard let project else { return nil }

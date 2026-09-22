@@ -22,13 +22,14 @@ final class DirectoryStoreRegistry: ObservableObject {
     @Published private(set) var activeStore: DirectoryStore
     @Published private(set) var activeKey: String
     @Published private(set) var generation: Int
+    @Published private(set) var storeCollectionRevision: Int
     private var storesByKey: [String: DirectoryStore]
     private var openedSessionIDs: [String] = []
     private(set) var v2PendingSessionIDs: Set<String> = []
     private(set) var v2NeedsReconnectHydration = false
     private var v2LifecycleRevisions: [String: UInt] = [:]
     private(set) var v2ProjectRevision: UInt = 0
-    private var v2DeletedSessionIDs: Set<String> = []
+    @Published private(set) var v2DeletedSessionIDs: Set<String> = []
 
     func isV2SessionDeleted(_ id: String) -> Bool { v2DeletedSessionIDs.contains(id) }
 
@@ -123,6 +124,7 @@ final class DirectoryStoreRegistry: ObservableObject {
         activeKey = key
         activeStore = store
         generation = 0
+        storeCollectionRevision = 0
         storesByKey = [key: store]
         observeSessionOpenings(in: store)
     }
@@ -180,6 +182,7 @@ final class DirectoryStoreRegistry: ObservableObject {
         let store = DirectoryStore()
         storesByKey[key] = store
         observeSessionOpenings(in: store)
+        storeCollectionRevision &+= 1
         return store
     }
 
@@ -263,6 +266,7 @@ final class DirectoryStoreRegistry: ObservableObject {
         activeStore = store
         observeSessionOpenings(in: store)
         generation &+= 1
+        storeCollectionRevision &+= 1
     }
 }
 

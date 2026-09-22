@@ -2255,6 +2255,8 @@ struct ChatView: View {
 
     @Namespace private var toolbarGlassNamespace
     @Namespace private var composerGlassNamespace
+    // Keep the popover's anchor in place while its settings change the composer layout.
+    @State private var pinnedHeaderUsesAssistantLayout: Bool?
     @State private var copiedDebugLog = false
     @State private var selectedMessageDebugPayload: MessageDebugPayload?
     @State private var selectedCompactionSummary: CompactionSummaryPayload?
@@ -2510,6 +2512,10 @@ struct ChatView: View {
 #else
         false
 #endif
+    }
+
+    private var usesAssistantHeaderLayout: Bool {
+        pinnedHeaderUsesAssistantLayout ?? usesAssistantComposerLayout
     }
 
     private var supportsSessionSwitcherKeyboardBridge: Bool {
@@ -5070,22 +5076,29 @@ struct ChatView: View {
         let assistantHeaderWidth = !chatFacade.isReadOnly && toolbarSnapshot.isLoading
             ? headerBudget.assistantHeaderWithTrailingItem
             : headerBudget.assistantHeader
-        let headerWidth: CGFloat = if usesAssistantComposerLayout, UIDevice.current.userInterfaceIdiom == .phone {
+        let headerWidth: CGFloat = if usesAssistantHeaderLayout, UIDevice.current.userInterfaceIdiom == .phone {
             isPhoneLandscape
                 ? min(360, assistantHeaderWidth)
                 : assistantHeaderWidth
-        } else if usesAssistantComposerLayout {
+        } else if usesAssistantHeaderLayout {
             min(220, max(92, chatViewportWidth - 208))
         } else {
             headerBudget.header
         }
-        ToolbarItem(placement: usesAssistantComposerLayout && UIDevice.current.userInterfaceIdiom == .phone && !isPhoneLandscape
+        ToolbarItem(placement: usesAssistantHeaderLayout && UIDevice.current.userInterfaceIdiom == .phone && !isPhoneLandscape
             ? .topBarTrailing : .topBarLeading) {
             HStack(spacing: headerBudget.spacing) {
                 ChatHeaderMenu(facade: chatFacade, session: liveSession,
                     containerWidth: chatViewportWidth, containerHeight: chatViewportHeight,
                     glassNamespace: toolbarGlassNamespace,
-                    maximumWidth: headerWidth - 44 - headerBudget.spacing)
+                    maximumWidth: headerWidth - 44 - headerBudget.spacing,
+                    onPresentationChange: { isPresented in
+                        if isPresented {
+                            pinnedHeaderUsesAssistantLayout = usesAssistantComposerLayout
+                        } else {
+                            pinnedHeaderUsesAssistantLayout = nil
+                        }
+                    })
 
                 SessionContextUsageToolbarButton(metrics: contextMetrics, hitTargetSize: 44) {
                     showingContextMetrics = true
@@ -5121,7 +5134,7 @@ struct ChatView: View {
             }
         } else if !chatFacade.isReadOnly {
             #if !targetEnvironment(macCatalyst)
-            if !usesAssistantComposerLayout {
+            if !usesAssistantHeaderLayout {
                 #if os(macOS)
                 if toolbarSnapshot.showsAgentMenu {
                     ToolbarItem(placement: .opencodeTrailing) {

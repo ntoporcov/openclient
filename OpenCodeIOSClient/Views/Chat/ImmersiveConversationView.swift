@@ -416,30 +416,7 @@ private struct TalkProjectSelectionView: View {
                                     OpenCodeHaptics.impact(.soft)
                                     onSelect(project)
                                 } label: {
-                                    VStack(spacing: 10) {
-                                        ProjectAvatar(
-                                            title: title(project),
-                                            systemImage: project.id == "global" ? "globe" : "folder.fill",
-                                            icon: project.icon,
-                                            usesSystemImageFallback: project.id == "global",
-                                            isSelected: false,
-                                            size: 48
-                                        )
-                                        Text(title(project))
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.center)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .frame(minHeight: 116)
-                                    .padding(12)
-                                    .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                                    .opencodeConcentricGlassSurface(
-                                        isInteractive: true,
-                                        minimumCornerRadius: 20,
-                                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    )
+                                    ProjectSelectionCard(project: project, title: title(project), isSelected: false)
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("talk.project.\(project.id)")

@@ -18,6 +18,7 @@ struct ConnectionSheetView: View {
     @ObservedObject var facade: ConnectionFacade
     @ObservedObject var commerce: CommerceFacade
     @ObservedObject var whatsNew: OpenClientWhatsNewStore
+    let bridge: OpenClientBridgeFacade?
 
     @State private var path: [ConnectionSheetRoute] = []
     @State private var selectedDetent: PresentationDetent = connectionSheetHomeDetent
@@ -32,7 +33,8 @@ struct ConnectionSheetView: View {
                 ConnectionView(
                     facade: facade,
                     commerce: commerce,
-                    whatsNew: whatsNew
+                    whatsNew: whatsNew,
+                    bridge: bridge
                 ) { route in
                     path.append(route)
                 }
@@ -110,6 +112,7 @@ struct ConnectionView: View {
     @ObservedObject var facade: ConnectionFacade
     @ObservedObject var commerce: CommerceFacade
     @ObservedObject var whatsNew: OpenClientWhatsNewStore
+    var bridge: OpenClientBridgeFacade? = nil
     var navigate: ((ConnectionSheetRoute) -> Void)? = nil
     @State private var isShowingLatestUpdates = false
 
@@ -159,6 +162,7 @@ struct ConnectionView: View {
             OpenClientWhatsNewView(
                 release: release,
                 connection: facade,
+                bridge: bridge,
                 onDone: whatsNew.dismiss
             )
         }
@@ -288,37 +292,15 @@ struct RootConfigurationsView: View {
                 }
                 .accessibilityIdentifier("configurations.app-icon")
 
-                Picker("Composer Style", selection: Binding(
-                    get: { facade.composerStyle },
-                    set: { facade.setComposerStyle($0) }
-                )) {
-                    ForEach(ComposerStyle.allCases) { style in
-                        Text(style.title).tag(style)
-                    }
+                NavigationLink {
+                    ChatAppearanceSettingsView(store: facade.appCustomizationStore)
+                } label: {
+                    Label("Chat Appearance", systemImage: "text.bubble")
+                        .foregroundStyle(.primary)
                 }
-                .accessibilityIdentifier("configurations.composer-style")
-
-                Toggle("Show Chat Activity Shimmer", isOn: Binding(
-                    get: { facade.showsChatActivityShimmer },
-                    set: { facade.setShowsChatActivityShimmer($0) }
-                ))
-                .accessibilityIdentifier("configurations.chat-activity-shimmer")
-
-                Toggle("Show Tool Calls", isOn: Binding(
-                    get: { facade.showsToolCalls },
-                    set: { facade.setShowsToolCalls($0) }
-                ))
-                .accessibilityIdentifier("configurations.show-tool-calls")
-
-                Toggle("Show Reasoning Blocks", isOn: Binding(
-                    get: { facade.showsReasoningBlocks },
-                    set: { facade.setShowsReasoningBlocks($0) }
-                ))
-                .accessibilityIdentifier("configurations.show-reasoning-blocks")
+                .accessibilityIdentifier("configurations.chat-appearance")
             } header: {
                 Text("Appearance")
-            } footer: {
-                Text("Shows an animated highlight at the top of a chat while the AI is active.")
             }
 
             Section("Voice") {

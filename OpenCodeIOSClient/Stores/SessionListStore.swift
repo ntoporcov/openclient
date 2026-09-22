@@ -415,6 +415,59 @@ final class SessionListStore: ObservableObject {
             .map { $0 }
     }
 
+    func projectsRankedByRecentSessions(
+        projects: [OpenCodeProject],
+        previews: [String: SessionPreview],
+        hiddenActionSessionIDs: Set<String> = [],
+        deletedSessionIDs: Set<String> = [],
+        liveSessionsByProjectID: [String: [OpenCodeSession]] = [:]
+    ) -> [OpenCodeProject] {
+        let projectsByID = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var candidatesBySessionID: [String: (session: OpenCodeSession, projectID: String, hasCachedAttribution: Bool)] = [:]
+        var latestActivityByProjectID: [String: Double] = [:]
+
+        for session in deduplicatedRecentSessions() {
+            guard let project = Self.project(for: session, projects: projects, projectsByID: projectsByID) else { continue }
+            candidatesBySessionID[session.id] = (session, project.id, true)
+        }
+
+        // Process global first so an uncached explicit scope wins attribution.
+        let liveProjectOrder = projects.filter { $0.id == "global" } + projects.filter { $0.id != "global" }
+        for project in liveProjectOrder {
+            guard let sessions = liveSessionsByProjectID[project.id] else { continue }
+            for session in sessions {
+                if var candidate = candidatesBySessionID[session.id] {
+                    candidate.session = session
+                    if !candidate.hasCachedAttribution, project.id != "global" {
+                        candidate.projectID = project.id
+                    }
+                    candidatesBySessionID[session.id] = candidate
+                } else {
+                    candidatesBySessionID[session.id] = (session, project.id, false)
+                }
+            }
+        }
+
+        for candidate in candidatesBySessionID.values {
+            let session = candidate.session
+            guard session.isRootSession, !session.isArchived,
+                  !hiddenActionSessionIDs.contains(session.id), !deletedSessionIDs.contains(session.id) else { continue }
+            latestActivityByProjectID[candidate.projectID] = max(
+                latestActivityByProjectID[candidate.projectID] ?? -.infinity,
+                Self.sortTime(for: session, preview: previews[session.id])
+            )
+        }
+
+        return projects.enumerated().sorted { lhs, rhs in
+            let lhsActivity = latestActivityByProjectID[lhs.element.id]
+            let rhsActivity = latestActivityByProjectID[rhs.element.id]
+            if lhsActivity != rhsActivity {
+                return (lhsActivity ?? -.infinity) > (rhsActivity ?? -.infinity)
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+    }
+
     func projectSessionSearchResults(
         projects: [OpenCodeProject],
         previews: [String: SessionPreview],

@@ -7,47 +7,21 @@ import UIKit
 struct OpenClientWhatsNewView: View {
     let release: OpenClientReleaseNotes
     @ObservedObject var connection: ConnectionFacade
+    let bridge: OpenClientBridgeFacade?
     let onDone: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Color.clear.frame(height: 12)
-
+        NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    OpenClientWhatsNewHero(
-                        version: release.version,
-                        title: release.title,
-                        summary: release.summary,
-                        hero: release.hero
-                    )
-
-                    if release.hero == .openCodeV2 {
-                        OpenClientWhatsNewV2Preview()
-                    }
-
-                    if release.hero == .ipad {
-                        OpenClientWhatsNewIPadTransitionNotes(connection: connection)
-                    }
-
-                    if release.hero == .activity {
-                        OpenClientWhatsNewActivityExamples()
-                    }
-
-                    if !release.internationalizationAnnouncements.isEmpty {
-                        OpenClientInternationalizationAnnouncementSection(
-                            announcements: release.internationalizationAnnouncements
+                Group {
+                    if release.hero == .personalControl {
+                        OpenClientWhatsNewPersonalControlContent(
+                            release: release,
+                            connection: connection,
+                            bridge: bridge
                         )
-                    }
-
-                    if !release.features.isEmpty {
-                        OpenClientWhatsNewFeatureList(
-                            title: release.featureSectionTitle,
-                            features: release.features
-                        )
-                    }
-                    if release.showsSetup {
-                        OpenClientWhatsNewSetupSection(connection: connection)
+                    } else {
+                        OpenClientWhatsNewHistoricalContent(release: release, connection: connection)
                     }
                 }
                 .frame(maxWidth: 600)
@@ -56,13 +30,418 @@ struct OpenClientWhatsNewView: View {
                 .padding(.bottom, 24)
                 .frame(maxWidth: .infinity)
             }
-        }
-        .background(OpenCodePlatformColor.groupedBackground)
-        .safeAreaInset(edge: .bottom) {
-            OpenClientWhatsNewFooter(onDone: onDone)
+            .background(OpenCodePlatformColor.groupedBackground)
+            .safeAreaInset(edge: .bottom) {
+                OpenClientWhatsNewFooter(onDone: onDone)
+            }
         }
         .presentationDetents([.fraction(0.78), .large])
         .presentationDragIndicator(.visible)
+    }
+}
+
+private struct OpenClientWhatsNewHistoricalContent: View {
+    let release: OpenClientReleaseNotes
+    @ObservedObject var connection: ConnectionFacade
+
+    var body: some View {
+        VStack(spacing: 24) {
+            OpenClientWhatsNewHero(
+                version: release.version,
+                title: release.title,
+                summary: release.summary,
+                hero: release.hero
+            )
+
+            if release.hero == .openCodeV2 {
+                OpenClientWhatsNewV2Preview()
+            }
+
+            if release.hero == .ipad {
+                OpenClientWhatsNewIPadTransitionNotes(connection: connection)
+            }
+
+            if release.hero == .activity {
+                OpenClientWhatsNewActivityExamples()
+            }
+
+            if !release.internationalizationAnnouncements.isEmpty {
+                OpenClientInternationalizationAnnouncementSection(
+                    announcements: release.internationalizationAnnouncements
+                )
+            }
+
+            if !release.features.isEmpty {
+                OpenClientWhatsNewFeatureList(
+                    title: release.featureSectionTitle,
+                    features: release.features
+                )
+            }
+            if release.showsSetup {
+                OpenClientWhatsNewSetupSection(connection: connection)
+            }
+        }
+    }
+}
+
+private struct OpenClientWhatsNewPersonalControlContent: View {
+    let release: OpenClientReleaseNotes
+    @ObservedObject var connection: ConnectionFacade
+    let bridge: OpenClientBridgeFacade?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 48) {
+            OpenClientWhatsNewCompactHeader(
+                version: release.version,
+                title: release.title,
+                summary: release.summary
+            )
+            OpenClientWhatsNewComposerSection(connection: connection)
+            OpenClientWhatsNewUsageSection(
+                facade: connection.providerUsageFacade,
+                usesInsecureTransport: connection.providerUsageUsesInsecureTransport
+            )
+            if let bridge {
+                OpenClientWhatsNewNotificationsSection(
+                    bridge: bridge,
+                    allowsNativeSetup: !connection.isV2Connection
+                )
+            } else {
+                OpenClientWhatsNewNotificationsOverview()
+            }
+        }
+    }
+}
+
+private struct OpenClientWhatsNewCompactHeader: View {
+    let version: String
+    let title: String
+    let summary: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(
+                    LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("NEW IN \(version)")
+                    .font(.caption.weight(.bold))
+                    .tracking(0.6)
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("new-features.personal-control.header")
+    }
+}
+
+private struct OpenClientWhatsNewComposerSection: View {
+    @ObservedObject var connection: ConnectionFacade
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Choose your composer", systemImage: "text.bubble.fill")
+                .font(.title2.bold())
+
+            Picker("Composer Style", selection: Binding(
+                get: { connection.composerStyle },
+                set: { connection.setComposerStyle($0) }
+            )) {
+                ForEach(ComposerStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("new-features.composer-style")
+
+            ComposerStylePreview(style: connection.composerStyle)
+                .padding(16)
+                .background(
+                    OpenCodePlatformColor.secondaryGroupedBackground,
+                    in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                )
+
+            Text("Your choice applies on iPhone. iPad always uses the Assistant composer.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("new-features.composer-section")
+    }
+}
+
+private struct OpenClientWhatsNewUsageSection: View {
+    let facade: ProviderUsageFacade
+    let usesInsecureTransport: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Usage, without leaving OpenClient", systemImage: "gauge.with.dots.needle.67percent")
+                .font(.title2.bold())
+
+            Text("Track OpenAI subscription limits and OpenRouter spend from Projects and Activity.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Example")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ProviderUsageMetricCollection(metrics: Self.exampleMetrics, mode: .progressBar)
+            }
+            .padding(14)
+            .background(
+                OpenCodePlatformColor.secondaryGroupedBackground,
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Example provider usage levels")
+
+            VStack(spacing: 0) {
+                OpenClientWhatsNewUsageProviderRow(
+                    provider: .codex,
+                    isBeta: false,
+                    accounts: facade.store.accounts,
+                    statuses: facade.store.statuses
+                )
+                Divider()
+                OpenClientWhatsNewUsageProviderRow(
+                    provider: .openRouter,
+                    isBeta: true,
+                    accounts: facade.store.accounts,
+                    statuses: facade.store.statuses
+                )
+            }
+
+            NavigationLink {
+                ProviderUsageView(
+                    facade: facade,
+                    provider: .codex,
+                    usesInsecureTransport: usesInsecureTransport
+                )
+            } label: {
+                Label("Set Up OpenAI Usage", systemImage: "arrow.right.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("new-features.openai-usage-setup")
+
+            Text("Setup asks before reading a discovered credential and again before saving it. If this connection cannot securely provide a supported credential, OpenClient will explain why instead.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .task { await facade.loadPersistedAccountsOnce() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("new-features.usage-section")
+    }
+
+    private static let exampleMetrics = [
+        OpenCodeProviderUsageDisplayMetric(
+            identity: .init(accountID: UUID(uuidString: "00000000-0000-0000-0000-000000000021")!, metricID: "openai-example"),
+            providerID: "openai",
+            providerName: String(localized: "OpenAI"),
+            accountLabel: String(localized: "Example"),
+            metricLabel: String(localized: "Usage limit"),
+            value: nil,
+            percentUsed: 36,
+            unit: .percentage,
+            period: .rolling(seconds: 18_000),
+            resetAt: nil,
+            isUnlimited: false,
+            fetchedAt: .distantPast
+        ),
+        OpenCodeProviderUsageDisplayMetric(
+            identity: .init(accountID: UUID(uuidString: "00000000-0000-0000-0000-000000000022")!, metricID: "openrouter-example"),
+            providerID: "openrouter",
+            providerName: String(localized: "OpenRouter beta"),
+            accountLabel: String(localized: "Example"),
+            metricLabel: String(localized: "Monthly spend"),
+            value: Decimal(string: "12.40"),
+            percentUsed: nil,
+            unit: .currency("USD"),
+            period: .month,
+            resetAt: nil,
+            isUnlimited: false,
+            fetchedAt: .distantPast
+        ),
+    ]
+}
+
+private struct OpenClientWhatsNewUsageProviderRow: View {
+    let provider: ProviderUsageProvider
+    let isBeta: Bool
+    let accounts: [ProviderUsageAccount]
+    let statuses: [UUID: ProviderUsageStatus]
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProviderLogo(providerID: provider.openCodeProviderID)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 7) {
+                    Text(provider.displayTitle)
+                        .font(.headline)
+                    if isBeta {
+                        Text("BETA")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.orange.opacity(0.14), in: Capsule())
+                    }
+                }
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(hasError ? Color.red : Color.secondary)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: statusSystemImage)
+                .foregroundStyle(statusColor)
+        }
+        .padding(.vertical, 11)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var providerAccounts: [ProviderUsageAccount] {
+        accounts.filter { $0.provider == provider }
+    }
+
+    private var hasError: Bool {
+        providerAccounts.contains { account in
+            guard let status = statuses[account.id] else { return false }
+            return switch status {
+            case .importFailed, .saveFailed, .usageFailed, .removalFailed: true
+            default: false
+            }
+        }
+    }
+
+    private var statusText: LocalizedStringResource {
+        if providerAccounts.isEmpty { return "Not set up" }
+        if hasError { return "Saved account needs attention" }
+        if providerAccounts.count == 1 { return "1 saved account" }
+        return "Multiple saved accounts"
+    }
+
+    private var statusSystemImage: String {
+        if hasError { return "exclamationmark.triangle.fill" }
+        return providerAccounts.isEmpty ? "circle" : "checkmark.circle.fill"
+    }
+
+    private var statusColor: Color {
+        if hasError { return .red }
+        return providerAccounts.isEmpty ? .secondary : .green
+    }
+}
+
+private struct OpenClientWhatsNewNotificationsSection: View {
+    @ObservedObject var bridge: OpenClientBridgeFacade
+    let allowsNativeSetup: Bool
+
+    var body: some View {
+        OpenClientWhatsNewNotificationsOverview(
+            setupDestination: allowsNativeSetup && bridge.snapshot.isConnected
+                ? OpenClientBridgeStatusView(bridge: bridge)
+                : nil
+        )
+    }
+}
+
+private struct OpenClientWhatsNewNotificationsOverview: View {
+    let setupDestination: OpenClientBridgeStatusView?
+
+    init(setupDestination: OpenClientBridgeStatusView? = nil) {
+        self.setupDestination = setupDestination
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Notifications from your OpenCode host", systemImage: "bell.badge.fill")
+                .font(.title2.bold())
+
+            Text("The OpenClient plugin now bundles OC Notify, a Home Screen web app that can alert you when a session becomes idle after activity or needs a permission or question answered.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            OpenClientWhatsNewNotificationStep(
+                number: 1,
+                text: "Install plugin 0.3.0 on your OpenCode host, enable notifications, and configure an HTTPS address reachable from your iPhone."
+            )
+            OpenClientWhatsNewNotificationStep(
+                number: 2,
+                text: "Open that origin in Safari, add OC Notify to the Home Screen, then pair it with the separate code generated on the host."
+            )
+            OpenClientWhatsNewNotificationStep(
+                number: 3,
+                text: "Allow notifications in OC Notify and enable OpenCode Activity. Setup prepares the connection but does not guarantee delivery."
+            )
+
+            if let setupDestination {
+                NavigationLink {
+                    setupDestination
+                } label: {
+                    Label("Open Plugin Notification Setup", systemImage: "bell.and.waves.left.and.right")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("new-features.notification-setup")
+            } else {
+                Text("Native setup becomes available when this app is connected to a configured, compatible legacy OpenCode plugin bridge. OpenCode v2 setup is not available here yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Link(destination: URL(string: "https://github.com/ntoporcov/openclient/blob/main/OpenClientPlugin/README.md")!) {
+                Label("Read the OC Notify Setup Guide", systemImage: "arrow.up.right.square")
+            }
+            .accessibilityIdentifier("new-features.notification-guide")
+
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.title2)
+                    .foregroundStyle(.green)
+                    .accessibilityHidden(true)
+                Text("Privacy: notification payloads are encrypted for Web Push and travel through Apple’s push service to your iPhone. OpenClient does not operate a hosted notification relay. Payloads exclude chat bodies and OpenCode passwords, but include routing information and project or session labels; those names or titles may appear on the Lock Screen.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+            .background(.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("new-features.notifications-section")
+    }
+}
+
+private struct OpenClientWhatsNewNotificationStep: View {
+    let number: Int
+    let text: LocalizedStringResource
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number, format: .number)
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(Color.accentColor, in: Circle())
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -235,6 +614,11 @@ private struct OpenClientWhatsNewHero: View {
                         OpenClientWhatsNewTalkMark()
                     case .openCodeV2:
                         OpenClientWhatsNewV2Mark()
+                    case .personalControl:
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .accessibilityHidden(true)
                     }
                 }
 

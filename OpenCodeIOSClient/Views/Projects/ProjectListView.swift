@@ -915,7 +915,6 @@ private struct ProjectNewChatModelOptionButton: View {
 }
 
 private enum ProjectNewChatQuickPicker: Equatable {
-    case project
     case workspace
     case agent
     case reasoning
@@ -993,7 +992,7 @@ struct ProjectNewChatSheet: View, Equatable {
                 GlobalFormsBanner(facade: viewModel.globalForms, location: newChatFormLocation)
                 GeometryReader { geometry in
                     ScrollView {
-                        newChatBody
+                        newChatBody(availableWidth: geometry.size.width)
                             .padding(.horizontal, 24)
                             .frame(minHeight: geometry.size.height)
                     }
@@ -1132,7 +1131,7 @@ struct ProjectNewChatSheet: View, Equatable {
     }
 
     @ViewBuilder
-    private var newChatBody: some View {
+    private func newChatBody(availableWidth: CGFloat) -> some View {
         if let startingSnapshot {
             NewSessionStartingPreview(snapshot: startingSnapshot)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1140,15 +1139,20 @@ struct ProjectNewChatSheet: View, Equatable {
             ContentUnavailableView("No Projects", systemImage: "folder", description: Text("Refresh projects before starting a new chat."))
                 .frame(maxWidth: .infinity)
         } else {
-            VStack(spacing: 14) {
+            VStack(spacing: 10) {
                 Spacer(minLength: 0)
 
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 40, weight: .semibold))
-                    .foregroundStyle(Color.accentColor.opacity(0.92))
-                    .padding(.bottom, 4)
-
                 editableChatTitle
+
+                if !request.locksProject {
+                    NewChatProjectCardPicker(
+                        projects: viewModel.rankedProjects,
+                        selectedProjectID: selectedProjectID,
+                        availableWidth: availableWidth,
+                        title: projectTitle,
+                        onSelect: { selectedProjectID = $0.id }
+                    )
+                }
 
                 destinationSubtitle
 
@@ -1162,12 +1166,18 @@ struct ProjectNewChatSheet: View, Equatable {
 
     @ViewBuilder
     private var editableChatTitle: some View {
-        Text(visibleChatTitle)
-            .font(.largeTitle.weight(.semibold))
-            .foregroundStyle(chatTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .primary : Color.accentColor)
-            .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, minHeight: 58)
+        HStack(spacing: 10) {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .font(.system(size: 27, weight: .semibold))
+                .foregroundStyle(Color.accentColor.opacity(0.92))
+                .accessibilityHidden(true)
+            Text(visibleChatTitle)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(chatTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .primary : Color.accentColor)
+                .lineLimit(2)
+        }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: 320, minHeight: 40, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture(perform: beginEditingChatTitle)
             .accessibilityLabel("Rename chat")
@@ -1245,9 +1255,17 @@ struct ProjectNewChatSheet: View, Equatable {
     @ViewBuilder
     private var destinationSubtitle: some View {
         VStack(spacing: 0) {
-            destinationLine
-            Divider()
-                .padding(.leading, 16)
+            if request.locksProject {
+                destinationLine
+                Divider()
+                    .padding(.leading, 16)
+            } else if showsWorkspacePicker {
+                selectionField("Workspace") {
+                    workspaceSelectTrigger
+                }
+                Divider()
+                    .padding(.leading, 16)
+            }
             composerSettingsLine
         }
         .frame(maxWidth: 320)
@@ -1307,7 +1325,7 @@ struct ProjectNewChatSheet: View, Equatable {
             content()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 11)
+        .padding(.vertical, 9)
         .frame(maxWidth: .infinity)
     }
 
@@ -1358,23 +1376,11 @@ struct ProjectNewChatSheet: View, Equatable {
 
     @ViewBuilder
     private var projectSelectTrigger: some View {
-        if request.locksProject {
-            Text(selectedProject.map(projectTitle) ?? String(localized: "Project"))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .accessibilityIdentifier("projects.newChat.project")
-        } else {
-            StablePickerMenu(
-                elements: quickPickerMenuElements(.project),
-                accessibilityLabel: String(localized: "Project"),
-                accessibilityValue: selectedProject.map(projectTitle) ?? String(localized: "Project"),
-                accessibilityIdentifier: "projects.newChat.project",
-                onSelect: { selectQuickPickerOption($0, in: .project) }
-            ) {
-                InlineSubtitleSelectTrigger(title: selectedProject.map(projectTitle) ?? String(localized: "Project"))
-            }
-        }
+        Text(selectedProject.map(projectTitle) ?? String(localized: "Project"))
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .accessibilityIdentifier("projects.newChat.project")
     }
 
     private var workspaceSelectTrigger: some View {
@@ -1488,20 +1494,6 @@ struct ProjectNewChatSheet: View, Equatable {
 
     private func quickPickerMenuElements(_ picker: ProjectNewChatQuickPicker) -> [StablePickerMenuElement] {
         switch picker {
-        case .project:
-            return [.inline(
-                id: "projects",
-                title: nil,
-                children: viewModel.projects.map { project in
-                    .action(
-                        id: project.id,
-                        title: projectTitle(project),
-                        systemImage: project.id == "global" ? "globe" : "folder.fill",
-                        isSelected: selectedProject?.id == project.id
-                    )
-                }
-            )]
-
         case .workspace:
             guard let selectedProject else { return [] }
             var options = [StablePickerMenuElement.action(
@@ -1563,11 +1555,6 @@ struct ProjectNewChatSheet: View, Equatable {
 
     private func selectQuickPickerOption(_ optionID: String, in picker: ProjectNewChatQuickPicker) {
         switch picker {
-        case .project:
-            if let project = viewModel.projects.first(where: { $0.id == optionID }) {
-                selectedProjectID = project.id
-            }
-
         case .workspace:
             if optionID == "main" {
                 workspaceSelection = .main
@@ -1897,6 +1884,45 @@ struct ProjectNewChatSheet: View, Equatable {
         viewModel.workspaceDisplayName(for: directory, in: selectedProject) ?? URL(fileURLWithPath: directory).lastPathComponent
     }
 
+}
+
+private struct NewChatProjectCardPicker: View {
+    let projects: [OpenCodeProject]
+    let selectedProjectID: String
+    let availableWidth: CGFloat
+    let title: (OpenCodeProject) -> String
+    let onSelect: (OpenCodeProject) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 10) {
+                ForEach(projects) { project in
+                    Button {
+                        OpenCodeHaptics.impact(.soft)
+                        onSelect(project)
+                    } label: {
+                        ProjectSelectionCard(
+                            project: project,
+                            title: title(project),
+                            isSelected: project.id == selectedProjectID,
+                            compact: true
+                        )
+                        .frame(width: 112)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(title(project))
+                    .accessibilityIdentifier("projects.newChat.project.\(project.id)")
+                }
+            }
+            .padding(.vertical, 4)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .scrollIndicators(.hidden)
+        .contentMargins(.horizontal, max(24, (availableWidth - 320) / 2), for: .scrollContent)
+        .padding(.horizontal, -24)
+        .accessibilityLabel("Project")
+        .accessibilityIdentifier("projects.newChat.project")
+    }
 }
 
 private struct NewChatInputBar: View {

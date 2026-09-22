@@ -1,20 +1,27 @@
 # OpenClient Plugin
 
 Connect OpenCode to the OpenClient iOS app for native tools, declarative
-visuals, and in-app browser automation.
+visuals, in-app browser automation, and optional OC Notify notifications.
 
 ## Install
 
-Bundled notifications are currently an unreleased development feature. The
-published `0.2.0` package provides the native tools bridge but does not include
-OC Notify. Build this repository's plugin and replace the existing plugin entry
-with the absolute URL of its built entrypoint:
+Add the plugin to your OpenCode configuration:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@openclient-ios/opencode-plugin@0.3.0"]
+}
+```
+
+Version `0.3.0` includes OC Notify. To enable notifications, replace the plugin
+entry with the options form:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    ["file:///absolute/path/to/OpenClientPlugin/dist/index.js", {
+    ["@openclient-ios/opencode-plugin@0.3.0", {
       "notifications": {
         "enabled": true,
         "publicOrigin": "https://notify.example.com",
@@ -35,7 +42,8 @@ hook during shutdown and reload.
 The OpenClient iOS app discovers the bridge on the connected OpenCode host and
 advertises the native tools supported by that app build.
 
-For repository development, run `npm run build` before loading `dist/index.js`.
+For repository development, run `npm run build` and replace the npm entry with
+`file:///absolute/path/to/OpenClientPlugin/dist/index.js`.
 Do not also load the old npm entry or the standalone notification adapter.
 OpenCode must be restarted after changing plugin code or configuration.
 
@@ -82,13 +90,13 @@ or opt into activity notifications. A first-time Home Screen PWA must still be
 paired using a separate code generated on the Mac:
 
 ```bash
-openclient-notify pair --data-dir /absolute/path/to/notification-state
+npm exec --package=@openclient-ios/opencode-plugin@0.3.0 -- openclient-notify pair --data-dir /absolute/path/to/notification-state
 ```
 
 For the repository prototype state, the explicit command is:
 
 ```bash
-openclient-notify pair --data-dir /absolute/path/to/NotificationPWA/.data
+npm exec --package=@openclient-ios/opencode-plugin@0.3.0 -- openclient-notify pair --data-dir /absolute/path/to/NotificationPWA/.data
 ```
 
 `openclient_visual_image` accepts an absolute path to a readable regular JPEG,

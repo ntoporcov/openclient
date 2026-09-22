@@ -8,6 +8,7 @@ struct ChatHeaderMenu: View {
     let containerHeight: CGFloat
     let glassNamespace: Namespace.ID
     var maximumWidth: CGFloat = 220
+    var onPresentationChange: (Bool) -> Void = { _ in }
     @State private var scope: ChatFacade.HeaderScope?
 
     var body: some View {
@@ -15,7 +16,7 @@ struct ChatHeaderMenu: View {
         let title = facade.headerSnapshot(for: current).navigationTitle
         let toolbar = facade.toolbarSnapshot(for: current)
         Button {
-            scope = facade.headerScope(for: current)
+            popoverScope.wrappedValue = facade.headerScope(for: current)
         } label: {
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: title).font(.caption)
@@ -33,15 +34,31 @@ struct ChatHeaderMenu: View {
         .frame(minHeight: 44)
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityIdentifier("chat.header")
-        .popover(item: $scope, attachmentAnchor: .rect(.bounds), arrowEdge: .top) { scope in
+        .popover(item: popoverScope, attachmentAnchor: .rect(.bounds), arrowEdge: .top) { scope in
             ChatHeaderPopover(facade: facade, scope: scope)
                 .frame(width: max(1, containerWidth - 32), height: min(600, max(1, containerHeight - 16)))
                 .presentationCompactAdaptation(.popover)
         }
-        .onChange(of: facade.promptContextID) { scope = nil }
-        .onChange(of: facade.selectedSession?.id) { scope = nil }
-        .onChange(of: facade.promptConnectionID) { scope = nil }
-        .onChange(of: facade.connectionStore.isConnected) { if !facade.connectionStore.isConnected { scope = nil } }
+        .onChange(of: facade.promptContextID) { dismissPopover() }
+        .onChange(of: facade.selectedSession?.id) { dismissPopover() }
+        .onChange(of: facade.promptConnectionID) { dismissPopover() }
+        .onChange(of: facade.connectionStore.isConnected) { if !facade.connectionStore.isConnected { dismissPopover() } }
+    }
+
+    private var popoverScope: Binding<ChatFacade.HeaderScope?> {
+        Binding(get: { scope }, set: { newValue in
+            let wasPresented = scope != nil
+            scope = newValue
+            let isPresented = newValue != nil
+            if wasPresented != isPresented {
+                onPresentationChange(isPresented)
+            }
+        })
+    }
+
+    private func dismissPopover() {
+        guard scope != nil else { return }
+        popoverScope.wrappedValue = nil
     }
 }
 
@@ -90,10 +107,20 @@ private struct ChatHeaderPopover: View {
                     Section {
                         Toggle(isOn: liveActivityBinding) {
                             Label("Live Activity", systemImage: "waveform")
+                                .foregroundStyle(.primary)
                         }
                         .disabled(changingLiveActivity)
                         .accessibilityIdentifier("chat.header.liveActivity")
                     }
+                }
+                Section {
+                    NavigationLink {
+                        ChatAppearanceSettingsView(store: facade.appCustomizationStore)
+                    } label: {
+                        Label("Appearance Settings", systemImage: "paintbrush")
+                            .foregroundStyle(.primary)
+                    }
+                    .accessibilityIdentifier("chat.header.appearance")
                 }
                 Section("Agents") {
                     ForEach(snapshot.selectableAgents, id: \.name) { agent in

@@ -20,6 +20,9 @@ struct ScreenshotSceneView: View {
         .onAppear {
             requestLandscapeForiPadScreenshots()
         }
+        .preferredColorScheme(
+            ProcessInfo.processInfo.environment["OPENCLIENT_UI_TEST_DARK_MODE"] == "1" ? .dark : nil
+        )
     }
 
     private func requestLandscapeForiPadScreenshots() {

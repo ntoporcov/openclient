@@ -64,7 +64,7 @@ struct ChatHeaderFixture: View {
     @State private var path = ["chat"]
 
     init() {
-        let model = AppViewModel()
+        let model = AppViewModel(appCustomizationStore: AppCustomizationStore(storageKey: "chatHeaderFixtureAppearance"))
         model.config = .init(baseURL: "https://chat-header.invalid", apiPreference: .legacy)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ChatHeaderFixtureProtocol.self]

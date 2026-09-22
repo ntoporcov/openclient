@@ -33,7 +33,7 @@ final class AppViewModel: ObservableObject {
 
     @Published var config = OpenCodeServerConfig()
     let connectionStore = ConnectionStore()
-    let appCustomizationStore = AppCustomizationStore()
+    let appCustomizationStore: AppCustomizationStore
     let appIconStore = AppIconStore()
     let speechVoiceStore = SpeechVoiceStore()
     let deepLinkRoutingStore = OpenClientDeepLinkRoutingStore()
@@ -877,9 +877,11 @@ final class AppViewModel: ObservableObject {
         providerUsageDisplayStore: ProviderUsageDisplayStore? = nil,
         providerUsageAccountRepository: (any ProviderUsageAccountRepository)? = nil,
         providerUsageClient: (any ProviderUsageFetching)? = nil,
-        providerUsageImporterFactory: ProviderUsageFacade.ImporterFactory? = nil
+        providerUsageImporterFactory: ProviderUsageFacade.ImporterFactory? = nil,
+        appCustomizationStore: AppCustomizationStore? = nil
     ) {
         self.backendFactory = backendFactory
+        self.appCustomizationStore = appCustomizationStore ?? AppCustomizationStore()
         self.providerUsageStore = providerUsageStore ?? ProviderUsageStore()
         self.providerUsageDisplayStore = providerUsageDisplayStore ?? ProviderUsageDisplayStore()
         self.providerUsageAccountRepository = providerUsageAccountRepository ?? Self.makeDefaultProviderUsageAccountRepository()
@@ -916,7 +918,7 @@ final class AppViewModel: ObservableObject {
         recentServerConfigs = recentConfigs
         hasSavedServer = recentConfigs.isEmpty == false
         showSavedServerPrompt = hasSavedServer
-        appCustomizationStore.reconcileAutoConnectServer(in: recentConfigs)
+        self.appCustomizationStore.reconcileAutoConnectServer(in: recentConfigs)
         if let savedConfig = recentConfigs.first {
             config = savedConfig
         }

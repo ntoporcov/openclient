@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@openclient-ios/opencode-plugin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Connect OpenCode to the OpenClient iOS app for native tools, visuals, and in-app browser automation.",
   "type": "module",
   "main": "./dist/index.js",

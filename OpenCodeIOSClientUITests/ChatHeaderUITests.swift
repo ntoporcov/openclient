@@ -188,6 +188,60 @@ final class ChatHeaderUITests: XCTestCase {
         app.terminate()
     }
 
+    func testHeaderAppearanceComposerStylePreviewPreservesPopoverAndDraft() {
+        let app = launch(window: true)
+        let input = app.textViews["chat.input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 15))
+        input.tap()
+        input.typeText("Keep this appearance draft")
+
+        app.buttons["chat.header"].tap()
+        let appearance = app.buttons["chat.header.appearance"]
+        XCTAssertTrue(appearance.waitForExistence(timeout: 3))
+        appearance.tap()
+
+        let composerStyle = app.buttons["chat.appearance.composer-style"]
+        XCTAssertTrue(composerStyle.waitForExistence(timeout: 3))
+        composerStyle.tap()
+
+        let picker = app.segmentedControls["configurations.composer-style"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 3))
+        let preview = app.descendants(matching: .any)["chat.appearance.composer-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 3))
+        XCTAssertEqual(preview.buttons.count, 0)
+        XCTAssertEqual(preview.textFields.count, 0)
+        XCTAssertEqual(preview.textViews.count, 0)
+
+        picker.buttons["Assistant"].tap()
+        XCTAssertTrue(picker.buttons["Assistant"].isSelected)
+        XCTAssertTrue(app.navigationBars["Composer Style"].exists, "Changing layout must not dismiss the header popover")
+        XCTAssertTrue(preview.label.contains("Assistant"))
+
+        picker.buttons["Messenger"].tap()
+        XCTAssertTrue(picker.buttons["Messenger"].isSelected)
+        XCTAssertTrue(app.navigationBars["Composer Style"].exists)
+        picker.buttons["Assistant"].tap()
+        XCTAssertTrue(picker.buttons["Assistant"].isSelected)
+
+        app.navigationBars["Composer Style"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Appearance Settings"].waitForExistence(timeout: 3))
+        app.navigationBars["Appearance Settings"].buttons.firstMatch.tap()
+        let agent = app.buttons["chat.header.agent.build"]
+        XCTAssertTrue(agent.waitForExistence(timeout: 3))
+        agent.tap()
+
+        XCTAssertTrue(input.waitForExistence(timeout: 3))
+        XCTAssertEqual(input.value as? String, "Keep this appearance draft")
+        XCTAssertTrue(app.buttons["chat.composer.model"].waitForExistence(timeout: 3))
+        app.buttons["chat.header"].tap()
+        XCTAssertTrue(appearance.waitForExistence(timeout: 3))
+        appearance.tap()
+        composerStyle.tap()
+        XCTAssertTrue(picker.waitForExistence(timeout: 3))
+        XCTAssertTrue(picker.buttons["Assistant"].isSelected)
+        app.terminate()
+    }
+
     func testAssistantHeaderAndContextStayInNavigationBarWhileKeyboardIsVisible() {
         for fixture in [(name: "Root", window: false, narrow: false), (name: "Window-320", window: true, narrow: true)] {
             let app = launch(window: fixture.window, narrow: fixture.narrow, assistant: true)
@@ -237,6 +291,47 @@ final class ChatHeaderUITests: XCTestCase {
         XCTAssertTrue(waitForPortrait(app))
         capture(app, "Header-Assistant-Portrait-After-Rotation")
         assertAssistantHeaderLayout(app)
+    }
+
+    func testAssistantComposerMenuOpensDismissesAndModelMenuRemainsUsable() {
+        let app = launch(window: false, assistant: true)
+        XCTAssertTrue(app.buttons["chat.composer.menu"].waitForExistence(timeout: 15))
+
+        let composerMenu = app.buttons["chat.composer.menu"]
+        composerMenu.tap()
+        let tools = app.navigationBars["Message Tools"]
+        XCTAssertTrue(tools.waitForExistence(timeout: 3))
+        XCTAssertTrue(composerMenu.exists)
+        capture(app, "Assistant-Attachment-Popover")
+
+        let photos = app.buttons["chat.composer.photos"]
+        XCTAssertTrue(photos.waitForExistence(timeout: 3))
+        photos.tap()
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+
+        let model = app.buttons["chat.composer.model"]
+        XCTAssertTrue(model.waitForExistence(timeout: 3))
+        let modelHittable = expectation(
+            for: NSPredicate(format: "hittable == true"),
+            evaluatedWith: model
+        )
+        wait(for: [modelHittable], timeout: 3)
+        model.tap()
+        let modelGroup = app.collectionViews.buttons["Model"].firstMatch
+        XCTAssertTrue(modelGroup.waitForExistence(timeout: 3))
+        modelGroup.tap()
+        let provider = app.collectionViews.buttons["OpenAI"].firstMatch
+        XCTAssertTrue(provider.waitForExistence(timeout: 3))
+        provider.tap()
+        let longModel = app.buttons["GPT-6 Astra Extended Context Research Preview"]
+        XCTAssertTrue(longModel.waitForExistence(timeout: 3))
+        longModel.tap()
+        XCTAssertTrue((model.value as? String ?? "").contains("GPT-6 Astra Extended Context Research Preview"))
+        Thread.sleep(forTimeInterval: 0.5)
+        capture(app, "Assistant-Glass-Model-Long-Title")
+        app.terminate()
     }
 
     private func assertAssistantHeaderLayout(_ app: XCUIApplication, expectsLeading: Bool = false) {

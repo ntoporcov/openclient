@@ -36,6 +36,7 @@ struct ModelToolbarMenu: View {
     var contentAlignment: HorizontalAlignment = .trailing
     var accessibilityIdentifier = "chat.toolbar.model"
     var providerAccessibilityIdentifier = "chat.toolbar.providerLogo"
+    var usesGlassCapsule = false
 
     var body: some View {
         StablePickerMenu(
@@ -45,58 +46,76 @@ struct ModelToolbarMenu: View {
             accessibilityIdentifier: accessibilityIdentifier,
             onSelect: select
         ) {
-            HStack(spacing: maximumWidth == nil ? 4 : 0) {
-                if maximumWidth != nil {
-                    Spacer(minLength: 0)
-                }
-                if maximumWidth == nil, let providerID = modelReference?.providerID, !providerID.isEmpty {
-                    ProviderIcon(providerID: providerID)
-                        .foregroundStyle(.primary.opacity(0.72))
-                }
-                if let reasoningSubtitle {
-                    VStack(alignment: contentAlignment, spacing: 0) {
-                        Text(modelTitle)
-                            .font(.caption)
-                            .truncationMode(.head)
-                            .accessibilityIdentifier("\(accessibilityIdentifier).title")
-                        Text(reasoningSubtitle)
-                            .font(.caption2)
-                            .foregroundStyle(.primary.opacity(0.72))
-                            .accessibilityIdentifier("\(accessibilityIdentifier).reasoning")
-                    }
-                } else {
-                    Text(modelTitle)
-                        .font(.caption)
-                        .truncationMode(.head)
-                }
-                if let maximumWidth, let providerID = modelReference?.providerID, !providerID.isEmpty {
-                    ProviderIcon(providerID: providerID, size: maximumWidth < 80 ? 16 : 24)
-                        .foregroundStyle(.primary.opacity(0.72))
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(Text(verbatim: providerName ?? providerID))
-                        .accessibilityIdentifier(providerAccessibilityIdentifier)
-                        .accessibilityHidden(false)
-                        .padding(.leading, 4)
-                        .fixedSize()
-                        .layoutPriority(1)
-                }
-            }
-            .lineLimit(contentAlignment == .leading || maximumWidth != nil ? 1 : nil)
-            .truncationMode(.tail)
-            .padding(.trailing, maximumWidth == nil ? 12 : 6)
-            .frame(
-                minWidth: contentAlignment == .leading ? 44 : maximumWidth == nil ? (modelReference == nil ? 72 : 108) : 44,
-                idealWidth: maximumWidth,
-                maxWidth: contentAlignment == .leading && maximumWidth == nil ? .infinity : maximumWidth,
-                minHeight: contentAlignment == .leading || maximumWidth != nil ? 44 : nil,
-                alignment: .leading
-            )
-            .opencodeToolbarGlassID("model-toolbar", in: glassNamespace)
+            modelLabel
         }
         .help(Text(verbatim: providerName ?? modelTitle))
         .transaction { transaction in
             transaction.animation = nil
         }
+    }
+
+    @ViewBuilder
+    private var modelLabel: some View {
+        if usesGlassCapsule {
+            modelLabelContent
+                .padding(.horizontal, 10)
+                .frame(minWidth: 44, minHeight: 44)
+                .opencodeGlassSurface(isInteractive: true, in: Capsule())
+                .opencodeToolbarGlassID("composer-model-selector", in: glassNamespace)
+                .opencodeMatchedGlassTransition()
+        } else {
+            modelLabelContent
+                .opencodeToolbarGlassID("model-toolbar", in: glassNamespace)
+        }
+    }
+
+    private var modelLabelContent: some View {
+        HStack(spacing: maximumWidth == nil ? 4 : 0) {
+            if maximumWidth != nil {
+                Spacer(minLength: 0)
+            }
+            if maximumWidth == nil, let providerID = modelReference?.providerID, !providerID.isEmpty {
+                ProviderIcon(providerID: providerID)
+                    .foregroundStyle(.primary.opacity(0.72))
+            }
+            if let reasoningSubtitle {
+                VStack(alignment: contentAlignment, spacing: 0) {
+                    Text(modelTitle)
+                        .font(.caption)
+                        .truncationMode(.head)
+                        .accessibilityIdentifier("\(accessibilityIdentifier).title")
+                    Text(reasoningSubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.primary.opacity(0.72))
+                        .accessibilityIdentifier("\(accessibilityIdentifier).reasoning")
+                }
+            } else {
+                Text(modelTitle)
+                    .font(.caption)
+                    .truncationMode(.head)
+            }
+            if let maximumWidth, let providerID = modelReference?.providerID, !providerID.isEmpty {
+                ProviderIcon(providerID: providerID, size: maximumWidth < 80 ? 16 : 24)
+                    .foregroundStyle(.primary.opacity(0.72))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text(verbatim: providerName ?? providerID))
+                    .accessibilityIdentifier(providerAccessibilityIdentifier)
+                    .accessibilityHidden(false)
+                    .padding(.leading, 4)
+                    .fixedSize()
+                    .layoutPriority(1)
+            }
+        }
+        .lineLimit(contentAlignment == .leading || maximumWidth != nil ? 1 : nil)
+        .truncationMode(.tail)
+        .padding(.trailing, usesGlassCapsule ? 0 : maximumWidth == nil ? 12 : 6)
+        .frame(
+            minWidth: contentAlignment == .leading ? 44 : maximumWidth == nil ? (modelReference == nil ? 72 : 108) : 44,
+            idealWidth: maximumWidth,
+            maxWidth: contentAlignment == .leading && maximumWidth == nil && !usesGlassCapsule ? .infinity : maximumWidth,
+            minHeight: contentAlignment == .leading || maximumWidth != nil ? 44 : nil,
+            alignment: .leading
+        )
     }
 
     private var reasoningSubtitle: String? {

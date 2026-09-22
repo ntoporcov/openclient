@@ -171,6 +171,52 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         ])
     }
 
+    func testCurrentCatalogEndsWithPersonalControlRelease() throws {
+        let release = try XCTUnwrap(OpenClientReleaseNotesCatalog.releases.last)
+
+        XCTAssertEqual(release.version, "1.0.21")
+        XCTAssertEqual(release.title, "More control, at a glance")
+        XCTAssertEqual(release.hero, .personalControl)
+        XCTAssertTrue(release.features.isEmpty)
+        XCTAssertFalse(release.showsSetup)
+        XCTAssertEqual(
+            OpenClientReleaseNotesCatalog.releases.map(\.version),
+            ["1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.19", "1.0.20", "1.0.21"]
+        )
+        XCTAssertEqual(Set(OpenClientReleaseNotesCatalog.releases.map(\.version)).count, 7)
+    }
+
+    func testUpgradeFromOnePointZeroPointTwentyPresentsOnePointZeroPointTwentyOneOnce() {
+        _ = OpenClientWhatsNewStore(
+            defaults: defaults,
+            currentVersion: "1.0.20",
+            releases: OpenClientReleaseNotesCatalog.releases,
+            hasExistingConnection: false
+        )
+
+        let upgraded = OpenClientWhatsNewStore(
+            defaults: defaults,
+            currentVersion: "1.0.21",
+            releases: OpenClientReleaseNotesCatalog.releases,
+            hasExistingConnection: false
+        )
+        XCTAssertEqual(upgraded.presentedRelease?.version, "1.0.21")
+
+        let reopened = OpenClientWhatsNewStore(
+            defaults: defaults,
+            currentVersion: "1.0.21",
+            releases: OpenClientReleaseNotesCatalog.releases,
+            hasExistingConnection: false
+        )
+        XCTAssertNil(reopened.presentedRelease)
+    }
+
+    func testPluginSetupUsesNotificationCapableRelease() {
+        XCTAssertEqual(OpenClientPluginSetup.packageName, "@openclient-ios/opencode-plugin@0.3.0")
+        XCTAssertTrue(OpenClientPluginSetup.prompt.contains("@openclient-ios/opencode-plugin@0.3.0"))
+        XCTAssertFalse(OpenClientPluginSetup.prompt.contains("@openclient-ios/opencode-plugin@0.2.0"))
+    }
+
     private var release: OpenClientReleaseNotes {
         OpenClientReleaseNotes(
             version: "2.0",

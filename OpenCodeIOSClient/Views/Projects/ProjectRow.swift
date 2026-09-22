@@ -101,6 +101,47 @@ struct ProjectAvatar: View {
     }
 }
 
+struct ProjectSelectionCard: View {
+    let project: OpenCodeProject
+    let title: String
+    let isSelected: Bool
+    var compact = false
+
+    var body: some View {
+        VStack(spacing: compact ? 6 : 10) {
+            ProjectAvatar(
+                title: title,
+                systemImage: project.id == "global" ? "globe" : "folder.fill",
+                icon: project.icon,
+                usesSystemImageFallback: project.id == "global",
+                isSelected: isSelected,
+                size: compact ? 36 : 48
+            )
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(compact ? 1 : 2)
+                .truncationMode(.tail)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: compact ? 76 : 116)
+        .padding(compact ? 9 : 12)
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .opencodeConcentricGlassSurface(
+            isInteractive: !compact,
+            minimumCornerRadius: 20,
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(isSelected ? 0.82 : 0), lineWidth: 2)
+        }
+        .animation(opencodeSelectionAnimation, value: isSelected)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 private struct ProjectAvatarImage<Fallback: View>: View {
     let source: String
     let fallback: Fallback

@@ -767,20 +767,28 @@ struct MessageComposer: View {
 
     #if os(iOS)
     private var catalystComposer: some View {
-        VStack(spacing: 0) {
-            composerTextFieldContent
-                .frame(maxWidth: .infinity)
+        ZStack(alignment: .bottomLeading) {
+            VStack(spacing: 0) {
+                composerTextFieldContent
+                    .frame(maxWidth: .infinity)
 
-            catalystComposerControlBar
-        }
-        .padding(.top, 4)
-        .padding(.bottom, 8)
-        .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.clear)
-                .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .onTapGesture {}
+                catalystComposerControlBar
+            }
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+            .background {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.clear)
+                    .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .onTapGesture {}
+            }
+
+            catalystAccessoryButton
+                .disabled(blocksNewInput)
+                .padding(.leading, 8)
+                .padding(.bottom, 8)
+                .zIndex(1)
         }
         #if targetEnvironment(macCatalyst)
         .padding(.bottom, 10)
@@ -788,10 +796,22 @@ struct MessageComposer: View {
     }
 
     private var catalystComposerControlBar: some View {
-        HStack(spacing: 4) {
-            catalystAccessoryButton
-                .disabled(blocksNewInput)
+        Group {
+            if #available(iOS 26.0, *) {
+                GlassEffectContainer(spacing: 20) {
+                    catalystComposerRemainingControls
+                }
+            } else {
+                catalystComposerRemainingControls
+            }
+        }
+        .padding(.leading, catalystControlHitTargetSize + 12)
+        .padding(.trailing, 8)
+        .frame(height: catalystControlHitTargetSize)
+    }
 
+    private var catalystComposerRemainingControls: some View {
+        HStack(spacing: 4) {
             catalystSelectorMenuRow
 
             Spacer()
@@ -819,7 +839,7 @@ struct MessageComposer: View {
                 catalystTrailingActionSlot
             }
         }
-        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
         .frame(height: catalystControlHitTargetSize)
     }
 
@@ -844,7 +864,8 @@ struct MessageComposer: View {
                 ) {
                     catalystSelectorLabel(
                         title: agentTitle.capitalized,
-                        systemImage: "person.crop.circle"
+                        systemImage: "person.crop.circle",
+                        glassID: "composer-agent-selector"
                     )
                 }
                 .transaction { transaction in
@@ -862,7 +883,9 @@ struct MessageComposer: View {
                     catalystSelectorLabel(
                         title: modelTitle,
                         systemImage: nil,
-                        providerID: modelReference?.providerID
+                        providerID: modelReference?.providerID,
+                        glassID: "composer-model-selector",
+                        usesGlassCapsule: false
                     )
                 }
                 .help(Text(verbatim: modelProviderName ?? modelTitle))
@@ -887,7 +910,8 @@ struct MessageComposer: View {
                 ) {
                     catalystSelectorLabel(
                         title: reasoningTitle,
-                        systemImage: "brain.head.profile"
+                        systemImage: "brain.head.profile",
+                        glassID: "composer-reasoning-selector"
                     )
                 }
                 .transaction { transaction in
@@ -911,7 +935,8 @@ struct MessageComposer: View {
                 },
                 contentAlignment: .leading,
                 accessibilityIdentifier: "chat.composer.model",
-                providerAccessibilityIdentifier: "chat.composer.model.providerLogo"
+                providerAccessibilityIdentifier: "chat.composer.model.providerLogo",
+                usesGlassCapsule: false
             )
         }
 #endif
@@ -922,12 +947,16 @@ struct MessageComposer: View {
             Image(systemName: "plus")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.primary)
-                .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
-                .contentShape(Rectangle())
+                .frame(width: 20, height: 20)
         }
-        .buttonStyle(.plain)
+        .composerPlusButtonStyle()
+        .controlSize(.small)
+        .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
         .accessibilityLabel("Open composer menu")
         .accessibilityIdentifier("chat.composer.menu")
+        .contentShape(Rectangle())
+        .opencodeToolbarGlassID("composer-plus-menu", in: accessoryGlassNamespace)
+        .shadow(color: .black.opacity(0.12), radius: 14, y: 4)
         .composerAccessoryTransitionSource(in: accessoryPresentationNamespace)
         .popover(
             isPresented: $isAccessoryMenuOpen,
@@ -962,7 +991,9 @@ struct MessageComposer: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white.opacity(isSendActionButtonEnabled ? 1 : 0.68))
                 .frame(width: 32, height: 32)
-                .background(Color.accentColor.opacity(0.82), in: Circle())
+                .opencodeActionGlass(clear: true, tint: Color.accentColor.opacity(0.82), size: 32, in: Circle())
+                .opencodeToolbarGlassID("composer-send-action", in: glassNamespace)
+                .opencodeMatchedGlassTransition()
                 .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
                 .contentShape(Rectangle())
         }
@@ -985,7 +1016,9 @@ struct MessageComposer: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(micActionForeground)
                 .frame(width: 32, height: 32)
-                .background(Color.primary.opacity(0.07), in: Circle())
+                .opencodeActionGlass(clear: true, tint: Color.primary.opacity(0.07), size: 32, in: Circle())
+                .opencodeToolbarGlassID("composer-mic-action", in: glassNamespace)
+                .opencodeMatchedGlassTransition()
                 .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
                 .contentShape(Rectangle())
         }
@@ -1004,7 +1037,9 @@ struct MessageComposer: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white.opacity(canToggleConversationMode ? 1 : 0.65))
                 .frame(width: 32, height: 32)
-                .background(Color.blue.opacity(0.82), in: Circle())
+                .opencodeActionGlass(clear: true, tint: Color.blue.opacity(0.82), size: 32, in: Circle())
+                .opencodeToolbarGlassID("composer-conversation-action", in: glassNamespace)
+                .opencodeMatchedGlassTransition()
                 .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
                 .contentShape(Rectangle())
         }
@@ -1024,7 +1059,9 @@ struct MessageComposer: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
-                .background(Color.red.opacity(0.72), in: Circle())
+                .opencodeActionGlass(clear: true, tint: Color.red.opacity(0.72), size: 32, in: Circle())
+                .opencodeToolbarGlassID("composer-stop-action", in: glassNamespace)
+                .opencodeMatchedGlassTransition()
                 .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
                 .contentShape(Rectangle())
         }
@@ -1034,8 +1071,15 @@ struct MessageComposer: View {
         .accessibilityIdentifier("chat.stream.stop")
     }
 
-    private func catalystSelectorLabel(title: String, systemImage: String?, providerID: String? = nil) -> some View {
-        HStack(spacing: 6) {
+    @ViewBuilder
+    private func catalystSelectorLabel(
+        title: String,
+        systemImage: String?,
+        providerID: String? = nil,
+        glassID: String,
+        usesGlassCapsule: Bool = true
+    ) -> some View {
+        let label = HStack(spacing: 6) {
             if let providerID, !providerID.isEmpty {
                 ProviderIcon(providerID: providerID)
                     .foregroundStyle(.secondary)
@@ -1048,12 +1092,27 @@ struct MessageComposer: View {
             }
             Text(verbatim: title)
         }
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .padding(.horizontal, 6)
-            .frame(height: catalystControlHitTargetSize)
-            .contentShape(Rectangle())
+
+        if usesGlassCapsule {
+            label
+                .padding(.horizontal, 10)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .frame(minWidth: catalystControlHitTargetSize, minHeight: catalystControlHitTargetSize)
+                .opencodeGlassSurface(isInteractive: true, in: Capsule())
+                .opencodeToolbarGlassID(glassID, in: accessoryGlassNamespace)
+                .opencodeMatchedGlassTransition()
+                .contentShape(Rectangle())
+        } else {
+            label
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .padding(.horizontal, 6)
+                .frame(height: catalystControlHitTargetSize)
+                .contentShape(Rectangle())
+        }
     }
 
     private var modelMenuElements: [StablePickerMenuElement] {
@@ -1474,7 +1533,7 @@ struct MessageComposer: View {
     private func presentAccessoryMenu() {
         OpenCodeHaptics.impact(.soft)
         withAnimation(opencodeSelectionAnimation) {
-            isAccessoryMenuOpen = true
+            isAccessoryMenuOpen.toggle()
         }
     }
 
@@ -1614,6 +1673,7 @@ struct MessageComposer: View {
                             systemImage: "brain.head.profile",
                             tint: .purple,
                             isDisabled: !canInsertAgentMentionShortcut,
+                            accessibilityIdentifier: "chat.composer.agentMention",
                             action: insertAgentMentionShortcut
                         )
                     }
@@ -1625,6 +1685,7 @@ struct MessageComposer: View {
                             systemImage: "rectangle.compress.vertical",
                             tint: .teal,
                             isDisabled: isBusy,
+                            accessibilityIdentifier: "chat.composer.compact",
                             action: {
                                 isAccessoryMenuOpen = false
                                 onCompact()
@@ -1637,6 +1698,7 @@ struct MessageComposer: View {
                             systemImage: "arrow.triangle.branch",
                             tint: .purple,
                             isDisabled: isBusy || !canFork,
+                            accessibilityIdentifier: "chat.composer.fork",
                             action: {
                                 expandAccessorySheetForNestedContentIfNeeded()
                                 accessoryNavigationPath.append(.fork)

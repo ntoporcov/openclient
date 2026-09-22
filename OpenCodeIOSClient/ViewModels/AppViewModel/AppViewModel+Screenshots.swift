@@ -176,6 +176,21 @@ extension AppViewModel {
 
     private static func screenshotNewSession() -> AppViewModel {
         let viewModel = baseConnectedScreenshotViewModel(selectedSession: nil)
+        if ProcessInfo.processInfo.environment["OPENCLIENT_UI_TEST_NEW_SESSION_PROJECT_POLISH"] == "1" {
+            viewModel.projects += [
+                OpenCodeProject(
+                    id: "screenshot-long-project",
+                    worktree: "/Users/nick/Code/a-project-name-that-must-truncate",
+                    vcs: "git",
+                    name: "a-project-name-that-must-truncate",
+                    sandboxes: nil,
+                    icon: nil,
+                    time: OpenCodeProject.Time(created: 1_712_000_000, updated: 1_712_000_000)
+                ),
+            ]
+        }
+        viewModel.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)
+        _ = try? viewModel.requireBackendConnection()
         viewModel.currentProject = OpenClientScreenshotData.repoProject
         viewModel.selectedDirectory = OpenClientScreenshotData.repoProject.worktree
         viewModel.projectWorkspacesEnabledByScope = [
@@ -196,7 +211,7 @@ extension AppViewModel {
         viewModel.presentNewProjectChatSheet(
             projectID: OpenClientScreenshotData.repoProject.id,
             workspaceDirectory: OpenClientScreenshotData.repoProject.worktree,
-            locksProject: false,
+            locksProject: ProcessInfo.processInfo.environment["OPENCLIENT_UI_TEST_NEW_SESSION_LOCKED"] == "1",
             composerSelection: NewProjectChatComposerSelection(
                 agentName: "build",
                 modelReference: OpenCodeModelReference(

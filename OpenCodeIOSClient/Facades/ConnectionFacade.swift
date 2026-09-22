@@ -80,6 +80,7 @@ final class ConnectionFacade: ObservableObject {
     var isUsingAppleIntelligence: Bool { viewModel.isUsingAppleIntelligence }
     var recentServerConfigs: [OpenCodeServerConfig] { viewModel.recentServerConfigs }
     var appIconStore: AppIconStore { viewModel.appIconStore }
+    var appCustomizationStore: AppCustomizationStore { viewModel.appCustomizationStore }
     var appIcons: [OpenClientAppIcon] { viewModel.appIconStore.icons }
     var selectedAppIcon: OpenClientAppIcon { viewModel.appIconStore.selectedIcon }
     var speechVoiceStore: SpeechVoiceStore { viewModel.speechVoiceStore }

@@ -614,7 +614,6 @@ final class FeatureFacadeTests: XCTestCase {
             info: OpenCodeMessage(id: "message", role: "assistant", sessionID: "session", time: nil, agent: nil, model: nil),
             parts: []
         )]
-        viewModel.sessionListStore.previews = [:]
         viewModel.sessionListStore.workspaceSessionsByDirectory["/tmp/project"] = OpenCodeWorkspaceSessionState()
         viewModel.modelConfigurationStore.selectedAgentNamesBySessionID["session"] = "build"
         viewModel.modelConfigurationStore.selectedModelsBySessionID["session"] = OpenCodeModelReference(
@@ -634,6 +633,37 @@ final class FeatureFacadeTests: XCTestCase {
         ]
 
         XCTAssertEqual(changes, 1)
+        withExtendedLifetime(observation) {}
+    }
+
+    func testNewProjectChatFacadeExposesCachedRecentProjectRanking() {
+        let viewModel = AppViewModel()
+        let first = OpenCodeProject(id: "first", worktree: "/tmp/first", vcs: "git", name: "First", sandboxes: nil, icon: nil, time: nil)
+        let second = OpenCodeProject(id: "second", worktree: "/tmp/second", vcs: "git", name: "Second", sandboxes: nil, icon: nil, time: nil)
+        viewModel.projects = [first, second]
+        var session = OpenCodeSession(id: "recent", title: "Recent", workspaceID: nil, directory: second.worktree, projectID: second.id, parentID: nil)
+        session.time = .init(created: 100, updated: 200)
+        viewModel.sessionListStore.setRecentSessions([session], for: second.worktree)
+
+        XCTAssertEqual(viewModel.newProjectChatFacade.rankedProjects.map(\.id), [second.id, first.id])
+    }
+
+    func testNewProjectChatFacadeObservesFreshDirectorySessionsForRanking() {
+        let viewModel = AppViewModel()
+        let first = OpenCodeProject(id: "first", worktree: "/tmp/first", vcs: "git", name: "First", sandboxes: nil, icon: nil, time: nil)
+        let second = OpenCodeProject(id: "second", worktree: "/tmp/second", vcs: "git", name: "Second", sandboxes: nil, icon: nil, time: nil)
+        viewModel.projects = [first, second]
+        let facade = viewModel.newProjectChatFacade
+        var changes = 0
+        let observation = facade.objectWillChange.sink { changes += 1 }
+        let store = viewModel.directoryStoreRegistry.store(for: second.worktree)
+        var session = OpenCodeSession(id: "live", title: "Live", workspaceID: nil, directory: second.worktree, projectID: second.id, parentID: nil)
+        session.time = .init(created: 100, updated: 300)
+
+        store.sessions = [session]
+
+        XCTAssertGreaterThan(changes, 0)
+        XCTAssertEqual(facade.rankedProjects.map(\.id), [second.id, first.id])
         withExtendedLifetime(observation) {}
     }
 

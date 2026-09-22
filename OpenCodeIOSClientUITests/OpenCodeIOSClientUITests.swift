@@ -127,7 +127,12 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             let done = app.buttons["new-features.continue"]
             XCTAssertTrue(done.waitForExistence(timeout: 5))
             let scroll = app.scrollViews.firstMatch
-            let keys = ["Ahead of what’s next", "EXPERIMENTAL PREVIEW", "Select. Copy. Done.", "Smoother around the edges"]
+            let keys = [
+                "More control, at a glance",
+                "Choose your composer",
+                "Usage, without leaving OpenClient",
+                "Notifications from your OpenCode host",
+            ]
             let initial = XCTAttachment(screenshot: app.screenshot())
             initial.name = "\(profile)-hero"
             initial.lifetime = .keepAlways
@@ -149,13 +154,9 @@ final class OpenCodeIOSClientUITests: XCTestCase {
                     XCTAssertEqual(card.label, text)
                     if accessibilitySize {
                         let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
-                        let lineHeight = UIFont.preferredFont(forTextStyle: .largeTitle, compatibleWith: traits).lineHeight
+                        let lineHeight = UIFont.preferredFont(forTextStyle: .title1, compatibleWith: traits).lineHeight
                         XCTAssertGreaterThan(card.frame.height, lineHeight * 1.5, "The full Portuguese title must wrap rather than truncate to one line")
                     }
-                }
-                if index == 1 {
-                    XCTAssertTrue(app.staticTexts["new-features.v2-preview"].exists)
-                    XCTAssertTrue(card.label.contains("OpenCode v2"))
                 }
                 let screenshot = XCTAttachment(screenshot: app.screenshot())
                 screenshot.name = "\(profile)-card-\(index)"
@@ -172,6 +173,52 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             XCTAssertTrue(entry.isHittable)
             app.terminate()
         }
+    }
+
+    @MainActor
+    func testLatestAnnouncementComposerAndOpenAISetupStayInsideSheet() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "connection"
+        app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "1"
+        app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["screenshot.scene.connection"].waitForExistence(timeout: 15))
+        let entry = app.buttons["help.latest-updates"]
+        for _ in 0..<6 where !entry.isHittable { app.swipeUp() }
+        XCTAssertTrue(entry.isHittable)
+        entry.tap()
+
+        let composerPicker = app.segmentedControls["new-features.composer-style"]
+        XCTAssertTrue(composerPicker.waitForExistence(timeout: 5))
+        let initialStyle = composerPicker.buttons.allElementsBoundByIndex.first(where: \.isSelected)?.label
+        composerPicker.buttons["Assistant"].tap()
+        let preview = app.descendants(matching: .any)["chat.appearance.composer-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertTrue(preview.label.contains("Assistant composer preview"))
+        attachScreenshot(named: "announcement-assistant-preview")
+        composerPicker.buttons["Messenger"].tap()
+        XCTAssertTrue(preview.label.contains("Messenger composer preview"))
+        attachScreenshot(named: "announcement-messenger-preview")
+        if let initialStyle { composerPicker.buttons[initialStyle].tap() }
+
+        let setup = app.buttons["new-features.openai-usage-setup"]
+        let done = app.buttons["new-features.continue"]
+        let scroll = app.scrollViews.firstMatch
+        // XCTest can report content behind the pinned footer as hittable.
+        for _ in 0..<10 where !setup.isHittable || setup.frame.maxY > done.frame.minY - 12 {
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(setup.isHittable)
+        XCTAssertLessThan(setup.frame.maxY, done.frame.minY)
+        setup.tap()
+
+        XCTAssertTrue(app.navigationBars["OpenAI"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "announcement-openai-setup")
+        XCTAssertTrue(app.buttons["new-features.continue"].exists == false)
+        app.navigationBars["OpenAI"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["new-features.continue"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -534,6 +581,79 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         providerSearch.tap()
         providerSearch.typeText("GPT-5.4")
         XCTAssertTrue(app.staticTexts["No Models"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor
+    func testNewSessionControlsRemainAboveKeyboard() {
+        for locked in [false, true] {
+            let app = XCUIApplication()
+            app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "new-session"
+            if locked {
+                app.launchEnvironment["OPENCLIENT_UI_TEST_NEW_SESSION_LOCKED"] = "1"
+            }
+            app.launch()
+
+            XCTAssertTrue(app.navigationBars["New Session"].waitForExistence(timeout: 10))
+            let input = app.textViews["chat.input"].firstMatch
+            XCTAssertTrue(input.waitForExistence(timeout: 10), "Expected enabled new-session composer")
+            input.tap()
+
+            let keyboard = app.keyboards.firstMatch
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "Expected the real composer to show the software keyboard")
+            let keyboardTop = keyboard.frame.minY
+            let controlIDs = locked
+                ? ["projects.newChat.project", "projects.newChat.worktree", "projects.newChat.agent", "projects.newChat.model", "projects.newChat.reasoning"]
+                : ["projects.newChat.project.screenshot-project", "projects.newChat.worktree", "projects.newChat.agent", "projects.newChat.model", "projects.newChat.reasoning"]
+
+            for identifier in controlIDs {
+                let control = app.descendants(matching: .any)[identifier]
+                XCTAssertTrue(control.waitForExistence(timeout: 5), "Expected \(identifier) without scrolling")
+                XCTAssertLessThanOrEqual(control.frame.maxY, keyboardTop, "Expected \(identifier) above the keyboard without scrolling")
+            }
+
+            if !locked {
+                let leadingCard = app.buttons["projects.newChat.project.screenshot-project"]
+                let selectorPanelLeadingEdge = (app.frame.width - 320) / 2
+                XCTAssertEqual(leadingCard.frame.minX, selectorPanelLeadingEdge, accuracy: 1.5, "Initial project row must align with the selector panel")
+            }
+
+            attachScreenshot(named: "new-session-\(locked ? "locked-" : "")keyboard-controls")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testNewSessionProjectCardsFillSheetViewport() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "new-session"
+        app.launchEnvironment["OPENCLIENT_UI_TEST_NEW_SESSION_PROJECT_POLISH"] = "1"
+        app.launchEnvironment["OPENCLIENT_UI_TEST_DARK_MODE"] = "1"
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["New Session"].waitForExistence(timeout: 10))
+        let input = app.textViews["chat.input"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+
+        let leadingCard = app.buttons["projects.newChat.project.screenshot-project"]
+        XCTAssertTrue(leadingCard.waitForExistence(timeout: 5))
+        XCTAssertEqual(leadingCard.frame.minX, (app.frame.width - 320) / 2, accuracy: 1.5)
+
+        let longNameCard = app.buttons["projects.newChat.project.screenshot-long-project"]
+        XCTAssertTrue(longNameCard.waitForExistence(timeout: 5), "The expanded lazy viewport must realize the trailing project")
+        XCTAssertLessThanOrEqual(longNameCard.staticTexts.firstMatch.frame.height, 22, "Compact project names must stay on one line")
+
+        let projectPicker = app.scrollViews["projects.newChat.project"]
+        XCTAssertTrue(projectPicker.waitForExistence(timeout: 5))
+        XCTAssertLessThan(longNameCard.frame.minX, projectPicker.frame.maxX, "The next project should peek into the sheet")
+        XCTAssertGreaterThan(longNameCard.frame.maxX, projectPicker.frame.maxX, "The next project should remain partially offscreen")
+
+        let docsCard = app.buttons["projects.newChat.project.screenshot-docs"]
+        XCTAssertTrue(docsCard.waitForExistence(timeout: 5))
+        docsCard.tap()
+        XCTAssertTrue(docsCard.isSelected)
+        attachScreenshot(named: "new-session-project-polish-dark-keyboard")
     }
 
     @MainActor
@@ -1150,6 +1270,9 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let globalSettings = app.buttons["configurations.global-settings"]
         try await reveal(globalSettings)
         globalSettings.tap()
+        let chatAppearance = app.buttons["configurations.chat-appearance"]
+        try await reveal(chatAppearance)
+        chatAppearance.tap()
         let toggleIDs = ["configurations.show-tool-calls", "configurations.show-reasoning-blocks"]
         var initialValues: [String: String] = [:]
         for id in toggleIDs {
@@ -1163,9 +1286,12 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             control.tap()
             try await waitForV2Smoke(in: app, "Expected local appearance toggle to change") { toggle.value as? String != initial }
         }
+        try await backFromConfiguration("Appearance Settings")
         try await backFromConfiguration("Configurations")
         try await reveal(globalSettings)
         globalSettings.tap()
+        try await reveal(chatAppearance)
+        chatAppearance.tap()
         for id in toggleIDs {
             let toggle = app.switches[id]
             try await reveal(toggle)
@@ -1176,6 +1302,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             try await waitForV2Smoke(in: app, "Expected local preference restoration") { toggle.value as? String == initialValues[id] }
         }
         attachScreenshot(named: "v2-feature-global-settings-restored")
+        try await backFromConfiguration("Appearance Settings")
         try await backFromConfiguration("Configurations")
         let providers = app.buttons["configurations.addProvider"]
         try await reveal(providers)

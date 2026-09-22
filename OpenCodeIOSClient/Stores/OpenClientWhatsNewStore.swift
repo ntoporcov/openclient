@@ -9,6 +9,7 @@ struct OpenClientReleaseNotes: Identifiable, Equatable {
         case ipad
         case talk
         case openCodeV2
+        case personalControl
     }
 
     struct Feature: Identifiable, Equatable {
@@ -267,6 +268,14 @@ enum OpenClientReleaseNotesCatalog {
             featureSectionTitle: "Little things that move work forward",
             showsSetup: false
         ),
+        OpenClientReleaseNotes(
+            version: "1.0.21",
+            title: "More control, at a glance",
+            summary: "Choose how you write, keep an eye on provider usage, and stay informed when OpenCode needs you.",
+            features: [],
+            hero: .personalControl,
+            showsSetup: false
+        ),
     ]
 }
 
@@ -283,10 +292,10 @@ enum OpenClientLocalizationContribution {
 }
 
 enum OpenClientPluginSetup {
-    static let packageName = "@openclient-ios/opencode-plugin@0.2.0"
+    static let packageName = "@openclient-ios/opencode-plugin@0.3.0"
 
     static let prompt = """
-    Install @openclient-ios/opencode-plugin@0.2.0 in my global OpenCode configuration at ~/.config/opencode/opencode.json.
+    Install @openclient-ios/opencode-plugin@0.3.0 in my global OpenCode configuration at ~/.config/opencode/opencode.json.
 
     First inspect the existing configuration. Add the package to the existing "plugin" array without removing other plugins or settings. Preserve valid JSON and the existing schema entry.
 

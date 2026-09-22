@@ -97,7 +97,8 @@ struct RootView<ChatDestination: View>: View {
                 ConnectionSheetView(
                     facade: shell.connection,
                     commerce: shell.commerce,
-                    whatsNew: whatsNew
+                    whatsNew: whatsNew,
+                    bridge: bridge
                 )
             case .createSession:
                 CreateSessionSheet(facade: shell.sessions)
@@ -118,6 +119,7 @@ struct RootView<ChatDestination: View>: View {
             OpenClientWhatsNewView(
                 release: release,
                 connection: shell.connection,
+                bridge: bridge,
                 onDone: whatsNew.dismiss
             )
         }
