@@ -19,6 +19,7 @@
 		032CFC26B2D9A3E945D1F635 /* OpenCodeServerPasswordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AA5B93EFBA292AE8B56323 /* OpenCodeServerPasswordStore.swift */; };
 		03DCDDFD8CE860FAEAD89DB3 /* ThinkingRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04820AC7A37C8876C322AE1F /* ThinkingRow.swift */; };
 		052D6B83E3E8D05BA230A3C5 /* ProviderUsageDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4E0D7F274F275C15FD384C4 /* ProviderUsageDiscoveryTests.swift */; };
+		0581A44033AEAA8D181DAABB /* OpenCodeProviderUsageWidgetContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86EE3D764DE1B924A408C47 /* OpenCodeProviderUsageWidgetContent.swift */; };
 		067D79F84D5A20EBD13FDD63 /* AppViewModel+Providers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B589E8430FCAC0B3367A60C /* AppViewModel+Providers.swift */; };
 		06BEDEE288262C5FEF4DCDF2 /* ResponseCopyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744BFC51A0F0E53CD7DF2F4A /* ResponseCopyUITests.swift */; };
 		0722C8EDD913B4953434AC4E /* ProviderUsageCredentialRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AAB8A147EC4FA67A43131A0 /* ProviderUsageCredentialRepository.swift */; };
@@ -63,6 +64,7 @@
 		152399F750FB324E47871DAA /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DF20ACB6AD0EFAC28A95D9 /* HelpView.swift */; };
 		153970FE4030F5A9B02E3DE3 /* ProviderUsageCredentialImportProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4200DE67B0A644299E9E6A43 /* ProviderUsageCredentialImportProtocol.swift */; };
 		15DC950F3073F1C9401075D6 /* CreateWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8409662C50D2BEAF859F67D7 /* CreateWorkspaceSheet.swift */; };
+		1621464BE50ABB2038A4F6A4 /* OpenCodeProviderUsageWidgetContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86EE3D764DE1B924A408C47 /* OpenCodeProviderUsageWidgetContent.swift */; };
 		16CEC496585A1932D18D7252 /* FunAndGamesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770DAD6B1290DD7EE6686359 /* FunAndGamesStore.swift */; };
 		16EB1CE37E1DB3592FF2846B /* OpenClientVisualVideoTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07BCC4CB8A1DEC6D03C3721 /* OpenClientVisualVideoTool.swift */; };
 		17207130D56238ACDC372FEC /* OpenClientVisualHTMLTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8623181740A38776BAB1F5D /* OpenClientVisualHTMLTool.swift */; };
@@ -280,6 +282,7 @@
 		70E4E1C33A9EE3D0965C9018 /* OpenClientPaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 768A055291804D40C5C400C9 /* OpenClientPaywallView.swift */; };
 		7149D59C3B14817F09F7F0E0 /* SnapshotHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C126EA7240EC59D518E11FA2 /* SnapshotHelper.swift */; };
 		716C1CF920F6BCAD754D9A9F /* SessionListFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39611722F24CFCE364E6B3A3 /* SessionListFacade.swift */; };
+		71D43A3CACBE7043FB6EC1DA /* OpenCodeProviderUsageWidgetContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86EE3D764DE1B924A408C47 /* OpenCodeProviderUsageWidgetContent.swift */; };
 		71E3BC763941CB2A6B6399C4 /* SessionLiveActivityMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E365D144D112480228AFE76 /* SessionLiveActivityMenu.swift */; };
 		72CE296EA2CAAD84D6C36D25 /* OpenClientWhatsNewStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D572C030A992FBAB5FCE81D9 /* OpenClientWhatsNewStore.swift */; };
 		73089DEC5B77318173F081E5 /* ChatDebugProbeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC61FC8D9D3F923A6C41F1AC /* ChatDebugProbeSheet.swift */; };
@@ -299,6 +302,7 @@
 		78F32D059AE30FE1B71D193A /* AppViewModel+Widgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0207739825466816326A8CE4 /* AppViewModel+Widgets.swift */; };
 		79703B9FE37AE1D6B08836E8 /* Trees.png in Resources */ = {isa = PBXBuildFile; fileRef = 1BC7E386B30F28CF8B9690C1 /* Trees.png */; };
 		79E6FCD9812F913E436BEB65 /* Pass5LiveIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B945D51D9AFAF7340A1CAAE /* Pass5LiveIntegrationTests.swift */; };
+		79EF2F38A6AAF08C1C63D47A /* OpenCodeProviderUsageWidgetContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86EE3D764DE1B924A408C47 /* OpenCodeProviderUsageWidgetContent.swift */; };
 		7A32F8D94D2064B9FACC955E /* ConnectionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D80E21EF102A85B41CE48EBC /* ConnectionCoordinator.swift */; };
 		7AFACF693932971AA33CD49A /* MCPListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E174CC4F5F328F7652FFFE5F /* MCPListView.swift */; };
 		7B13E182462CA311B2F1AC45 /* OpenCodeAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F548AE214A483AB9207C376D /* OpenCodeAPIClient.swift */; };
@@ -945,6 +949,7 @@
 		C73E5DD2A81A2BE85D770863 /* OpenCodeShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenCodeShareExtension.entitlements; sourceTree = "<group>"; };
 		C7A01D05F93385A37BD72757 /* LegacySubmissionRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacySubmissionRecoveryTests.swift; sourceTree = "<group>"; };
 		C8623181740A38776BAB1F5D /* OpenClientVisualHTMLTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientVisualHTMLTool.swift; sourceTree = "<group>"; };
+		C86EE3D764DE1B924A408C47 /* OpenCodeProviderUsageWidgetContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeProviderUsageWidgetContent.swift; sourceTree = "<group>"; };
 		C89E5A5AAB367A0E214A668A /* ProjectCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCoordinator.swift; sourceTree = "<group>"; };
 		C9159522F297AB0893D930A2 /* SessionListStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListStore.swift; sourceTree = "<group>"; };
 		C93DEC83084F3C7FC50B5020 /* AppShellFacadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellFacadeTests.swift; sourceTree = "<group>"; };
@@ -1330,6 +1335,7 @@
 				F38ECBF6C78E9A20D6110C19 /* OpenCodePreviewText.swift */,
 				14A0FBF27A25EDAC5132E410 /* OpenCodeProfileIdentity.swift */,
 				3709F71C94118068B066715F /* OpenCodeProviderUsageDisplay.swift */,
+				C86EE3D764DE1B924A408C47 /* OpenCodeProviderUsageWidgetContent.swift */,
 				C4AA5B93EFBA292AE8B56323 /* OpenCodeServerPasswordStore.swift */,
 				70A5B94B94132296B0A9AB18 /* OpenCodeStableHash.swift */,
 				2B362EA66509E48608C95477 /* OpenCodeWidgetModels.swift */,
@@ -2048,6 +2054,7 @@
 				9574FFE9C40CDBE83A39619D /* OpenCodePreviewText.swift in Sources */,
 				A6DFBD201C602A8847A35786 /* OpenCodeProfileIdentity.swift in Sources */,
 				3B982FB9E93E2631CDB87662 /* OpenCodeProviderUsageDisplay.swift in Sources */,
+				1621464BE50ABB2038A4F6A4 /* OpenCodeProviderUsageWidgetContent.swift in Sources */,
 				3CB6667D6B9E122A31412679 /* OpenCodeServerPasswordStore.swift in Sources */,
 				383D2A52E27FF310F943BC35 /* OpenCodeStableHash.swift in Sources */,
 				3C222F4738224A084D5D2BBD /* OpenCodeWidgetModels.swift in Sources */,
@@ -2161,6 +2168,7 @@
 				7F1C12E9A5242DF8624C9A4A /* OpenCodePreviewText.swift in Sources */,
 				9B3FEEA1DB46CCD9198E0493 /* OpenCodeProfileIdentity.swift in Sources */,
 				82A4CC1477201C03B268645F /* OpenCodeProviderUsageDisplay.swift in Sources */,
+				71D43A3CACBE7043FB6EC1DA /* OpenCodeProviderUsageWidgetContent.swift in Sources */,
 				01EB4652AF2961C51DD47DF2 /* OpenCodeProviderUsageWidgetIntents.swift in Sources */,
 				7FE00778C5B3F5F764F10236 /* OpenCodeProviderUsageWidgets.swift in Sources */,
 				B71DE83912485B00B1154A72 /* OpenCodeRecentSessionsWidget.swift in Sources */,
@@ -2329,6 +2337,7 @@
 				F1F3D888049D4F1BC07B4589 /* OpenCodePreviewText.swift in Sources */,
 				FDE0A411BAFE54D5B8321CF3 /* OpenCodeProfileIdentity.swift in Sources */,
 				B60605EE68CCE1322D8CD471 /* OpenCodeProviderUsageDisplay.swift in Sources */,
+				79EF2F38A6AAF08C1C63D47A /* OpenCodeProviderUsageWidgetContent.swift in Sources */,
 				9556984BB2C2F5AF9D93E252 /* OpenCodeSavedServer.swift in Sources */,
 				B4886ACD51D0D4389A832A55 /* OpenCodeServerConfig.swift in Sources */,
 				C97B32A827B47B9F6E355037 /* OpenCodeServerPasswordStore.swift in Sources */,
@@ -2571,6 +2580,7 @@
 				80048EC25354DD2CF7FC34E4 /* OpenCodePreviewText.swift in Sources */,
 				B45B483CBB4F39AF24B87F13 /* OpenCodeProfileIdentity.swift in Sources */,
 				877ACBC7346F3B1895A0C38A /* OpenCodeProviderUsageDisplay.swift in Sources */,
+				0581A44033AEAA8D181DAABB /* OpenCodeProviderUsageWidgetContent.swift in Sources */,
 				B2608D2922DC434AFCAF03CC /* OpenCodeSavedServer.swift in Sources */,
 				EF7A2854EBAFD83C8D9A04F0 /* OpenCodeServerConfig.swift in Sources */,
 				33D639D324CB7874C62439FF /* OpenCodeServerPasswordStore.swift in Sources */,
@@ -2714,7 +2724,7 @@
 		37A38C3C67B13A34407EB08A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -2726,7 +2736,7 @@
 		37B20BB1A98ED0C0FD08E35D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				ENABLE_TESTABILITY = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

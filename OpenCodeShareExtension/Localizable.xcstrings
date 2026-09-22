@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ credits": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "%@ credits" } }, "it": { "stringUnit": { "state": "translated", "value": "%@ crediti" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "%@ créditos" } } } },
+    "Daily": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Daily" } }, "it": { "stringUnit": { "state": "translated", "value": "Giornaliero" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Diário" } } } },
+    "In %@": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "In %@" } }, "it": { "stringUnit": { "state": "translated", "value": "Tra %@" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Em %@" } } } },
+    "Lifetime": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Lifetime" } }, "it": { "stringUnit": { "state": "translated", "value": "Sempre" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Todo o período" } } } },
+    "Monthly": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Monthly" } }, "it": { "stringUnit": { "state": "translated", "value": "Mensile" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Mensal" } } } },
+    "Now": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Now" } }, "it": { "stringUnit": { "state": "translated", "value": "Ora" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Agora" } } } },
+    "Reset %@": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Reset %@" } }, "it": { "stringUnit": { "state": "translated", "value": "Ripristino %@" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Redefine %@" } } } },
+    "Unavailable": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Unavailable" } }, "it": { "stringUnit": { "state": "translated", "value": "Non disponibile" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Indisponível" } } } },
+    "Unlimited": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Unlimited" } }, "it": { "stringUnit": { "state": "translated", "value": "Illimitato" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Ilimitado" } } } },
+    "Usage": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Usage" } }, "it": { "stringUnit": { "state": "translated", "value": "Utilizzo" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Uso" } } } },
+    "Weekly": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Weekly" } }, "it": { "stringUnit": { "state": "translated", "value": "Settimanale" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Semanal" } } } },
     "%@\n\n%lld image attached.": {
       "localizations": {
         "en": {

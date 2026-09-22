@@ -131,8 +131,11 @@ final class OpenCodeIOSClientUITests: XCTestCase {
                 "More control, at a glance",
                 "Choose your composer",
                 "Usage, without leaving OpenClient",
-                "Notifications from your OpenCode host",
+                "Home Screen widgets",
             ]
+            XCTAssertFalse(app.descendants(matching: .any)["new-features.notifications-section"].exists)
+            XCTAssertFalse(app.descendants(matching: .any)["new-features.notification-setup"].exists)
+            XCTAssertFalse(app.descendants(matching: .any)["new-features.notification-guide"].exists)
             let initial = XCTAttachment(screenshot: app.screenshot())
             initial.name = "\(profile)-hero"
             initial.lifetime = .keepAlways
@@ -203,10 +206,20 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         attachScreenshot(named: "announcement-messenger-preview")
         if let initialStyle { composerPicker.buttons[initialStyle].tap() }
 
-        let setup = app.buttons["new-features.openai-usage-setup"]
+        let widgetGallery = app.descendants(matching: .any)["new-features.usage-widget-gallery"]
         let done = app.buttons["new-features.continue"]
         let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(widgetGallery.waitForExistence(timeout: 5))
         // XCTest can report content behind the pinned footer as hittable.
+        for _ in 0..<10 where !widgetGallery.isHittable || widgetGallery.frame.maxY > done.frame.minY - 12 {
+            scroll.swipeUp()
+        }
+        XCTAssertLessThan(widgetGallery.frame.maxY, done.frame.minY)
+        XCTAssertTrue(app.descendants(matching: .any)["new-features.usage-widget-bars"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["new-features.usage-widget-rings"].exists)
+        attachScreenshot(named: "announcement-usage-widget-previews")
+
+        let setup = app.buttons["new-features.openai-usage-setup"]
         for _ in 0..<10 where !setup.isHittable || setup.frame.maxY > done.frame.minY - 12 {
             scroll.swipeUp()
         }
@@ -218,7 +231,73 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         attachScreenshot(named: "announcement-openai-setup")
         XCTAssertTrue(app.buttons["new-features.continue"].exists == false)
         app.navigationBars["OpenAI"].buttons.firstMatch.tap()
-        XCTAssertTrue(app.buttons["new-features.continue"].waitForExistence(timeout: 5))
+         XCTAssertTrue(app.buttons["new-features.continue"].waitForExistence(timeout: 5))
+     }
+
+    @MainActor
+    func testLatestAnnouncementWidgetPreviewsBrazilianPortugueseAXXXLLayout() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "connection"
+        app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "1"
+        app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
+        app.launchArguments = ["-AppleLanguages", "(pt-BR)", "-AppleLocale", "pt-BR",
+                               "-UIPreferredContentSizeCategoryName",
+                               "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["screenshot.scene.connection"].waitForExistence(timeout: 15))
+        let entry = app.buttons["help.latest-updates"]
+        for _ in 0..<6 where !entry.isHittable { app.swipeUp() }
+        XCTAssertTrue(entry.isHittable)
+        entry.tap()
+
+        let scroll = app.scrollViews.firstMatch
+        let done = app.buttons["new-features.continue"]
+        let gallery = app.descendants(matching: .any)["new-features.usage-widget-gallery"]
+        let bars = app.descendants(matching: .any)["new-features.usage-widget-bars"]
+        let rings = app.descendants(matching: .any)["new-features.usage-widget-rings"]
+        XCTAssertTrue(gallery.waitForExistence(timeout: 5))
+        XCTAssertTrue(bars.waitForExistence(timeout: 5))
+        XCTAssertTrue(rings.waitForExistence(timeout: 5))
+        let initialBarsFrame = bars.frame
+        let initialRingsFrame = rings.frame
+
+        func reachPreview(_ preview: XCUIElement, named name: String) {
+            for _ in 0..<16 {
+                let previewFrame = preview.frame
+                let scrollFrame = scroll.frame
+                let footerTop = done.frame.minY - 12
+                let horizontallyInsideScroll = previewFrame.minX >= scrollFrame.minX
+                    && previewFrame.maxX <= scrollFrame.maxX
+                if preview.isHittable && previewFrame.maxY <= footerTop && horizontallyInsideScroll {
+                    break
+                }
+
+                if previewFrame.minY < scrollFrame.minY {
+                    let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
+                    let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+                    start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
+                } else {
+                    scroll.swipeUp(velocity: .slow)
+                }
+            }
+
+            XCTAssertTrue(preview.isHittable, "Expected reachable \(name) preview")
+            XCTAssertLessThanOrEqual(preview.frame.maxY, done.frame.minY - 12,
+                                     "Expected \(name) preview above the pinned Continue button")
+            XCTAssertGreaterThanOrEqual(preview.frame.minX, scroll.frame.minX,
+                                        "Expected \(name) preview inside the scroll view horizontally")
+            XCTAssertLessThanOrEqual(preview.frame.maxX, scroll.frame.maxX,
+                                     "Expected \(name) preview inside the scroll view horizontally")
+            attachScreenshot(named: "announcement-pt-BR-AXXXL-\(name)")
+        }
+
+        reachPreview(bars, named: "bars")
+        reachPreview(rings, named: "rings")
+        if initialBarsFrame != .zero && initialRingsFrame != .zero {
+            XCTAssertLessThanOrEqual(initialBarsFrame.maxY, initialRingsFrame.minY,
+                                     "Expected usage bars to appear above usage rings")
+        }
     }
 
     @MainActor

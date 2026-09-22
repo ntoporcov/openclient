@@ -17,8 +17,7 @@ struct OpenClientWhatsNewView: View {
                     if release.hero == .personalControl {
                         OpenClientWhatsNewPersonalControlContent(
                             release: release,
-                            connection: connection,
-                            bridge: bridge
+                            connection: connection
                         )
                     } else {
                         OpenClientWhatsNewHistoricalContent(release: release, connection: connection)
@@ -87,7 +86,6 @@ private struct OpenClientWhatsNewHistoricalContent: View {
 private struct OpenClientWhatsNewPersonalControlContent: View {
     let release: OpenClientReleaseNotes
     @ObservedObject var connection: ConnectionFacade
-    let bridge: OpenClientBridgeFacade?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 48) {
@@ -101,14 +99,6 @@ private struct OpenClientWhatsNewPersonalControlContent: View {
                 facade: connection.providerUsageFacade,
                 usesInsecureTransport: connection.providerUsageUsesInsecureTransport
             )
-            if let bridge {
-                OpenClientWhatsNewNotificationsSection(
-                    bridge: bridge,
-                    allowsNativeSetup: !connection.isV2Connection
-                )
-            } else {
-                OpenClientWhatsNewNotificationsOverview()
-            }
         }
     }
 }
@@ -211,6 +201,8 @@ private struct OpenClientWhatsNewUsageSection: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Example provider usage levels")
 
+            OpenClientWhatsNewWidgetGallery(metric: Self.exampleMetrics[0])
+
             VStack(spacing: 0) {
                 OpenClientWhatsNewUsageProviderRow(
                     provider: .codex,
@@ -279,6 +271,89 @@ private struct OpenClientWhatsNewUsageSection: View {
             fetchedAt: .distantPast
         ),
     ]
+}
+
+private struct OpenClientWhatsNewWidgetGallery: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let metric: OpenCodeProviderUsageDisplayMetric
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Home Screen widgets")
+                    .font(.headline)
+                Text("See your usage at a glance with the same Bars and Rings layouts available on your Home Screen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 12) {
+                    widgetPreview(style: .bars)
+                    widgetPreview(style: .rings)
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        widgetPreview(style: .bars)
+                        widgetPreview(style: .rings)
+                    }
+                    VStack(spacing: 12) {
+                        widgetPreview(style: .bars)
+                        widgetPreview(style: .rings)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            OpenCodePlatformColor.secondaryGroupedBackground,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("new-features.usage-widget-gallery")
+    }
+
+    private func widgetPreview(style: OpenCodeProviderUsageWidgetStyle) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title(for: style))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            OpenCodeProviderUsageWidgetContent(
+                metrics: [metric],
+                style: style,
+                size: .small,
+                referenceDate: .distantPast
+            )
+            .padding(14)
+            .aspectRatio(1, contentMode: .fit)
+            .background(
+                OpenCodePlatformColor.groupedBackground,
+                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            )
+        }
+        .frame(minWidth: 142, maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(accessibilityLabel(for: style)))
+        .accessibilityIdentifier(style == .bars
+            ? "new-features.usage-widget-bars"
+            : "new-features.usage-widget-rings")
+    }
+
+    private func title(for style: OpenCodeProviderUsageWidgetStyle) -> LocalizedStringResource {
+        switch style {
+        case .bars: "Bars"
+        case .rings: "Rings"
+        }
+    }
+
+    private func accessibilityLabel(for style: OpenCodeProviderUsageWidgetStyle) -> LocalizedStringResource {
+        switch style {
+        case .bars: "Bars widget preview"
+        case .rings: "Rings widget preview"
+        }
+    }
 }
 
 private struct OpenClientWhatsNewUsageProviderRow: View {

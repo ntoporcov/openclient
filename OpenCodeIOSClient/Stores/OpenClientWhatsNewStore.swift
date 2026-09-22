@@ -271,7 +271,7 @@ enum OpenClientReleaseNotesCatalog {
         OpenClientReleaseNotes(
             version: "1.0.21",
             title: "More control, at a glance",
-            summary: "Choose how you write, keep an eye on provider usage, and stay informed when OpenCode needs you.",
+            summary: "Choose how you write and keep an eye on provider usage, in the app and on your Home Screen.",
             features: [],
             hero: .personalControl,
             showsSetup: false
