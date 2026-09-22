@@ -58,7 +58,7 @@ final class ProviderUsageDisplayStoreTests: XCTestCase {
         )])
 
         XCTAssertEqual(reloader.reloadCount, 1)
-        store.setVisible(true, identity: store.availableMetrics[0].identity, destination: .home)
+        store.setVisible(false, identity: store.availableMetrics[0].identity, destination: .home)
         XCTAssertEqual(reloader.reloadCount, 1, "Visibility does not alter the visibility-independent widget payload")
     }
 
@@ -111,6 +111,8 @@ final class ProviderUsageDisplayStoreTests: XCTestCase {
         let first = store.orderedAvailableMetrics[0].identity
         let second = store.orderedAvailableMetrics[1].identity
 
+        store.setVisible(false, identity: second, destination: .home)
+        store.setVisible(false, identity: first, destination: .activity)
         store.setVisible(true, identity: first, destination: .home)
         store.setVisible(true, identity: second, destination: .activity)
         store.moveAvailableMetrics(fromOffsets: IndexSet(integer: 1), toOffset: 0)
@@ -145,8 +147,87 @@ final class ProviderUsageDisplayStoreTests: XCTestCase {
         ])])
 
         XCTAssertEqual(store.previewMetrics.map(\.identity.metricID), ["one", "two"])
+        store.setVisible(false, identity: store.availableMetrics[0].identity, destination: .activity)
+        store.setVisible(false, identity: store.availableMetrics[0].identity, destination: .home)
         store.setVisible(true, identity: store.availableMetrics[1].identity, destination: .activity)
         XCTAssertEqual(store.previewMetrics.map(\.identity.metricID), ["two"])
+    }
+
+    func testNewMetricsDefaultToBothDestinationsAndPreserveExistingOffFlags() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let persistence = OpenCodeProviderUsageDisplayPersistence(defaults: defaults)
+        let store = ProviderUsageDisplayStore(persistence: persistence)
+        let account = makeAccount(id: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", provider: .openRouter)
+
+        store.reconcile(accounts: [account], snapshots: [account.id: snapshot(provider: .openRouter, metrics: [
+            metric(id: "existing", value: 12)
+        ])])
+        let existing = identity(account.id.uuidString, "existing")
+        XCTAssertTrue(store.isVisible(existing, in: .home))
+        XCTAssertTrue(store.isVisible(existing, in: .activity))
+
+        store.setVisible(false, identity: existing, destination: .home)
+        store.setVisible(false, identity: existing, destination: .activity)
+        store.reconcile(accounts: [account], snapshots: [account.id: snapshot(provider: .openRouter, metrics: [
+            metric(id: "existing", value: 11),
+            metric(id: "new", value: 8)
+        ])])
+
+        let newMetric = identity(account.id.uuidString, "new")
+        XCTAssertFalse(store.isVisible(existing, in: .home))
+        XCTAssertFalse(store.isVisible(existing, in: .activity))
+        XCTAssertTrue(store.isVisible(newMetric, in: .home))
+        XCTAssertTrue(store.isVisible(newMetric, in: .activity))
+
+        let restored = ProviderUsageDisplayStore(persistence: persistence)
+        XCTAssertFalse(restored.isVisible(existing, in: .home))
+        XCTAssertFalse(restored.isVisible(existing, in: .activity))
+        XCTAssertTrue(restored.isVisible(newMetric, in: .home))
+        XCTAssertTrue(restored.isVisible(newMetric, in: .activity))
+    }
+
+    func testProviderMetricsAreFilteredWithoutSharingVisibilityFlags() throws {
+        let (defaults, suiteName) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = ProviderUsageDisplayStore(persistence: .init(defaults: defaults))
+        let openAI = makeAccount(id: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", provider: .codex)
+        let openRouter = makeAccount(id: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB", provider: .openRouter)
+        store.reconcile(
+            accounts: [openAI, openRouter],
+            snapshots: [
+                openAI.id: snapshot(provider: .codex, metrics: [
+                    metric(id: "quota", percent: 25),
+                    metric(id: "daily", percent: 10),
+                ]),
+                openRouter.id: snapshot(provider: .openRouter, metrics: [
+                    metric(id: "spend", value: 12),
+                    metric(id: "balance", value: 8),
+                ]),
+            ]
+        )
+
+        let openAIMetric = try XCTUnwrap(store.orderedAvailableMetrics(for: .codex).first)
+        let openRouterMetric = try XCTUnwrap(store.orderedAvailableMetrics(for: .openRouter).first)
+        for metric in store.orderedAvailableMetrics {
+            store.setVisible(false, identity: metric.identity, destination: .home)
+            store.setVisible(false, identity: metric.identity, destination: .activity)
+        }
+        store.setVisible(true, identity: openAIMetric.identity, destination: .home)
+        store.setVisible(true, identity: openRouterMetric.identity, destination: .activity)
+
+        XCTAssertEqual(store.orderedAvailableMetrics(for: .codex).map(\.identity.accountID), [openAI.id, openAI.id])
+        XCTAssertEqual(store.orderedAvailableMetrics(for: .codex).map(\.identity.metricID), ["quota", "daily"])
+        XCTAssertEqual(store.orderedAvailableMetrics(for: .openRouter).map(\.identity.accountID), [openRouter.id, openRouter.id])
+        XCTAssertEqual(store.orderedAvailableMetrics(for: .openRouter).map(\.identity.metricID), ["spend", "balance"])
+        XCTAssertEqual(store.metrics(for: .home).map(\.identity), [openAIMetric.identity])
+        XCTAssertEqual(store.metrics(for: .activity).map(\.identity), [openRouterMetric.identity])
+        store.setDisplayMode(.progressRing)
+        XCTAssertEqual(store.displayMode, .progressRing)
+
+        let restored = ProviderUsageDisplayStore(persistence: .init(defaults: defaults))
+        XCTAssertEqual(restored.displayMode, .progressRing)
+        XCTAssertEqual(restored.selections.map(\.identity), store.selections.map(\.identity))
     }
 
     func testRingRenderStatesAreSafe() {
@@ -192,7 +273,7 @@ final class ProviderUsageDisplayStoreTests: XCTestCase {
                 metric(id: "limit", percent: 30),
             ]
         )])
-        store.setVisible(true, identity: store.availableMetrics[0].identity, destination: .home)
+        store.setVisible(false, identity: store.availableMetrics[0].identity, destination: .home)
 
         let payload = persistence.loadWidgetPayload()
         XCTAssertEqual(payload.metrics.count, 2, "Widgets can choose metrics independently of in-app visibility")
@@ -229,6 +310,8 @@ final class ProviderUsageDisplayStoreTests: XCTestCase {
         apply(snapshot(provider: .codex, metrics: [metric(id: "unselected", percent: 20)]), to: unselected.id, store: usageStore)
         displayStore.reconcile(accounts: usageStore.accounts, snapshots: usageStore.snapshots)
         let identity = OpenCodeProviderUsageMetricIdentity(accountID: selected.id, metricID: "selected")
+        let unselectedIdentity = OpenCodeProviderUsageMetricIdentity(accountID: unselected.id, metricID: "unselected")
+        displayStore.setVisible(false, identity: unselectedIdentity, destination: .home)
         displayStore.setVisible(true, identity: identity, destination: .home)
 
         await facade.prepareDisplay(.home, referenceDate: Date(timeIntervalSince1970: 1_000), maxAge: 1)

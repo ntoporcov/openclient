@@ -22,6 +22,10 @@ struct ProviderUsageView: View {
                 }
             )
 
+            if store.accounts.contains(where: { $0.provider == provider }) {
+                ProviderUsageProviderDisplaySettingsSection(provider: provider, store: facade.displayStore)
+            }
+
             ProviderUsageDiscoverySection(
                 readiness: store.candidateReadiness,
                 hasContext: store.candidateContext != nil,

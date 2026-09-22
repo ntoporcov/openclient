@@ -17,6 +17,10 @@ final class ProviderUsageDisplayStore {
         return selections.compactMap { metricsByID[$0.identity] }
     }
 
+    func orderedAvailableMetrics(for provider: ProviderUsageProvider) -> [OpenCodeProviderUsageDisplayMetric] {
+        orderedAvailableMetrics.filter { $0.providerID == provider.openCodeProviderID }
+    }
+
     init(
         persistence: OpenCodeProviderUsageDisplayPersistence = .init(),
         widgetTimelineReloader: ProviderUsageWidgetTimelineReloading = SystemWidgetTimelineReloader()
@@ -48,7 +52,7 @@ final class ProviderUsageDisplayStore {
         let known = Set(selections.map(\.identity))
         let additions = metrics.compactMap { metric -> OpenCodeProviderUsageMetricSelection? in
             guard !known.contains(metric.identity) else { return nil }
-            return .init(identity: metric.identity, showsOnHome: false, showsInActivity: false)
+            return .init(identity: metric.identity, showsOnHome: true, showsInActivity: true)
         }
         if !additions.isEmpty {
             selections.append(contentsOf: additions)

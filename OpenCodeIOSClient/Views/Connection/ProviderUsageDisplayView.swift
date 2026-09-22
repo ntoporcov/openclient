@@ -7,17 +7,7 @@ struct ProviderUsageDisplayConfigurationView: View {
 
     var body: some View {
         List {
-            Section {
-                Picker("Usage Display Style", selection: displayModeBinding) {
-                    Text("Bars").tag(OpenCodeProviderUsageDisplayMode.progressBar)
-                    Text("Rings").tag(OpenCodeProviderUsageDisplayMode.progressRing)
-                }
-                .pickerStyle(.segmented)
-            } header: {
-                Text("Display Style")
-            } footer: {
-                Text("One style is shared by Projects and Activity.")
-            }
+            ProviderUsageDisplayStyleSection(store: store)
 
             Section {
                 if store.availableMetrics.isEmpty {
@@ -62,6 +52,24 @@ struct ProviderUsageDisplayConfigurationView: View {
         .opencodeInlineNavigationTitle()
         .toolbar { EditButton() }
         .task { await facade.prepareDisplayConfiguration() }
+    }
+}
+
+struct ProviderUsageDisplayStyleSection: View {
+    let store: ProviderUsageDisplayStore
+
+    var body: some View {
+        Section {
+            Picker("Usage Display Style", selection: displayModeBinding) {
+                Text("Bars").tag(OpenCodeProviderUsageDisplayMode.progressBar)
+                Text("Rings").tag(OpenCodeProviderUsageDisplayMode.progressRing)
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Display Style")
+        } footer: {
+            Text("This style applies to all providers on Home and Activity.")
+        }
     }
 
     private var displayModeBinding: Binding<OpenCodeProviderUsageDisplayMode> {
@@ -109,6 +117,39 @@ private struct ProviderUsageDisplayConfigurationRow: View {
             get: { store.isVisible(metric.identity, in: destination) },
             set: { store.setVisible($0, identity: metric.identity, destination: destination) }
         )
+    }
+}
+
+struct ProviderUsageProviderDisplaySettingsSection: View {
+    let provider: ProviderUsageProvider
+    let store: ProviderUsageDisplayStore
+
+    private var metrics: [OpenCodeProviderUsageDisplayMetric] {
+        store.orderedAvailableMetrics(for: provider)
+    }
+
+    var body: some View {
+        ProviderUsageDisplayStyleSection(store: store)
+
+        Section {
+            if metrics.isEmpty {
+                ContentUnavailableView(
+                    "No Usage Metrics",
+                    systemImage: "gauge.with.dots.needle.0percent",
+                    description: Text("Refresh a saved usage account to choose metrics for Home and Activity.")
+                )
+            } else {
+                ForEach(metrics) { metric in
+                    ProviderUsageDisplayConfigurationRow(metric: metric, store: store)
+                }
+            }
+        } header: {
+            Text("Displayed Usage")
+        } footer: {
+            if !metrics.isEmpty {
+                Text("Home and Activity visibility can be chosen independently.")
+            }
+        }
     }
 }
 
