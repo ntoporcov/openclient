@@ -120,10 +120,15 @@ struct ChatHeaderFixture: View {
         }
         .frame(maxWidth: ProcessInfo.processInfo.environment["OPENCLIENT_HEADER_NARROW"] == "1" ? 320 : (UIDevice.current.userInterfaceIdiom == .pad ? 650 : .infinity))
         .overlay(alignment: .bottomLeading) {
-            Text(verbatim: model.selectedSession?.id ?? "")
-                .font(.caption2).foregroundStyle(.clear)
-                .accessibilityIdentifier("chat.header.fixture.root")
-                .accessibilityValue(Text(verbatim: "\(model.modelConfigurationStore.selectedModelReference(for: model.selectedSession?.id ?? "")?.modelID ?? "")|\(model.modelConfigurationStore.selectedVariant(for: model.selectedSession?.id ?? "") ?? "")"))
+            VStack {
+                Text(verbatim: model.selectedSession?.id ?? "")
+                    .font(.caption2).foregroundStyle(.clear)
+                    .accessibilityIdentifier("chat.header.fixture.root")
+                    .accessibilityValue(Text(verbatim: "\(model.modelConfigurationStore.selectedModelReference(for: model.selectedSession?.id ?? "")?.modelID ?? "")|\(model.modelConfigurationStore.selectedVariant(for: model.selectedSession?.id ?? "") ?? "")"))
+                Text(verbatim: model.modelConfigurationStore.selectedAgentName(for: "header-b") ?? "")
+                    .font(.caption2).foregroundStyle(.clear)
+                    .accessibilityIdentifier("chat.header.fixture.agent")
+            }
         }
     }
 }

@@ -94,7 +94,9 @@ private struct OpenClientWhatsNewPersonalControlContent: View {
                 title: release.title,
                 summary: release.summary
             )
-            OpenClientWhatsNewComposerSection(connection: connection)
+            if OpenCodePlatformCapabilities.supportsComposerStyleChoice {
+                OpenClientWhatsNewComposerSection(connection: connection)
+            }
             OpenClientWhatsNewUsageSection(
                 facade: connection.providerUsageFacade,
                 usesInsecureTransport: connection.providerUsageUsesInsecureTransport
@@ -232,7 +234,7 @@ private struct OpenClientWhatsNewUsageSection: View {
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("new-features.openai-usage-setup")
 
-            Text("Setup asks before reading a discovered credential and again before saving it. If this connection cannot securely provide a supported credential, OpenClient will explain why instead.")
+            Text("Setup asks before reading a discovered credential, then saves it automatically when the read succeeds. If this connection cannot securely provide a supported credential, OpenClient will explain why instead.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

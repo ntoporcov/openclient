@@ -14,7 +14,7 @@
     "Track OpenAI subscription limits and OpenRouter spend from Projects and Activity.": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Track OpenAI subscription limits and OpenRouter spend from Projects and Activity." } }, "it": { "stringUnit": { "state": "translated", "value": "Tieni sotto controllo i limiti dell'abbonamento OpenAI e la spesa su OpenRouter da Progetti e Attività." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Acompanhe os limites da assinatura do OpenAI e os gastos do OpenRouter em Projetos e Atividade." } } } },
     "Example provider usage levels": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Example provider usage levels" } }, "it": { "stringUnit": { "state": "translated", "value": "Livelli di utilizzo dei provider di esempio" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Níveis de uso dos provedores de exemplo" } } } },
     "Set Up OpenAI Usage": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Set Up OpenAI Usage" } }, "it": { "stringUnit": { "state": "translated", "value": "Configura l'utilizzo di OpenAI" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Configurar uso do OpenAI" } } } },
-    "Setup asks before reading a discovered credential and again before saving it. If this connection cannot securely provide a supported credential, OpenClient will explain why instead.": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Setup asks before reading a discovered credential and again before saving it. If this connection cannot securely provide a supported credential, OpenClient will explain why instead." } }, "it": { "stringUnit": { "state": "translated", "value": "La configurazione chiede conferma prima di leggere una credenziale rilevata e di nuovo prima di salvarla. Se questa connessione non può fornire in modo sicuro una credenziale supportata, OpenClient ti spiegherà perché." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "A configuração pede confirmação antes de ler uma credencial encontrada e novamente antes de salvá-la. Se esta conexão não puder fornecer com segurança uma credencial compatível, o OpenClient explicará o motivo." } } } },
+    "Setup asks before reading a discovered credential, then saves it automatically when the read succeeds. If this connection cannot securely provide a supported credential, OpenClient will explain why instead.": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Setup asks before reading a discovered credential, then saves it automatically when the read succeeds. If this connection cannot securely provide a supported credential, OpenClient will explain why instead." } }, "it": { "stringUnit": { "state": "translated", "value": "La configurazione chiede conferma prima di leggere una credenziale rilevata, quindi la salva automaticamente se la lettura riesce. Se questa connessione non può fornire in modo sicuro una credenziale supportata, OpenClient ti spiegherà perché." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "A configuração pede confirmação antes de ler uma credencial encontrada e a salva automaticamente quando a leitura é bem-sucedida. Se esta conexão não puder fornecer com segurança uma credencial compatível, o OpenClient explicará o motivo." } } } },
     "Example": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Example" } }, "it": { "stringUnit": { "state": "translated", "value": "Esempio" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Exemplo" } } } },
     "OpenRouter beta": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "OpenRouter beta" } }, "it": { "stringUnit": { "state": "translated", "value": "OpenRouter beta" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "OpenRouter beta" } } } },
     "Monthly spend": { "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Monthly spend" } }, "it": { "stringUnit": { "state": "translated", "value": "Spesa mensile" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Gasto mensal" } } } },
@@ -287,13 +287,6 @@
         "pt-BR": { "stringUnit": { "state": "translated", "value": "Permitir transferência insegura nesta tentativa" } }
       }
     },
-    "API key": {
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "API key" } },
-        "it": { "stringUnit": { "state": "translated", "value": "Chiave API" } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "Chave de API" } }
-      }
-    },
     "Balance": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Balance" } },
@@ -476,20 +469,6 @@
         "pt-BR": { "stringUnit": { "state": "translated", "value": "Credencial rejeitada" } }
       }
     },
-    "Credential Review": {
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Credential Review" } },
-        "it": { "stringUnit": { "state": "translated", "value": "Verifica credenziale" } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "Revisão da credencial" } }
-      }
-    },
-    "Credential Type": {
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Credential Type" } },
-        "it": { "stringUnit": { "state": "translated", "value": "Tipo di credenziale" } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "Tipo de credencial" } }
-      }
-    },
     "Credential unavailable": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Credential unavailable" } },
@@ -553,11 +532,11 @@
         "pt-BR": { "stringUnit": { "state": "translated", "value": "O OpenClient está lendo somente a credencial do provedor selecionado. O valor não será exibido." } }
       }
     },
-    "OpenClient needs your permission before it asks the connected OpenCode server to read this provider credential. The value is kept out of the interface and is not saved until you approve the review.": {
+    "OpenClient needs your permission before it asks the connected OpenCode server to read this provider credential. If the read succeeds, OpenClient automatically stores the credential in Keychain and sends it only to the selected provider's usage API for this check and future refreshes. The value stays hidden.": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "OpenClient needs your permission before it asks the connected OpenCode server to read this provider credential. The value is kept out of the interface and is not saved until you approve the review." } },
-        "it": { "stringUnit": { "state": "translated", "value": "OpenClient richiede la tua autorizzazione prima di chiedere al server OpenCode connesso di leggere questa credenziale del provider. Il valore non appare nell'interfaccia e non viene salvato finché non approvi la verifica." } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "O OpenClient precisa da sua permissão antes de pedir ao servidor OpenCode conectado para ler esta credencial do provedor. O valor não aparece na interface e não é salvo até você aprovar a revisão." } }
+        "en": { "stringUnit": { "state": "translated", "value": "OpenClient needs your permission before it asks the connected OpenCode server to read this provider credential. If the read succeeds, OpenClient automatically stores the credential in Keychain and sends it only to the selected provider's usage API for this check and future refreshes. The value stays hidden." } },
+        "it": { "stringUnit": { "state": "translated", "value": "OpenClient richiede la tua autorizzazione prima di chiedere al server OpenCode connesso di leggere questa credenziale del provider. Se la lettura riesce, OpenClient archivia automaticamente la credenziale nel Portachiavi e la invia solo all'API di utilizzo del provider selezionato per questa verifica e per gli aggiornamenti futuri. Il valore rimane nascosto." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "O OpenClient precisa da sua permissão antes de pedir ao servidor OpenCode conectado para ler esta credencial do provedor. Se a leitura for bem-sucedida, o OpenClient armazenará automaticamente a credencial nas Chaves e a enviará somente à API de uso do provedor selecionado para esta consulta e futuras atualizações. O valor permanece oculto." } }
       }
     },
     "OpenRouter": {
@@ -609,13 +588,6 @@
         "pt-BR": { "stringUnit": { "state": "translated", "value": "Substituir credencial" } }
       }
     },
-    "Replace Usage Account": {
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Replace Usage Account" } },
-        "it": { "stringUnit": { "state": "translated", "value": "Sostituisci account di utilizzo" } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "Substituir conta de uso" } }
-      }
-    },
     "Remove Usage Account?": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Remove Usage Account?" } },
@@ -649,13 +621,6 @@
         "en": { "stringUnit": { "state": "translated", "value": "Saved, not checked" } },
         "it": { "stringUnit": { "state": "translated", "value": "Salvato, non verificato" } },
         "pt-BR": { "stringUnit": { "state": "translated", "value": "Salva, não verificada" } }
-      }
-    },
-    "Save Usage Account": {
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Save Usage Account" } },
-        "it": { "stringUnit": { "state": "translated", "value": "Salva account di utilizzo" } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "Salvar conta de uso" } }
       }
     },
     "Saving account...": {
@@ -700,25 +665,11 @@
         "pt-BR": { "stringUnit": { "state": "translated", "value": "Limite de gastos" } }
       }
     },
-    "Subscription access token": {
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Subscription access token" } },
-        "it": { "stringUnit": { "state": "translated", "value": "Token di accesso all'abbonamento" } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "Token de acesso da assinatura" } }
-      }
-    },
     "Temporarily rate limited": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Temporarily rate limited" } },
         "it": { "stringUnit": { "state": "translated", "value": "Limite di richieste temporaneo" } },
         "pt-BR": { "stringUnit": { "state": "translated", "value": "Limite de requisições temporário" } }
-      }
-    },
-    "The credential was read successfully and remains hidden. Saving authorizes OpenClient to store it in Keychain and send it only to the selected provider's usage API for this check and future refreshes.": {
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "The credential was read successfully and remains hidden. Saving authorizes OpenClient to store it in Keychain and send it only to the selected provider's usage API for this check and future refreshes." } },
-        "it": { "stringUnit": { "state": "translated", "value": "La credenziale è stata letta correttamente e resta nascosta. Il salvataggio autorizza OpenClient a conservarla nel Portachiavi e a inviarla solo all'API di utilizzo del provider selezionato per questa verifica e per gli aggiornamenti futuri." } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "A credencial foi lida com sucesso e permanece oculta. Ao salvar, você autoriza o OpenClient a armazená-la nas Chaves e enviá-la somente à API de uso do provedor selecionado para esta consulta e futuras atualizações." } }
       }
     },
     "This credential source cannot be read safely.": {
@@ -728,11 +679,11 @@
         "pt-BR": { "stringUnit": { "state": "translated", "value": "Esta origem de credencial não pode ser lida com segurança." } }
       }
     },
-    "This credential identifies a different provider account. Saving will replace the tracked account and discard its current usage snapshot.": {
+    "This will replace the saved credential for this source and discard its current usage snapshot.": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "This credential identifies a different provider account. Saving will replace the tracked account and discard its current usage snapshot." } },
-        "it": { "stringUnit": { "state": "translated", "value": "Questa credenziale identifica un account provider diverso. Il salvataggio sostituirà l'account monitorato e ne eliminerà l'istantanea di utilizzo corrente." } },
-        "pt-BR": { "stringUnit": { "state": "translated", "value": "Esta credencial identifica uma conta de provedor diferente. Ao salvar, a conta monitorada será substituída e seu snapshot de uso atual será descartado." } }
+        "en": { "stringUnit": { "state": "translated", "value": "This will replace the saved credential for this source and discard its current usage snapshot." } },
+        "it": { "stringUnit": { "state": "translated", "value": "Questa operazione sostituirà la credenziale salvata per questa origine ed eliminerà l'istantanea di utilizzo corrente." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Isso substituirá a credencial salva para esta origem e descartará o snapshot de uso atual." } }
       }
     },
     "This removes the saved account and its credential from OpenClient.": {

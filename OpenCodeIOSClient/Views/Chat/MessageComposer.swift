@@ -847,31 +847,7 @@ struct MessageComposer: View {
     private var catalystSelectorMenuRow: some View {
 #if targetEnvironment(macCatalyst)
         HStack(spacing: 4) {
-            if !agentTitle.isEmpty, let onSelectAgent {
-                StablePickerMenu(
-                    elements: selectableAgents.map { agent in
-                        .action(
-                            id: agent.name,
-                            title: agent.name.capitalized,
-                            systemImage: "person.crop.circle",
-                            isSelected: agent.name.caseInsensitiveCompare(agentTitle) == .orderedSame
-                        )
-                    },
-                    accessibilityLabel: String(localized: "Agent"),
-                    accessibilityValue: agentTitle,
-                    accessibilityIdentifier: "chat.composer.agent",
-                    onSelect: onSelectAgent
-                ) {
-                    catalystSelectorLabel(
-                        title: agentTitle.capitalized,
-                        systemImage: "person.crop.circle",
-                        glassID: "composer-agent-selector"
-                    )
-                }
-                .transaction { transaction in
-                    transaction.animation = nil
-                }
-            }
+            assistantAgentSelector
             if !modelTitle.isEmpty, onSelectModel != nil {
                 StablePickerMenu(
                     elements: modelMenuElements,
@@ -920,26 +896,61 @@ struct MessageComposer: View {
             }
         }
 #else
-        if !modelTitle.isEmpty, let onSelectModel {
-            ModelToolbarMenu(
-                modelTitle: modelTitle,
-                modelReference: modelReference,
-                providerName: modelProviderName,
-                providerGroups: providerGroups,
-                reasoningVariants: reasoningVariants,
-                reasoningTitle: reasoningTitle,
-                glassNamespace: accessoryGlassNamespace,
-                onSelectModel: onSelectModel,
-                onSelectReasoningVariant: onSelectReasoningVariant.map { onSelect in
-                    { variantID in onSelect(variantID) }
-                },
-                contentAlignment: .leading,
-                accessibilityIdentifier: "chat.composer.model",
-                providerAccessibilityIdentifier: "chat.composer.model.providerLogo",
-                usesGlassCapsule: false
-            )
+        HStack(spacing: 4) {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                assistantAgentSelector
+            }
+            if !modelTitle.isEmpty, let onSelectModel {
+                ModelToolbarMenu(
+                    modelTitle: modelTitle,
+                    modelReference: modelReference,
+                    providerName: modelProviderName,
+                    providerGroups: providerGroups,
+                    reasoningVariants: reasoningVariants,
+                    reasoningTitle: reasoningTitle,
+                    glassNamespace: accessoryGlassNamespace,
+                    onSelectModel: onSelectModel,
+                    onSelectReasoningVariant: onSelectReasoningVariant.map { onSelect in
+                        { variantID in onSelect(variantID) }
+                    },
+                    contentAlignment: .leading,
+                    accessibilityIdentifier: "chat.composer.model",
+                    providerAccessibilityIdentifier: "chat.composer.model.providerLogo",
+                    usesGlassCapsule: false
+                )
+            }
         }
 #endif
+    }
+
+    @ViewBuilder
+    private var assistantAgentSelector: some View {
+        if !agentTitle.isEmpty, let onSelectAgent {
+            StablePickerMenu(
+                elements: selectableAgents.map { agent in
+                    .action(
+                        id: agent.name,
+                        title: agent.name.capitalized,
+                        systemImage: "person.crop.circle",
+                        isSelected: agent.name.caseInsensitiveCompare(agentTitle) == .orderedSame
+                    )
+                },
+                accessibilityLabel: String(localized: "Agent"),
+                accessibilityValue: agentTitle,
+                accessibilityIdentifier: "chat.composer.agent",
+                onSelect: onSelectAgent
+            ) {
+                catalystSelectorLabel(
+                    title: agentTitle.capitalized,
+                    systemImage: "person.crop.circle",
+                    glassID: "composer-agent-selector",
+                    usesGlassCapsule: false
+                )
+            }
+            .transaction { transaction in
+                transaction.animation = nil
+            }
+        }
     }
 
     private var catalystAccessoryButton: some View {
@@ -1110,7 +1121,7 @@ struct MessageComposer: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .padding(.horizontal, 6)
-                .frame(height: catalystControlHitTargetSize)
+                .frame(minWidth: catalystControlHitTargetSize, minHeight: catalystControlHitTargetSize)
                 .contentShape(Rectangle())
         }
     }

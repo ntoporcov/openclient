@@ -199,6 +199,64 @@ final class TerminalFeatureTests: XCTestCase {
         XCTAssertNotNil(request.value(forHTTPHeaderField: "x-opencode-directory"))
     }
 
+    func testCredentialImportLegacyPTYTransportAllowsStableGlobalScope() async throws {
+        let client = makeClient()
+        defer { client.session.invalidateAndCancel() }
+        let transport = try OpenCodeCredentialImportLegacyPTYTransport(client: client)
+        let (requests, continuation) = AsyncStream<TerminalPendingRequest>.makeStream()
+        TerminalURLProtocol.handler = { continuation.yield($0) }
+        var iterator = requests.makeAsyncIterator()
+        let calls = Task {
+            let created = try await transport.create(
+                request: OpenCodePTYCreateRequest(title: "Credential import"),
+                scope: .init()
+            )
+            XCTAssertEqual(created.id, "pty_1")
+            guard case .deleted = try await transport.delete(id: created.id, scope: .init()) else {
+                return XCTFail("Expected the global-scope PTY to be deleted")
+            }
+        }
+
+        let nextCreate = await iterator.next()
+        let create = try XCTUnwrap(nextCreate)
+        XCTAssertEqual(create.request.httpMethod, "POST")
+        XCTAssertEqual(create.request.url?.path, "/pty")
+        XCTAssertNil(URLComponents(url: try XCTUnwrap(create.request.url), resolvingAgainstBaseURL: false)?.query)
+        XCTAssertNil(create.request.value(forHTTPHeaderField: "x-opencode-directory"))
+        create.respond(Self.ptyJSON)
+
+        let nextDelete = await iterator.next()
+        let delete = try XCTUnwrap(nextDelete)
+        XCTAssertEqual(delete.request.httpMethod, "DELETE")
+        XCTAssertEqual(delete.request.url?.path, "/pty/pty_1")
+        XCTAssertNil(URLComponents(url: try XCTUnwrap(delete.request.url), resolvingAgainstBaseURL: false)?.query)
+        XCTAssertNil(delete.request.value(forHTTPHeaderField: "x-opencode-directory"))
+        delete.respond("true")
+
+        try await calls.value
+        continuation.finish()
+    }
+
+    func testCredentialImportGlobalPTYConnectRequestUsesServerDefaultDirectory() throws {
+        var config = OpenCodeServerConfig()
+        config.baseURL = "https://example.com/api"
+        config.username = "user"
+        config.password = "password"
+
+        let request = try OpenCodeAPIClient(config: config).ptyConnectRequest(
+            id: "pty_1",
+            directory: nil,
+            cursor: 0
+        )
+
+        let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.scheme, "wss")
+        XCTAssertEqual(components.path, "/api/pty/pty_1/connect")
+        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(query, ["cursor": "0"])
+        XCTAssertNil(request.value(forHTTPHeaderField: "x-opencode-directory"))
+    }
+
     @MainActor
     func testTerminalStoreKeepsIndependentDirectoryTabs() {
         let store = TerminalStore()

@@ -194,17 +194,24 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         entry.tap()
 
         let composerPicker = app.segmentedControls["new-features.composer-style"]
-        XCTAssertTrue(composerPicker.waitForExistence(timeout: 5))
-        let initialStyle = composerPicker.buttons.allElementsBoundByIndex.first(where: \.isSelected)?.label
-        composerPicker.buttons["Assistant"].tap()
-        let preview = app.descendants(matching: .any)["chat.appearance.composer-preview"]
-        XCTAssertTrue(preview.waitForExistence(timeout: 5))
-        XCTAssertTrue(preview.label.contains("Assistant composer preview"))
-        attachScreenshot(named: "announcement-assistant-preview")
-        composerPicker.buttons["Messenger"].tap()
-        XCTAssertTrue(preview.label.contains("Messenger composer preview"))
-        attachScreenshot(named: "announcement-messenger-preview")
-        if let initialStyle { composerPicker.buttons[initialStyle].tap() }
+        let isRunningOniPad = UIDevice.current.userInterfaceIdiom == .pad
+            || environment["SIMULATOR_DEVICE_NAME"]?.localizedCaseInsensitiveContains("iPad") == true
+        if !isRunningOniPad {
+            XCTAssertTrue(composerPicker.waitForExistence(timeout: 5))
+            let initialStyle = composerPicker.buttons.allElementsBoundByIndex.first(where: \.isSelected)?.label
+            composerPicker.buttons["Assistant"].tap()
+            let preview = app.descendants(matching: .any)["chat.appearance.composer-preview"]
+            XCTAssertTrue(preview.waitForExistence(timeout: 5))
+            XCTAssertTrue(preview.label.contains("Assistant composer preview"))
+            attachScreenshot(named: "announcement-assistant-preview")
+            composerPicker.buttons["Messenger"].tap()
+            XCTAssertTrue(preview.label.contains("Messenger composer preview"))
+            attachScreenshot(named: "announcement-messenger-preview")
+            if let initialStyle { composerPicker.buttons[initialStyle].tap() }
+        } else {
+            XCTAssertFalse(composerPicker.exists)
+            XCTAssertFalse(app.descendants(matching: .any)["new-features.composer-section"].exists)
+        }
 
         let widgetGallery = app.descendants(matching: .any)["new-features.usage-widget-gallery"]
         let done = app.buttons["new-features.continue"]

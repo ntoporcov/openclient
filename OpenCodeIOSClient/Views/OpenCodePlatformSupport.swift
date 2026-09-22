@@ -37,6 +37,17 @@ enum OpenCodePlatformColor {
     }
 }
 
+@MainActor
+enum OpenCodePlatformCapabilities {
+    static var supportsComposerStyleChoice: Bool {
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        UIDevice.current.userInterfaceIdiom == .phone
+#else
+        false
+#endif
+    }
+}
+
 enum OpenCodeClipboard {
     static func copy(_ string: String) {
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)

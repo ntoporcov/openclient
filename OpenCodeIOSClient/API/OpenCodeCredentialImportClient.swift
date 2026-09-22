@@ -31,21 +31,19 @@ actor OpenCodeCredentialImportLegacyPTYTransport: ProviderUsagePTYTransport {
     }
 
     func create(request: OpenCodePTYCreateRequest, scope: BackendScope) async throws -> OpenCodePTY {
-        guard let directory = scope.directory, !directory.isEmpty else {
-            throw ProviderUsageCredentialImportError.contextChanged
-        }
-        return try await client.createPTY(request: request, directory: directory, workspaceID: scope.workspaceID)
+        try await client.createPTY(
+            request: request,
+            directory: scope.directory,
+            workspaceID: scope.workspaceID
+        )
     }
 
     func connect(
         id: String, scope: BackendScope,
         receive: @escaping @Sendable (OpenCodePTYSocketEvent) async -> Bool
     ) async throws {
-        guard let directory = scope.directory, !directory.isEmpty else {
-            throw ProviderUsageCredentialImportError.contextChanged
-        }
         let request = try client.ptyConnectRequest(
-            id: id, directory: directory, workspaceID: scope.workspaceID, cursor: 0
+            id: id, directory: scope.directory, workspaceID: scope.workspaceID, cursor: 0
         )
         let stop = ProviderUsagePTYStopRequest()
         do {
@@ -65,11 +63,8 @@ actor OpenCodeCredentialImportLegacyPTYTransport: ProviderUsagePTYTransport {
     func send(_ bytes: [UInt8]) async throws { try await connection.send(bytes) }
 
     func delete(id: String, scope: BackendScope) async throws -> ProviderUsagePTYDeleteResult {
-        guard let directory = scope.directory, !directory.isEmpty else {
-            throw ProviderUsageCredentialImportError.cleanupFailed
-        }
         do {
-            try await client.deletePTY(id: id, directory: directory, workspaceID: scope.workspaceID)
+            try await client.deletePTY(id: id, directory: scope.directory, workspaceID: scope.workspaceID)
             return .deleted
         } catch let OpenCodeAPIError.httpError(status, _) where status == 404 {
             return .alreadyMissing

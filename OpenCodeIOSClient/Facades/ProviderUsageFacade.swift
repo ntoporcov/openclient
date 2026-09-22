@@ -122,14 +122,6 @@ final class ProviderUsageFacade {
         trackedAccount(for: candidate) != nil
     }
 
-    func replacementChangesProviderAccount(_ review: ProviderUsageCredentialReview) -> Bool {
-        guard let accountID = review.candidate.replacingAccountID,
-              let previous = store.accounts.first(where: { $0.id == accountID }),
-              let previousProviderAccountID = previous.providerAccountID,
-              let importedProviderAccountID = review.providerAccountID else { return false }
-        return previousProviderAccountID != importedProviderAccountID
-    }
-
     func approveRead(allowsInsecureHTTP: Bool = false) async {
         guard isActive, case .selected(let candidate) = store.setupPhase,
               contextProvider() == candidate.discoveryContext else {
@@ -163,13 +155,14 @@ final class ProviderUsageFacade {
         setupTask = task
         setupTaskID = taskID
         await task.value
-        if setupTaskID == taskID {
-            setupTask = nil
-            setupTaskID = nil
-        }
+        guard setupTaskID == taskID else { return }
+        setupTask = nil
+        setupTaskID = nil
+        guard case .reviewing = store.setupPhase else { return }
+        await saveImportedCredential()
     }
 
-    func approveSave() async {
+    private func saveImportedCredential() async {
         guard isActive, case .reviewing(let review) = store.setupPhase,
               contextProvider() == review.candidate.discoveryContext else {
             cancel()

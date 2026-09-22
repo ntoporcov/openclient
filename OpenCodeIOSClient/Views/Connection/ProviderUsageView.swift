@@ -41,12 +41,8 @@ struct ProviderUsageView: View {
                 importError: store.setupImportError,
                 usesInsecureTransport: usesInsecureTransport,
                 allowsInsecureTransport: $allowsInsecureTransport,
-                replacementChangesProviderAccount: { facade.replacementChangesProviderAccount($0) },
                 onApproveRead: {
                     Task { await facade.approveRead(allowsInsecureHTTP: allowsInsecureTransport) }
-                },
-                onApproveSave: {
-                    Task { await facade.approveSave() }
                 },
                 onCancel: {
                     allowsInsecureTransport = false
@@ -399,9 +395,7 @@ private struct ProviderUsageSetupSection: View {
     let importError: ProviderUsageCredentialImportError?
     let usesInsecureTransport: Bool
     @Binding var allowsInsecureTransport: Bool
-    let replacementChangesProviderAccount: (ProviderUsageCredentialReview) -> Bool
     let onApproveRead: () -> Void
-    let onApproveSave: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
@@ -435,14 +429,7 @@ private struct ProviderUsageSetupSection: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Button("Cancel", role: .cancel, action: onCancel)
-                case .reviewing(let review):
-                    ProviderUsageCredentialReviewView(
-                        review: review,
-                        changesProviderAccount: replacementChangesProviderAccount(review),
-                        onSave: onApproveSave,
-                        onCancel: onCancel
-                    )
-                case .saving:
+                case .reviewing, .saving:
                     ProgressView("Saving account...")
                     Button("Cancel", role: .cancel, action: onCancel)
                 }
@@ -464,9 +451,26 @@ private struct ProviderUsageReadConsentView: View {
             Text(candidate.provider.title)
                 .font(.headline)
         }
-        Text("OpenClient needs your permission before it asks the connected OpenCode server to read this provider credential. The value is kept out of the interface and is not saved until you approve the review.")
+        Text("OpenClient needs your permission before it asks the connected OpenCode server to read this provider credential. If the read succeeds, OpenClient automatically stores the credential in Keychain and sends it only to the selected provider's usage API for this check and future refreshes. The value stays hidden.")
             .font(.footnote)
             .foregroundStyle(.secondary)
+
+        if candidate.replacingAccountID != nil {
+            Label(
+                "This will replace the saved credential for this source and discard its current usage snapshot.",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.footnote)
+            .foregroundStyle(.orange)
+        }
+
+        if candidate.provider == .codex,
+           candidate.apiProfile == .legacy,
+           candidate.sourceKind == .openCodeAuth {
+            Text("Automatic renewal: when this access token expires or is rejected, OpenClient may ask this connected OpenCode source to renew it and update the source authentication file. The refresh token remains on the source.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
 
         if usesInsecureTransport {
             Toggle("Allow insecure transfer for this attempt", isOn: $allowsInsecureTransport)
@@ -481,49 +485,6 @@ private struct ProviderUsageReadConsentView: View {
         Button("Allow Credential Read", action: onApprove)
             .disabled(usesInsecureTransport && !allowsInsecureTransport)
         Button("Cancel", role: .cancel, action: onCancel)
-    }
-}
-
-private struct ProviderUsageCredentialReviewView: View {
-    let review: ProviderUsageCredentialReview
-    let changesProviderAccount: Bool
-    let onSave: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        Label("Credential Review", systemImage: "checkmark.shield")
-            .font(.headline)
-        LabeledContent("Provider", value: String(localized: review.candidate.provider.title))
-        LabeledContent("Credential Type", value: String(localized: providerUsageCredentialKindTitle(review.candidate.credentialKind)))
-        if let expiration = review.credentialExpiresAt {
-            LabeledContent("Expires") {
-                Text(expiration, format: .dateTime.year().month().day().hour().minute())
-            }
-        }
-        if changesProviderAccount {
-            Label(
-                "This credential identifies a different provider account. Saving will replace the tracked account and discard its current usage snapshot.",
-                systemImage: "exclamationmark.triangle.fill"
-            )
-            .font(.footnote)
-            .foregroundStyle(.orange)
-        }
-        Text("The credential was read successfully and remains hidden. Saving authorizes OpenClient to store it in Keychain and send it only to the selected provider's usage API for this check and future refreshes.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-        if review.candidate.provider == .codex,
-           review.candidate.apiProfile == .legacy,
-           review.candidate.sourceKind == .openCodeAuth {
-            Text("Automatic renewal: when this access token expires or is rejected, OpenClient may ask this connected OpenCode source to renew it and update the source authentication file. The refresh token remains on the source.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-        Button(action: onSave) { Text(saveTitle) }
-        Button("Cancel", role: .cancel, action: onCancel)
-    }
-
-    private var saveTitle: LocalizedStringResource {
-        review.candidate.replacingAccountID == nil ? "Save Usage Account" : "Replace Usage Account"
     }
 }
 
@@ -630,13 +591,6 @@ private func providerUsageUnavailableReason(
     case .sourceExtractionUnverified: "Credential access is not verified for this source."
     case .ambiguousLegacySource: "This credential source cannot be read safely."
     case .v2CredentialKindUnknown: "Credential import is not available for this server version."
-    }
-}
-
-private func providerUsageCredentialKindTitle(_ kind: ProviderUsageCredentialKind) -> LocalizedStringResource {
-    switch kind {
-    case .apiKey: "API key"
-    case .oauthAccessToken: "Subscription access token"
     }
 }
 

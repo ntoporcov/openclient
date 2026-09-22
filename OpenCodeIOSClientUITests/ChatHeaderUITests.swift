@@ -1,8 +1,14 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class ChatHeaderUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
+
+    private var isRunningOniPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+            || ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"]?.localizedCaseInsensitiveContains("iPad") == true
+    }
 
     func testShortTitlePillIsWiderThanEntireModelGroup() {
         for window in [false, true] {
@@ -201,6 +207,22 @@ final class ChatHeaderUITests: XCTestCase {
         appearance.tap()
 
         let composerStyle = app.buttons["chat.appearance.composer-style"]
+        if isRunningOniPad {
+            XCTAssertFalse(composerStyle.exists)
+            XCTAssertTrue(app.switches["configurations.chat-activity-shimmer"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.switches["configurations.show-tool-calls"].exists)
+            XCTAssertTrue(app.switches["configurations.show-reasoning-blocks"].exists)
+            capture(app, "Appearance-iPad-Composer-Style-Hidden")
+            app.navigationBars["Appearance Settings"].buttons.firstMatch.tap()
+            let currentAgent = app.buttons["chat.header.agent.build"]
+            XCTAssertTrue(currentAgent.waitForExistence(timeout: 3))
+            currentAgent.tap()
+            XCTAssertTrue(input.waitForExistence(timeout: 3))
+            XCTAssertEqual(input.value as? String, "Keep this appearance draft")
+            app.terminate()
+            return
+        }
+
         XCTAssertTrue(composerStyle.waitForExistence(timeout: 3))
         composerStyle.tap()
 
@@ -240,6 +262,52 @@ final class ChatHeaderUITests: XCTestCase {
         XCTAssertTrue(picker.waitForExistence(timeout: 3))
         XCTAssertTrue(picker.buttons["Assistant"].isSelected)
         app.terminate()
+    }
+
+    func testIPadAssistantComposerAgentSelectionPreservesDraftInRootAndWindowForBothStoredStyles() throws {
+        guard isRunningOniPad else {
+            throw XCTSkip("The Assistant composer agent selector is specific to iPad.")
+        }
+
+        for window in [false, true] {
+            for assistant in [false, true] {
+                let app = launch(window: window, narrow: true, assistant: assistant)
+                let input = app.textViews["chat.input"]
+                XCTAssertTrue(input.waitForExistence(timeout: 15))
+                input.tap()
+                input.typeText("Keep this agent draft")
+
+                let agent = app.buttons["chat.composer.agent"]
+                let model = app.buttons["chat.composer.model"]
+                XCTAssertTrue(agent.waitForExistence(timeout: 3))
+                XCTAssertTrue(agent.isHittable)
+                XCTAssertTrue(model.isHittable)
+                XCTAssertGreaterThanOrEqual(agent.frame.width, 44)
+                XCTAssertGreaterThanOrEqual(agent.frame.height, 44)
+                XCTAssertGreaterThanOrEqual(model.frame.width, 44)
+                XCTAssertGreaterThanOrEqual(model.frame.height, 44)
+                XCTAssertLessThanOrEqual(agent.frame.maxX, model.frame.minX + 1)
+                XCTAssertLessThanOrEqual(model.frame.maxX, input.frame.maxX + 1)
+                XCTAssertEqual(agent.value as? String, "build")
+
+                agent.tap()
+                let reviewAgent = app.buttons.matching(
+                    NSPredicate(format: "label ==[c] %@", "ReviewAgent")
+                ).firstMatch
+                XCTAssertTrue(reviewAgent.waitForExistence(timeout: 3))
+                reviewAgent.tap()
+
+                XCTAssertEqual(agent.value as? String, "ReviewAgent")
+                XCTAssertTrue(app.buttons["chat.header"].label.contains("ReviewAgent"))
+                XCTAssertEqual(app.staticTexts["chat.header.fixture.agent"].label, "ReviewAgent")
+                XCTAssertEqual(input.value as? String, "Keep this agent draft")
+                let menu = app.buttons["chat.composer.menu"]
+                XCTAssertGreaterThanOrEqual(menu.frame.width, 44)
+                XCTAssertGreaterThanOrEqual(menu.frame.height, 44)
+                capture(app, "Agent-iPad-\(window ? "Window" : "Root")-\(assistant ? "Assistant" : "Messenger")")
+                app.terminate()
+            }
+        }
     }
 
     func testAssistantHeaderAndContextStayInNavigationBarWhileKeyboardIsVisible() {
@@ -313,6 +381,10 @@ final class ChatHeaderUITests: XCTestCase {
 
         let model = app.buttons["chat.composer.model"]
         XCTAssertTrue(model.waitForExistence(timeout: 3))
+        let input = app.textViews["chat.input"]
+        XCTAssertTrue(input.exists)
+        XCTAssertGreaterThanOrEqual(model.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(model.frame.height, 44)
         let modelHittable = expectation(
             for: NSPredicate(format: "hittable == true"),
             evaluatedWith: model
@@ -321,6 +393,7 @@ final class ChatHeaderUITests: XCTestCase {
         model.tap()
         let modelGroup = app.collectionViews.buttons["Model"].firstMatch
         XCTAssertTrue(modelGroup.waitForExistence(timeout: 3))
+        capture(app, "Assistant-Model-Menu-Open")
         modelGroup.tap()
         let provider = app.collectionViews.buttons["OpenAI"].firstMatch
         XCTAssertTrue(provider.waitForExistence(timeout: 3))
@@ -332,6 +405,64 @@ final class ChatHeaderUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.5)
         capture(app, "Assistant-Glass-Model-Long-Title")
         app.terminate()
+    }
+
+    func testAssistantComposerModelUsesIntrinsicWidthAndFits320Pane() {
+        let short = launch(window: false, assistant: true)
+        let shortInput = short.textViews["chat.input"]
+        let shortModel = short.buttons["chat.composer.model"]
+        let shortMenu = short.buttons["chat.composer.menu"]
+        XCTAssertTrue(shortInput.waitForExistence(timeout: 15))
+        XCTAssertTrue(shortModel.waitForExistence(timeout: 3))
+        XCTAssertTrue(shortMenu.waitForExistence(timeout: 3))
+        shortInput.tap()
+        shortInput.typeText("Verify model width")
+        let shortSend = short.buttons["chat.send"]
+        XCTAssertTrue(shortSend.waitForExistence(timeout: 3))
+        let shortTitle = short.staticTexts["chat.composer.model.title"]
+        let shortReasoning = short.staticTexts["chat.composer.model.reasoning"]
+        XCTAssertTrue(shortTitle.exists)
+        XCTAssertTrue(shortReasoning.exists)
+        XCTAssertGreaterThanOrEqual(shortModel.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(shortModel.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(shortSend.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(shortSend.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(shortMenu.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(shortMenu.frame.height, 44)
+        XCTAssertLessThan(shortModel.frame.maxX, shortSend.frame.minX,
+            "The short model button must not expand into the trailing composer controls")
+        XCTAssertLessThanOrEqual(shortModel.frame.width, 180,
+            "The known short fixture model should remain intrinsically sized")
+        XCTAssertLessThanOrEqual(shortModel.frame.maxX, max(shortTitle.frame.maxX, shortReasoning.frame.maxX) + 16,
+            "The short model button should end at its visible text padding instead of filling the row")
+        if isRunningOniPad {
+            XCTAssertGreaterThanOrEqual(shortSend.frame.minX - shortModel.frame.maxX, 100,
+                "The 650-point iPad fixture should retain substantial space after the short model")
+        }
+        capture(short, "Assistant-Short-Model-Before-Menu")
+        shortModel.tap()
+        XCTAssertTrue(short.collectionViews.buttons["Model"].firstMatch.waitForExistence(timeout: 3))
+        capture(short, "Assistant-Short-Model-Menu-Open")
+        short.terminate()
+
+        let long = launch(window: true, longModel: true, narrow: true, assistant: true)
+        let input = long.textViews["chat.input"]
+        let model = long.buttons["chat.composer.model"]
+        let menu = long.buttons["chat.composer.menu"]
+        XCTAssertTrue(input.waitForExistence(timeout: 15))
+        XCTAssertTrue(model.waitForExistence(timeout: 3))
+        XCTAssertTrue(menu.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(model.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(model.frame.height, 44)
+        XCTAssertLessThanOrEqual(model.frame.maxX, input.frame.maxX + 1,
+            "The long model label must fit the actual 320-point composer pane")
+        XCTAssertGreaterThanOrEqual(long.buttons["chat.composer.menu"].frame.width, 44)
+        XCTAssertGreaterThanOrEqual(long.buttons["chat.composer.menu"].frame.height, 44)
+        capture(long, "Assistant-320-Long-Model")
+        model.tap()
+        XCTAssertTrue(long.collectionViews.buttons["Model"].firstMatch.waitForExistence(timeout: 3))
+        capture(long, "Assistant-320-Model-Menu-Open")
+        long.terminate()
     }
 
     private func assertAssistantHeaderLayout(_ app: XCUIApplication, expectsLeading: Bool = false) {

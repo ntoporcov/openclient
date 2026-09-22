@@ -112,7 +112,7 @@ struct ModelToolbarMenu: View {
         .frame(
             minWidth: contentAlignment == .leading ? 44 : maximumWidth == nil ? (modelReference == nil ? 72 : 108) : 44,
             idealWidth: maximumWidth,
-            maxWidth: contentAlignment == .leading && maximumWidth == nil && !usesGlassCapsule ? .infinity : maximumWidth,
+            maxWidth: maximumWidth,
             minHeight: contentAlignment == .leading || maximumWidth != nil ? 44 : nil,
             alignment: .leading
         )

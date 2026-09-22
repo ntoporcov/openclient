@@ -39,7 +39,7 @@ final class ProviderUsageFacadeTests: XCTestCase {
         XCTAssertEqual(recorder.calls.map(\.1), [true, false])
     }
 
-    func testExactTrackedSourceDefaultsToReplacementAndFlagsChangedProviderAccount() throws {
+    func testExactTrackedSourceDefaultsToReplacement() throws {
         let context = Self.context()
         let original = Self.account()
         let tracked = ProviderUsageAccount(
@@ -65,22 +65,204 @@ final class ProviderUsageFacadeTests: XCTestCase {
         XCTAssertTrue(facade.beginSetup(from: candidate))
         guard case .selected(let setup) = store.setupPhase else { return XCTFail("Expected replacement selection") }
         XCTAssertEqual(setup.replacingAccountID, tracked.id)
+    }
 
-        let changed = ProviderUsageCredentialReview(
-            candidate: setup,
-            secret: .init(value: "synthetic-secret"),
-            providerAccountID: "provider-account-b",
-            credentialExpiresAt: nil
+    func testApprovedReadAutomaticallyPersistsFirstAccountAndRefreshesUsage() async throws {
+        let context = Self.context()
+        let account = Self.account()
+        let repository = FacadeProviderUsageAccountRepository(
+            saveResult: .init(account: account, supersededCredentialCleanupPending: false),
+            saveError: nil
         )
-        XCTAssertTrue(facade.replacementChangesProviderAccount(changed))
+        let provider = FacadeProviderUsageFetching()
+        let store = ProviderUsageStore()
+        let facade = makeFacade(
+            store: store,
+            accounts: repository,
+            providerClient: provider,
+            context: { context },
+            importerFactory: { candidate, _, _ in ImmediateProviderUsageImporter(candidate: candidate) }
+        )
+        facade.synchronizeDiscovery()
+        XCTAssertTrue(facade.beginSetup(from: try XCTUnwrap(store.candidates.first)))
+        guard case .selected(let selected) = store.setupPhase else { return XCTFail("Expected selection") }
+        XCTAssertNil(selected.replacingAccountID)
 
-        let unchanged = ProviderUsageCredentialReview(
-            candidate: setup,
-            secret: .init(value: "synthetic-secret"),
-            providerAccountID: "provider-account-a",
-            credentialExpiresAt: nil
+        await facade.approveRead()
+
+        let saveCount = await repository.saveCount
+        let fetchCount = await provider.callCount
+        XCTAssertEqual(saveCount, 1)
+        XCTAssertEqual(fetchCount, 1)
+        XCTAssertEqual(store.accounts, [account])
+        XCTAssertEqual(store.statuses[account.id], .ready)
+    }
+
+    func testApprovedReadAutomaticallyPersistsReplacementRefreshesAndSynchronizesDisplay() async throws {
+        let context = Self.context()
+        let original = Self.account()
+        let replacement = ProviderUsageAccount(
+            id: original.id,
+            provider: original.provider,
+            sourceConnectionID: original.sourceConnectionID,
+            apiProfile: original.apiProfile,
+            sourceKind: original.sourceKind,
+            credentialKind: original.credentialKind,
+            providerAccountID: "provider-account",
+            credentialReference: original.credentialReference,
+            credentialRevision: 2,
+            createdAt: original.createdAt,
+            updatedAt: Date(timeIntervalSince1970: 2)
         )
-        XCTAssertFalse(facade.replacementChangesProviderAccount(unchanged))
+        let snapshot = ProviderUsageSnapshot(
+            provider: .openRouter,
+            accountLabel: "Synthetic",
+            fetchedAt: Date(timeIntervalSince1970: 3),
+            credentialExpiresAt: nil,
+            metrics: [.init(
+                id: "spend",
+                kind: .spend,
+                period: .month,
+                used: 1,
+                remaining: nil,
+                limit: nil,
+                percentUsed: nil,
+                unit: .currency("USD"),
+                resetAt: nil
+            )]
+        )
+        let repository = FacadeProviderUsageAccountRepository(
+            accounts: [original],
+            saveResult: .init(account: replacement, supersededCredentialCleanupPending: false),
+            saveError: nil
+        )
+        let provider = FacadeProviderUsageFetching(snapshot: snapshot)
+        let store = ProviderUsageStore()
+        store.replaceAccounts([original])
+        let facade = makeFacade(
+            store: store,
+            accounts: repository,
+            providerClient: provider,
+            context: { context },
+            importerFactory: { candidate, _, _ in ImmediateProviderUsageImporter(candidate: candidate) }
+        )
+        facade.synchronizeDiscovery()
+        XCTAssertTrue(facade.beginSetup(from: try XCTUnwrap(store.candidates.first)))
+        guard case .selected(let selected) = store.setupPhase else { return XCTFail("Expected selection") }
+        XCTAssertEqual(selected.replacingAccountID, original.id)
+
+        await facade.approveRead()
+
+        let saveCount = await repository.saveCount
+        let fetchCount = await provider.callCount
+        XCTAssertEqual(saveCount, 1)
+        XCTAssertEqual(fetchCount, 1)
+        XCTAssertEqual(store.accounts, [replacement])
+        XCTAssertEqual(store.snapshots[replacement.id], snapshot)
+        XCTAssertEqual(store.statuses[replacement.id], .ready)
+        XCTAssertEqual(facade.displayStore.availableMetrics.map(\.identity.accountID), [replacement.id])
+    }
+
+    func testImportFailureDoesNotPersistCredential() async throws {
+        let context = Self.context()
+        let repository = FacadeProviderUsageAccountRepository()
+        let store = ProviderUsageStore()
+        let facade = makeFacade(
+            store: store,
+            accounts: repository,
+            context: { context },
+            importerFactory: { _, _, _ in ThrowingFacadeProviderUsageImporter() }
+        )
+        facade.synchronizeDiscovery()
+        XCTAssertTrue(facade.beginSetup(from: try XCTUnwrap(store.candidates.first)))
+
+        await facade.approveRead()
+
+        let saveCount = await repository.saveCount
+        XCTAssertEqual(saveCount, 0)
+        XCTAssertEqual(store.setupStatus, .importFailed)
+        XCTAssertEqual(store.setupImportError, .sourceMissing)
+        XCTAssertTrue(store.accounts.isEmpty)
+    }
+
+    func testAutomaticSaveFailureRemainsUnconfiguredAndSurfacesError() async throws {
+        let context = Self.context()
+        let repository = FacadeProviderUsageAccountRepository()
+        let provider = FacadeProviderUsageFetching()
+        let store = ProviderUsageStore()
+        let facade = makeFacade(
+            store: store,
+            accounts: repository,
+            providerClient: provider,
+            context: { context },
+            importerFactory: { candidate, _, _ in ImmediateProviderUsageImporter(candidate: candidate) }
+        )
+        facade.synchronizeDiscovery()
+        XCTAssertTrue(facade.beginSetup(from: try XCTUnwrap(store.candidates.first)))
+
+        await facade.approveRead()
+
+        let saveCount = await repository.saveCount
+        let fetchCount = await provider.callCount
+        XCTAssertEqual(saveCount, 1)
+        XCTAssertEqual(fetchCount, 0)
+        XCTAssertEqual(store.setupStatus, .saveFailed)
+        XCTAssertTrue(store.accounts.isEmpty)
+    }
+
+    func testContextChangeBeforeAutomaticSaveDoesNotPersistCredential() async throws {
+        let first = Self.context(lifetime: Self.uuid("11111111-1111-1111-1111-111111111111"))
+        let second = Self.context(lifetime: Self.uuid("22222222-2222-2222-2222-222222222222"))
+        let contextBox = ProviderUsageContextBox(first)
+        let importer = DeferredFacadeProviderUsageImporter()
+        let repository = FacadeProviderUsageAccountRepository()
+        let store = ProviderUsageStore()
+        let facade = makeFacade(
+            store: store,
+            accounts: repository,
+            context: { contextBox.value },
+            importerFactory: { _, _, _ in importer }
+        )
+        facade.synchronizeDiscovery()
+        XCTAssertTrue(facade.beginSetup(from: try XCTUnwrap(store.candidates.first)))
+        guard case .selected(let selected) = store.setupPhase else { return XCTFail("Expected selection") }
+
+        let operation = Task { await facade.approveRead() }
+        await importer.waitUntilCalled()
+        contextBox.value = second
+        await importer.resolve(candidate: selected)
+        await operation.value
+
+        let saveCount = await repository.saveCount
+        XCTAssertEqual(saveCount, 0)
+        XCTAssertEqual(store.setupPhase, .idle)
+        XCTAssertTrue(store.accounts.isEmpty)
+    }
+
+    func testCancellationDuringReadDoesNotPersistCredential() async throws {
+        let context = Self.context()
+        let importer = DeferredFacadeProviderUsageImporter()
+        let repository = FacadeProviderUsageAccountRepository()
+        let store = ProviderUsageStore()
+        let facade = makeFacade(
+            store: store,
+            accounts: repository,
+            context: { context },
+            importerFactory: { _, _, _ in importer }
+        )
+        facade.synchronizeDiscovery()
+        XCTAssertTrue(facade.beginSetup(from: try XCTUnwrap(store.candidates.first)))
+
+        let operation = Task { await facade.approveRead() }
+        await importer.waitUntilCalled()
+        facade.cancel()
+        await importer.resolve(candidate: Self.setupCandidate(context: context))
+        await operation.value
+
+        let saveCount = await repository.saveCount
+        XCTAssertEqual(saveCount, 0)
+        XCTAssertEqual(store.setupPhase, .idle)
+        XCTAssertTrue(store.accounts.isEmpty)
     }
 
     func testContextSwitchAndBackgroundDropLateImportWhileRetainingAccounts() async throws {
@@ -111,6 +293,8 @@ final class ProviderUsageFacadeTests: XCTestCase {
         XCTAssertEqual(store.setupPhase, .idle)
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(store.candidateContext, second)
+        let saveCount = await repository.saveCount
+        XCTAssertEqual(saveCount, 0)
 
         facade.applicationActivityChanged(isActive: false)
         XCTAssertNil(store.candidateContext)
@@ -120,9 +304,11 @@ final class ProviderUsageFacadeTests: XCTestCase {
     func testBackgroundDropsLateImport() async throws {
         let context = Self.context()
         let importer = DeferredFacadeProviderUsageImporter()
+        let repository = FacadeProviderUsageAccountRepository()
         let store = ProviderUsageStore()
         let facade = makeFacade(
             store: store,
+            accounts: repository,
             context: { context },
             importerFactory: { _, _, _ in importer }
         )
@@ -137,6 +323,8 @@ final class ProviderUsageFacadeTests: XCTestCase {
 
         XCTAssertEqual(store.setupPhase, .idle)
         XCTAssertNil(store.candidateContext)
+        let saveCount = await repository.saveCount
+        XCTAssertEqual(saveCount, 0)
     }
 
     func testDisconnectedRefreshAndRemoveUseLocalRepositories() async {
@@ -590,6 +778,12 @@ private actor ImmediateProviderUsageImporter: ProviderUsageCredentialImporter {
     }
 }
 
+private struct ThrowingFacadeProviderUsageImporter: ProviderUsageCredentialImporter {
+    func importCredential(for candidate: ProviderUsageSetupCandidate) async throws -> ProviderUsageCredentialReview {
+        throw ProviderUsageCredentialImportError.sourceMissing
+    }
+}
+
 private actor DeferredFacadeProviderUsageImporter: ProviderUsageCredentialImporter {
     private var continuation: CheckedContinuation<ProviderUsageCredentialReview, Never>?
     private var calledContinuation: CheckedContinuation<Void, Never>?
@@ -621,8 +815,19 @@ private actor DeferredFacadeProviderUsageImporter: ProviderUsageCredentialImport
 private actor FacadeProviderUsageAccountRepository: ProviderUsageAccountRepository {
     private var storedAccounts: [ProviderUsageAccount]
     private(set) var removeCount = 0
+    private(set) var saveCount = 0
+    private let saveResult: ProviderUsageAccountSaveResult?
+    private let saveError: ProviderUsageAccountRepositoryError?
 
-    init(accounts: [ProviderUsageAccount] = []) { storedAccounts = accounts }
+    init(
+        accounts: [ProviderUsageAccount] = [],
+        saveResult: ProviderUsageAccountSaveResult? = nil,
+        saveError: ProviderUsageAccountRepositoryError? = .credential(.unavailable)
+    ) {
+        storedAccounts = accounts
+        self.saveResult = saveResult
+        self.saveError = saveError
+    }
 
     func load() -> [ProviderUsageAccount] { storedAccounts }
 
@@ -634,7 +839,12 @@ private actor FacadeProviderUsageAccountRepository: ProviderUsageAccountReposito
     }
 
     func save(review: ProviderUsageCredentialReview) throws -> ProviderUsageAccountSaveResult {
-        throw ProviderUsageAccountRepositoryError.credential(.unavailable)
+        saveCount += 1
+        if let saveError { throw saveError }
+        guard let saveResult else { throw ProviderUsageAccountRepositoryError.credential(.unavailable) }
+        storedAccounts.removeAll { $0.id == saveResult.account.id }
+        storedAccounts.append(saveResult.account)
+        return saveResult
     }
 
     func remove(accountID: UUID) throws {
@@ -646,6 +856,11 @@ private actor FacadeProviderUsageAccountRepository: ProviderUsageAccountReposito
 private actor FacadeProviderUsageFetching: ProviderUsageFetching {
     private(set) var callCount = 0
     private(set) var providers: [ProviderUsageProvider] = []
+    private let snapshot: ProviderUsageSnapshot?
+
+    init(snapshot: ProviderUsageSnapshot? = nil) {
+        self.snapshot = snapshot
+    }
 
     func fetchUsage(
         provider: ProviderUsageProvider,
@@ -656,7 +871,7 @@ private actor FacadeProviderUsageFetching: ProviderUsageFetching {
     ) async throws -> ProviderUsageSnapshot {
         callCount += 1
         providers.append(provider)
-        return .init(
+        return snapshot ?? .init(
             provider: provider,
             accountLabel: nil,
             fetchedAt: Date(timeIntervalSince1970: 2),

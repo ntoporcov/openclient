@@ -1342,7 +1342,7 @@ struct OpenCodeAPIClient: Sendable {
 
     func createPTY(
         request: OpenCodePTYCreateRequest,
-        directory: String,
+        directory: String?,
         workspaceID: String? = nil
     ) async throws -> OpenCodePTY {
         try await send(
@@ -1386,7 +1386,7 @@ struct OpenCodeAPIClient: Sendable {
 
     func deletePTY(
         id: String,
-        directory: String,
+        directory: String?,
         workspaceID: String? = nil
     ) async throws {
         try await sendNoContent(
@@ -1399,7 +1399,7 @@ struct OpenCodeAPIClient: Sendable {
 
     func ptyConnectRequest(
         id: String,
-        directory: String,
+        directory: String?,
         workspaceID: String? = nil,
         cursor: Int
     ) throws -> URLRequest {

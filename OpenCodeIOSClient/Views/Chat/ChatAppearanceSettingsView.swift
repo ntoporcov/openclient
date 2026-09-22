@@ -5,15 +5,17 @@ struct ChatAppearanceSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                NavigationLink {
-                    ComposerStyleSettingsView(store: store)
-                } label: {
-                    LabeledContent("Composer Style") {
-                        Text(store.composerStyle.title)
+            if OpenCodePlatformCapabilities.supportsComposerStyleChoice {
+                Section {
+                    NavigationLink {
+                        ComposerStyleSettingsView(store: store)
+                    } label: {
+                        LabeledContent("Composer Style") {
+                            Text(store.composerStyle.title)
+                        }
                     }
+                    .accessibilityIdentifier("chat.appearance.composer-style")
                 }
-                .accessibilityIdentifier("chat.appearance.composer-style")
             }
 
             Section {
