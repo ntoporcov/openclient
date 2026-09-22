@@ -1,3 +1,5 @@
+import SwiftUI
+import UIKit
 import XCTest
 @testable import OpenClient
 
@@ -436,6 +438,57 @@ final class ChatWindowAdapterTests: XCTestCase {
         parent.windowContext?.close()
         XCTAssertTrue(child.windowContext!.isClosed)
     }
+
+    #if !targetEnvironment(macCatalyst)
+    func testFirstLegacyChildSheetContentHasAtomicContextAndRendersImmediately() throws {
+        // Hydration has separate coverage and can outlive this isolated view host during teardown.
+        setenv("OPENCLIENT_SCREENSHOT_SCENE", "test", 1)
+        defer { unsetenv("OPENCLIENT_SCREENSHOT_SCENE") }
+        let model = model(.legacy)
+        defer { model.disconnect() }
+        let parent = window(model, session: session("ses_parent", directory: "/B"))
+        defer { parent.windowContext?.close() }
+        let childSession = session("ses_child", directory: "/B", parent: "ses_parent")
+        parent.directoryStore(forSessionID: "ses_parent").insertV2Session(childSession)
+        let child = try XCTUnwrap(parent.childPresentation(for: childSession))
+        defer { child.windowContext?.close() }
+        let presentation = try XCTUnwrap(TaskSessionPresentation(sessionID: childSession.id, chatFacade: child))
+        XCTAssertNil(TaskSessionPresentation(sessionID: "another-session", chatFacade: child))
+        XCTAssertTrue(presentation.chatFacade === child)
+        XCTAssertTrue(presentation.context === child.windowContext!)
+
+        let content = TaskSessionSheetContent(
+            presentation: presentation,
+            imageContent: nil,
+            videoStreams: nil,
+            onDismiss: {},
+            detent: .constant(.medium)
+        )
+        let controller = UIHostingController(rootView: AnyView(content))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 400, height: 700)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer {
+            controller.rootView = AnyView(EmptyView())
+            controller.view.layoutIfNeeded()
+            presentation.context.close()
+            window.isHidden = true
+            window.rootViewController = nil
+            withExtendedLifetime(model) {}
+        }
+        window.layoutIfNeeded()
+
+        func descendants(of view: UIView) -> [UIView] {
+            [view] + view.subviews.flatMap { descendants(of: $0) }
+        }
+        XCTAssertTrue(descendants(of: controller.view).contains { $0 is ChatTranscriptCollection })
+        XCTAssertFalse(presentation.context.isClosed)
+        XCTAssertEqual(parent.selectedSession?.id, "ses_parent")
+        XCTAssertEqual(model.selectedSession?.id, "ses_a")
+    }
+    #endif
 
     func testWindowTodoInspectorReadsAndAppliesOnlyItsCanonicalSession() async throws {
         let model = model(.legacy)

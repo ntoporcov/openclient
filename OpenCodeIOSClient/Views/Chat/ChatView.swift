@@ -2181,6 +2181,49 @@ private struct EquatableMessageComposerHost: View, Equatable {
     }
 }
 
+@MainActor
+struct TaskSessionPresentation: Identifiable {
+    nonisolated let id: UUID
+    let sessionID: String
+    let chatFacade: ChatFacade
+    let context: ChatWindowContext
+
+    init?(sessionID: String, chatFacade: ChatFacade) {
+        guard let context = chatFacade.windowContext,
+              context.isCurrent,
+              context.session.id == sessionID else { return nil }
+        self.id = context.id
+        self.sessionID = sessionID
+        self.chatFacade = chatFacade
+        self.context = context
+    }
+}
+
+@MainActor
+struct TaskSessionSheetContent: View {
+    let presentation: TaskSessionPresentation
+    let imageContent: OpenClientImageContentCoordinator?
+    let videoStreams: OpenClientVideoStreamCoordinator?
+    let onDismiss: () -> Void
+    @Binding var detent: PresentationDetent
+
+    var body: some View {
+        NavigationStack {
+            ChatView(
+                chatFacade: presentation.chatFacade,
+                browser: presentation.context.browser,
+                imageContent: imageContent,
+                videoStreams: videoStreams,
+                sessionID: presentation.sessionID,
+                onDismissChildSession: onDismiss
+            )
+        }
+        .presentationDetents([.fraction(0.3), .medium, .large], selection: $detent)
+        .presentationDragIndicator(.visible)
+        .onDisappear { presentation.context.close() }
+    }
+}
+
 struct ChatView: View {
     @Environment(\.scenePhase) private var scenePhase
 #if os(iOS)
@@ -2261,8 +2304,7 @@ struct ChatView: View {
     @State private var selectedMessageDebugPayload: MessageDebugPayload?
     @State private var selectedCompactionSummary: CompactionSummaryPayload?
     @State private var selectedActivityDetail: ActivityDetail?
-    @State private var presentedTaskSession: OpenCodeSession?
-    @State private var presentedTaskChat: ChatFacade?
+    @State private var presentedTask: TaskSessionPresentation?
     @State private var taskSessionDetent: PresentationDetent = .medium
     @State private var showingTodoInspector = false
     @State private var showingContextMetrics = false
@@ -2780,24 +2822,14 @@ struct ChatView: View {
                 ActivityDetailView(chatFacade: chatFacade, detail: detail)
             }
         }
-        .sheet(item: $presentedTaskSession, onDismiss: restoreActiveSessionAfterTaskSheet) { taskSession in
-            if let childChat = presentedTaskChat, let childContext = childChat.windowContext {
-                NavigationStack {
-                    ChatView(
-                        chatFacade: childChat,
-                        browser: childContext.browser,
-                        imageContent: imageContent,
-                        videoStreams: videoStreams,
-                        sessionID: taskSession.id,
-                        onDismissChildSession: {
-                            presentedTaskSession = nil
-                        }
-                    )
-                }
-                .presentationDetents([.fraction(0.3), .medium, .large], selection: $taskSessionDetent)
-                .presentationDragIndicator(.visible)
-                .onDisappear { childContext.close() }
-            }
+        .sheet(item: $presentedTask, onDismiss: restoreActiveSessionAfterTaskSheet) { presentation in
+            TaskSessionSheetContent(
+                presentation: presentation,
+                imageContent: imageContent,
+                videoStreams: videoStreams,
+                onDismiss: { presentedTask = nil },
+                detent: $taskSessionDetent
+            )
         }
         .sheet(item: $selectedMessageDebugPayload) { payload in
             NavigationStack {
@@ -5228,15 +5260,13 @@ struct ChatView: View {
             return
         }
         guard let session = await chatFacade.sessionForPresentation(sessionID: sessionID),
-              let childChat = chatFacade.childPresentation(for: session) else { return }
+              let childChat = chatFacade.childPresentation(for: session),
+              let presentation = TaskSessionPresentation(sessionID: session.id, chatFacade: childChat) else { return }
         taskSessionDetent = .medium
-        presentedTaskChat = childChat
-        presentedTaskSession = session
+        presentedTask = presentation
     }
 
     private func restoreActiveSessionAfterTaskSheet() {
-        presentedTaskChat?.windowContext?.close()
-        presentedTaskChat = nil
         chatFacade.setActiveChatSessionID(sessionID)
     }
 
