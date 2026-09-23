@@ -1,8 +1,5 @@
-OpenCode v2 support and a smoother chat experience.
+Lifetime Pro is $19.99 through September 30 (then $29.99).
 
-• OpenClient now automatically detects your server's API, with experimental support for OpenCode v2 alongside existing OpenCode connections.
-• Press and hold assistant text to select and copy just the part you need.
-• Enjoy smoother message sending, streaming feedback, and keyboard transitions.
-• Includes fixes and reliability improvements throughout the app.
+Unlock unlimited prompts, unlimited sessions, and Project Actions — and keep OpenClient growing.
 
-OpenCode v2 support is still evolving, and some features may be incomplete. The in-app experimental notice includes a link to report bugs.
+Free still includes 5 prompts/day and 1 session so you can try it on your own OpenCode server.
