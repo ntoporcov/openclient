@@ -22,7 +22,7 @@
     <main class="policy-layout">
       <article class="panel policy">
         <h1>Privacy Policy</h1>
-        <p class="meta">Last updated: April 24, 2026</p>
+        <p class="meta">Last updated: September 22, 2026</p>
 
         <h2>Overview</h2>
         <p>OpenClient is a native client for connecting to a user-selected OpenCode server.</p>
@@ -36,12 +36,15 @@
           <li>chat messages, prompts, replies, and session content received from your OpenCode server</li>
           <li>project, session, todo, permission, and question data returned by your OpenCode server</li>
           <li>local app settings such as recent servers and workspace preferences</li>
+          <li>optional provider usage data, such as account, quota, usage, spending, balance, and credit information</li>
         </ul>
 
         <h2>How Information Is Stored On Device</h2>
         <p>OpenClient stores some information locally on your device.</p>
         <ul>
           <li>server passwords are stored in the system Keychain</li>
+          <li>optional OpenAI access tokens and OpenRouter API keys are stored in the system Keychain in a private, non-synchronizable, device-only item</li>
+          <li>provider usage account metadata is stored in the app's local Application Support data, and fetched usage, account, plan, quota, spending, balance, and credit data may be cached locally</li>
           <li>non-sensitive recent server metadata, such as server URL and username, may be stored in local app storage</li>
           <li>local UI state and preferences may also be stored on device</li>
         </ul>
@@ -62,6 +65,11 @@
           <li><code>http://</code> connections do not use HTTPS/TLS, even if you are connecting through a private or encrypted network such as Tailscale</li>
         </ul>
         <p>OpenClient warns before establishing an insecure <code>http://</code> connection entered manually.</p>
+
+        <h2>Provider Usage</h2>
+        <p>Provider Usage is optional. If you choose to enable it, OpenClient can import an OpenAI access token or OpenRouter API key from the configured OpenCode server's supported authentication source. The credential is transferred through the authenticated import flow and is not placed in widget snapshots.</p>
+        <p>After setup, OpenClient sends the selected credential directly to the relevant provider to retrieve usage information: OpenAI requests use OpenAI's ChatGPT usage endpoint, and OpenRouter requests use OpenRouter's key endpoint. For eligible OpenAI OAuth credentials, an expired credential may be refreshed through OpenAI's OAuth endpoint; the refreshed credential may be written back to the source server's OpenCode authentication file so the source remains current.</p>
+        <p>Provider usage widgets and related app-group snapshots contain only selected derived display data, such as provider and account labels, usage or credit values, limits, percentages, reset times, and fetch times. They do not contain provider tokens, API keys, or other credential secrets. Widget data may be visible to anyone who can see the widget or device.</p>
 
         <h2>Self-Hosted Server Responsibility</h2>
         <p>Your OpenCode server is operated separately from OpenClient.</p>
@@ -95,6 +103,7 @@
           <li>saved connection metadata may remain on device until you remove it</li>
           <li>server passwords stored in Keychain remain until deleted by the app or removed with the app/account data</li>
           <li>chat and session data displayed in the app may also be reloaded from your configured OpenCode server</li>
+          <li>provider usage credentials and account records remain until you remove the usage account; removing it deletes the credential, local account record, cached usage data, and related widget snapshot selections</li>
         </ul>
         <p>Data stored or retained by your OpenCode server is up to that server and whoever runs it.</p>
 
@@ -102,6 +111,7 @@
         <ul>
           <li>choose which server OpenClient connects to</li>
           <li>remove saved recent servers in the app</li>
+          <li>remove imported provider usage accounts in the Provider Usage settings</li>
           <li>choose whether to use insecure <code>http://</code> connections</li>
           <li>uninstall the app to remove app data stored with the installation</li>
         </ul>
