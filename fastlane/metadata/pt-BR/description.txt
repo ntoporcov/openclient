@@ -1,14 +1,28 @@
-O OpenClient oferece a integração nativa mais completa entre iPhone, iPad e OpenCode para o seu próprio servidor autohospedado.
+O OpenClient oferece integração nativa entre iPhone, iPad e OpenCode para o seu próprio servidor autohospedado.
 
 Mantenha suas sessões de programação sempre ao alcance, mesmo longe da mesa. Navegue por projetos, retome conversas, acompanhe a atividade das ferramentas, responda a pedidos de permissão e perguntas e siga o trabalho em andamento por uma interface nativa e rápida, criada para aproveitar o iOS e o iPadOS.
 
 O OpenClient foi desenvolvido para quem já usa o OpenCode e quer mais do que uma janela de conversa remota. Ele é uma central de comando móvel para agentes ativos, tarefas de longa duração, acompanhamentos rápidos e consultas remotas.
+
+Grátis e Pro
+
+O plano Grátis permite experimentar o OpenClient com seu próprio servidor OpenCode: envie até 5 prompts por dia e crie uma sessão.
+
+O OpenClient Pro desbloqueia:
+- Prompts ilimitados
+- Sessões ilimitadas
+- Ações do Projeto
+- Suporte ao desenvolvimento contínuo do app Open Source na App Store
+
+O Pro Lifetime é uma compra única e inclui o ícone Pro Life. O Pro Monthly é uma assinatura com renovação automática mensal.
 
 Principais recursos do OpenCode:
 
 - Conecte-se ao seu próprio servidor OpenCode autohospedado
 - Salve servidores recentes e reconecte-se rapidamente
 - Navegue por projetos, espaços de trabalho e histórico de sessões
+- Acompanhe o uso da assinatura do OpenAI e os gastos no OpenRouter ao configurar o uso de provedores
+- Configure barras ou anéis de uso em Projetos e Atividade, com widgets que mostram os últimos dados sincronizados
 - Abra sessões existentes ou inicie novas sessões
 - Continue conversas pelo iPhone ou iPad
 - Acompanhe respostas do assistente e ferramentas em tempo real
@@ -35,6 +49,7 @@ Integrações com iOS e iPadOS:
 - Seletor de arquivos nativo para adicionar anexos compatíveis
 - Anexos de esboços com Excalidraw exportados diretamente para a conversa
 - Controles de composição preparados para ditado por voz
+- Escolha o compositor Messenger ou Assistant no iPhone; o iPad usa o compositor Assistant
 - Links diretos de widgets para o servidor, projeto e sessão corretos
 
 Privacidade e hospedagem própria:

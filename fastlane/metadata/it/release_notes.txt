@@ -1,8 +1,7 @@
-Supporto per OpenCode v2 e un'esperienza di chat più fluida.
+Più controllo, a colpo d'occhio.
 
-• OpenClient ora rileva automaticamente l'API del server, con supporto sperimentale per OpenCode v2 oltre alle connessioni OpenCode esistenti.
-• Tieni premuto il testo dell'assistente per selezionare e copiare solo la parte che ti serve.
-• Invio dei messaggi, feedback durante lo streaming e transizioni della tastiera più fluidi.
-• Correzioni e miglioramenti dell'affidabilità in tutta l'app.
-
-Il supporto per OpenCode v2 è ancora in evoluzione e alcune funzionalità potrebbero essere incomplete. L'avviso di supporto sperimentale nell'app include un link per segnalare bug.
+• Configura l'utilizzo dei provider per controllare l'uso dell'abbonamento OpenAI e la spesa su OpenRouter da Progetti e Attività.
+• Configura barre o anelli di utilizzo in Progetti e Attività e consulta gli ultimi dati sincronizzati nei widget della schermata Home.
+• Scegli il composer Messenger o Assistant su iPhone; iPad usa ora un layout Assistant più curato.
+• Esplora i suggerimenti di comandi e agenti con una tastiera esterna e completali con Tab.
+• Le viste Recenti e Attività sono più rapide, con correzioni alla selezione dei modelli, alle bozze e alle sessioni dei subagenti.

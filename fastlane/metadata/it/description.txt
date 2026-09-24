@@ -1,14 +1,28 @@
-OpenClient offre l'integrazione nativa più completa tra iPhone, iPad e OpenCode per il tuo server autogestito.
+OpenClient offre un'integrazione nativa tra iPhone, iPad e OpenCode per il tuo server autogestito.
 
 Tieni le sessioni di programmazione sempre a portata di mano, anche quando sei lontano dalla scrivania. Esplora i progetti, riprendi le chat, controlla l'attività degli strumenti, rispondi alle richieste di autorizzazione e alle domande e segui il lavoro in corso da un'interfaccia nativa e veloce, progettata per iOS e iPadOS.
 
 OpenClient è pensato per chi usa già OpenCode e desidera qualcosa di più di una finestra di chat remota. È un centro di controllo mobile per agenti attivi, attività di lunga durata, rapidi approfondimenti e controlli da remoto.
+
+Gratis e Pro
+
+Il piano Gratis permette di provare OpenClient con il tuo server OpenCode: invia fino a 5 prompt al giorno e crea una sessione.
+
+OpenClient Pro sblocca:
+- Prompt illimitati
+- Sessioni illimitate
+- Azioni del progetto
+- Supporto allo sviluppo continuo dell'app Open Source sull'App Store
+
+Pro Lifetime è un acquisto una tantum e include l'icona Pro Life. Pro Monthly è un abbonamento con rinnovo automatico mensile.
 
 Funzionalità principali di OpenCode:
 
 - Connettiti al tuo server OpenCode autogestito
 - Salva i server recenti e riconnettiti rapidamente
 - Esplora progetti, spazi di lavoro e cronologia delle sessioni
+- Controlla l'uso dell'abbonamento OpenAI e la spesa su OpenRouter configurando l'utilizzo dei provider
+- Configura barre o anelli di utilizzo in Progetti e Attività, con widget che mostrano gli ultimi dati sincronizzati
 - Apri sessioni esistenti o creane di nuove
 - Continua le conversazioni da iPhone o iPad
 - Segui in tempo reale le risposte dell'assistente e l'attività degli strumenti
@@ -35,6 +49,7 @@ Integrazioni con iOS e iPadOS:
 - Selettore file nativo per aggiungere allegati compatibili
 - Allegati di disegni basati su Excalidraw esportati direttamente nella chat
 - Controlli di composizione adatti alla dettatura vocale
+- Scegli il composer Messenger o Assistant su iPhone; iPad usa il composer Assistant
 - Link diretti dai widget al server, al progetto e alla sessione corretti
 
 Privacy e gestione autonoma:

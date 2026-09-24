@@ -1,4 +1,4 @@
-OpenClient brings the deepest native iPhone and iPad integration available for OpenCode to your own self-hosted server.
+OpenClient brings native iPhone and iPad integration for OpenCode to your own self-hosted server.
 
 Keep coding sessions within reach when you are away from your desk. Browse projects, resume chats, review tool activity, answer permission and question prompts, and follow ongoing work from a fast native interface built around the way iOS and iPadOS actually work.
 
@@ -6,7 +6,7 @@ OpenClient is designed for developers who already run OpenCode and want more tha
 
 Free vs Pro
 
-Free includes everything you need to try OpenClient with your own OpenCode server: up to 5 prompts per day and 1 session.
+Free lets you try OpenClient with your own OpenCode server: send up to 5 prompts per day and create one session.
 
 OpenClient Pro unlocks:
 - Unlimited prompts
@@ -14,13 +14,15 @@ OpenClient Pro unlocks:
 - Project Actions
 - Support for continued development of the open-source App Store build
 
-Pro Lifetime is a one-time purchase and includes the Pro Life icon. Launch price is $19.99 through September 30, then US$29.99 or the local equivalent. Pro Monthly is $4.99 and renews monthly.
+Pro Lifetime is a one-time purchase and includes the Pro Life icon. Pro Monthly is an auto-renewing subscription billed monthly.
 
 Core OpenCode features:
 
 - Connect to your own self-hosted OpenCode server
 - Save recent servers and reconnect quickly
 - Browse projects, workspaces, and session history
+- Track OpenAI subscription usage and OpenRouter spending with optional provider usage setup
+- Configure usage bars or rings in Projects and Activity, with usage snapshot widgets
 - Open existing sessions or start new ones
 - Continue chat conversations from iPhone or iPad
 - Stream assistant responses and tool activity live
@@ -47,6 +49,7 @@ iOS and iPadOS integrations:
 - Native file picker support for adding compatible attachments
 - Local Excalidraw-powered sketch attachments exported directly into chat
 - Voice dictation-friendly composer controls
+- Choose the Messenger or Assistant composer on iPhone; iPad uses the Assistant composer
 - Deep links from widgets back into the right server, project, and session
 
 Privacy and self-hosting:
