@@ -9,35 +9,42 @@ final class AutomaticConnectionUITests: XCTestCase {
         let id = try XCTUnwrap((created["data"] as? [String: Any])?["id"] as? String)
         addTeardownBlock { @MainActor in _ = try? await fixture.request("/api/session/\(id)", method: "DELETE") }
         try await connect(app)
+        let notice = app.otherElements["connection.v2-notice"]
         let dismiss = app.buttons["connection.v2-notice.dismiss"]
         let report = app.descendants(matching: .any)["connection.v2-notice.report-bug"].firstMatch
-        try await wait(app, "Automatic v2 notice after bootstrap") { dismiss.isHittable && report.isHittable }
+        try await wait(app, "Automatic v2 notice after bootstrap") { notice.isHittable && report.isHittable }
         XCTAssertTrue(app.staticTexts["OpenCode v2 detected"].exists)
+        XCTAssertFalse(dismiss.exists)
         capture(app, "automatic-v2-notice-after-bootstrap")
 
-        // Navigate with the banner present: it is not a modal acknowledgment gate.
-        try await openGlobal(app)
-        XCTAssertTrue(app.buttons["sessions.create"].isHittable)
-        XCTAssertTrue(dismiss.isHittable)
-        XCTAssertTrue(report.isHittable)
-        let notice = app.otherElements["connection.v2-notice"]
-        let row = app.buttons["session.row.\(id)"]
-        try await wait(app, "First session remains accessible below notice") { row.exists && row.isHittable }
-        XCTAssertGreaterThanOrEqual(app.navigationBars["Global"].frame.minY, notice.frame.maxY - 1)
-        XCTAssertGreaterThanOrEqual(row.frame.minY, notice.frame.maxY - 1)
-        capture(app, "automatic-v2-notice-nonblocking-session-list")
-        dismiss.tap()
-        try await wait(app, "Notice dismissed") { !dismiss.exists }
+        // The notice is a scrolling row on Projects and Activity, not a global inset.
+        app.buttons["projects.activity"].tap()
+        try await wait(app, "Automatic v2 notice on Activity") { notice.isHittable && report.isHittable }
+        capture(app, "automatic-v2-notice-activity-row")
+        try await home(app)
+        try await wait(app, "Automatic v2 notice back on Projects") { notice.isHittable && report.isHittable }
+        notice.swipeLeft()
+        if dismiss.waitForExistence(timeout: 1) {
+            dismiss.tap()
+        }
+        try await wait(app, "Notice dismissed") { !notice.exists }
 
+        app.buttons["projects.activity"].tap()
+        try await wait(app, "Activity opens after dismissal") { app.navigationBars["Activity"].exists }
+        XCTAssertFalse(dismiss.exists, "Dismissing on Projects also dismisses the Activity row")
+        try await home(app)
+
+        try await openProject(app, fixture: fixture)
+        let row = app.buttons["session.row.\(id)"]
         try await wait(app, "Bootstrap loaded the owned session") { row.exists }
         XCTAssertFalse(dismiss.exists)
-        _ = try await fixture.request("/api/session/\(id)/rename", method: "POST", body: ["title": title + " renamed"])
+        _ = try await fixture.request("/api/session/\(id)", method: "PATCH", body: ["title": title + " renamed"])
         try await wait(app, "Real session-renamed SSE reaches list") { row.label.contains("renamed") }
         XCTAssertFalse(dismiss.exists)
         capture(app, "automatic-v2-dismissal-survives-real-events")
         try await home(app)
         XCTAssertFalse(dismiss.exists)
-        try await openGlobal(app)
+        try await openProject(app, fixture: fixture)
         XCTAssertFalse(dismiss.exists)
         try await home(app)
 
@@ -49,7 +56,7 @@ final class AutomaticConnectionUITests: XCTestCase {
         try await wait(app, "Exact saved fixture is tappable") { saved.isHittable }
         saved.tap()
         try await wait(app, "New connection lifetime re-presents notice", timeout: 40) {
-            dismiss.isHittable && report.isHittable && app.textFields["projects.searchChats"].exists
+            notice.isHittable && report.isHittable && app.textFields["projects.searchChats"].exists
         }
         capture(app, "automatic-v2-notice-new-connection-lifetime")
     }
@@ -63,7 +70,7 @@ final class AutomaticConnectionUITests: XCTestCase {
         try await connect(app)
         XCTAssertFalse(app.buttons["connection.v2-notice.dismiss"].exists)
         capture(app, "automatic-legacy-connected-without-v2-notice")
-        try await openGlobal(app)
+        try await openProject(app, fixture: fixture)
         let row = app.buttons["session.row.\(id)"]
         try await wait(app, "Legacy bootstrap lists the actual owned session") { row.exists && row.isHittable }
         XCTAssertTrue(row.label.contains(title))
@@ -126,15 +133,15 @@ final class AutomaticConnectionUITests: XCTestCase {
         try await revealConnect(app)
         app.buttons["connection.connect"].tap()
         try await wait(app, "Successful automatic bootstrap", timeout: 40) {
-            !app.collectionViews["connection.form"].exists && app.staticTexts["Global"].firstMatch.isHittable
+            !app.collectionViews["connection.form"].exists && app.buttons["projects.newChat"].isHittable
         }
     }
 
-    private func openGlobal(_ app: XCUIApplication) async throws {
-        let global = app.staticTexts["Global"].firstMatch
+    private func openProject(_ app: XCUIApplication, fixture: DeletionFixture) async throws {
+        let project = app.staticTexts[fixture.isLegacy ? "Global" : fixture.workspace.lastPathComponent].firstMatch
         for _ in 0..<2 {
-            try await wait(app, "Global project entry") { global.isHittable }
-            global.tap()
+            try await wait(app, "Fixture project entry") { project.isHittable }
+            project.tap()
             if app.buttons["sessions.create"].waitForExistence(timeout: 3) { break }
         }
         try await wait(app, "Session list is usable") { app.buttons["sessions.create"].isHittable }

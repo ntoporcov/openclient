@@ -72,11 +72,6 @@ struct RootView<ChatDestination: View>: View {
                 if shell.isConnected, !isShowingConnectionExperience {
                     GlobalFormsBanner(facade: shell.globalForms, location: shell.globalFormLocation)
                 }
-                if scenePhase == .active, let connectionID = shell.v2NoticeConnectionID {
-                    V2ConnectionNoticeBanner {
-                        shell.connection.dismissV2Notice(connectionID: connectionID)
-                    }
-                }
                 appShell
             }
             .opacity(isShowingConnectionExperience ? 0 : 1)
@@ -236,13 +231,13 @@ struct RootView<ChatDestination: View>: View {
                 case .loadingProject:
                     CompactRouteLoadingView(title: "Loading project...")
                 case .projectContent:
-                    ProjectContentView(shell: shell) {
+                    ProjectContentView(shell: shell, bridge: bridge) {
                         withAnimation(opencodeSelectionAnimation) {
                             preferredCompactColumn = .detail
                         }
                     }
                 case .activity:
-                    ActivityView(facade: shell.activity, connection: shell.connection, providerUsage: shell.providerUsage) {
+                    ActivityView(facade: shell.activity, connection: shell.connection, providerUsage: shell.providerUsage, configurations: shell.configurations, bridge: bridge) {
                         withAnimation(opencodeSelectionAnimation) {
                             showDetailColumn()
                         }
@@ -393,39 +388,60 @@ struct RootView<ChatDestination: View>: View {
     }
 }
 
-private struct V2ConnectionNoticeBanner: View {
+struct V2ConnectionNoticeCard: View {
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "flask.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 32, height: 32)
+                    .background(Color.accentColor.opacity(0.12), in: Circle())
+
                 Text("OpenCode v2 detected")
                     .font(.subheadline.weight(.semibold))
-                Text("OpenClient is using experimental v2 support. If something doesn’t work as expected, please report a bug.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Link("Report a Bug", destination: AppSupportURLs.issues)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minHeight: 44)
-                    .accessibilityIdentifier("connection.v2-notice.report-bug")
+
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
+
+            Text("OpenClient is using experimental v2 support. If something doesn’t work as expected, please report a bug.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Link(destination: AppSupportURLs.issues) {
+                HStack(spacing: 8) {
+                    Image(systemName: "ladybug.fill")
+                    Text("Report a Bug")
+                    Spacer(minLength: 8)
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption.weight(.bold))
+                }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tint)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(0.18), lineWidth: 0.5)
+                }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss")
-            .accessibilityIdentifier("connection.v2-notice.dismiss")
+            .accessibilityIdentifier("connection.v2-notice.report-bug")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(.regularMaterial)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.primary.opacity(0.08), lineWidth: 0.5)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("connection.v2-notice")
+        .accessibilityAction(named: Text("Dismiss"), dismiss)
     }
 }
 

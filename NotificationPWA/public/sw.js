@@ -1,5 +1,5 @@
 importScripts("/handoff-core.js");
-const CACHE = "notification-pwa-shell-v9";
+const CACHE = "notification-pwa-shell-v12";
 const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/events.html", "/events.js", "/handoff.html", "/handoff.js", "/handoff-core.js", "/manifest.webmanifest", "/icons/icon-180.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => Promise.all(SHELL.map(async (path) => {

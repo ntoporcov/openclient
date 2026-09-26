@@ -3,6 +3,9 @@ import SwiftUI
 struct ProjectSettingsSheet: View {
     @ObservedObject var facade: ProjectFacade
     let connection: ConnectionFacade
+    let configurations: ConfigurationsFacade
+    let bridge: OpenClientBridgeFacade?
+    @State private var navigationPath = NavigationPath()
     @State private var selectedActionCommandName = ""
     @State private var selectedActionIconName = "bolt.fill"
     @State private var symbolPickerContext: ProjectActionSymbolPickerContext?
@@ -10,7 +13,7 @@ struct ProjectSettingsSheet: View {
     var body: some View {
         let snapshot = facade.settingsSnapshot
 
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Form {
                 Section {
                     NavigationLink {
@@ -19,6 +22,13 @@ struct ProjectSettingsSheet: View {
                         Label("Global Settings", systemImage: "gearshape")
                     }
                     .accessibilityIdentifier("project.settings.global-settings")
+
+                    NavigationLink {
+                        ConfigurationsView(viewModel: configurations, connection: connection, bridge: bridge, navigationPath: $navigationPath)
+                    } label: {
+                        Label("Connection Settings", systemImage: "slider.horizontal.3")
+                    }
+                    .accessibilityIdentifier("project.settings.configurations")
                 }
 
                 Section("Sessions") {

@@ -67,6 +67,7 @@ final class ProjectActionTests: XCTestCase {
         let client = OpenCodeAPIClient(config: .init(baseURL: "https://action.invalid"))
         XCTAssertNotNil(OpenCodeCommandsService.make(client: client, profile: .legacy, version: "1", sessions: fake, chat: fake))
         XCTAssertNotNil(OpenCodeCommandsService.make(client: client, profile: .v2, version: "0.0.0-next-17155", sessions: fake, chat: fake))
+        XCTAssertNil(OpenCodeCommandsService.make(client: client, profile: .v2, version: "2.0.16", sessions: fake, chat: fake))
         XCTAssertNil(OpenCodeCommandsService.make(client: client, profile: .v2, version: "unverified", sessions: fake, chat: fake))
         let connection = fake.connection()
         XCTAssertNil(connection.openCodeCompatibility)
@@ -256,17 +257,24 @@ final class ProjectActionTests: XCTestCase {
         XCTAssertFalse(ProjectActionCoordinator.isSuccess(turn(marker + "\nOPENCLIENT_ACTION_RESULT:\(run.id):FAILURE"), run: run))
     }
 
-    func testV2CommandUsesArgumentsAndDecodesAdmissionWithExplicitSelection() async throws {
+    func testV2CommandAdmissionRejectsUncorrelatedPausedAndSelectedIntentsWithoutTransport() async throws {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ActionCommandURLProtocol.self]
+        configuration.protocolClasses = [UnexpectedCommandNetworkProtocol.self]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         let client = OpenCodeAPIClient(config: .init(baseURL: "https://action.invalid"), session: session)
-        let receipt = try await client.admitV2Command(sessionID: "ses_action", messageID: "msg_action", command: "test",
-            arguments: "--all", agent: "build", model: .init(providerID: "provider", modelID: "model"), variant: "high",
-            attachments: [.init(id: "file", kind: .file, filename: "test.txt", mime: "text/plain", dataURL: "data:text/plain;base64,YQ==")],
-            resume: false)
-        XCTAssertEqual(receipt, .init(id: "msg_action", sessionID: "ses_action", timeCreated: 123, delivery: "queued"))
+        do {
+            _ = try await client.admitV2Command(sessionID: "ses_action", messageID: "msg_action", command: "test", resume: false)
+            XCTFail("Paused command admission is not supported by the 2.0.16 command route")
+        } catch OpenCodeV2TransportError.unsupportedPausedCommand {}
+        do {
+            _ = try await client.admitV2Command(sessionID: "ses_action", messageID: "msg_action", command: "test", agent: "build")
+            XCTFail("Per-command selection cannot be silently ignored")
+        } catch OpenCodeV2TransportError.unsupportedCommandSelection {}
+        do {
+            _ = try await client.admitV2Command(sessionID: "ses_action", messageID: "msg_action", command: "test")
+            XCTFail("A 204 response cannot prove caller-owned command identity")
+        } catch OpenCodeV2TransportError.unsupportedCommandAdmission {}
     }
 
     func testHomeAndSearchBuildersFilterOwnedRunsBeforeLimitWithoutDeletingCandidates() throws {
@@ -902,46 +910,6 @@ private final class UnexpectedCommandNetworkProtocol: URLProtocol {
     override func startLoading() {
         XCTFail("Pending admission must block network follow-ups: \(request.url?.path ?? "")")
         client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
-    }
-    override func stopLoading() { }
-}
-
-private final class ActionCommandURLProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        do {
-            XCTAssertEqual(request.url?.path, "/api/session/ses_action/command")
-            XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertNil(request.url?.query)
-            XCTAssertNil(request.value(forHTTPHeaderField: "x-opencode-directory"))
-            var data = request.httpBody ?? Data()
-            if data.isEmpty, let stream = request.httpBodyStream {
-                stream.open()
-                defer { stream.close() }
-                var buffer = [UInt8](repeating: 0, count: 1024)
-                while stream.hasBytesAvailable {
-                    let count = stream.read(&buffer, maxLength: buffer.count)
-                    guard count > 0 else { break }
-                    data.append(contentsOf: buffer.prefix(count))
-                }
-            }
-            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-            XCTAssertEqual(body["id"] as? String, "msg_action")
-            XCTAssertEqual(body["command"] as? String, "test")
-            XCTAssertEqual(body["arguments"] as? String, "--all")
-            XCTAssertNil(body["text"])
-            XCTAssertEqual(body["agent"] as? String, "build")
-            XCTAssertEqual(body["model"] as? [String: String], ["providerID": "provider", "id": "model", "variant": "high"])
-            XCTAssertEqual(body["files"] as? [[String: String]], [["uri": "data:text/plain;base64,YQ==", "name": "test.txt"]])
-            XCTAssertEqual(body["resume"] as? Bool, false)
-            let response = try XCTUnwrap(HTTPURLResponse(url: XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil))
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: Data(#"{"data":{"id":"msg_action","sessionID":"ses_action","timeCreated":123,"type":"user","data":{"text":"expanded command","files":[],"agents":[],"skills":[],"metadata":{}},"delivery":"queued"}}"#.utf8))
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-        }
     }
     override func stopLoading() { }
 }

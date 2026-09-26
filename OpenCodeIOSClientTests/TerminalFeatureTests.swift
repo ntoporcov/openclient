@@ -109,7 +109,7 @@ final class TerminalFeatureTests: XCTestCase {
         XCTAssertEqual(components.scheme, "wss")
         XCTAssertEqual(components.path, "/relay/api/pty/pty_1/connect")
         let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        XCTAssertEqual(query, ["location[directory]": "/tmp/a b", "location[workspace]": "wrk_1", "cursor": "-1"])
+        XCTAssertEqual(query, ["location[directory]": "/tmp/a b", "cursor": "-1"])
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Basic dXNlcjpwYXNzd29yZA==")
         XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory")?.removingPercentEncoding, "/tmp/a b")
         config.baseURL = "http://example.com"
@@ -142,7 +142,7 @@ final class TerminalFeatureTests: XCTestCase {
             XCTAssertEqual(pending.request.url?.path, route.1)
             let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(pending.request.url), resolvingAgainstBaseURL: false))
             let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-            XCTAssertEqual(query, ["location[directory]": "/tmp/project", "location[workspace]": "wrk_1"])
+            XCTAssertEqual(query, ["location[directory]": "/tmp/project"])
             XCTAssertNotNil(pending.request.value(forHTTPHeaderField: "Authorization"))
             if route.0 == "POST" {
                 let body = try requestBody(pending.request)
@@ -639,7 +639,7 @@ final class TerminalFeatureTests: XCTestCase {
     private static let ptyJSON = #"{"id":"pty_1","title":"Terminal 1","command":"/bin/zsh","args":["-l"],"cwd":"/tmp/project","status":"running","pid":42}"#
 
     private static func wrapped(_ data: String) -> String {
-        #"{"location":{"directory":"/tmp/project","project":{"id":"project","directory":"/tmp/project","canonical":"/tmp/project"}},"data":\#(data)}"#
+        #"{"location":{"directory":"/tmp/project"},"data":\#(data)}"#
     }
 
     private func makeClient() -> OpenCodeAPIClient {

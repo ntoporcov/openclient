@@ -17,6 +17,13 @@ final class AcceptanceUITests: XCTestCase {
         for key in app.launchEnvironment.keys where key.hasPrefix("OPENCODE_UI_TEST_") || key.hasPrefix("OPENCLIENT_SCREENSHOT") {
             app.launchEnvironment.removeValue(forKey: key)
         }
+        app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "1"
+        app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
+        app.launchEnvironment["OPENCODE_UI_TEST_BASE_URL"] = fixture.baseURL
+        app.launchEnvironment["OPENCODE_UI_TEST_USERNAME"] = fixture.username
+        app.launchEnvironment["OPENCODE_UI_TEST_PASSWORD"] = fixture.password
+        app.launchEnvironment["OPENCODE_UI_TEST_DIRECTORY"] = fixture.workspace.path
+        app.launchEnvironment["OPENCODE_UI_TEST_SERVER_NAME"] = "Acceptance \(fixture.runID.prefix(8))"
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         addUIInterruptionMonitor(withDescription: "System password save prompt") { prompt in
             guard prompt.label == "Save Password?" || prompt.staticTexts["Save Password?"].exists,
@@ -27,19 +34,13 @@ final class AcceptanceUITests: XCTestCase {
         addTeardownBlock { @MainActor [self] in
             app.terminate()
             // Failure cleanup only. Stop assertions below never use this API path.
-            if let sessionID { _ = try? await fixture.request("/api/session/\(sessionID)/interrupt", body: [:]) }
+            if let sessionID { _ = try? await fixture.request("/api/session/\(sessionID)/interrupt", method: "POST", body: [:]) }
         }
         app.launch()
         try await connectNormally()
         let title = "Acceptance \(UUID().uuidString.prefix(8))"
-        let global = app.staticTexts["Global"].firstMatch
-        let create = app.buttons["sessions.create"]
-        for _ in 0..<2 {
-            try await wait("Global project") { global.isHittable }
-            global.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            if create.waitForExistence(timeout: 3) { break }
-        }
-        try await wait("Native new-session action") { create.isHittable }
+        let create = app.buttons["projects.newChat"]
+        try await wait("Native home new-session action") { create.isHittable }
         create.tap()
         let rename = app.buttons["projects.newChat.navigationTitleButton"]
         try await wait("Native new-chat rename action") { rename.isHittable }
@@ -53,8 +54,8 @@ final class AcceptanceUITests: XCTestCase {
         let first = marker("reasoning")
         try await send(first)
         _ = try await fixture.waitEvent(first, kind: "held", stage: 1)
-        let sessions = try await fixture.request("/api/session", query: [.init(name: "project", value: "global"), .init(name: "search", value: title)])
-        let rows = try XCTUnwrap(sessions["data"] as? [[String: Any]]).filter { $0["title"] as? String == title }
+        let rows = try await fixture.arrayRequest("/api/session")
+            .compactMap { $0 as? [String: Any] }.filter { $0["title"] as? String == title }
         XCTAssertEqual(rows.count, 1)
         sessionID = try XCTUnwrap(rows.first?["id"] as? String)
 
@@ -77,7 +78,7 @@ final class AcceptanceUITests: XCTestCase {
         capture("acceptance-before-native-stop")
         stop.tap()
         _ = try await fixture.waitEvent(interrupted, kind: "disconnected")
-        _ = try await fixture.request("/api/session/\(sessionID!)/wait", body: [:])
+        try await fixture.waitForIdle(sessionID!)
         let aborted = try await canonical().filter { $0["type"] as? String == "assistant" }
         XCTAssertEqual(aborted.count, 2)
         XCTAssertEqual(answer(aborted[1]), partial)
@@ -137,13 +138,13 @@ final class AcceptanceUITests: XCTestCase {
         let background = marker("stream")
         try await send(background)
         _ = try await held(background, assistantCount: 5, stage: 1)
-        XCUIDevice.shared.press(.home)
+        XCUIApplication(bundleIdentifier: "com.apple.springboard").activate()
         try await wait("App actually backgrounded") { app.state == .runningBackground || app.state == .runningBackgroundSuspended }
         _ = try await fixture.request("/control/advance", body: ["marker": background], provider: true)
         _ = try await fixture.waitEvent(background, kind: "held", stage: 2)
         _ = try await fixture.request("/control/finish", body: ["marker": background], provider: true)
         _ = try await fixture.waitEvent(background, kind: "finished")
-        _ = try await fixture.request("/api/session/\(sessionID!)/wait", body: [:])
+        try await fixture.waitForIdle(sessionID!)
         let completed = try await canonical()
         let finalAnswer = answer(try XCTUnwrap(completed.last { $0["type"] as? String == "assistant" }))
         XCTAssertEqual(finalAnswer, expectedText(background, stage: 3))
@@ -153,6 +154,9 @@ final class AcceptanceUITests: XCTestCase {
         try await evidence(background, phase: "background-completed-foreground-catchup", text: finalAnswer, finished: true)
         app.terminate()
         XCTAssertEqual(app.state, .notRunning)
+        for key in app.launchEnvironment.keys where key.hasPrefix("OPENCODE_UI_TEST_") {
+            app.launchEnvironment.removeValue(forKey: key)
+        }
         app.launch()
         try await reconnectSavedServer()
         let search = app.textFields["projects.searchChats"]
@@ -185,20 +189,22 @@ final class AcceptanceUITests: XCTestCase {
 
     private func connectNormally() async throws {
         let url = app.textFields["connection.baseURL"]
+        if app.collectionViews["connection.recent-servers"].waitForExistence(timeout: 5) {
+            let addServer = app.buttons["plus"]
+            try await wait("Add Server from persisted test connections") { addServer.isHittable }
+            addServer.tap()
+        }
         try await wait("Fresh normal automatic connection editor", timeout: 30) { app.collectionViews["connection.form"].exists && url.exists }
-        try await replace(app.textFields["connection.name"], with: "Acceptance \(fixture.runID.prefix(8))")
-        try await replace(url, with: fixture.baseURL)
-        try await replace(app.textFields["connection.username"], with: fixture.username)
-        let password = app.secureTextFields["connection.password"]
-        try await focus(password)
-        password.typeText(fixture.password)
+        XCTAssertEqual(url.value as? String, fixture.baseURL)
+        XCTAssertEqual(app.textFields["connection.username"].value as? String, fixture.username)
+        XCTAssertTrue(app.secureTextFields["connection.password"].exists)
         let ack = app.switches["connection.insecureAck"]
         try await reveal("connection.insecureAck", type: .switch)
         capture("acceptance-insecure-ack-before-native-toggle")
         for _ in 0..<2 {
             if ack.exists && ack.value as? String == "1" { break }
             try await reveal("connection.insecureAck", type: .switch)
-            ack.switches.firstMatch.tap()
+            ack.tap()
             let deadline = Date().addingTimeInterval(2)
             repeat {
                 if ack.value as? String == "1" { break }
@@ -210,7 +216,9 @@ final class AcceptanceUITests: XCTestCase {
         try await reveal("connection.connect")
         try await wait("Acknowledged native connection enabled") { connect.isEnabled && connect.isHittable }
         connect.tap()
-        try await wait("Real v2 connection complete", timeout: 35) { app.staticTexts["Global"].firstMatch.isHittable && !app.buttons["connection.connect"].exists }
+        try await wait("Real v2 connection complete", timeout: 35) {
+            app.buttons["projects.newChat"].isHittable && !app.buttons["connection.connect"].exists
+        }
         try await wait("Automatic v2 detection notice") { app.buttons["connection.v2-notice.dismiss"].isHittable }
         capture("acceptance-automatic-v2-notice")
         app.buttons["connection.v2-notice.dismiss"].tap()
@@ -223,6 +231,11 @@ final class AcceptanceUITests: XCTestCase {
         XCTAssertFalse(app.textFields["connection.password"].exists)
         saved.tap()
         try await wait("Saved credentials reconnect", timeout: 35) { app.textFields["projects.searchChats"].isHittable }
+        let continueFeatures = app.buttons["new-features.continue"]
+        if continueFeatures.waitForExistence(timeout: 3) {
+            continueFeatures.tap()
+            try await wait("New Features dismissed after cold reconnect") { !continueFeatures.exists }
+        }
         try await wait("New saved-server connection lifetime notice") { app.buttons["connection.v2-notice.dismiss"].isHittable }
         app.buttons["connection.v2-notice.dismiss"].tap()
     }
@@ -295,8 +308,21 @@ final class AcceptanceUITests: XCTestCase {
     }
 
     private func canonical() async throws -> [[String: Any]] {
-        let response = try await fixture.request("/api/session/\(sessionID!)/context")
-        return try XCTUnwrap(response["data"] as? [[String: Any]])
+        return try await fixture.arrayRequest("/api/session/\(sessionID!)/message", query: [
+            .init(name: "order", value: "asc"), .init(name: "limit", value: "200"),
+        ]).compactMap { item in
+            guard var message = item as? [String: Any] else { return nil }
+            if message["files"] == nil {
+                let parts = message["content"] as? [[String: Any]] ?? []
+                message["files"] = parts.compactMap { part -> [String: Any]? in
+                    guard part["type"] as? String == "file", let url = part["url"] as? String,
+                          let comma = url.firstIndex(of: ",") else { return nil }
+                    return ["data": String(url[url.index(after: comma)...]), "mime": part["mime"] as Any,
+                            "name": part["filename"] as Any, "source": part["source"] as Any]
+                }
+            }
+            return message
+        }
     }
 
     private func answer(_ message: [String: Any]) -> String {
@@ -314,7 +340,7 @@ final class AcceptanceUITests: XCTestCase {
     private func held(_ marker: String, assistantCount: Int, stage: Int) async throws -> String {
         _ = try await fixture.waitEvent(marker, kind: "held", stage: stage)
         let active = try await fixture.request("/api/session/active")
-        let status = (active["data"] as? [String: [String: Any]])?[sessionID!]
+        let status = (active["data"] as? [String: Any])?[sessionID!] as? [String: Any]
         XCTAssertEqual(status?["type"] as? String, "running")
         let text = expectedText(marker, stage: stage)
         try await wait("Visible assistant chunk at provider hold \(stage)", timeout: 20) { self.answerElement(text).exists && self.answerElement(text).isHittable }
@@ -327,7 +353,7 @@ final class AcceptanceUITests: XCTestCase {
     private func finish(_ marker: String, assistantCount: Int) async throws -> String {
         _ = try await fixture.request("/control/finish", body: ["marker": marker], provider: true)
         _ = try await fixture.waitEvent(marker, kind: "finished")
-        _ = try await fixture.request("/api/session/\(sessionID!)/wait", body: [:])
+        try await fixture.waitForIdle(sessionID!)
         let assistants = try await canonical().filter { $0["type"] as? String == "assistant" }
         XCTAssertEqual(assistants.count, assistantCount)
         let latest = try XCTUnwrap(assistants.last)
@@ -407,43 +433,55 @@ private final class AcceptanceFixture: NSObject, URLSessionTaskDelegate {
         supervisorPID = try XCTUnwrap(value["supervisor_pid"] as? Int)
         super.init()
         guard baseURL == "http://127.0.0.1:14097", providerURL == "http://127.0.0.1:14098",
-              value["version"] as? String == "0.0.0-next-17155", value["model"] as? String == "scripted/test-model",
-              URL(fileURLWithPath: value["root"] as? String ?? "").resolvingSymlinksInPath() == root,
-              workspace == root.appendingPathComponent("workspace"), username == "opencode",
+               value["version"] as? String == "2.0.16", value["model"] as? String == "test/test-model",
+               acceptanceCanonicalPath(value["root"] as? String ?? "") == root.path,
+               workspace.path == acceptanceCanonicalPath(root.appendingPathComponent("workspace").path), username == "opencode",
               try String(contentsOf: root.appendingPathComponent(".acceptance-root"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) == runID else {
             throw NSError(domain: "AcceptanceUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Acceptance identity rejected"])
         }
     }
 
     static func load() throws -> AcceptanceFixture {
-        guard let path = ProcessInfo.processInfo.environment["OPENCLIENT_ACCEPTANCE_MANIFEST_PATH"] else { throw XCTSkip("Acceptance runner manifest required") }
+        let environment = ProcessInfo.processInfo.environment
+        guard let path = environment["OPENCLIENT_ACCEPTANCE_MANIFEST_PATH"] else { throw XCTSkip("Acceptance runner manifest required") }
+        guard let hostRootPath = environment["OPENCLIENT_ACCEPTANCE_HOST_ROOT"], hostRootPath.hasPrefix("/") else {
+            throw NSError(domain: "AcceptanceUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Explicit acceptance host root required"])
+        }
         let url = URL(fileURLWithPath: path)
         let root = url.deletingLastPathComponent().resolvingSymlinksInPath()
-        let parent = URL(fileURLWithPath: "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode").resolvingSymlinksInPath()
-        guard root.deletingLastPathComponent() == parent, root.lastPathComponent.hasPrefix("acceptance-next17155-"), url.lastPathComponent == "manifest.json" else {
+        let parent = URL(fileURLWithPath: hostRootPath).resolvingSymlinksInPath()
+        guard root.deletingLastPathComponent().path == parent.path, root.lastPathComponent.hasPrefix("acceptance-v2_0_16-"), url.lastPathComponent == "manifest.json" else {
             throw NSError(domain: "AcceptanceUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Unapproved acceptance manifest location"])
         }
         let mode = try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int ?? 0
         guard mode & 0o077 == 0 else { throw NSError(domain: "AcceptanceUI", code: 2) }
-        return try AcceptanceFixture(XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]), root: root)
+        let value = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        guard acceptanceCanonicalPath(value["host_root"] as? String ?? "") == parent.path else {
+            throw NSError(domain: "AcceptanceUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Acceptance host root identity rejected"])
+        }
+        return try AcceptanceFixture(value, root: root)
     }
 
     func verify() async throws {
-        let health = try await request("/api/health")
+        let info = try await request("/api/info")
         let location = try await request("/api/location")
         let status = try await request("/control/status", provider: true)
-        guard health["version"] as? String == "0.0.0-next-17155", health["pid"] as? Int == serverPID,
+        let project = location["project"] as? [String: Any]
+        guard info["version"] as? String == "2.0.16", info["pid"] as? Int == serverPID,
               status["run_id"] as? String == runID, status["pid"] as? Int == supervisorPID,
-              URL(fileURLWithPath: location["directory"] as? String ?? "").resolvingSymlinksInPath() == workspace,
-              (location["project"] as? [String: Any])?["id"] as? String == "global" else { throw NSError(domain: "AcceptanceUI", code: 2) }
+              acceptanceCanonicalPath(location["directory"] as? String ?? "") == workspace.path,
+              acceptanceCanonicalPath(project?["directory"] as? String ?? "") == workspace.path else {
+            throw NSError(domain: "AcceptanceUI", code: 2)
+        }
     }
 
-    func request(_ path: String, body: [String: Any]? = nil, query: [URLQueryItem] = [], provider: Bool = false) async throws -> [String: Any] {
-        guard path.hasPrefix(provider ? "/control/" : "/api/"), !path.contains("..") else { throw NSError(domain: "AcceptanceUI", code: 2) }
+    func request(_ path: String, method: String? = nil, body: [String: Any]? = nil,
+                 query: [URLQueryItem] = [], provider: Bool = false) async throws -> [String: Any] {
+        guard path.hasPrefix(provider ? "/control/" : "/"), !path.contains("..") else { throw NSError(domain: "AcceptanceUI", code: 2) }
         var components = URLComponents(string: (provider ? providerURL : baseURL) + path)!
         components.queryItems = query.isEmpty ? nil : query
         var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-        request.httpMethod = body == nil ? "GET" : "POST"
+        request.httpMethod = method ?? (body == nil ? "GET" : "POST")
         request.setValue(provider ? "Bearer \(controlToken)" : "Basic \(Data("\(username):\(password)".utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -458,7 +496,34 @@ private final class AcceptanceFixture: NSObject, URLSessionTaskDelegate {
             throw NSError(domain: "AcceptanceUI", code: 3, userInfo: [NSLocalizedDescriptionKey: "Acceptance HTTP request failed: \(path)"])
         }
         if data.isEmpty { return [:] }
-        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    func arrayRequest(_ path: String, query: [URLQueryItem] = []) async throws -> [Any] {
+        guard path.hasPrefix("/"), !path.contains("..") else { throw NSError(domain: "AcceptanceUI", code: 2) }
+        var components = URLComponents(string: baseURL + path)!
+        components.queryItems = query.isEmpty ? nil : query
+        var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        request.setValue("Basic \(Data("\(username):\(password)".utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
+        let config = URLSessionConfiguration.ephemeral
+        config.connectionProxyDictionary = [:]
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+            throw NSError(domain: "AcceptanceUI", code: 3, userInfo: [NSLocalizedDescriptionKey: "Acceptance HTTP request failed: \(path)"])
+        }
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        return try XCTUnwrap(object["data"] as? [Any])
+    }
+
+    func waitForIdle(_ sessionID: String) async throws {
+        for _ in 0..<500 {
+            let status = try await request("/api/session/active")
+            if (status["data"] as? [String: Any])?[sessionID] == nil { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw NSError(domain: "AcceptanceUI", code: 5, userInfo: [NSLocalizedDescriptionKey: "Session did not become idle"])
     }
 
     func waitEvent(_ marker: String, kind: String, stage: Int? = nil) async throws -> [String: Any] {
@@ -475,4 +540,8 @@ private final class AcceptanceFixture: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
         completionHandler(nil)
     }
+}
+
+private func acceptanceCanonicalPath(_ path: String) -> String {
+    URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
 }

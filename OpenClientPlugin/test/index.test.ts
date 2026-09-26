@@ -3,7 +3,9 @@ import { createServer } from "node:net"
 import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import OpenClientPlugin from "../src/index.js"
+import plugin from "../src/index.js"
+
+const OpenClientPlugin = plugin.server
 
 describe("plugin failure isolation", () => {
   test("first reachable bridge health is notification-ready after successful initialization", async () => {
@@ -19,7 +21,16 @@ describe("plugin failure isolation", () => {
     try {
       const bridgePort = await bridgePortFor(52001)
       const health = await fetch(`http://127.0.0.1:${bridgePort}/openclient/v1/health`).then((response) => response.json())
-      expect(health.notifications).toEqual({ version: 1, state: "ready", publicOrigin: "https://notify.example.com" })
+      expect(health.notifications).toEqual({
+        version: 1,
+        state: "ready",
+        publicOrigin: "https://notify.example.com",
+        pairing: {
+          version: 1,
+          cliPath: expect.stringMatching(/\/dist\/notifications\/src\/cli\.mjs$/),
+          dataDir,
+        },
+      })
     } finally {
       await hooks.dispose?.()
       await rm(dataDir, { recursive: true, force: true })

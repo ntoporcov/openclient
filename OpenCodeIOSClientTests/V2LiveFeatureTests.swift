@@ -29,7 +29,7 @@ final class V2LiveFeatureTests: XCTestCase {
                 await events.receive($0)
             })
         }
-        addTeardownBlock { stream.cancel(); await stream.value }
+        addTeardownBlock { stream.cancel() }
         try await wait("v2 SSE handshake") { await events.isOpen }
 
         let created = try await client.createV2PTY(title: title, directory: directory)
@@ -53,7 +53,6 @@ final class V2LiveFeatureTests: XCTestCase {
         addTeardownBlock {
             socket.cancel()
             await connection.disconnect()
-            _ = await socket.result
         }
         try await wait("real PTY WebSocket handshake and cursor metadata") { await output.isReady }
         let firstMarker = "V2_FIRST_\(token)"
@@ -84,7 +83,6 @@ final class V2LiveFeatureTests: XCTestCase {
         try await wait("output after saved cursor") { await output.contains(replayMarker) }
         socket.cancel()
         await connection.disconnect()
-        _ = await socket.result
 
         let replay = V2LiveSocketRecorder()
         let replayRequest = try client.v2PTYConnectRequest(id: created.id, directory: directory, cursor: cursor)
@@ -94,7 +92,6 @@ final class V2LiveFeatureTests: XCTestCase {
         addTeardownBlock {
             reopened.cancel()
             await connection.disconnect()
-            _ = await reopened.result
         }
         try await wait("reopened socket replays bytes after saved cursor") {
             let ready = await replay.isReady
@@ -111,7 +108,6 @@ final class V2LiveFeatureTests: XCTestCase {
 
         reopened.cancel()
         await connection.disconnect()
-        _ = await reopened.result
         let beforeDelete = try await client.getV2PTY(id: created.id, directory: directory)
         try Self.requireOwned(beforeDelete, titles: ownedTitles, directory: directory)
         try await client.deleteV2PTY(id: created.id, directory: directory)
@@ -127,6 +123,7 @@ final class V2LiveFeatureTests: XCTestCase {
         let providers = try await client.listV2Providers(directory: directory)
         let integrations = try await client.v2Integrations(directory: directory)
         let plugins = try await client.v2Plugins(directory: directory)
+        let configuration = try await client.listV2ConfigurationEntries(directory: directory)
 
         // Independent decoding of actual wire envelopes catches normalization/DTO asymmetry.
         @MainActor
@@ -137,6 +134,14 @@ final class V2LiveFeatureTests: XCTestCase {
             guard http.statusCode == 200 else { throw V2LiveFailure("Read-only discovery returned HTTP \(http.statusCode)") }
             return try JSONDecoder().decode(V2LiveResponse<Value>.self, from: data).data
         }
+        @MainActor
+        func readBare<Value: Decodable & Sendable>(_ path: String, as type: Value.Type) async throws -> Value {
+            let request = try client.makeRequest(path: path, method: "GET", queryItems: client.v2LocationQueryItems(directory: directory))
+            let (data, response) = try await client.session.data(for: request)
+            let http = try XCTUnwrap(response as? HTTPURLResponse)
+            guard http.statusCode == 200 else { throw V2LiveFailure("Read-only discovery returned HTTP \(http.statusCode)") }
+            return try JSONDecoder().decode(Value.self, from: data)
+        }
         let rawProviders = try await read("/api/provider", as: [[String: OpenCodeJSONValue]].self)
         let availableIDs = rawProviders.filter {
             if let activation = $0["activation"]?.literalStringValue { return activation != "disabled" }
@@ -145,8 +150,10 @@ final class V2LiveFeatureTests: XCTestCase {
         XCTAssertEqual(Set(providers.map(\.id)), Set(availableIDs))
         let decodedIntegrations = try await read("/api/integration", as: [OpenCodeV2Integration].self)
         let decodedPlugins = try await read("/api/plugin", as: [OpenCodeV2Plugin].self)
+        let decodedConfiguration = try await readBare("/api/config", as: [OpenCodeJSONValue].self)
         XCTAssertEqual(integrations, decodedIntegrations)
         XCTAssertEqual(plugins, decodedPlugins)
+        XCTAssertEqual(configuration, decodedConfiguration)
         XCTAssertEqual(Set(integrations.map(\.id)).count, integrations.count)
         // Empty or env-only discovery is valid. Never install credentials or start OAuth here.
     }
@@ -171,29 +178,25 @@ final class V2LiveFeatureTests: XCTestCase {
     }
 
     private func isolatedContext() async throws -> (OpenCodeAPIClient, String) {
-        let env = ProcessInfo.processInfo.environment
-        guard let baseURL = env["OPENCODE_V2_TEST_BASE_URL"], !baseURL.isEmpty,
-              let username = env["OPENCODE_V2_TEST_USERNAME"], !username.isEmpty,
-              let password = env["OPENCODE_V2_TEST_PASSWORD"], !password.isEmpty else {
-            throw XCTSkip("Set OPENCODE_V2_TEST_BASE_URL/USERNAME/PASSWORD to opt into the disposable v2 server")
-        }
+        let fixture = try OpenCodeV2LiveFixture.load()
+        let baseURL = OpenCodeV2LiveFixture.baseURL
         guard let url = URL(string: baseURL), url.scheme == "http", url.host == "127.0.0.1", url.port == 14097,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               url.path.isEmpty || url.path == "/" else {
             throw V2LiveFailure("Only the isolated http://127.0.0.1:14097 server is permitted")
         }
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 20
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 10
         let session = URLSession(configuration: configuration)
         addTeardownBlock { session.invalidateAndCancel() }
-        let client = OpenCodeAPIClient(config: .init(baseURL: baseURL, username: username, password: password, apiPreference: .v2), session: session)
+        let client = OpenCodeAPIClient(config: .init(baseURL: baseURL, username: fixture.username,
+                                                      password: fixture.password, apiPreference: .v2), session: session)
         let location = try await client.getV2Location()
-        let root = "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode/pass2-VwCj6l"
-        let standardized = URL(fileURLWithPath: location.directory).standardizedFileURL.path
-        let directory = standardized.hasPrefix("/private/var/") ? String(standardized.dropFirst(8)) : standardized
-        guard location.project.id == "global", directory == root || directory.hasPrefix(root + "/") else {
-            throw V2LiveFailure("Refusing a server outside the dedicated pass2 temporary root")
+        let directory = URL(fileURLWithPath: location.directory).resolvingSymlinksInPath().standardizedFileURL
+        let projectDirectory = URL(fileURLWithPath: location.project.directory).resolvingSymlinksInPath().standardizedFileURL
+        guard directory == fixture.workspace, projectDirectory == fixture.workspace, fixture.owns(directory) else {
+            throw V2LiveFailure("Refusing a server outside the manifest-owned v2 fixture")
         }
         return (client, location.directory)
     }

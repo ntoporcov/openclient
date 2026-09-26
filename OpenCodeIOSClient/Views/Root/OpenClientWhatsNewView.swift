@@ -20,7 +20,11 @@ struct OpenClientWhatsNewView: View {
                             connection: connection
                         )
                     } else {
-                        OpenClientWhatsNewHistoricalContent(release: release, connection: connection)
+                        OpenClientWhatsNewHistoricalContent(
+                            release: release,
+                            connection: connection,
+                            bridge: bridge
+                        )
                     }
                 }
                 .frame(maxWidth: 600)
@@ -42,6 +46,7 @@ struct OpenClientWhatsNewView: View {
 private struct OpenClientWhatsNewHistoricalContent: View {
     let release: OpenClientReleaseNotes
     @ObservedObject var connection: ConnectionFacade
+    let bridge: OpenClientBridgeFacade?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -62,6 +67,14 @@ private struct OpenClientWhatsNewHistoricalContent: View {
 
             if release.hero == .activity {
                 OpenClientWhatsNewActivityExamples()
+            }
+
+            if release.hero == .webPush {
+                if let bridge {
+                    OpenClientWhatsNewNotificationsSection(bridge: bridge, allowsNativeSetup: true)
+                } else {
+                    OpenClientWhatsNewNotificationsOverview()
+                }
             }
 
             if !release.internationalizationAnnouncements.isEmpty {
@@ -444,26 +457,55 @@ private struct OpenClientWhatsNewNotificationsOverview: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Notifications from your OpenCode host", systemImage: "bell.badge.fill")
-                .font(.title2.bold())
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Web Push, without the middleman", systemImage: "lock.shield.fill")
+                    .font(.title2.bold())
 
-            Text("The OpenClient plugin now bundles OC Notify, a Home Screen web app that can alert you when a session becomes idle after activity or needs a permission or question answered.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                Text("Your chat messages and raw OpenCode events never go to an OpenClient server or notification relay.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-            OpenClientWhatsNewNotificationStep(
-                number: 1,
-                text: "Install plugin 0.3.0 on your OpenCode host, enable notifications, and configure an HTTPS address reachable from your iPhone."
-            )
-            OpenClientWhatsNewNotificationStep(
-                number: 2,
-                text: "Open that origin in Safari, add OC Notify to the Home Screen, then pair it with the separate code generated on the host."
-            )
-            OpenClientWhatsNewNotificationStep(
-                number: 3,
-                text: "Allow notifications in OC Notify and enable OpenCode Activity. Setup prepares the connection but does not guarantee delivery."
-            )
+            OpenClientWhatsNewNotificationFlow()
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("HOW THE PWA FITS IN")
+                    .font(.caption.weight(.bold))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+
+                OpenClientWhatsNewNotificationStep(
+                    number: 1,
+                    text: "Add OC Notify to your Home Screen. This gives the web app permission to receive Web Push on iPhone."
+                )
+                OpenClientWhatsNewNotificationStep(
+                    number: 2,
+                    text: "Your OpenCode host turns activity into a minimal encrypted alert and sends it directly through Apple’s Web Push service."
+                )
+                OpenClientWhatsNewNotificationStep(
+                    number: 3,
+                    text: "Tap the notification and OC Notify hands off to the matching session in OpenClient. Enable Try Auto-Open to make the redirect automatic when iOS allows it."
+                )
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "eye.slash.fill")
+                    .font(.title2)
+                    .foregroundStyle(.green)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Built to reveal less")
+                        .font(.headline)
+                    Text("Alerts contain no chat body or OpenCode password. They carry only the event kind, a validated route, and bounded project or session labels. Those labels can appear on your Lock Screen.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(16)
+            .background(.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 
             if let setupDestination {
                 NavigationLink {
@@ -474,7 +516,7 @@ private struct OpenClientWhatsNewNotificationsOverview: View {
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("new-features.notification-setup")
             } else {
-                Text("Native setup becomes available when this app is connected to a configured, compatible legacy OpenCode plugin bridge. OpenCode v2 setup is not available here yet.")
+                Text("Setup becomes available here when OpenClient is connected to a compatible plugin with OC Notify enabled.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -484,21 +526,83 @@ private struct OpenClientWhatsNewNotificationsOverview: View {
             }
             .accessibilityIdentifier("new-features.notification-guide")
 
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.title2)
-                    .foregroundStyle(.green)
-                    .accessibilityHidden(true)
-                Text("Privacy: notification payloads are encrypted for Web Push and travel through Apple’s push service to your iPhone. OpenClient does not operate a hosted notification relay. Payloads exclude chat bodies and OpenCode passwords, but include routing information and project or session labels; those names or titles may appear on the Lock Screen.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(16)
-            .background(.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("new-features.notifications-section")
+    }
+}
+
+private struct OpenClientWhatsNewNotificationFlow: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("NO OPENCLIENT CLOUD")
+                .font(.caption2.weight(.black))
+                .tracking(1)
+                .foregroundStyle(.green)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.green.opacity(0.12), in: Capsule())
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    node("OpenCode host", detail: "Creates alert", image: "desktopcomputer", tint: .purple)
+                    connector(image: "lock.fill")
+                    node("Apple Web Push", detail: "Encrypted delivery", image: "network", tint: .blue)
+                    connector(image: "arrow.right")
+                    node("Your iPhone", detail: "OC Notify", image: "iphone", tint: .green)
+                }
+
+                VStack(spacing: 8) {
+                    node("OpenCode host", detail: "Creates a minimal alert", image: "desktopcomputer", tint: .purple)
+                    connector(image: "arrow.down")
+                    node("Apple Web Push", detail: "Encrypted delivery", image: "network", tint: .blue)
+                    connector(image: "arrow.down")
+                    node("Your iPhone", detail: "OC Notify opens OpenClient", image: "iphone", tint: .green)
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            LinearGradient(
+                colors: [.green.opacity(0.1), .cyan.opacity(0.06)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.green.opacity(0.2), lineWidth: 0.75)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("No OpenClient cloud. Your OpenCode host creates a minimal alert, Apple Web Push delivers it encrypted, and OC Notify receives it on your iPhone.")
+        .accessibilityIdentifier("new-features.notification-flow")
+    }
+
+    private func node(_ title: LocalizedStringResource, detail: LocalizedStringResource, image: String, tint: Color) -> some View {
+        VStack(spacing: 7) {
+            Image(systemName: image)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 38, height: 38)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.bold))
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func connector(image: String) -> some View {
+        Image(systemName: image)
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
     }
 }
 
@@ -696,6 +800,8 @@ private struct OpenClientWhatsNewHero: View {
                             .font(.title2.weight(.bold))
                             .foregroundStyle(.white)
                             .accessibilityHidden(true)
+                    case .webPush:
+                        OpenClientWhatsNewWebPushMark()
                     }
                 }
 
@@ -721,6 +827,41 @@ private struct OpenClientWhatsNewHero: View {
         }
         .shadow(color: .black.opacity(0.14), radius: 24, y: 12)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct OpenClientWhatsNewWebPushMark: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(.green.opacity(0.24))
+                .frame(width: 84, height: 84)
+                .blur(radius: 10)
+
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.green, .cyan],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 62, height: 62)
+                .shadow(color: .green.opacity(0.35), radius: 18, y: 8)
+
+            Image(systemName: "bell.and.waves.left.and.right")
+                .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(.white)
+
+            Image(systemName: "lock.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.green)
+                .frame(width: 20, height: 20)
+                .background(.white, in: Circle())
+                .offset(x: 25, y: 24)
+        }
+        .frame(width: 92, height: 72)
+        .accessibilityHidden(true)
     }
 }
 

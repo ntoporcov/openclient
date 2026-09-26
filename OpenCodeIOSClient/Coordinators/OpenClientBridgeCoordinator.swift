@@ -12,9 +12,10 @@ final class OpenClientBridgeCoordinator {
     private let store: OpenClientBridgeStore
     private let connectionStore: ConnectionStore
     private let chatStore: ChatStore
-    private let configProvider: @MainActor () -> OpenCodeServerConfig
+    private let configProvider: @MainActor () -> OpenCodeServerConfig?
     private let client: any OpenClientBridgeConnecting
     private let notificationSetupClient: any OpenClientNotificationSetupRequesting
+    private let notificationPairingRunner: (any OpenClientNotificationPairingRunning)?
     private let notificationContextProvider: @MainActor () -> OpenClientNotificationSetupContext?
     private var observations: Set<AnyCancellable> = []
     private var lifecycleTask: Task<Void, Never>?
@@ -22,6 +23,8 @@ final class OpenClientBridgeCoordinator {
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var lifecycleID = UUID()
+    private var attemptedConnectionID: UUID?
+    private var attemptedConfig: OpenCodeServerConfig?
     private let reconnectDelay: @MainActor (Int) -> Duration
     private let now: @MainActor () -> Date
 
@@ -29,9 +32,10 @@ final class OpenClientBridgeCoordinator {
         store: OpenClientBridgeStore,
         connectionStore: ConnectionStore,
         chatStore: ChatStore,
-        configProvider: @escaping @MainActor () -> OpenCodeServerConfig,
+        configProvider: @escaping @MainActor () -> OpenCodeServerConfig?,
         client: any OpenClientBridgeConnecting = OpenClientBridgeClient(),
         notificationSetupClient: any OpenClientNotificationSetupRequesting = OpenClientNotificationSetupClient(),
+        notificationPairingRunner: (any OpenClientNotificationPairingRunning)? = nil,
         notificationContextProvider: @escaping @MainActor () -> OpenClientNotificationSetupContext? = { nil },
         now: @escaping @MainActor () -> Date = Date.init,
         reconnectDelay: @escaping @MainActor (Int) -> Duration = { attempt in
@@ -44,6 +48,7 @@ final class OpenClientBridgeCoordinator {
         self.configProvider = configProvider
         self.client = client
         self.notificationSetupClient = notificationSetupClient
+        self.notificationPairingRunner = notificationPairingRunner
         self.notificationContextProvider = notificationContextProvider
         self.now = now
         self.reconnectDelay = reconnectDelay
@@ -101,6 +106,13 @@ final class OpenClientBridgeCoordinator {
         connectionStateChanged()
     }
 
+    func backendContextChanged(connectionID: UUID?, config: OpenCodeServerConfig?) {
+        guard connectionID != attemptedConnectionID || config != attemptedConfig else { return }
+        attemptedConnectionID = connectionID
+        attemptedConfig = config
+        reconcileConnection()
+    }
+
     func forceConnect() {
         guard shouldConnect else {
             store.apply(.disconnected("Connect to an OpenCode server before connecting to its plugin bridge."))
@@ -129,7 +141,28 @@ final class OpenClientBridgeCoordinator {
             store.failNotificationSetup(OpenClientNotificationSetupError.staleSetup.localizedDescription)
             return nil
         }
-        return OpenClientNotificationOpenRequest(requestID: owner.requestID, url: setup.url)
+        guard let fragment = URLComponents(url: setup.url, resolvingAgainstBaseURL: false)?.fragment else {
+            store.failNotificationSetup(OpenClientNotificationSetupError.staleSetup.localizedDescription)
+            return nil
+        }
+        let values = fragment.split(separator: "&").compactMap { item -> (String, String)? in
+            let pair = item.split(separator: "=", maxSplits: 1).map(String.init)
+            guard pair.count == 2 else { return nil }
+            return (pair[0], pair[1])
+        }
+        guard let pairingCode = values.first(where: { $0.0 == "pair" })?.1,
+              let setupCode = values.first(where: { $0.0 == "setup" })?.1,
+              setupCode == setup.code,
+              setupCode.range(of: "^[A-F0-9]{10}$", options: .regularExpression) != nil,
+              pairingCode.range(of: "^[A-F0-9]{10}$", options: .regularExpression) != nil else {
+            store.failNotificationSetup(OpenClientNotificationSetupError.staleSetup.localizedDescription)
+            return nil
+        }
+        return OpenClientNotificationOpenRequest(
+            requestID: owner.requestID,
+            url: setup.url,
+            clipboardPayload: "ocnotify:v1:\(setupCode):\(pairingCode)"
+        )
     }
 
     func notificationBrowserOpenFailed(request: OpenClientNotificationOpenRequest) {
@@ -162,6 +195,19 @@ final class OpenClientBridgeCoordinator {
         store.beginNotificationSetup(owner: owner)
         do {
             let setup = try await notificationSetupClient.createSetup(endpoint: endpoint, context: context)
+            var pairedSetup = setup
+            if let notificationPairingRunner {
+                guard let launcher = endpoint.notificationPairingLauncher else {
+                    throw OpenClientNotificationSetupError.pairingUnavailable
+                }
+                let pairingCode = try await notificationPairingRunner.createPairingCode(launcher: launcher)
+                guard var components = URLComponents(url: setup.url, resolvingAgainstBaseURL: false) else {
+                    throw OpenClientNotificationSetupError.invalidResponse
+                }
+                components.fragment = "setup=\(setup.code)&pair=\(pairingCode)"
+                guard let setupURL = components.url else { throw OpenClientNotificationSetupError.invalidResponse }
+                pairedSetup = OpenClientNotificationSetup(url: setupURL, code: setup.code, expiresAt: setup.expiresAt)
+            }
             guard lifecycleID == owner.lifecycleID,
                   store.notificationSetupOwner == owner,
                   case .connected = store.phase,
@@ -170,7 +216,7 @@ final class OpenClientBridgeCoordinator {
                 store.clearNotificationSetup(owner: owner)
                 return
             }
-            store.finishNotificationSetup(setup, owner: owner)
+            store.finishNotificationSetup(pairedSetup, owner: owner)
         } catch {
             guard lifecycleID == owner.lifecycleID,
                   store.notificationSetupOwner == owner,
@@ -199,8 +245,7 @@ final class OpenClientBridgeCoordinator {
         apiProfile: OpenCodeAPIProfile?
     ) -> Bool {
         guard store.isEnabled else { return false }
-        guard apiProfile != .v2 else { return false }
-        if backendMode == .server && isConnected {
+        if (backendMode == .server || backendMode == .serverV2) && isConnected {
             return true
         }
         switch connectionPhase {
@@ -253,8 +298,9 @@ final class OpenClientBridgeCoordinator {
         lifecycleTask?.cancel()
         let lifecycleID = UUID()
         self.lifecycleID = lifecycleID
-        let connect = requestedConnectionState ?? shouldConnect
-        let config = connect ? configProvider() : OpenCodeServerConfig()
+        let requested = requestedConnectionState ?? shouldConnect
+        let config = requested ? configProvider() : nil
+        let connect = requested && config != nil
         let registration = OpenClientBridgeRegistration(
             clientID: store.clientID,
             displayName: store.displayName,
@@ -270,7 +316,7 @@ final class OpenClientBridgeCoordinator {
             guard let self else { return }
             guard !Task.isCancelled, lifecycleID == self.lifecycleID else { return }
             await client.disconnect()
-            guard !Task.isCancelled, lifecycleID == self.lifecycleID, connect else {
+            guard !Task.isCancelled, lifecycleID == self.lifecycleID, connect, let config else {
                 if lifecycleID == self.lifecycleID { lifecycleTask = nil }
                 return
             }

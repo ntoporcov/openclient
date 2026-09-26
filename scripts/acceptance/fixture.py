@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private, disposable next-17155 server and scripted Chat Completions provider."""
+"""Private, disposable OpenCode v2 server and scripted Chat Completions provider."""
 import argparse
 import base64
 import hashlib
@@ -19,15 +19,17 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from inspect_runtime import BINARY
+from inspect_runtime import (BINARY, BINARY_SHA256, RUNTIME_ROOT, RUNTIME_ROOT_ENV,
+                             SOURCE_URL, VERSION, verify_runtime)
 from scenarios import (COLOR_PNG, MARKER, OUTPUT_MARKER, expected_output, fixture_route,
                        safari_page, scenario_for_messages)
 
-TEMP = Path('/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode')
-VERSION = '0.0.0-next-17155'
+HOST_ROOT_ENV = 'OPENCLIENT_ACCEPTANCE_HOST_ROOT'
+TEMP = Path(os.environ.get(HOST_ROOT_ENV, str(Path(tempfile.gettempdir()) / 'opencode'))).absolute().resolve()
 BASE = 'http://127.0.0.1:14097'
 PROVIDER = 'http://127.0.0.1:14098'
-MODEL = 'scripted/test-model'
+MODEL = 'test/test-model'
+ROOT_PREFIX = 'acceptance-v2_0_16-'
 PROFILE = ('(version 1)(allow default)(deny network-outbound)'
            '(allow network-outbound (remote ip "localhost:14097") (remote ip "localhost:14098"))')
 
@@ -45,18 +47,33 @@ def private_json(path, data):
     temporary.replace(path)
 
 
+def verify_host_root():
+    require(TEMP.is_absolute() and TEMP.is_dir() and not TEMP.is_symlink(),
+            f'{HOST_ROOT_ENV} must name an existing real directory')
+    attributes = TEMP.stat()
+    require(attributes.st_uid == os.getuid(), 'Acceptance host root must be owned by the current user')
+    require(attributes.st_mode & 0o022 == 0, 'Acceptance host root must not be group/other writable')
+    return TEMP
+
+
 def load_manifest(path):
+    verify_host_root()
     path = Path(path).absolute()
     root = path.parent
-    require(root.parent == TEMP and root.name.startswith('acceptance-next17155-'), 'Unapproved root')
+    require(root.parent == TEMP and root.name.startswith(ROOT_PREFIX), 'Unapproved root')
     require(root.resolve() == TEMP.resolve() / root.name and not root.is_symlink()
             and not path.is_symlink(), 'Symlink fixture refused')
     require(path.name == 'manifest.json' and path.stat().st_mode & 0o077 == 0, 'Manifest must be private')
     data = json.loads(path.read_text())
     require((root / '.acceptance-root').read_text().strip() == data['run_id'], 'Root marker mismatch')
-    require(data['root'] == str(root) and data['workspace'] == str(root / 'workspace'), 'Root mismatch')
+    require(data['host_root'] == str(TEMP) and data['root'] == str(root)
+            and data['workspace'] == str(root / 'workspace'), 'Root mismatch')
     require(data['base_url'] == BASE and data['provider_url'] == PROVIDER, 'Forbidden endpoint')
     require(data['version'] == VERSION and data['model'] == MODEL, 'Fixture identity mismatch')
+    require(data['username'] == 'opencode' and data['password'] and data['control_token'],
+            'Fixture credentials are incomplete')
+    require(data['binary'] == str(BINARY) and data['binary_sha256'] == BINARY_SHA256,
+            'Fixture runtime identity mismatch')
     return data
 
 
@@ -80,41 +97,40 @@ def request(manifest, path, body=None, method=None, provider=False, timeout=30):
 
 
 def verify(manifest):
-    health = request(manifest, '/api/health', timeout=3)
+    info = request(manifest, '/api/info', timeout=3)
     location = request(manifest, '/api/location', timeout=3)
-    require(health['healthy'] and health['version'] == VERSION, 'Wrong runtime')
-    require(health['pid'] == manifest['server_pid'], 'Server PID mismatch')
+    require(info['version'] == VERSION and info['pid'] == manifest['server_pid'], 'Wrong runtime')
     require(Path(location['directory']).resolve() == Path(manifest['workspace']).resolve()
-            and location['project']['id'] == 'global',
-            'Not the owned non-Git workspace')
+            and Path(location['project']['directory']).resolve() == Path(manifest['workspace']).resolve(),
+            'Not the owned workspace')
     state = request(manifest, '/control/status', provider=True, timeout=3)
     require(state['run_id'] == manifest['run_id'] and state['pid'] == manifest['supervisor_pid'],
             'Supervisor identity mismatch')
-    return {'run_id': manifest['run_id'], 'server_pid': health['pid'], 'workspace': location['directory']}
+    return {'run_id': manifest['run_id'], 'server_pid': manifest['server_pid'],
+            'workspace': manifest['workspace']}
 
 
 def configuration():
     return {
         '$schema': 'https://opencode.ai/config.json',
-        'model': MODEL, 'default_agent': 'build', 'autoupdate': False,
-        'share': 'disabled', 'snapshots': False, 'warming': False,
-        'formatter': False, 'lsp': False, 'skills': [], 'plugins': ['-opencode.command'],
-        'commands': {'acceptance': {'description': 'Local gated acceptance reply',
+        'model': MODEL, 'small_model': MODEL, 'default_agent': 'build', 'autoupdate': False,
+        'share': 'disabled', 'snapshot': False, 'formatter': False, 'lsp': False,
+        'skills': {'paths': [], 'urls': []}, 'plugin': [], 'enabled_providers': ['test'],
+        'command': {'acceptance': {'description': 'Local gated acceptance reply',
                     'template': '[[acceptance:stream:$ARGUMENTS]]', 'model': MODEL}},
-        'compaction': {'auto': False},
-        'agents': {name: {'model': MODEL, **({'disabled': True} if name == 'title' else {})}
+        'compaction': {'auto': False, 'prune': False},
+        'agent': {name: {'model': MODEL, **({'disable': True} if name == 'title' else {})}
                    for name in ('build', 'plan', 'general', 'explore', 'title', 'summary', 'compaction')},
-        'permissions': [{'action': '*', 'resource': '*', 'effect': 'deny'}],
-        'experimental': {'policies': [
-            {'action': 'provider.use', 'resource': '*', 'effect': 'deny'},
-            {'action': 'provider.use', 'resource': 'scripted', 'effect': 'allow'}]},
-        'providers': {'scripted': {
-            'name': 'Local Scripted Acceptance', 'env': [],
-            'package': 'aisdk:@ai-sdk/openai-compatible',
-            'settings': {'baseURL': PROVIDER + '/v1'},
+        'permission': {'*': 'deny'},
+        'provider': {'test': {
+            'name': 'Local Scripted Acceptance',
+            'id': 'test', 'npm': '@ai-sdk/openai-compatible',
+            'options': {'baseURL': PROVIDER + '/v1'},
             'models': {'test-model': {
-                'name': 'Scripted Test Model',
-                'capabilities': {'tools': False, 'input': ['text', 'image'], 'output': ['text']},
+                'id': 'test-model', 'name': 'Scripted Test Model', 'attachment': True,
+                'reasoning': True, 'temperature': False, 'tool_call': False,
+                'release_date': '2026-01-01',
+                'modalities': {'input': ['text', 'image'], 'output': ['text']},
                 'limit': {'context': 32768, 'output': 4096},
                 'cost': {'input': 0, 'output': 0}}}}}
     }
@@ -354,10 +370,10 @@ def environment(root, manifest):
     env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(root / 'home'),
            'OPENCODE_TEST_HOME': str(root / 'home'), 'TMPDIR': str(root / 'tmp'),
            'OPENCODE_CONFIG_DIR': str(root / 'config/opencode'),
-           'OPENCODE_CONFIG_PROJECT_DISABLE': '1', 'OPENCODE_DISABLE_AUTOUPDATE': '1',
-           'OPENCODE_DISABLE_MODELS_FETCH': '1', 'OPENCODE_MODELS_PATH': str(root / 'models.json'),
-           'OPENCODE_DB': str(root / 'data/opencode.db'),
-           'OPENCODE_SERVER_USERNAME': 'opencode', 'OPENCODE_SERVER_PASSWORD': manifest['password']}
+            'OPENCODE_CONFIG_PROJECT_DISABLE': '1', 'OPENCODE_DISABLE_AUTOUPDATE': '1',
+            'OPENCODE_DISABLE_MODELS_FETCH': '1', 'OPENCODE_MODELS_PATH': str(root / 'models.json'),
+            'OPENCODE_DB': str(root / 'data/opencode.db'),
+            'OPENCODE_SERVER_USERNAME': 'opencode', 'OPENCODE_SERVER_PASSWORD': manifest['password']}
     for name in ('config', 'data', 'cache', 'state'):
         env['XDG_' + name.upper() + '_HOME'] = str(root / name)
     env['XDG_RUNTIME_DIR'] = str(root / 'runtime')
@@ -366,6 +382,7 @@ def environment(root, manifest):
 
 def serve(path):
     manifest = load_manifest(path)
+    verify_runtime()
     root = Path(manifest['root'])
     state = State(manifest)
     server = ThreadingHTTPServer(('127.0.0.1', 14098), Handler)
@@ -388,27 +405,28 @@ def serve(path):
         private_json(Path(path), manifest)
         # Readiness retries are bounded startup polling, never streaming test synchronization.
         deadline = time.monotonic() + 45
+        last_error = None
         while time.monotonic() < deadline and child.poll() is None and not state.stop.is_set():
             try:
                 verify(manifest)
                 providers = request(manifest, '/api/provider', timeout=3)['data']
-                if not providers:
-                    state.stop.wait(0.1)
-                    continue
-                require([p['id'] for p in providers] == ['scripted'], 'Unexpected provider catalog')
                 models = request(manifest, '/api/model', timeout=3)['data']
-                require([(m['providerID'], m['id']) for m in models] == [('scripted', 'test-model')],
-                        'Unexpected model catalog')
                 commands = request(manifest, '/api/command', timeout=3)['data']
-                if not commands:
-                    state.stop.wait(0.1)
-                    continue
-                require([c['name'] for c in commands] == ['acceptance'], 'Unexpected command catalog')
+                require([provider['id'] for provider in providers] == ['test'],
+                        'Unexpected provider catalog')
+                require([(model['providerID'], model['id']) for model in models] ==
+                        [('test', 'test-model')], 'Unexpected model catalog')
+                require(sum(command['name'] == 'acceptance' for command in commands) == 1,
+                        'Configured acceptance command missing or duplicated')
                 state.event('ready')
                 break
-            except (OSError, ValueError):
+            except (OSError, ValueError, RuntimeError) as error:
+                last_error = error
                 state.stop.wait(0.1)
         else:
+            if last_error is not None:
+                state.event('readiness_error', error_type=type(last_error).__name__,
+                            status=getattr(last_error, 'code', None), reason=str(last_error))
             raise RuntimeError('Runtime readiness failed; inspect private server.log')
         while not state.stop.wait(0.25):
             require(child.poll() is None, 'Runtime exited unexpectedly')
@@ -425,33 +443,49 @@ def serve(path):
 
 
 def start():
-    require(BINARY.is_file(), 'Pinned installed runtime is missing')
+    verify_host_root()
+    verify_runtime()
     # Never contact, authenticate to, or kill a listener that already occupies either port.
     for port in (14097, 14098):
         with socket.socket() as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind(('127.0.0.1', port))
-    root = Path(tempfile.mkdtemp(prefix='acceptance-next17155-', dir=TEMP))
-    for name in ('workspace', 'home', 'config/opencode', 'data', 'cache', 'state', 'runtime', 'tmp'):
+    root = Path(tempfile.mkdtemp(prefix=ROOT_PREFIX, dir=TEMP))
+    for name in ('workspace', 'git-fixture', 'copies', 'home', 'config/opencode', 'data', 'cache', 'state', 'runtime', 'tmp'):
         (root / name).mkdir(parents=True, exist_ok=True, mode=0o700)
-    manifest = {'run_id': secrets.token_hex(16), 'version': VERSION, 'root': str(root),
+    manifest = {'run_id': secrets.token_hex(16), 'version': VERSION, 'host_root': str(TEMP),
+                'root': str(root),
                 'workspace': str(root / 'workspace'), 'base_url': BASE, 'provider_url': PROVIDER,
+                'git_root': str(root / 'git-fixture'),
+                'worktree_destination_parent': str(root / 'copies'),
                 'model': MODEL, 'username': 'opencode', 'password': secrets.token_urlsafe(32),
                 'output_schema_version': 2, 'acceptance_command': 'acceptance',
                 'control_token': secrets.token_urlsafe(32), 'server_pid': None, 'supervisor_pid': None,
-                'binary': str(BINARY), 'network_policy': PROFILE}
+                'binary': str(BINARY), 'binary_sha256': BINARY_SHA256,
+                'source': SOURCE_URL, 'network_policy': PROFILE}
     (root / '.acceptance-root').write_text(manifest['run_id'] + '\n')
+    (root / 'git-fixture/README.md').write_text('# Disposable acceptance repository\n')
+    git_env = {'PATH': '/usr/bin:/bin', 'HOME': str(root / 'home')}
+    for command in (['git', 'init', '--quiet'],
+                    ['git', 'config', 'user.name', 'OpenClient Acceptance'],
+                    ['git', 'config', 'user.email', 'acceptance@invalid.example'],
+                    ['git', 'add', 'README.md'],
+                    ['git', 'commit', '--quiet', '-m', 'Initial acceptance fixture']):
+        subprocess.run(command, cwd=root / 'git-fixture', env=git_env, check=True,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     private_json(root / 'models.json', {})
     config = configuration()
-    config['providers']['scripted']['settings']['apiKey'] = manifest['control_token']
+    config['provider']['test']['options']['apiKey'] = manifest['control_token']
     private_json(root / 'config/opencode/opencode.json', config)
     path = root / 'manifest.json'
     private_json(path, manifest)
     with (root / 'supervisor.log').open('ab') as log:
         process = subprocess.Popen(['/usr/bin/sandbox-exec', '-p', PROFILE,
                                     sys.executable, str(Path(__file__).resolve()), '_serve', str(path)],
-                                   env={'PATH': '/usr/bin:/bin', 'HOME': str(root / 'home'),
-                                        'PYTHONDONTWRITEBYTECODE': '1'},
+                                    env={'PATH': '/usr/bin:/bin', 'HOME': str(root / 'home'),
+                                         HOST_ROOT_ENV: str(TEMP),
+                                         RUNTIME_ROOT_ENV: str(RUNTIME_ROOT),
+                                         'PYTHONDONTWRITEBYTECODE': '1'},
                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
     print(str(path), flush=True)
     deadline = time.monotonic() + 50

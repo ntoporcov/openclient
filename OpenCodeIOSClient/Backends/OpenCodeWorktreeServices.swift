@@ -51,7 +51,7 @@ final class OpenCodeWorktreeServices: BackendProjectLifecycleService, BackendWor
     func resolveProject(directory: String) async throws -> BackendProjectResolution {
         if profile == .v2 {
             let location = try await client.getV2Location(directory: directory)
-            let metadata = try await client.currentV2Project(directory: location.directory, workspaceID: location.workspaceID)
+            let metadata = try await client.project(for: location)
             guard metadata.id == location.project.id else { throw BackendError.invalidScope }
             // A shared project identity may have another clone as its catalog canonical path.
             let project = OpenCodeProject(id: location.project.id, worktree: location.project.directory,

@@ -5,32 +5,63 @@ import XCTest
 /// Opt-in integration tests. Never target the persistent development servers.
 @MainActor
 final class BackendFeatureLiveTests: XCTestCase {
-    func testNativeCommandEncodingReturnsOwnedPendingReceiptWithoutProviderTurn() async throws {
-        let (client, directory, _) = try await context()
+    func testNativeCommandEncodingRunsFixtureOwnedCommandThroughScriptedProvider() async throws {
+        let (client, directory, _) = try await context(timeout: 15)
+        let fixture = try OpenCodeV2LiveFixture.load()
         let sessionID = try await ownedSession(client, directory: directory)
         var commands = try await client.listV2Commands(directory: directory)
-        // This preview activates built-in catalogs asynchronously on first location access.
-        for _ in 0..<40 where !commands.contains(where: { $0.name == "review" }) {
+        // The runtime activates configured catalogs asynchronously on first location access.
+        for _ in 0..<40 where !commands.contains(where: { $0.name == "acceptance" }) {
             try await Task.sleep(for: .milliseconds(250))
             commands = try await client.listV2Commands(directory: directory)
         }
-        let command = try XCTUnwrap(commands.first { $0.name == "review" }, "Expected the next-17155 built-in review command")
-        let messageID = OpenCodeIdentifier.message()
-        // Exercise the production encoder, not a parallel hand-written command payload.
-        let receipt = try await client.admitV2Command(
-            sessionID: sessionID, messageID: messageID, command: command.name, arguments: "", resume: false
+        let command = try XCTUnwrap(commands.first { $0.name == "acceptance" }, "Expected the fixture-owned acceptance command")
+        let suffix = "command_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())"
+        let marker = "[[acceptance:stream:\(suffix)]]"
+        // Exercise the production encoder and the only configured fixture command. The
+        // generated provider is loopback-only and cannot forward to a real provider.
+        let completion = BackendFeatureCommandCompletion()
+        let commandTask = Task {
+            do {
+                try await client.sendV2Command(sessionID: sessionID, command: command.name, arguments: suffix)
+                await completion.finish()
+            } catch {
+                await completion.finish(failure: String(describing: error))
+            }
+        }
+        // A later failure must still release the fixture provider. Do not await the
+        // command task in teardown because a broken transport could outlive cancellation.
+        addTeardownBlock { @MainActor in
+            _ = try? await self.control(fixture, path: "/control/finish", body: ["marker": marker])
+            commandTask.cancel()
+        }
+        let firstHold = try await controlEvent(fixture, marker: marker, kind: "held")
+        let firstSequence = try XCTUnwrap(firstHold["seq"] as? Int)
+        _ = try await control(fixture, path: "/control/advance", body: ["marker": marker])
+        _ = try await controlEvent(fixture, marker: marker, kind: "held", after: firstSequence)
+        _ = try await control(fixture, path: "/control/finish", body: ["marker": marker])
+        _ = try await controlEvent(fixture, marker: marker, kind: "finished")
+        try await waitForCommand(completion)
+        try await client.waitForV2Session(sessionID: sessionID)
+
+        let transcript = try await client.listV2Messages(sessionID: sessionID, limit: 20)
+        let expected = "Acceptance stream/\(suffix): first. Acceptance stream/\(suffix): progress. Acceptance stream/\(suffix): complete."
+        // The canonical wire history also includes a model-switched record, which
+        // normalization intentionally presents as a synthetic assistant message.
+        let meaningfulAssistants = transcript.messages.filter { message in
+            message.info.role == "assistant" && message.parts.contains { part in
+                part.synthetic != true && !(part.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
+        XCTAssertEqual(meaningfulAssistants.count, 1)
+        let response = try XCTUnwrap(meaningfulAssistants.first)
+        XCTAssertEqual(
+            response.parts.filter { $0.synthetic != true }.compactMap(\.text).joined(),
+            expected
         )
-        XCTAssertEqual(receipt.id, messageID)
-        XCTAssertEqual(receipt.sessionID, sessionID)
-        XCTAssertGreaterThan(receipt.timeCreated, 0)
-        let pending = try await object(client, "/api/session/\(sessionID)/pending")
-        let inputs = try XCTUnwrap(pending["data"]?.arrayValue)
-        XCTAssertEqual(inputs.count, 1)
-        XCTAssertEqual(inputs.first?.objectValue?["id"], .string(messageID))
-        XCTAssertEqual(inputs.first?.objectValue?["sessionID"], .string(sessionID))
-        XCTAssertEqual(inputs.first?.objectValue?["type"], .string("user"))
-        let transcript = try await object(client, "/api/session/\(sessionID)/message")
-        XCTAssertEqual(transcript["data"]?.arrayValue, [], "Paused command admission must not start a provider turn")
+        let status = try await control(fixture, path: "/control/status")
+        let events = try XCTUnwrap(status["events"] as? [[String: Any]])
+        XCTAssertEqual(events.filter { $0["marker"] as? String == marker && $0["kind"] as? String == "request" }.count, 1)
     }
 
     func testNativeFormServicePreservesTypedAnswerAndCancellation() async throws {
@@ -89,11 +120,9 @@ final class BackendFeatureLiveTests: XCTestCase {
 
     func testRealWorktreeLifecycleRequiresForceAndRetainsPausedSession() async throws {
         let (client, _, root) = try await context()
-        let env = ProcessInfo.processInfo.environment
-        let source = URL(fileURLWithPath: env["OPENCODE_V2_TEST_GIT_ROOT"] ?? root.appendingPathComponent("git-fixture").path)
-            .resolvingSymlinksInPath().standardizedFileURL
-        let parent = URL(fileURLWithPath: env["OPENCODE_V2_TEST_WORKTREE_DESTINATION_PARENT"] ?? root.appendingPathComponent("copies").path)
-            .resolvingSymlinksInPath().standardizedFileURL
+        let fixture = try OpenCodeV2LiveFixture.load()
+        let source = fixture.gitRoot
+        let parent = fixture.worktreeDestinationParent
         let git = source.appendingPathComponent(".git")
         let gitValues = try git.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         let sourceValues = try source.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
@@ -148,7 +177,7 @@ final class BackendFeatureLiveTests: XCTestCase {
         addTeardownBlock { @MainActor in
             let inventory = try await service.inventory(scope: scope)
             for worktree in inventory where worktree.directory == expectedDirectory {
-                guard worktree.isManaged, worktree.directory.hasPrefix(destinationParent.path + "/backend-live-") else {
+                guard worktree.directory.hasPrefix(destinationParent.path + "/backend-live-") else {
                     throw BackendFeatureLiveFailure("Refusing removal without exact registered fixture ownership")
                 }
                 try await service.remove(scope: scope, directory: worktree.directory, force: true)
@@ -160,17 +189,18 @@ final class BackendFeatureLiveTests: XCTestCase {
         }
         XCTAssertEqual(created.readiness, .ready)
         let inventory = try await service.inventory(scope: scope)
-        XCTAssertEqual(inventory.filter { $0.directory == expectedDirectory }, [created.worktree])
+        guard inventory.filter({ $0.directory == expectedDirectory }) == [created.worktree] else {
+            throw BackendFeatureLiveFailure("Created checkout strategy did not normalize to gitCopy")
+        }
         XCTAssertTrue(FileManager.default.fileExists(atPath: expectedDirectory + "/.git"))
         let clean = try await client.listV2FileStatus(directory: expectedDirectory)
         XCTAssertTrue(clean.isEmpty, "Real git status must report a clean created checkout")
 
         let sessionID = try await ownedSession(client, directory: expectedDirectory)
-        let commands = try await client.listV2Commands(directory: expectedDirectory)
-        let command = try XCTUnwrap(commands.first { $0.name == "review" })
         let messageID = OpenCodeIdentifier.message()
-        let receipt = try await client.admitV2Command(sessionID: sessionID, messageID: messageID,
-                                                     command: command.name, arguments: "", resume: false)
+        let receipt = try await client.admitV2TextPrompt(
+            sessionID: sessionID, messageID: messageID, text: "Retain this pending worktree input", resume: false
+        )
         XCTAssertEqual(receipt.id, messageID)
         XCTAssertEqual(receipt.sessionID, sessionID)
         let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
@@ -198,18 +228,25 @@ final class BackendFeatureLiveTests: XCTestCase {
         addTeardownBlock {
             socket.cancel()
             await connection.disconnect()
-            _ = await socket.result
         }
         try await waitForWriter("WebSocket handshake") { await output.ready }
         // Write on the server, not through the simulator app's filesystem sandbox.
-        // Require the exact physical cwd and a linked checkout; noclobber prevents overwrites.
-        let approved = "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode/pass2-VwCj6l/"
-        let physicalDirectory = expectedDirectory.hasPrefix(approved) ? "/private" + expectedDirectory : expectedDirectory
-        guard physicalDirectory.hasPrefix("/private" + approved + "copies/backend-live-"),
-              !physicalDirectory.contains("'"), sameApprovedFixturePath(physicalDirectory, expected: URL(fileURLWithPath: expectedDirectory)) else {
+        // Compare filesystem identity because `pwd -P` spells /var as /private/var,
+        // while Foundation can preserve the /var spelling for the same directory.
+        let physicalDirectory = URL(fileURLWithPath: expectedDirectory).resolvingSymlinksInPath().path
+        let gitMetadata = try URL(fileURLWithPath: expectedDirectory).appendingPathComponent(".git")
+            .resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey])
+        let directoryAttributes = try FileManager.default.attributesOfItem(atPath: expectedDirectory)
+        let device = try XCTUnwrap(directoryAttributes[.systemNumber] as? NSNumber)
+        let inode = try XCTUnwrap(directoryAttributes[.systemFileNumber] as? NSNumber)
+        let directoryIdentity = "\(device.uint64Value):\(inode.uint64Value)"
+        guard physicalDirectory.hasPrefix(parent.path + "/backend-live-"),
+              !physicalDirectory.contains("'"), sameApprovedFixturePath(physicalDirectory, expected: URL(fileURLWithPath: expectedDirectory)),
+              gitMetadata.isSymbolicLink == false,
+              gitMetadata.isRegularFile == true || gitMetadata.isDirectory == true else {
             throw BackendFeatureLiveFailure("Unsafe writer cwd")
         }
-        let script = "[ \"$(pwd -P)\" = '\(physicalDirectory)' ] && [ -f .git ] && [ ! -L .git ] && (umask 077; set -C; printf '%s\\n' 'Owned force-removal regression fixture' > '\(filename)') && printf '\\n%s%s\\n' 'BACKEND_WRITTEN_' '\(token)'\r"
+        let script = "[ \"$(stat -f '%d:%i' .)\" = '\(directoryIdentity)' ] && [ ! -L .git ] && ( [ -f .git ] || [ -d .git ] ) && (umask 077; set -C; printf '%s\\n' 'Owned force-removal regression fixture' > '\(filename)') && printf '\\n%s%s\\n' 'BACKEND_WRITTEN_' '\(token)'\r"
         try await connection.send(Array(script.utf8))
         // The contiguous marker is absent from shell input, so terminal echo cannot pass.
         try await waitForWriter("executed file write") { await output.contains("BACKEND_WRITTEN_" + token) }
@@ -217,7 +254,6 @@ final class BackendFeatureLiveTests: XCTestCase {
         XCTAssertEqual(written.content, "Owned force-removal regression fixture\n")
         socket.cancel()
         await connection.disconnect()
-        _ = await socket.result
         let beforeDelete = try await client.getV2PTY(id: writer.id, directory: expectedDirectory)
         guard beforeDelete.id == writer.id, beforeDelete.title == writerTitle, beforeDelete.cwd == expectedDirectory else {
             throw BackendFeatureLiveFailure("Writer ownership changed before shutdown")
@@ -228,12 +264,12 @@ final class BackendFeatureLiveTests: XCTestCase {
         XCTAssertFalse(remainingPTYs.contains { $0.id == writer.id }, "Writer must be deleted before checkout removal")
         let dirty = try await client.listV2FileStatus(directory: expectedDirectory)
         XCTAssertEqual(dirty.map(\.path), [filename], "Only the exact owned untracked file may dirty this checkout")
-        let query = client.v2LocationQueryItems(directory: scope.directory)
-        let raw = try await wire(client, "/experimental/project/\(projectID)/copy", method: "DELETE", query: query,
-                                 body: ["directory": .string(expectedDirectory), "force": .bool(false)])
+        let raw = try await wire(client, "/api/worktree", method: "DELETE", body: [
+            "projectID": .string(projectID), "directory": .string(expectedDirectory), "force": .bool(false)
+        ])
         XCTAssertEqual(raw.status, 400)
         let failure = try JSONDecoder().decode([String: OpenCodeJSONValue].self, from: raw.data)
-        XCTAssertEqual(failure["name"], .string("ProjectCopyError"))
+        XCTAssertEqual(failure["name"], .string("WorktreeError"))
         XCTAssertEqual(failure["data"]?.objectValue?["forceRequired"], .bool(true))
         do {
             try await service.remove(scope: scope, directory: expectedDirectory, force: false)
@@ -254,53 +290,46 @@ final class BackendFeatureLiveTests: XCTestCase {
         let retained = try await client.getV2Session(sessionID: sessionID)
         XCTAssertEqual(retained.id, sessionID)
         XCTAssertEqual(retained.directory, expectedDirectory)
-        let pending = try await object(client, "/api/session/\(sessionID)/pending")
+        let pending = try await object(client, "/api/session/\(sessionID)/inbox")
         XCTAssertEqual(pending["data"]?.arrayValue?.map { $0.objectValue?["id"] }, [.string(messageID)])
     }
 
-    private func context() async throws -> (OpenCodeAPIClient, String, URL) {
+    private func context(timeout: TimeInterval = 8) async throws -> (OpenCodeAPIClient, String, URL) {
         continueAfterFailure = false
-        let env = ProcessInfo.processInfo.environment
-        guard let base = env["OPENCODE_V2_TEST_BASE_URL"], !base.isEmpty,
-              let username = env["OPENCODE_V2_TEST_USERNAME"], !username.isEmpty,
-              let password = env["OPENCODE_V2_TEST_PASSWORD"], !password.isEmpty else {
-            throw XCTSkip("Set OPENCODE_V2_TEST_BASE_URL/USERNAME/PASSWORD to opt into isolated live tests")
-        }
+        let fixture = try OpenCodeV2LiveFixture.load()
+        let base = OpenCodeV2LiveFixture.baseURL
         guard let url = URL(string: base), url.scheme == "http", url.host == "127.0.0.1", url.port == 14097,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               url.path.isEmpty || url.path == "/" else {
             throw BackendFeatureLiveFailure("Only http://127.0.0.1:14097 is permitted; never use 4096/4097")
         }
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 30
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
         let session = URLSession(configuration: configuration)
         addTeardownBlock { session.invalidateAndCancel() }
-        let client = OpenCodeAPIClient(config: .init(baseURL: base, username: username, password: password, apiPreference: .v2), session: session)
-        let health = try await object(client, "/api/health")
-        guard health["healthy"] == .bool(true), health["version"] == .string("0.0.0-next-17155") else {
-            throw BackendFeatureLiveFailure("These tests require the verified next-17155 contract")
+        let client = OpenCodeAPIClient(config: .init(baseURL: base, username: fixture.username,
+                                                      password: fixture.password, apiPreference: .v2), session: session)
+        let info = try await object(client, "/api/info")
+        guard info["version"] == .string(OpenCodeV2LiveFixture.version) else {
+            throw BackendFeatureLiveFailure("These tests require the manifest-pinned v2 contract")
         }
         let location = try await client.getV2Location()
         let directory = URL(fileURLWithPath: location.directory).resolvingSymlinksInPath().standardizedFileURL
         let root = directory.deletingLastPathComponent()
-        let approved = URL(fileURLWithPath: "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode")
-            .resolvingSymlinksInPath().standardizedFileURL
-        guard location.project.id == "global", directory.lastPathComponent == "workspace",
-              root.lastPathComponent == "pass2-VwCj6l", root.deletingLastPathComponent() == approved else {
-            throw BackendFeatureLiveFailure("Refusing a server outside the approved disposable pass2 fixture")
+        let projectDirectory = URL(fileURLWithPath: location.project.directory).resolvingSymlinksInPath().standardizedFileURL
+        guard directory.lastPathComponent == "workspace", projectDirectory == fixture.workspace,
+              root == fixture.root, directory == fixture.workspace, fixture.owns(directory) else {
+            throw BackendFeatureLiveFailure("Refusing a server outside the manifest-owned v2 fixture")
         }
         return (client, location.directory, root)
     }
 
     private func sameApprovedFixturePath(_ actual: String, expected: URL) -> Bool {
-        // Simulator Foundation and the host Git process can spell this one approved root differently.
-        let approved = "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode/pass2-VwCj6l/"
-        func normalize(_ path: String) -> String {
-            path.hasPrefix("/private" + approved) ? String(path.dropFirst("/private".count)) : path
-        }
-        let target = normalize(expected.path)
-        return target.hasPrefix(approved) && normalize(actual) == target
+        guard let fixture = try? OpenCodeV2LiveFixture.load() else { return false }
+        let actualURL = URL(fileURLWithPath: actual).resolvingSymlinksInPath().standardizedFileURL
+        let expectedURL = expected.resolvingSymlinksInPath().standardizedFileURL
+        return fixture.owns(expectedURL) && actualURL == expectedURL
     }
 
     private func waitForWriter(_ phase: String, until condition: () async -> Bool) async throws {
@@ -310,6 +339,49 @@ final class BackendFeatureLiveTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(50))
         } while Date() < deadline
         throw BackendFeatureLiveFailure("Timed out waiting for owned writer \(phase)")
+    }
+
+    private func controlEvent(
+        _ fixture: OpenCodeV2LiveFixture, marker: String, kind: String, after: Int = 0
+    ) async throws -> [String: Any] {
+        let response = try await control(fixture, path: "/control/wait", body: [
+            "marker": marker, "kind": kind, "after": after, "timeout": 5,
+        ])
+        return try XCTUnwrap((response["events"] as? [[String: Any]])?.first)
+    }
+
+    private func waitForCommand(_ completion: BackendFeatureCommandCompletion) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while ContinuousClock.now < deadline {
+            if try await completion.isFinished() { return }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        throw BackendFeatureLiveFailure("Timed out waiting for command HTTP 204 completion")
+    }
+
+    private func control(
+        _ fixture: OpenCodeV2LiveFixture, path: String, body: [String: Any]? = nil
+    ) async throws -> [String: Any] {
+        guard path.hasPrefix("/control/"), !path.contains("..") else {
+            throw BackendFeatureLiveFailure("Invalid fixture control path")
+        }
+        var request = URLRequest(url: fixture.providerURL.appendingPathComponent(String(path.dropFirst())))
+        request.httpMethod = body == nil ? "GET" : "POST"
+        request.setValue("Bearer \(fixture.controlToken)", forHTTPHeaderField: "Authorization")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 7
+        configuration.timeoutIntervalForResource = 7
+        configuration.connectionProxyDictionary = [:]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request)
+        let status = try XCTUnwrap(response as? HTTPURLResponse).statusCode
+        guard status == 200 else { throw BackendFeatureLiveFailure("Fixture control returned HTTP \(status)") }
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
     private func ownedSession(_ client: OpenCodeAPIClient, directory: String) async throws -> String {
@@ -355,6 +427,21 @@ final class BackendFeatureLiveTests: XCTestCase {
 private struct BackendFeatureLiveFailure: LocalizedError {
     let errorDescription: String?
     init(_ message: String) { errorDescription = message }
+}
+
+private actor BackendFeatureCommandCompletion {
+    private var finished = false
+    private var failure: String?
+
+    func finish(failure: String? = nil) {
+        finished = true
+        self.failure = failure
+    }
+
+    func isFinished() throws -> Bool {
+        if let failure { throw BackendFeatureLiveFailure("Command transport failed: \(failure)") }
+        return finished
+    }
 }
 
 private actor BackendFeatureWriterOutput {

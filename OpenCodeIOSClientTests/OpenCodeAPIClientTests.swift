@@ -24,6 +24,81 @@ final class OpenCodeAPIClientTests: XCTestCase {
         XCTAssertEqual(result, .available(OpenCodeV2Health(healthy: true, version: "0.0.0-next-17055", pid: 24062)))
     }
 
+    func testProbeV2UsesInfoWhenHealthRouteWasRemoved() async throws {
+        let client = makeProbeClient()
+        var paths: [String] = []
+        MockURLProtocol.requestHandler = { request in
+            paths.append(try XCTUnwrap(request.url?.path))
+            if request.url?.path == "/api/health" {
+                return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
+            }
+            XCTAssertEqual(request.url?.path, "/api/info")
+            return (
+                HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!,
+                Data(#"{"version":"2.0.16","pid":24062,"urls":["http://127.0.0.1:4096"],"paths":{"tmp":"/tmp"}}"#.utf8)
+            )
+        }
+
+        let result = try await client.probeV2()
+
+        XCTAssertEqual(result, .available(OpenCodeV2Health(healthy: true, version: "2.0.16", pid: 24062)))
+        XCTAssertEqual(paths, ["/api/health", "/api/info"])
+    }
+
+    func testProbeV2InfoDoesNotHideAuthenticationFailure() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let status = request.url?.path == "/api/health" ? 404 : 401
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: status, httpVersion: nil, headerFields: nil)!, Data())
+        }
+
+        do {
+            _ = try await makeProbeClient().probeV2()
+            XCTFail("Expected authentication failure")
+        } catch let OpenCodeAPIError.httpError(statusCode, _) {
+            XCTAssertEqual(statusCode, 401)
+        }
+    }
+
+    func testProbeV2DoesNotFallbackAfterHealthServerFailure() async throws {
+        var paths: [String] = []
+        MockURLProtocol.requestHandler = { request in
+            paths.append(try XCTUnwrap(request.url?.path))
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 503, httpVersion: nil, headerFields: nil)!, Data("starting".utf8))
+        }
+
+        do {
+            _ = try await makeProbeClient().probeV2()
+            XCTFail("Expected server failure")
+        } catch let OpenCodeAPIError.httpError(statusCode, body) {
+            XCTAssertEqual(statusCode, 503)
+            XCTAssertEqual(body, "starting")
+        }
+        XCTAssertEqual(paths, ["/api/health"])
+    }
+
+    func testProbeV2InfoSurfacesServerAndDecodeFailures() async throws {
+        for (status, body) in [(500, #"{"version":"2.0.16","pid":1,"urls":[]}"#), (200, #"{"version":"2.0.16","pid":"invalid","urls":[]}"#)] {
+            var paths: [String] = []
+            MockURLProtocol.requestHandler = { request in
+                paths.append(try XCTUnwrap(request.url?.path))
+                if request.url?.path == "/api/health" {
+                    return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
+                }
+                return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: status, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
+            }
+
+            do {
+                _ = try await makeProbeClient().probeV2()
+                XCTFail("Expected strict info failure")
+            } catch let OpenCodeAPIError.httpError(statusCode, _) {
+                XCTAssertEqual(statusCode, 500)
+            } catch is DecodingError {
+                XCTAssertEqual(status, 200)
+            }
+            XCTAssertEqual(paths, ["/api/health", "/api/info"])
+        }
+    }
+
     func testProbeV2TreatsLegacyHealthShapeAsUnavailable() async throws {
         let client = makeProbeClient()
         MockURLProtocol.requestHandler = { request in
@@ -340,6 +415,36 @@ final class OpenCodeAPIClientTests: XCTestCase {
         XCTAssertEqual(requests, 1, "Ordinary short chats must not trigger lookahead")
     }
 
+    func testV2ContextRecordsRetainTypesForCardsInHistoryAndSingleMessageHydration() async throws {
+        let client = makeProbeClient()
+        for kind in OpenCodeTimelineContextType.allCases {
+            let record: [String: Any] = [
+                "id": "msg_context", "type": kind.rawValue,
+                "text": "Instructions from: /repo/AGENTS.md\n# Context", "time": ["created": 1000]
+            ]
+            MockURLProtocol.requestHandler = { request in
+                let isSingle = request.url?.lastPathComponent == "msg_context"
+                let payload: Any = isSingle ? record as Any : [record] as Any
+                let data = try JSONSerialization.data(withJSONObject: ["data": payload])
+                return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"])!, data)
+            }
+            let page = try await client.listV2Messages(sessionID: "ses_1")
+            let single = try await client.getV2Message(sessionID: "ses_1", messageID: "msg_context")
+            XCTAssertEqual(page.messages, [single])
+            let part = try XCTUnwrap(single.parts.first)
+            XCTAssertEqual(part.type, kind.rawValue)
+            XCTAssertEqual(part.timelineContextType, kind)
+            XCTAssertTrue(part.synthetic == true)
+            XCTAssertFalse(OpenCodeToolActivityPolicy.isToolCall(part))
+            XCTAssertTrue(MessageBubbleMessageVisibilityPolicy.shouldDisplay(single,
+                showsToolCalls: false, showsReasoningBlocks: false))
+            let cached = try JSONDecoder().decode(OpenCodeMessageEnvelope.self,
+                from: JSONEncoder().encode(single))
+            XCTAssertEqual(cached.parts.first?.timelineContextType, kind)
+        }
+    }
+
     func testListV2MessagesCursorRequestOmitsOrderAndStopsOnEmptyPage() async throws {
         let client = makeProbeClient()
         var requests = 0
@@ -502,7 +607,7 @@ final class OpenCodeAPIClientTests: XCTestCase {
             XCTAssertNil(json["agent"])
             return (
                 HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!,
-                Data(#"{"data":{"id":"msg_client","sessionID":"ses_1","timeCreated":1234,"type":"user","data":{"text":"Hello v2","files":[],"agents":[],"skills":[],"metadata":{}},"delivery":"steer"}}"#.utf8)
+                Data(#"{"data":{"id":"msg_client","sessionID":"ses_1","time":{"created":1234},"type":"user","payload":{"text":"Hello v2","files":[],"agents":[],"skills":[],"metadata":{}},"delivery":"steer"}}"#.utf8)
             )
         }
 
@@ -514,7 +619,7 @@ final class OpenCodeAPIClientTests: XCTestCase {
     func testWaitForV2SessionUsesWaitEndpoint() async throws {
         let client = makeProbeClient()
         MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.url?.path, "/api/session/ses_1/wait")
+            XCTAssertEqual(request.url?.path, "/api/experimental/session/ses_1/wait")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertNil(Self.requestBodyData(request))
             return (
@@ -557,8 +662,8 @@ final class OpenCodeAPIClientTests: XCTestCase {
             switch request.url?.path {
             case "/api/permission/request":
                 body = #"{"location":{"directory":"/tmp/project","project":{"id":"project","directory":"/tmp/project","canonical":"/tmp/project"}},"data":[{"id":"per_1","sessionID":"ses_1","action":"bash","resources":["git status*"],"save":["git status*"],"metadata":{"command":"git status --short"},"source":{"type":"tool","messageID":"msg_1","id":"call_1"}}]}"#
-            case "/api/form/request":
-                body = #"{"location":{"directory":"/tmp/project","project":{"id":"project","directory":"/tmp/project","canonical":"/tmp/project"}},"data":[{"id":"frm_1","sessionID":"ses_1","title":"Confirm","fields":[{"key":"proceed","type":"string","description":"Proceed?","required":true,"options":[{"value":"yes","label":"Yes","description":"Continue"}]}]}]}"#
+            case "/api/form":
+                body = #"{"location":{"directory":"/tmp/project"},"data":[{"id":"frm_1","sessionID":"ses_1","title":"Confirm","fields":[{"key":"proceed","type":"string","description":"Proceed?","required":true,"options":[{"value":"yes","label":"Yes","description":"Continue"}]}]}]}"#
             default:
                 XCTFail("Unexpected path \(request.url?.path ?? "nil")")
                 body = "{}"
@@ -572,13 +677,30 @@ final class OpenCodeAPIClientTests: XCTestCase {
         let loadedPermissions = try await client.listV2PendingPermissions(directory: "/tmp/project")
         let loadedQuestions = try await client.listV2PendingQuestions(directory: "/tmp/project")
 
-        XCTAssertEqual(Set(requestedPaths), ["/api/permission/request", "/api/form/request"])
+        XCTAssertEqual(Set(requestedPaths), ["/api/permission/request", "/api/form"])
         XCTAssertEqual(loadedPermissions.first?.permission, "bash")
         XCTAssertEqual(loadedPermissions.first?.patterns, ["git status*"])
         XCTAssertEqual(loadedPermissions.first?.callID, "call_1")
         XCTAssertEqual(loadedQuestions.first?.questions.first?.question, "Proceed?")
         XCTAssertEqual(loadedQuestions.first?.id, "frm_1")
         XCTAssertNil(loadedQuestions.first?.tool)
+    }
+
+    func testListV2PendingFormsOnlyFallsBackToOldRouteWhenNewRouteIsUnavailable() async throws {
+        var paths: [String] = []
+        MockURLProtocol.requestHandler = { request in
+            paths.append(try XCTUnwrap(request.url?.path))
+            if request.url?.path == "/api/form" {
+                return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
+            }
+            let body = #"{"location":{"directory":"/tmp/project"},"data":[]}"#
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
+        }
+
+        let forms = try await makeProbeClient().listV2PendingForms(directory: "/tmp/project")
+
+        XCTAssertTrue(forms.isEmpty)
+        XCTAssertEqual(paths, ["/api/form", "/api/form/request"])
     }
 
     func testV2InteractionRepliesUseSessionScopedEndpoints() async throws {
@@ -606,10 +728,12 @@ final class OpenCodeAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.map(\.0), [
             "/api/session/ses_1/permission/per_1/reply",
             "/api/session/ses_1/form/frm_1/reply",
-            "/api/session/ses_1/form/frm_1/cancel",
+            "/api/session/ses_1/form/frm_1",
         ])
         let permissionBody = try XCTUnwrap(requests[0].1)
-        XCTAssertEqual(try (JSONSerialization.jsonObject(with: permissionBody) as? [String: Any])?["reply"] as? String, "once")
+        let permissionJSON = try JSONSerialization.jsonObject(with: permissionBody) as? [String: Any]
+        XCTAssertEqual(permissionJSON?["decision"] as? String, "once")
+        XCTAssertNil(permissionJSON?["reply"])
         let questionBody = try XCTUnwrap(requests[1].1)
         XCTAssertEqual(try (JSONSerialization.jsonObject(with: questionBody) as? [String: Any])?["answer"] as? [String: String], ["proceed": "yes"])
         XCTAssertNil(requests[2].1)
@@ -668,7 +792,6 @@ final class OpenCodeAPIClientTests: XCTestCase {
             XCTAssertEqual(request.url?.path, "/relay/server/api/location")
             XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems, [
                 URLQueryItem(name: "location[directory]", value: "/repo with spaces/a&b"),
-                URLQueryItem(name: "location[workspace]", value: "wrk_1"),
             ])
             XCTAssertNil(request.value(forHTTPHeaderField: "x-opencode-directory"))
             return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -747,7 +870,7 @@ final class OpenCodeAPIClientTests: XCTestCase {
             XCTAssertEqual(mention["text"] as? String, "@explore")
             XCTAssertEqual(mention["start"] as? Int, 4)
             XCTAssertEqual(mention["end"] as? Int, 12)
-            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(#"{"data":{"id":"msg_1","sessionID":"ses_1","timeCreated":1,"delivery":"queue","type":"user","data":{"text":"ask @explore","metadata":{}}}}"#.utf8))
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(#"{"data":{"id":"msg_1","sessionID":"ses_1","time":{"created":1},"delivery":"queue","type":"user","payload":{"text":"ask @explore","metadata":{}}}}"#.utf8))
         }
         _ = try await makeProbeClient().admitV2TextPrompt(sessionID: "ses_1", messageID: "msg_1", text: "ask @explore", attachments: [.init(id: "a", kind: .file, filename: "notes.txt", mime: "text/plain", dataURL: "data:text/plain;base64,aGk=")], agentMentions: [.init(name: "explore", content: "@explore", start: 4, end: 12)])
     }
@@ -795,9 +918,9 @@ final class OpenCodeAPIClientTests: XCTestCase {
 
     func testV2PermissionsAndFormsUseLocationQueryNotLegacyHeader() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "location[directory]", value: "/repo"), URLQueryItem(name: "location[workspace]", value: "wrk_1")])
+            XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "location[directory]", value: "/repo")])
             XCTAssertNil(request.value(forHTTPHeaderField: "x-opencode-directory"))
-            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(#"{"location":{"directory":"/repo","project":{"id":"p","directory":"/repo","canonical":"/repo"}},"data":[]}"#.utf8))
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(#"{"location":{"directory":"/repo"},"data":[]}"#.utf8))
         }
         _ = try await makeProbeClient().listV2PendingPermissions(directory: "/repo", workspaceID: "wrk_1")
         _ = try await makeProbeClient().listV2PendingForms(directory: "/repo", workspaceID: "wrk_1")
@@ -987,30 +1110,30 @@ final class OpenCodeAPIClientTests: XCTestCase {
             let body = try Self.requestBodyData(request).map { try XCTUnwrap(JSONSerialization.jsonObject(with: $0) as? [String: Any]) }
             var response = ""
             switch path {
-            case "/api/session/ses_1/rename":
-                XCTAssertEqual(request.httpMethod, "POST")
-                XCTAssertEqual(body?["title"] as? String, "Renamed")
             case "/api/session/ses_1/fork":
-                XCTAssertEqual((body?["boundary"] as? [String: String]), ["type": "before", "messageID": "msg_1"])
-                response = #"{"data":{"id":"ses_fork","projectID":"p","fork":{"sessionID":"ses_1","boundary":{"type":"before","messageID":"msg_1"}},"location":{"directory":"/repo"},"time":{"created":1,"updated":2}}}"#
+                XCTAssertEqual(body?["before"] as? String, "msg_1")
+                response = #"{"data":{"id":"ses_fork","projectID":"p","location":{"directory":"/repo"},"time":{"created":1,"updated":2}}}"#
             case "/api/session/ses_1/agent":
                 XCTAssertEqual(body?["agent"] as? String, "build")
             case "/api/session/ses_1/model":
                 XCTAssertEqual(body?["model"] as? [String: String], ["providerID": "openai", "id": "gpt-5", "variant": "high"])
             case "/api/session/ses_1/compact":
-                XCTAssertEqual(body?.count, 0)
-            case "/api/session/ses_1/command":
-                XCTAssertEqual(body?["command"] as? String, "init")
-                XCTAssertEqual(body?["arguments"] as? String, "README.md")
-                XCTAssertNil(body?["text"])
+                XCTAssertEqual(body?["delivery"] as? String, "steer")
                 let id = try XCTUnwrap(body?["id"] as? String)
-                XCTAssertEqual(body?["resume"] as? Bool, true)
-                response = "{\"data\":{\"id\":\"\(id)\",\"sessionID\":\"ses_1\",\"timeCreated\":1,\"delivery\":\"queued\"}}"
+                response = "{\"data\":{\"id\":\"\(id)\",\"sessionID\":\"ses_1\",\"time\":{\"created\":1},\"type\":\"compaction\",\"payload\":{},\"delivery\":\"steer\"}}"
+            case "/api/session/ses_1/command":
+                XCTAssertEqual(body?["name"] as? String, "init")
+                XCTAssertEqual(body?["text"] as? String, "README.md")
+                XCTAssertEqual(body?["files"] as? [[String: String]], [["uri": "data:text/plain;base64,YQ==", "name": "notes.txt"]])
+                XCTAssertNil(body?["delivery"])
+                XCTAssertNil(body?["id"])
             case "/api/session/active":
                 response = #"{"data":{"ses_1":{"type":"running"}}}"#
             case "/api/session/ses_1":
                 if request.httpMethod == "GET" {
                     response = #"{"data":{"id":"ses_1","projectID":"p","title":"Renamed","location":{"directory":"/repo"},"time":{"created":1,"updated":2}}}"#
+                } else if request.httpMethod == "PATCH" {
+                    XCTAssertEqual(body?["title"] as? String, "Renamed")
                 } else { XCTAssertEqual(request.httpMethod, "DELETE") }
             default: XCTFail("Unexpected session action \(path)")
             }
@@ -1025,11 +1148,60 @@ final class OpenCodeAPIClientTests: XCTestCase {
         try await client.switchV2SessionAgent(sessionID: "ses_1", agent: "build")
         try await client.switchV2SessionModel(sessionID: "ses_1", model: .init(providerID: "openai", modelID: "gpt-5"), variant: "high")
         try await client.compactV2Session(sessionID: "ses_1")
-        try await client.sendV2Command(sessionID: "ses_1", command: "init", arguments: "README.md")
+        try await client.sendV2Command(sessionID: "ses_1", command: "init", arguments: "README.md",
+            attachments: [.init(id: "file", kind: .file, filename: "notes.txt", mime: "text/plain", dataURL: "data:text/plain;base64,YQ==")])
         let statuses = try await client.listV2SessionStatuses()
         XCTAssertEqual(statuses, ["ses_1": "busy"])
         try await client.deleteV2Session(sessionID: "ses_1")
         XCTAssertEqual(paths.count, 9)
+    }
+
+    func testPreviewV2MutationsUseDetectedContractWithoutTryingReleaseRoutes() async throws {
+        var client = makeProbeClient()
+        client.v2Contract = .preview17155
+        var requests: [(String, String, [String: Any])] = []
+        MockURLProtocol.requestHandler = { request in
+            let body = Self.requestBodyData(request)
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            requests.append((request.httpMethod ?? "", request.url?.path ?? "", body))
+            if request.httpMethod == "GET" {
+                return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(#"{"data":{"id":"ses_1","projectID":"p","title":"Renamed","location":{"directory":"/repo"},"time":{"created":1,"updated":2}}}"#.utf8))
+            }
+            if request.url?.path == "/api/session/ses_1/fork" {
+                return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(#"{"data":{"id":"ses_fork","projectID":"p","location":{"directory":"/repo"},"time":{"created":1,"updated":2}}}"#.utf8))
+            }
+            if request.url?.path == "/api/session/ses_1/command" {
+                return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(#"{"data":{"id":"msg_command","sessionID":"ses_1","timeCreated":3,"delivery":"queue"}}"#.utf8))
+            }
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 204, httpVersion: nil, headerFields: nil)!, Data())
+        }
+
+        _ = try await client.updateV2SessionTitle(sessionID: "ses_1", title: "Renamed")
+        _ = try await client.forkV2Session(sessionID: "ses_1", messageID: "msg_1")
+        try await client.compactV2Session(sessionID: "ses_1")
+        _ = try await client.admitV2Command(sessionID: "ses_1", messageID: "msg_command", command: "init")
+        try await client.waitForV2Session(sessionID: "ses_1")
+        try await client.replyToV2Permission(sessionID: "ses_1", requestID: "per_1", reply: "once")
+        try await client.cancelV2Form(sessionID: "ses_1", formID: "frm_1", directory: "/repo", workspaceID: "wrk_1")
+
+        XCTAssertEqual(requests.map { "\($0.0) \($0.1)" }, [
+            "POST /api/session/ses_1/rename",
+            "GET /api/session/ses_1",
+            "POST /api/session/ses_1/fork",
+            "POST /api/session/ses_1/compact",
+            "POST /api/session/ses_1/command",
+            "POST /api/session/ses_1/wait",
+            "POST /api/session/ses_1/permission/per_1/reply",
+            "POST /api/session/ses_1/form/frm_1/cancel",
+        ])
+        XCTAssertEqual((requests[2].2["boundary"] as? [String: Any])?["type"] as? String, "before")
+        XCTAssertTrue(requests[3].2.isEmpty)
+        XCTAssertEqual(requests[4].2["id"] as? String, "msg_command")
+        XCTAssertEqual(requests[6].2["reply"] as? String, "once")
+        XCTAssertNil(requests[6].2["decision"])
     }
 
     func testV2FileAndVCSTransportsNormalizeCurrentShapes() async throws {
@@ -1037,7 +1209,7 @@ final class OpenCodeAPIClientTests: XCTestCase {
             let body: String
             switch request.url?.path {
             case "/api/fs/list":
-                body = #"{"location":{"directory":"/resolved","project":{"id":"p","directory":"/resolved","canonical":"/resolved"}},"data":[{"path":"Sources/main.swift","type":"file"}]}"#
+                body = #"{"location":{"directory":"/resolved"},"data":[{"path":"Sources/main.swift","type":"file"}]}"#
             case "/api/fs/read/Sources/main.swift":
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "*/*")
                 return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/plain"])!, Data("let value = 1".utf8))
@@ -1086,9 +1258,8 @@ final class OpenCodeAPIClientTests: XCTestCase {
         XCTAssertEqual(page.messages[2].info.time?.completed, 4)
     }
 
-    func testV2TranscriptDoesNotSilentlyDropUnknownRecordsOrOldAttachmentContract() async throws {
+    func testV2TranscriptDoesNotSilentlyDropMalformedKnownRecordsOrOldAttachmentContract() async throws {
         for record in [
-            #"{"id":"msg_1","type":"unknown"}"#,
             #"{"id":"msg_1","type":"user","text":"File","files":[{"uri":"file:///tmp/a","name":"a"}]}"#,
             #"{"id":"msg_1","type":"user"}"#,
             #"{"id":"msg_1","type":"assistant","content":[{"type":"text"}]}"#,
@@ -1106,6 +1277,17 @@ final class OpenCodeAPIClientTests: XCTestCase {
             } catch OpenCodeV2TransportError.invalidTimelineRecord {}
             XCTAssertEqual(requests, 1, "Invalid primary records must fail before lookahead")
         }
+    }
+
+    func testV2TranscriptSkipsIdleAndUnknownRecordsButKeepsDisplayableHistory() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let body = #"{"data":[{"type":"idle","time":{"created":3}},{"id":"future_1","type":"future-record","value":true},{"id":"msg_1","type":"user","text":"Hello","time":{"created":1}}],"cursor":{}}"#
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
+        }
+
+        let page = try await makeProbeClient().listV2Messages(sessionID: "ses_1")
+
+        XCTAssertEqual(page.messages.map(\.id), ["msg_1"])
     }
 
     func testV2GlobalBootstrapRetainsConcreteServerDirectory() async throws {
@@ -1136,7 +1318,7 @@ final class OpenCodeAPIClientTests: XCTestCase {
             let body = try XCTUnwrap(Self.requestBodyData(request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["resume"] as? Bool, false)
-            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(#"{"data":{"id":"msg_paused","sessionID":"ses_1","timeCreated":1,"delivery":"steer","type":"user","data":{"text":"Paused"}}}"#.utf8))
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(#"{"data":{"id":"msg_paused","sessionID":"ses_1","time":{"created":1},"delivery":"steer","type":"user","payload":{"text":"Paused"}}}"#.utf8))
         }
         let receipt = try await makeProbeClient().admitV2TextPrompt(sessionID: "ses_1", messageID: "msg_paused", text: "Paused", resume: false)
         XCTAssertEqual(receipt.id, "msg_paused")
@@ -2259,6 +2441,38 @@ final class OpenCodeAPIClientTests: XCTestCase {
         ])
     }
 
+    func testV2PTYConnectUsesV2EndpointAndLocationScope() throws {
+        var client = makeProbeClient()
+        client.v2Contract = .preview17155
+
+        let request = try client.v2PTYConnectRequest(
+            id: "pty-1", directory: "/repo", workspaceID: "workspace-1", cursor: 7
+        )
+
+        XCTAssertEqual(request.url?.path, "/api/pty/pty-1/connect")
+        let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+            .reduce(into: [String: String]()) { result, item in
+                if let value = item.value { result[item.name] = value }
+            }
+        XCTAssertEqual(query, ["location[directory]": "/repo", "location[workspace]": "workspace-1", "cursor": "7"])
+        XCTAssertNil(request.url?.path.range(of: #"^/pty/"#, options: .regularExpression))
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/repo")
+    }
+
+    func testLegacyPTYConnectKeepsLegacyEndpointAndWorkspaceScope() throws {
+        let client = makeProbeClient()
+        let request = try client.ptyConnectRequest(
+            id: "pty-1", directory: "/repo", workspaceID: "workspace-1", cursor: 7
+        )
+
+        XCTAssertEqual(request.url?.path, "/pty/pty-1/connect")
+        let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+            .reduce(into: [String: String]()) { result, item in
+                if let value = item.value { result[item.name] = value }
+            }
+        XCTAssertEqual(query, ["directory": "/repo", "workspace": "workspace-1", "cursor": "7"])
+    }
+
     private func makeProbeClient() -> OpenCodeAPIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
@@ -2269,23 +2483,178 @@ final class OpenCodeAPIClientTests: XCTestCase {
     }
 }
 
+// Opt in only when explicitly validating the user's local server. Prompt fixtures
+// remain paused so they cannot invoke inference; mutations use UUID-owned sessions.
+@MainActor
+final class OpenCodeRealServerAPIClientTests: XCTestCase {
+    private struct Context {
+        let client: OpenCodeAPIClient
+        let connection: BackendConnection
+        let snapshot: BackendProjectsSnapshot
+        let scope: BackendScope
+    }
+
+    func testAutomaticDetectionBootstrapAndReadOnlySurfacesAgainstRealServer() async throws {
+        let context = try await makeContext()
+        defer { context.connection.close() }
+
+        XCTAssertTrue(context.connection.healthy)
+        XCTAssertEqual(context.connection.descriptor.version, "0.0.0-next-17155")
+        XCTAssertFalse(context.snapshot.projects.isEmpty)
+        XCTAssertEqual(context.snapshot.currentProject?.id, context.scope.projectID)
+        XCTAssertEqual(context.snapshot.defaultDirectory, context.scope.directory)
+
+        let adapter = try XCTUnwrap(context.connection.openCodeCompatibility)
+        XCTAssertEqual(adapter.profile, .v2)
+        XCTAssertEqual(adapter.client.config.apiPreference, .automatic)
+        XCTAssertEqual(adapter.client.v2Contract, .preview17155)
+
+        _ = try await context.connection.models.modelCatalog(scope: context.scope)
+        _ = try await adapter.client.listV2ConfigurationEntries(directory: context.scope.directory)
+        _ = try await adapter.client.listV2PendingPermissions(directory: context.scope.directory)
+        let globalForms = try XCTUnwrap(context.connection.globalForms)
+        let forms = try await globalForms.pendingGlobalForms(scope: context.scope)
+        XCTAssertEqual(forms.location.directory, context.scope.directory)
+    }
+
+    func testOwnedSessionLifecycleAgainstRealServer() async throws {
+        let context = try await makeContext()
+        defer { context.connection.close() }
+        let marker = "OpenClient real API \(UUID().uuidString)"
+
+        let created = try await context.connection.sessions.createSession(.init(title: marker, scope: context.scope))
+        cleanUpOwnedSession(created.id, marker: marker, client: context.client)
+        XCTAssertEqual(created.title, marker)
+        XCTAssertEqual(created.directory, context.scope.directory)
+
+        let loaded = try await context.connection.sessions.session(id: created.id, scope: context.scope)
+        XCTAssertEqual(loaded.id, created.id)
+        XCTAssertEqual(loaded.title, marker)
+
+        let renamedTitle = "\(marker) renamed"
+        let renamed = try await context.connection.sessions.renameSession(id: created.id, title: renamedTitle, scope: context.scope)
+        XCTAssertEqual(renamed.title, renamedTitle)
+        let reloaded = try await context.connection.sessions.session(id: created.id, scope: context.scope)
+        XCTAssertEqual(reloaded.title, renamedTitle)
+
+        let transcript = try await context.connection.chat.transcript(sessionID: created.id, scope: context.scope, cursor: nil, limit: 20)
+        XCTAssertTrue(transcript.messages.isEmpty)
+        let permissions = try await context.client.listV2SessionPermissions(sessionID: created.id)
+        XCTAssertTrue(permissions.isEmpty)
+        let sessionForms = try XCTUnwrap(context.connection.sessionForms)
+        let forms = try await sessionForms.pendingForms(sessionID: created.id, scope: context.scope)
+        XCTAssertTrue(forms.isEmpty)
+
+        let messageID = OpenCodeIdentifier.message()
+        let receipt = try await context.client.admitV2TextPrompt(
+            sessionID: created.id, messageID: messageID, text: "Fork boundary fixture", resume: false
+        )
+        XCTAssertEqual(receipt.id, messageID)
+        XCTAssertEqual(receipt.sessionID, created.id)
+        let pending = try await context.client.listV2PendingInputIDs(sessionID: created.id, endpoint: .pending)
+        XCTAssertTrue(pending.contains(messageID))
+        let stillEmpty = try await context.connection.chat.transcript(sessionID: created.id, scope: context.scope, cursor: nil, limit: 20)
+        XCTAssertTrue(stillEmpty.messages.isEmpty, "Paused admission must not execute inference or create a transcript message")
+        do {
+            _ = try await context.client.forkV2Session(sessionID: created.id)
+            XCTFail("The preview contract must reject a fork without a delivered transcript boundary")
+        } catch let OpenCodeAPIError.httpError(status, body) {
+            XCTAssertEqual(status, 400)
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+            XCTAssertEqual(payload["kind"] as? String, "empty_session")
+        }
+
+        try await context.connection.sessions.deleteSession(id: created.id, scope: context.scope)
+        try await assertMissing(created.id, client: context.client)
+    }
+
+    private func makeContext() async throws -> Context {
+        let environment = ProcessInfo.processInfo.environment
+        guard let baseURL = environment["OPENCODE_API_TEST_BASE_URL"], !baseURL.isEmpty else {
+            throw XCTSkip("Set OPENCODE_API_TEST_BASE_URL to opt in to real-server API tests")
+        }
+        guard let url = URL(string: baseURL), url.scheme == "http", url.host == "127.0.0.1", url.port == 4097,
+              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
+              url.path.isEmpty || url.path == "/" else {
+            throw OpenCodeRealServerTestError("Only http://127.0.0.1:4097 is permitted")
+        }
+        guard let username = environment["OPENCODE_API_TEST_USERNAME"], !username.isEmpty,
+              let password = environment["OPENCODE_API_TEST_PASSWORD"], !password.isEmpty else {
+            throw XCTSkip("Set OPENCODE_API_TEST_USERNAME and OPENCODE_API_TEST_PASSWORD")
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 10
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        let session = URLSession(configuration: configuration)
+        addTeardownBlock { session.invalidateAndCancel() }
+        let client = OpenCodeAPIClient(config: .init(
+            baseURL: baseURL,
+            username: username,
+            password: password,
+            apiPreference: .automatic
+        ), session: session)
+        let connection = try await OpenCodeBackendFactory(client: client, eventManager: OpenCodeEventManager()).connect()
+        guard connection.descriptor.version == "0.0.0-next-17155" else {
+            connection.close()
+            throw OpenCodeRealServerTestError("Expected the authorized preview17155 server on port 4097")
+        }
+        let snapshot = try await connection.projects.projectsSnapshot()
+        guard let project = snapshot.currentProject,
+              let directory = snapshot.defaultDirectory, !directory.isEmpty else {
+            connection.close()
+            throw OpenCodeRealServerTestError("Real server bootstrap did not resolve a current project and directory")
+        }
+        return Context(client: try XCTUnwrap(connection.openCodeCompatibility?.client), connection: connection,
+                       snapshot: snapshot, scope: .init(projectID: project.id, directory: directory))
+    }
+
+    private func cleanUpOwnedSession(_ sessionID: String, marker: String, client: OpenCodeAPIClient) {
+        addTeardownBlock {
+            do {
+                let session = try await client.getV2Session(sessionID: sessionID)
+                guard session.title?.hasPrefix(marker) == true else {
+                    XCTFail("Refusing to delete a session not owned by this test: \(sessionID)")
+                    return
+                }
+                try await client.deleteV2Session(sessionID: sessionID)
+            } catch let OpenCodeAPIError.httpError(status, _) where status == 404 {
+                // The successful lifecycle path already deleted this owned session.
+            }
+        }
+    }
+
+    private func assertMissing(_ sessionID: String, client: OpenCodeAPIClient) async throws {
+        do {
+            _ = try await client.getV2Session(sessionID: sessionID)
+            XCTFail("Deleted session remained readable: \(sessionID)")
+        } catch let OpenCodeAPIError.httpError(status, _) {
+            XCTAssertEqual(status, 404)
+        }
+    }
+}
+
+private struct OpenCodeRealServerTestError: LocalizedError {
+    let errorDescription: String?
+    init(_ message: String) { errorDescription = message }
+}
+
 // Opt in only against a disposable server. Prompts stay paused and imported fixtures
 // exercise transcript reads without contacting a model provider.
 final class OpenCodeV2LiveAPIClientTests: XCTestCase {
     private func makeClient() throws -> OpenCodeAPIClient {
-        let environment = ProcessInfo.processInfo.environment
-        guard let baseURL = environment["OPENCODE_V2_TEST_BASE_URL"], !baseURL.isEmpty else {
-            throw XCTSkip("Set OPENCODE_V2_TEST_BASE_URL to opt in against a disposable v2 server.")
-        }
+        let fixture = try OpenCodeV2LiveFixture.load()
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 30
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 10
         let session = URLSession(configuration: configuration)
         addTeardownBlock { session.invalidateAndCancel() }
         return OpenCodeAPIClient(config: .init(
-            baseURL: baseURL,
-            username: environment["OPENCODE_V2_TEST_USERNAME"] ?? "opencode",
-            password: environment["OPENCODE_V2_TEST_PASSWORD"] ?? "",
+            baseURL: OpenCodeV2LiveFixture.baseURL,
+            username: fixture.username,
+            password: fixture.password,
             apiPreference: .v2
         ), session: session)
     }
@@ -2323,16 +2692,17 @@ final class OpenCodeV2LiveAPIClientTests: XCTestCase {
         _ = try await client.listV2Files(directory: location.directory)
         _ = try await client.getV2VCSInfo(directory: location.directory)
         _ = try await client.listV2FileStatus(directory: location.directory)
-        _ = try await client.listV2PendingPermissions(directory: location.directory)
     }
 
     func testSessionLifecycleAndPausedAdmissionAgainstV2Backend() async throws {
         let client = try makeClient()
         let location = try await client.getV2Location()
-        let first = try await client.createV2Session(title: "OpenClient live API \(UUID().uuidString)", directory: location.directory, agent: "plan", model: .init(providerID: "fixture", modelID: "configured"), variant: "high")
+        let first = try await client.createV2Session(title: "OpenClient live API \(UUID().uuidString)", directory: location.directory, agent: "plan", model: .init(providerID: "test", modelID: "test-model"), variant: "high")
         cleanUpSession(first.id, client: client)
+        let permissions = try await client.listV2SessionPermissions(sessionID: first.id)
+        XCTAssertTrue(permissions.isEmpty)
         XCTAssertEqual(first.agent, "plan")
-        XCTAssertEqual(first.model, .init(providerID: "fixture", modelID: "configured", variant: "high"))
+        XCTAssertEqual(first.model, .init(providerID: "test", modelID: "test-model", variant: "high"))
         let second = try await client.createV2Session(title: "OpenClient pagination \(UUID().uuidString)", directory: location.directory)
         cleanUpSession(second.id, client: client)
         let renamed = try await client.updateV2SessionTitle(sessionID: first.id, title: "Renamed API fixture")
@@ -2363,17 +2733,13 @@ final class OpenCodeV2LiveAPIClientTests: XCTestCase {
         )
         XCTAssertEqual(receipt.id, messageID)
         XCTAssertEqual(receipt.sessionID, first.id)
-        // This exact released runtime's saved OpenAPI contract advertises pending.
-        // Other versions must not be assigned a route merely by trying requests.
-        if case let .available(health) = try await client.probeV2(), health.version == "0.0.0-next-17155" {
-            let pendingIDs = try await client.listV2PendingInputIDs(sessionID: first.id, endpoint: .pending)
-            XCTAssertTrue(pendingIDs.contains(messageID))
-            do {
-                _ = try await client.getV2Message(sessionID: first.id, messageID: messageID)
-                XCTFail("Paused admission should not yet be projected")
-            } catch let OpenCodeAPIError.httpError(status, _) {
-                XCTAssertEqual(status, 404)
-            }
+        let pendingIDs = try await client.listV2PendingInputIDs(sessionID: first.id, endpoint: .inbox)
+        XCTAssertTrue(pendingIDs.contains(messageID))
+        do {
+            _ = try await client.getV2Message(sessionID: first.id, messageID: messageID)
+            XCTFail("Paused admission should not yet be projected")
+        } catch let OpenCodeAPIError.httpError(status, _) {
+            XCTAssertEqual(status, 404)
         }
         // Admission is durable pending input, not a delivered transcript message.
         let transcript = try await client.listV2Messages(sessionID: first.id)
@@ -2462,7 +2828,7 @@ final class OpenCodeV2LiveAPIClientTests: XCTestCase {
                  "content": [["type": "reasoning", "text": "Fixture reasoning"], ["type": "text", "text": "Fixture answer"]]],
             ],
         ]
-        var request = URLRequest(url: try XCTUnwrap(client.config.sanitizedBaseURL).appendingPathComponent("api/session/import"))
+        var request = URLRequest(url: try XCTUnwrap(client.config.sanitizedBaseURL).appendingPathComponent("api/experimental/session/import"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let credentials = Data("\(client.config.username):\(client.config.password)".utf8).base64EncodedString()
@@ -2508,8 +2874,8 @@ final class OpenCodeV2LiveAPIClientTests: XCTestCase {
         guard case let .available(health) = try await client.probeV2() else {
             return XCTFail("The opted-in server must expose v2.")
         }
-        guard health.version == "0.0.0-next-17155" else {
-            throw XCTSkip("This live SSE vocabulary is verified for next-17155; verify other runtimes explicitly.")
+        guard health.version == OpenCodeV2LiveFixture.version else {
+            throw XCTSkip("This live SSE vocabulary requires the manifest-pinned v2 runtime.")
         }
         let location = try await client.getV2Location()
         let manager = OpenCodeEventManager()
@@ -2570,11 +2936,15 @@ final class OpenCodeV2LiveAPIClientTests: XCTestCase {
             let messageID = OpenCodeIdentifier.message()
             let text = "Paused SSE fixture \(UUID().uuidString)"
             _ = try await client.admitV2TextPrompt(sessionID: session.id, messageID: messageID, text: text, resume: false)
-            let admitted = try await recorder.waitFor(type: "session.input.admitted", sessionID: session.id)
-            // These are the runtime's real fields, not aliases for inboxID/item/payload.
-            XCTAssertEqual(admitted.data.objectValue?["inputID"]?.literalStringValue, messageID)
-            XCTAssertEqual(admitted.data.objectValue?["input"]?.objectValue?["data"]?.objectValue?["text"]?.literalStringValue, text)
-            let pendingIDs = try await client.listV2PendingInputIDs(sessionID: session.id, endpoint: .pending)
+            let admitted = try await recorder.waitFor(type: "session.inbox.enqueued", sessionID: session.id)
+            // Assert the current wire vocabulary and the boundary aliases consumed by stores.
+            XCTAssertEqual(admitted.data.objectValue?["inboxID"]?.literalStringValue, messageID)
+            XCTAssertEqual(admitted.data.objectValue?["item"]?.objectValue?["type"]?.literalStringValue, "user")
+            XCTAssertEqual(admitted.data.objectValue?["item"]?.objectValue?["payload"]?.objectValue?["text"]?.literalStringValue, text)
+            XCTAssertEqual(admitted.inputID, messageID)
+            XCTAssertEqual(admitted.admittedInput?.type.rawValue, "user")
+            XCTAssertEqual(admitted.admittedInput?.data.text, text)
+            let pendingIDs = try await client.listV2PendingInputIDs(sessionID: session.id, endpoint: .inbox)
             XCTAssertTrue(pendingIDs.contains(messageID))
             let transcript = try await client.listV2Messages(sessionID: session.id)
             XCTAssertTrue(transcript.messages.isEmpty)

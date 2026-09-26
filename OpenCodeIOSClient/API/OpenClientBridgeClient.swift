@@ -12,19 +12,22 @@ struct OpenClientBridgeEndpoint: Equatable, Sendable {
     let port: Int
     let openCodePort: Int
     let notifications: OpenClientBridgeNotificationsCapability
+    let notificationPairingLauncher: OpenClientNotificationPairingLauncher?
 
     init(
         healthURL: URL,
         webSocketURL: URL,
         port: Int,
         openCodePort: Int,
-        notifications: OpenClientBridgeNotificationsCapability = .missing
+        notifications: OpenClientBridgeNotificationsCapability = .missing,
+        notificationPairingLauncher: OpenClientNotificationPairingLauncher? = nil
     ) {
         self.healthURL = healthURL
         self.webSocketURL = webSocketURL
         self.port = port
         self.openCodePort = openCodePort
         self.notifications = notifications
+        self.notificationPairingLauncher = notificationPairingLauncher
     }
 }
 
@@ -368,11 +371,15 @@ enum OpenClientBridgeEndpointDiscovery {
               let response = response as? HTTPURLResponse,
               response.statusCode == 200,
               let health = try? JSONDecoder().decode(OpenClientBridgeHealth.self, from: data),
-              health.service == "openclient-plugin",
-              health.protocol == openClientBridgeProtocolVersion,
-              health.port == candidate.port,
-              health.openCodePort == candidate.openCodePort else { return nil }
+              matches(candidate: candidate, health: health) else { return nil }
         return endpoint(candidate: candidate, health: health)
+    }
+
+    static func matches(candidate: OpenClientBridgeEndpoint, health: OpenClientBridgeHealth) -> Bool {
+        health.service == "openclient-plugin"
+            && health.protocol == openClientBridgeProtocolVersion
+            && health.port == candidate.port
+            && health.openCodePort == candidate.openCodePort
     }
 
     static func endpoint(
@@ -384,7 +391,8 @@ enum OpenClientBridgeEndpointDiscovery {
             webSocketURL: candidate.webSocketURL,
             port: candidate.port,
             openCodePort: candidate.openCodePort,
-            notifications: OpenClientBridgeNotificationsCapability(advertisement: health.notifications)
+            notifications: OpenClientBridgeNotificationsCapability(advertisement: health.notifications),
+            notificationPairingLauncher: health.notifications?.pairing.flatMap { $0.isTrustedShape ? $0 : nil }
         )
     }
 }
@@ -473,6 +481,181 @@ protocol OpenClientNotificationSetupRequesting: Sendable {
         endpoint: OpenClientBridgeEndpoint,
         context: OpenClientNotificationSetupContext
     ) async throws -> OpenClientNotificationSetup
+}
+
+@MainActor
+protocol OpenClientNotificationPairingRunning {
+    func createPairingCode(launcher: OpenClientNotificationPairingLauncher) async throws -> String
+}
+
+@MainActor
+final class OpenClientNotificationPairingRunner: OpenClientNotificationPairingRunning {
+    typealias ConnectionRunner = @Sendable (
+        OpenCodePTYConnection,
+        URLRequest,
+        Int,
+        @escaping @Sendable (OpenCodePTYSocketEvent) async -> Void
+    ) async throws -> Void
+
+    private let clientProvider: () -> OpenCodeAPIClient?
+    private let directoryProvider: () -> String?
+    private let apiProfileProvider: () -> OpenCodeAPIProfile?
+    private let workspaceIDProvider: () -> String?
+    private let connectionRunner: ConnectionRunner
+    private let timeout: Duration
+
+    init(
+        clientProvider: @escaping () -> OpenCodeAPIClient?,
+        directoryProvider: @escaping () -> String?,
+        apiProfileProvider: @escaping () -> OpenCodeAPIProfile? = { .legacy },
+        workspaceIDProvider: @escaping () -> String? = { nil },
+        connectionRunner: @escaping ConnectionRunner = { connection, request, cursor, onEvent in
+            try await connection.run(request: request, initialCursor: cursor, onEvent: onEvent)
+        },
+        timeout: Duration = .seconds(20)
+    ) {
+        self.clientProvider = clientProvider
+        self.directoryProvider = directoryProvider
+        self.apiProfileProvider = apiProfileProvider
+        self.workspaceIDProvider = workspaceIDProvider
+        self.connectionRunner = connectionRunner
+        self.timeout = timeout
+    }
+
+    func createPairingCode(launcher: OpenClientNotificationPairingLauncher) async throws -> String {
+        guard launcher.isTrustedShape,
+              let client = clientProvider() else {
+            throw OpenClientNotificationSetupError.pairingUnavailable
+        }
+        let profile = apiProfileProvider()
+        let directory = directoryProvider().flatMap { $0.isEmpty ? nil : $0 }
+        let workspaceID = workspaceIDProvider().flatMap { $0.isEmpty ? nil : $0 }
+        guard let profile else { throw OpenClientNotificationSetupError.pairingUnavailable }
+        guard profile != .v2 || directory != nil else {
+            throw OpenClientNotificationSetupError.pairingUnavailable
+        }
+        let terminal = try await (profile == .v2
+            ? client.createV2PTY(title: "OC Notify Setup", directory: directory!, workspaceID: workspaceID)
+            : client.createPTY(
+                request: OpenCodePTYCreateRequest(title: "OC Notify Setup"),
+                directory: directory,
+                workspaceID: workspaceID
+            ))
+        let connection = OpenCodePTYConnection()
+        let collector = OpenClientNotificationPairingOutputCollector()
+        let connectionTask = Task {
+            let request = try profile == .v2
+                ? client.v2PTYConnectRequest(id: terminal.id, directory: directory!, workspaceID: workspaceID, cursor: 0)
+                : client.ptyConnectRequest(id: terminal.id, directory: directory, workspaceID: workspaceID, cursor: 0)
+            try await connectionRunner(connection, request, 0) { event in
+                await collector.consume(event)
+            }
+        }
+        do {
+            let code = try await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask {
+                    try await self.waitForPairingCode(
+                        collector: collector,
+                        connection: connection,
+                        command: Self.command(for: launcher)
+                    )
+                }
+                group.addTask {
+                    try await withTaskCancellationHandler(operation: {
+                        try await connectionTask.value
+                        throw OpenClientNotificationSetupError.pairingUnavailable
+                    }, onCancel: {
+                        connectionTask.cancel()
+                    })
+                }
+                defer { group.cancelAll() }
+                guard let result = try await group.next() else {
+                    throw OpenClientNotificationSetupError.pairingUnavailable
+                }
+                return result
+            }
+            connectionTask.cancel()
+            await connection.disconnect()
+            await deletePTY(client: client, profile: profile, id: terminal.id, directory: directory, workspaceID: workspaceID)
+            return code
+        } catch {
+            connectionTask.cancel()
+            await connection.disconnect()
+            await deletePTY(client: client, profile: profile, id: terminal.id, directory: directory, workspaceID: workspaceID)
+            throw error
+        }
+    }
+
+    private func deletePTY(
+        client: OpenCodeAPIClient,
+        profile: OpenCodeAPIProfile,
+        id: String,
+        directory: String?,
+        workspaceID: String?
+    ) async {
+        if profile == .v2 {
+            guard let directory else { return }
+            try? await client.deleteV2PTY(id: id, directory: directory, workspaceID: workspaceID)
+        } else {
+            try? await client.deletePTY(id: id, directory: directory, workspaceID: workspaceID)
+        }
+    }
+
+    nonisolated static func command(for launcher: OpenClientNotificationPairingLauncher) -> String {
+        "\(shellQuote(launcher.cliPath)) pair --data-dir \(shellQuote(launcher.dataDir))\r"
+    }
+
+    nonisolated private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func waitForPairingCode(
+        collector: OpenClientNotificationPairingOutputCollector,
+        connection: OpenCodePTYConnection,
+        command: String
+    ) async throws -> String {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        var sent = false
+        while clock.now < deadline {
+            try Task.checkCancellation()
+            let state = await collector.state
+            if let code = state.code { return code }
+            if state.connected, !sent {
+                sent = true
+                try await connection.send(Array(command.utf8))
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw OpenClientNotificationSetupError.pairingTimedOut
+    }
+}
+
+private actor OpenClientNotificationPairingOutputCollector {
+    private(set) var state = (connected: false, code: Optional<String>.none)
+    private var output = ""
+
+    func consume(_ event: OpenCodePTYSocketEvent) {
+        switch event {
+        case .connected:
+            state.connected = true
+        case .output(let text, _):
+            let plain = text.replacingOccurrences(
+                of: "\u{001B}\\[[0-?]*[ -/]*[@-~]",
+                with: "",
+                options: .regularExpression
+            )
+            output = String((output + plain).suffix(2_048))
+            guard let match = output.range(
+                of: #"Pairing code \(valid 10 minutes, one use\): ([A-F0-9]{10})"#,
+                options: .regularExpression
+            ) else { return }
+            let line = String(output[match])
+            state.code = String(line.suffix(10))
+        case .closed, .cursor:
+            break
+        }
+    }
 }
 
 final class OpenClientNotificationSetupClient: NSObject, OpenClientNotificationSetupRequesting, URLSessionTaskDelegate, @unchecked Sendable {

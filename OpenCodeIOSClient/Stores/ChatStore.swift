@@ -357,7 +357,7 @@ final class ChatStore: ObservableObject {
         messages = canonical
         cacheMessages(canonical, forSessionID: sessionID)
         v2TranscriptStates[sessionID] = V2TranscriptState(
-            olderCursor: loadedMessages.isEmpty ? nil : olderCursor,
+            olderCursor: olderCursor,
             isLoadingOlder: false,
             hasLoadedInitial: true
         )
@@ -400,7 +400,7 @@ final class ChatStore: ObservableObject {
             messages = merged
         }
         v2TranscriptStates[sessionID] = V2TranscriptState(
-            olderCursor: olderMessages.isEmpty || olderCursor == requestedCursor ? nil : olderCursor,
+            olderCursor: olderCursor == requestedCursor ? nil : olderCursor,
             isLoadingOlder: false,
             hasLoadedInitial: true
         )
@@ -628,7 +628,7 @@ final class ChatStore: ObservableObject {
                 info: OpenCodeMessage(id: inputID, role: role, sessionID: sessionID, time: nil, agent: nil, model: nil),
                 parts: [OpenCodePart(
                     id: partID(type: "text", messageID: inputID, ordinal: 0), messageID: inputID,
-                    sessionID: sessionID, type: "text", mime: nil, filename: nil, url: nil,
+                    sessionID: sessionID, type: input.type == .synthetic ? "synthetic" : "text", mime: nil, filename: nil, url: nil,
                     reason: nil, tool: nil, callID: nil, state: nil, text: input.data.text,
                     synthetic: input.type == .synthetic ? true : nil
                 )]

@@ -36,8 +36,10 @@ entry with the options form:
 Quit and restart OpenCode after changing plugin configuration. OpenCode loads
 plugins at startup and does not hot-reload them.
 
-OpenCode `1.18.5` or newer is required so the host invokes the plugin disposal
-hook during shutdown and reload.
+The current source build supports OpenCode **v1 1.18.29+** and **v2**, including
+preview `0.0.0-next-17155`. Dual-version support is not yet published in `0.3.0`.
+Both hosts load the same package and choose its native entry point automatically:
+v1 calls `server()`, while v2 calls `setup()`. No version-mode option is needed.
 
 The OpenClient iOS app discovers the bridge on the connected OpenCode host and
 advertises the native tools supported by that app build.
@@ -46,6 +48,40 @@ For repository development, run `npm run build` and replace the npm entry with
 `file:///absolute/path/to/OpenClientPlugin/dist/index.js`.
 Do not also load the old npm entry or the standalone notification adapter.
 OpenCode must be restarted after changing plugin code or configuration.
+
+### V2 source configuration
+
+V2 uses `plugins` and an object for package options (rather than v1's `plugin`
+and tuple). Build the source and configure:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [{
+    "package": "file:///absolute/path/to/OpenClientPlugin/dist/index.js",
+    "options": {
+      "notifications": {
+        "enabled": true,
+        "publicOrigin": "https://notify-v2.example.com",
+        "port": 4321,
+        "dataDir": "/absolute/path/to/v2-notification-state"
+      }
+    }
+  }]
+}
+```
+
+When running multiple servers on one machine, use distinct notification ports,
+HTTPS origins, and data directories. Bridge ports are selected automatically.
+V2 does not expose its listening URL to plugins, so the bridge uses the host's
+`serve --port` / `--port=` argument, or `OPENCODE_SERVER_PORT`. Embedded hosts
+without these can set the optional `serverURL` origin in plugin options.
+
+V2 tools use native tool-registration permissions, JSON Schema, structured
+output, and the session's canonical location. Current v2 passes cancellation
+signals for tool execution; older previews without those signals can only
+cancel outstanding device requests when the plugin unloads. Notifications
+normalize v2 forms and events into the shared notification lifecycle.
 
 The first feature is a dual-stack WebSocket bridge that binds the first
 available port in `4070...4090` on all IPv4 and IPv6 interfaces. It exposes two
@@ -85,9 +121,13 @@ on `npm run pair` defaults for an existing prototype `.data` directory. Perform
 the final controlled restart only when active OpenCode work can be interrupted.
 
 The native setup endpoint creates a one-use, 10-minute connection-prefill code.
-It does not pair a browser, authorize a device, save a destination, enable push,
-or opt into activity notifications. A first-time Home Screen PWA must still be
-paired using a separate code generated on the Mac:
+It does not itself pair a browser or opt into activity notifications. Current
+OpenClient builds launch the bundled pairing CLI through an OpenCode PTY and
+copy one short-lived setup payload. The browser shows installation instructions;
+the Home Screen PWA's **Paste Setup from OpenClient** pairs and saves the
+connection. Notification permission and activity opt-in remain explicit.
+
+For manual diagnostics, generate a pairing code with:
 
 ```bash
 npm exec --package=@openclient-ios/opencode-plugin@0.3.0 -- openclient-notify pair --data-dir /absolute/path/to/notification-state
@@ -149,8 +189,9 @@ npm run check
 npm run build
 ```
 
-Add hooks and tools to the object returned by `OpenClientPlugin` in
-`src/index.ts`.
+The default export in `src/index.ts` contains both host entry points. V1 returns
+its tools/hooks from `server`; `src/v2.ts` registers the shared tools and event
+adapter through the v2 context. Keep host-specific translation at this boundary.
 
 Validate the exact package contents without publishing:
 

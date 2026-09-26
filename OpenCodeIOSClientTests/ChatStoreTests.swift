@@ -607,6 +607,13 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertFalse(store.applyV2StreamEvent(admitted, sessionID: "ses_v2"))
         XCTAssertTrue(store.messages.isEmpty)
 
+        let deliveryChanged = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(
+            from: #"{"id":"evt_delivery","created":1000.5,"type":"session.inbox.delivery.changed","data":{"sessionID":"ses_v2","inboxID":"msg_user","delivery":"queue"}}"#
+        ))
+        XCTAssertEqual(deliveryChanged.inputID, "msg_user")
+        XCTAssertFalse(store.applyV2StreamEvent(deliveryChanged, sessionID: "ses_v2"))
+        XCTAssertTrue(store.messages.isEmpty)
+
         try applyV2Event(
             #"{"id":"evt_promoted","created":1001,"type":"session.inbox.delivered","data":{"sessionID":"ses_v2","inboxID":"msg_user"}}"#,
             to: store
@@ -692,6 +699,7 @@ final class ChatStoreTests: XCTestCase {
         try applyV2Event(#"{"created":1234,"type":"session.input.promoted","data":{"sessionID":"ses_v2","inputID":"msg_synthetic"}}"#, to: store)
         XCTAssertEqual(store.messages.first?.info.role, "assistant")
         XCTAssertEqual(store.messages.first?.parts.first?.synthetic, true)
+        XCTAssertEqual(store.messages.first?.parts.first?.timelineContextType, .synthetic)
 
         let pending = message(id: "msg_missed", role: "user", text: "Pending", sessionID: "ses_v2")
         XCTAssertTrue(store.beginV2Prompt(pending, sessionID: "ses_v2"))
@@ -893,6 +901,20 @@ final class ChatStoreTests: XCTestCase {
         store.applyV2EventProjection([], olderCursor: nil, sessionID: "ses_v2")
         XCTAssertTrue(store.messages.isEmpty)
         XCTAssertEqual(store.cachedMessagesBySessionID["ses_v2"], [])
+        XCTAssertFalse(store.hasOlderV2Messages(sessionID: "ses_v2"))
+    }
+
+    func testV2SkippedOnlyPagesPreserveRawOlderCursorUntilPagingCompletes() {
+        let store = ChatStore()
+        store.beginV2TranscriptHydration(sessionID: "ses_v2")
+
+        XCTAssertTrue(store.applyInitialV2Transcript([], olderCursor: "older-1", sessionID: "ses_v2"))
+        XCTAssertEqual(store.beginLoadingOlderV2Messages(sessionID: "ses_v2"), "older-1")
+
+        store.applyOlderV2Transcript([], olderCursor: "older-2", requestedCursor: "older-1", sessionID: "ses_v2")
+        XCTAssertEqual(store.beginLoadingOlderV2Messages(sessionID: "ses_v2"), "older-2")
+
+        store.applyOlderV2Transcript([], olderCursor: nil, requestedCursor: "older-2", sessionID: "ses_v2")
         XCTAssertFalse(store.hasOlderV2Messages(sessionID: "ses_v2"))
     }
 

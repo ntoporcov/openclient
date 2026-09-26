@@ -5,8 +5,6 @@ import Foundation
 final class ModelConfigurationStore: ObservableObject {
     static let preferredFallbackModelReference = OpenCodeModelReference(providerID: "opencode", modelID: "minimax-m2.5-free")
     static let popularProviderIDs = ["opencode", "opencode-go", "anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
-    static let visibleModelLimitPerProvider = 80
-
     private static let visibilityDefaultsKey = "opencode.modelVisibility.v1"
 
     @Published var availableAgents: [OpenCodeAgent]
@@ -237,12 +235,8 @@ final class ModelConfigurationStore: ObservableObject {
         }
 
         let latestReferences = latestModelReferences
-        var result: [OpenCodeModel] = []
-        for entry in modelEntries(for: provider) where isModelVisible(entry.reference, latestReferences: latestReferences) {
-            result.append(entry.model)
-            if result.count >= Self.visibleModelLimitPerProvider {
-                break
-            }
+        let result = modelEntries(for: provider).compactMap { entry in
+            isModelVisible(entry.reference, latestReferences: latestReferences) ? entry.model : nil
         }
         visibleModelsCache[provider.id] = result
         return result

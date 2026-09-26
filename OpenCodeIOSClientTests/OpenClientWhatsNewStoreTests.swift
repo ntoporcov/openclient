@@ -171,8 +171,8 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         ])
     }
 
-    func testCurrentCatalogEndsWithPersonalControlRelease() throws {
-        let release = try XCTUnwrap(OpenClientReleaseNotesCatalog.releases.last)
+    func testCurrentCatalogDescribesPersonalControlRelease() throws {
+        let release = try XCTUnwrap(OpenClientReleaseNotesCatalog.releases.first { $0.version == "1.0.21" })
 
         XCTAssertEqual(release.version, "1.0.21")
         XCTAssertEqual(release.title, "More control, at a glance")
@@ -181,9 +181,20 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         XCTAssertFalse(release.showsSetup)
         XCTAssertEqual(
             OpenClientReleaseNotesCatalog.releases.map(\.version),
-            ["1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.19", "1.0.20", "1.0.21"]
+            ["1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.19", "1.0.20", "1.0.21", "1.0.22"]
         )
-        XCTAssertEqual(Set(OpenClientReleaseNotesCatalog.releases.map(\.version)).count, 7)
+        XCTAssertEqual(Set(OpenClientReleaseNotesCatalog.releases.map(\.version)).count, 8)
+    }
+
+    func testCurrentCatalogEndsWithPrivateWebPushRelease() throws {
+        let release = try XCTUnwrap(OpenClientReleaseNotesCatalog.releases.last)
+
+        XCTAssertEqual(release.version, "1.0.22")
+        XCTAssertEqual(release.title, "Private push, straight to you")
+        XCTAssertEqual(release.hero, .webPush)
+        XCTAssertEqual(release.featureSectionTitle, "Also in this release")
+        XCTAssertEqual(release.features.map(\.title), ["OpenCode v2, steadier"])
+        XCTAssertFalse(release.showsSetup)
     }
 
     func testUpgradeFromOnePointZeroPointTwentyPresentsOnePointZeroPointTwentyOneOnce() {
@@ -205,6 +216,31 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         let reopened = OpenClientWhatsNewStore(
             defaults: defaults,
             currentVersion: "1.0.21",
+            releases: OpenClientReleaseNotesCatalog.releases,
+            hasExistingConnection: false
+        )
+        XCTAssertNil(reopened.presentedRelease)
+    }
+
+    func testUpgradeFromOnePointZeroPointTwentyOnePresentsOnePointZeroPointTwentyTwoOnce() {
+        _ = OpenClientWhatsNewStore(
+            defaults: defaults,
+            currentVersion: "1.0.21",
+            releases: OpenClientReleaseNotesCatalog.releases,
+            hasExistingConnection: false
+        )
+
+        let upgraded = OpenClientWhatsNewStore(
+            defaults: defaults,
+            currentVersion: "1.0.22",
+            releases: OpenClientReleaseNotesCatalog.releases,
+            hasExistingConnection: false
+        )
+        XCTAssertEqual(upgraded.presentedRelease?.version, "1.0.22")
+
+        let reopened = OpenClientWhatsNewStore(
+            defaults: defaults,
+            currentVersion: "1.0.22",
             releases: OpenClientReleaseNotesCatalog.releases,
             hasExistingConnection: false
         )

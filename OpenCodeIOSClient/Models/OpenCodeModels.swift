@@ -2165,7 +2165,20 @@ struct OpenCodePartTime: Codable, Hashable, Sendable {
     }
 }
 
+enum OpenCodeTimelineContextType: String, Codable, Sendable, CaseIterable {
+    case synthetic, system, skill
+    case agentSwitched = "agent-switched"
+    case modelSwitched = "model-switched"
+    case locationSwitched = "location-switched"
+}
+
 struct OpenCodePart: Codable, Hashable, Sendable {
+    /// V2 context records retain their server type instead of becoming answer text.
+    var timelineContextType: OpenCodeTimelineContextType? {
+        guard synthetic == true else { return nil }
+        return OpenCodeTimelineContextType(rawValue: type)
+    }
+
     let id: String?
     let messageID: String?
     let sessionID: String?

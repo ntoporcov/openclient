@@ -10,6 +10,7 @@ struct OpenClientReleaseNotes: Identifiable, Equatable {
         case talk
         case openCodeV2
         case personalControl
+        case webPush
     }
 
     struct Feature: Identifiable, Equatable {
@@ -274,6 +275,21 @@ enum OpenClientReleaseNotesCatalog {
             summary: "Choose how you write and keep an eye on provider usage, in the app and on your Home Screen.",
             features: [],
             hero: .personalControl,
+            showsSetup: false
+        ),
+        OpenClientReleaseNotes(
+            version: "1.0.22",
+            title: "Private push, straight to you",
+            summary: "OC Notify brings Web Push to OpenClient, with no hosted OpenClient relay between your OpenCode host and your iPhone.",
+            features: [
+                OpenClientReleaseNotes.Feature(
+                    title: "OpenCode v2, steadier",
+                    detail: "Fixes across projects, sessions, tools, and live updates make connecting to OpenCode v2 more reliable.",
+                    systemImage: "arrow.triangle.branch"
+                ),
+            ],
+            hero: .webPush,
+            featureSectionTitle: "Also in this release",
             showsSetup: false
         ),
     ]

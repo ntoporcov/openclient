@@ -962,7 +962,7 @@ final class V2ConfigurationTests: XCTestCase {
     private static let copilotIntegration = #"{"id":"github-copilot","name":"GitHub Copilot","methods":[{"id":"device","type":"oauth","label":"Login with GitHub Copilot","form":[{"type":"string","key":"deploymentType","title":"Select GitHub deployment type","required":true,"options":[{"label":"GitHub.com","value":"github.com","description":"Public"},{"label":"GitHub Enterprise","value":"enterprise","description":"Data residency or self-hosted"}]},{"type":"string","key":"enterpriseUrl","title":"Enter your GitHub Enterprise URL or domain","placeholder":"company.ghe.com or https://company.ghe.com","required":true,"when":[{"key":"deploymentType","op":"eq","value":"enterprise"}]}]}],"connections":[]}"#
 
     private static func response(_ data: String) -> String {
-        #"{"location":{"directory":"/repo","project":{"id":"project","directory":"/repo","canonical":"/repo"}},"data":\#(data)}"#
+        #"{"location":{"directory":"/repo"},"data":\#(data)}"#
     }
 
     private static func attempt(mode: String, expires: Double = Date().addingTimeInterval(600).timeIntervalSince1970 * 1_000) -> String {

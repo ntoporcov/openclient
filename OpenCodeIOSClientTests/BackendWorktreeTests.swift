@@ -7,18 +7,43 @@ final class BackendWorktreeTests: XCTestCase {
         WorktreeURLProtocol.handler = nil
     }
 
+    func testFactoryExposesOnlyVerifiedWorktreeAndCommandContracts() {
+        let factory = OpenCodeBackendFactory(client: makeClient(), eventManager: OpenCodeEventManager())
+        let current = factory.makeConnection(profile: .v2, version: "2.0.16", healthy: true)
+        XCTAssertTrue(current.capabilities.contains(.bridge))
+        XCTAssertTrue(current.capabilities.contains(.worktrees))
+        XCTAssertFalse(current.capabilities.contains(.commands))
+        XCTAssertNotNil(current.worktrees)
+        XCTAssertNil(current.commands)
+
+        let oldV2 = factory.makeConnection(profile: .v2, version: "0.0.0-next-17155", healthy: true)
+        XCTAssertTrue(oldV2.capabilities.contains(.worktrees))
+        XCTAssertTrue(oldV2.capabilities.contains(.commands))
+        XCTAssertNotNil(oldV2.worktrees)
+        XCTAssertNotNil(oldV2.commands)
+        XCTAssertEqual(oldV2.openCodeCompatibility?.client.v2Contract, .preview17155)
+
+        let legacy = factory.makeConnection(profile: .legacy, version: "1", healthy: true)
+        XCTAssertTrue(legacy.capabilities.contains(.bridge))
+        XCTAssertTrue(legacy.capabilities.contains(.worktrees))
+        XCTAssertTrue(legacy.capabilities.contains(.commands))
+        XCTAssertNotNil(legacy.worktrees)
+        XCTAssertNotNil(legacy.commands)
+    }
+
     func testNext17155InventoryPreservesRootAndUnknownStrategy() async throws {
         let client = makeClient()
         WorktreeURLProtocol.handler = { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/project/project/directories")
-            XCTAssertEqual(Self.query(request), ["location[directory]": "/repo"])
-            return Self.response(request, body: #"[{"directory":"/repo"},{"directory":"/copies/a","strategy":"git_worktree"},{"directory":"/other","strategy":"plugin-copy"}]"#)
+            XCTAssertEqual(request.url?.path, "/api/worktree")
+            XCTAssertEqual(Self.query(request), ["projectID": "project"])
+            return Self.response(request, body: #"[{"directory":"/repo"},{"directory":"/copies/a","strategy":"git"},{"directory":"/copies/legacy","strategy":"git_worktree"},{"directory":"/other","strategy":"plugin-copy"}]"#)
         }
         let result = try await client.listV2Worktrees(scope: .init(projectID: "project", directory: "/repo"))
         XCTAssertEqual(result, [.init(directory: "/repo", kind: .root), .init(directory: "/copies/a", kind: .gitCopy),
+                                .init(directory: "/copies/legacy", kind: .gitCopy),
                                 .init(directory: "/other", kind: .unknownStrategy("plugin-copy"))])
-        XCTAssertFalse(result[2].isManaged)
+        XCTAssertFalse(result[3].isManaged)
     }
 
     func testNext17155CreateUsesParentAndActualReturnedDirectoryWithoutReadiness() async throws {
@@ -27,11 +52,11 @@ final class BackendWorktreeTests: XCTestCase {
         WorktreeURLProtocol.handler = { request in
             requests += 1
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertEqual(request.url?.path, "/experimental/project/project/copy")
-            XCTAssertEqual(Self.query(request), ["location[directory]": "/repo"])
+            XCTAssertEqual(request.url?.path, "/api/worktree")
+            XCTAssertTrue(Self.query(request).isEmpty)
             let body = try Self.body(request)
-            XCTAssertEqual(Set(body.keys), ["strategy", "directory", "name"])
-            XCTAssertEqual(body["strategy"] as? String, "git_worktree")
+            XCTAssertEqual(Set(body.keys), ["projectID", "directory", "name"])
+            XCTAssertEqual(body["projectID"] as? String, "project")
             XCTAssertEqual(body["directory"] as? String, "/copies")
             XCTAssertEqual(body["name"] as? String, "topic")
             return Self.response(request, body: #"{"directory":"/copies/topic-2"}"#)
@@ -67,18 +92,18 @@ final class BackendWorktreeTests: XCTestCase {
         var requests: [(String, String)] = []
         WorktreeURLProtocol.handler = { request in
             requests.append((request.httpMethod ?? "", request.url?.path ?? ""))
-            XCTAssertEqual(Self.query(request), ["location[directory]": "/repo"])
+            XCTAssertTrue(Self.query(request).isEmpty)
             if request.httpMethod == "DELETE" {
                 let body = try Self.body(request)
-                XCTAssertEqual(Set(body.keys), ["directory", "force"])
+                XCTAssertEqual(Set(body.keys), ["projectID", "directory", "force"])
+                XCTAssertEqual(body["projectID"] as? String, "project")
                 XCTAssertEqual(body["directory"] as? String, "/copies/topic")
                 XCTAssertEqual(body["force"] as? Bool, false)
                 return Self.response(request, status: 400,
-                    body: #"{"name":"ProjectCopyError","data":{"message":"Dirty checkout","forceRequired":true}}"#)
+                    body: #"{"name":"WorktreeError","data":{"message":"Dirty checkout","forceRequired":true}}"#)
             }
-            XCTAssertEqual(request.url?.path, "/experimental/project/project/copy/refresh")
-            XCTAssertNil(request.httpBody)
-            XCTAssertNil(request.httpBodyStream)
+            XCTAssertEqual(request.url?.path, "/api/worktree/refresh")
+            XCTAssertEqual(try Self.body(request)["projectID"] as? String, "project")
             return Self.response(request, status: 204)
         }
         do {
@@ -116,12 +141,41 @@ final class BackendWorktreeTests: XCTestCase {
         WorktreeURLProtocol.handler = { request in
             count += 1
             XCTAssertEqual(request.httpMethod, "DELETE")
-            XCTAssertEqual(request.url?.path, "/experimental/project/project/copy")
+            XCTAssertEqual(request.url?.path, "/api/worktree")
+            XCTAssertEqual(try Self.body(request)["projectID"] as? String, "project")
             XCTAssertEqual(try Self.body(request)["force"] as? Bool, true)
             return Self.response(request, status: 204)
         }
         try await client.removeV2Worktree(scope: .init(projectID: "project", directory: "/repo"), directory: "/copies/topic", force: true)
         XCTAssertEqual(count, 1)
+    }
+
+    func testPreviewWorktreeContractUsesVersionOwnedRoutesWithoutMutationFallback() async throws {
+        var client = makeClient()
+        client.v2Contract = .preview17155
+        var paths: [String] = []
+        WorktreeURLProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            XCTAssertEqual(Self.query(request)["location[directory]"], "/repo")
+            switch request.httpMethod {
+            case "GET":
+                return Self.response(request, body: #"[{"directory":"/repo"},{"directory":"/copies/topic","strategy":"git_worktree"}]"#)
+            case "POST":
+                let body = try Self.body(request)
+                XCTAssertEqual(body["strategy"] as? String, "git_worktree")
+                XCTAssertNil(body["projectID"])
+                return Self.response(request, body: #"{"directory":"/copies/topic"}"#)
+            default:
+                XCTFail("Unexpected preview worktree request")
+                return Self.response(request, status: 500)
+            }
+        }
+
+        let scope = BackendScope(projectID: "project", directory: "/repo")
+        _ = try await client.listV2Worktrees(scope: scope)
+        _ = try await client.createV2Worktree(.init(scope: scope, name: "topic", destinationParent: "/copies"))
+
+        XCTAssertEqual(paths, ["/api/project/project/directories", "/experimental/project/project/copy"])
     }
 
     func testNonGitDiscoveryPreservesGlobalIdentityAndConcreteDirectoryWithoutWrites() async throws {
@@ -134,8 +188,6 @@ final class BackendWorktreeTests: XCTestCase {
             switch path {
             case "/api/location":
                 return Self.response(request, body: #"{"directory":"/notes","project":{"id":"global","directory":"/","canonical":"/"}}"#)
-            case "/api/project/current":
-                return Self.response(request, body: #"{"id":"global","directory":"/","canonical":"/"}"#)
             case "/api/project":
                 return Self.response(request, body: #"[{"id":"global","canonical":"/","sandboxes":[]}]"#)
             default:
@@ -147,7 +199,7 @@ final class BackendWorktreeTests: XCTestCase {
         XCTAssertEqual(resolution.project.id, "global")
         XCTAssertEqual(resolution.scope, .init(projectID: "global", directory: "/notes"))
         XCTAssertEqual(resolution.canonicalDirectory, "/")
-        XCTAssertEqual(paths, ["/api/location", "/api/project/current", "/api/project"])
+        XCTAssertEqual(paths, ["/api/location", "/api/project"])
     }
 
     func testSharedProjectCanonicalDoesNotBecomeWorktreeSource() async throws {
@@ -157,14 +209,12 @@ final class BackendWorktreeTests: XCTestCase {
             case "/api/location":
                 XCTAssertEqual(Self.query(request)["location[directory]"], "/clones/fixture/subdir")
                 return Self.response(request, body: #"{"directory":"/clones/fixture/subdir","project":{"id":"project","directory":"/clones/fixture","canonical":"/original"}}"#)
-            case "/api/project/current":
-                XCTAssertEqual(Self.query(request)["location[directory]"], "/clones/fixture/subdir")
-                return Self.response(request, body: #"{"id":"project","directory":"/clones/fixture","canonical":"/original"}"#)
             case "/api/project":
                 return Self.response(request, body: #"[{"id":"project","canonical":"/original","vcs":"git","sandboxes":[]}]"#)
-            case "/experimental/project/project/copy":
-                XCTAssertEqual(Self.query(request), ["location[directory]": "/clones/fixture/subdir"])
+            case "/api/worktree":
+                XCTAssertTrue(Self.query(request).isEmpty)
                 let body = try Self.body(request)
+                XCTAssertEqual(body["projectID"] as? String, "project")
                 if request.httpMethod == "POST" {
                     XCTAssertEqual(body["directory"] as? String, "/clones/copies")
                     return Self.response(request, body: #"{"directory":"/clones/copies/topic"}"#)
@@ -217,7 +267,7 @@ final class BackendWorktreeTests: XCTestCase {
         WorktreeURLProtocol.handler = { request in
             XCTAssertEqual(request.url?.path, "/api/fs/find")
             XCTAssertEqual(Self.query(request)["type"], "directory")
-            return Self.response(request, body: #"{"location":{"directory":"/resolved","project":{"id":"project","directory":"/resolved","canonical":"/resolved"}},"data":[{"path":"notes","type":"directory"},{"path":"notes.txt","type":"file"}]}"#)
+            return Self.response(request, body: #"{"location":{"directory":"/resolved"},"data":[{"path":"notes","type":"directory"},{"path":"notes.txt","type":"file"}]}"#)
         }
         let result = try await service.searchDirectories(query: "notes", root: "/requested")
         XCTAssertEqual(result.directories, ["/resolved/notes"])

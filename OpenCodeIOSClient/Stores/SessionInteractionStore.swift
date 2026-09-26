@@ -152,8 +152,10 @@ final class SessionInteractionStore: ObservableObject {
     }
 
     static func forms(forSessionTreeRootID sessionID: String, sessions: [OpenCodeSession], forms: [BackendForm]) -> [BackendForm] {
-        requests(forSessionTreeRootID: sessionID, sessions: sessions,
-            requestsBySessionID: Dictionary(grouping: forms.filter { $0.sessionID != "global" }, by: \.sessionID))
+        let scopedForms = forms.filter { $0.sessionID != "global" }
+        guard !scopedForms.isEmpty else { return [] }
+        return requests(forSessionTreeRootID: sessionID, sessions: sessions,
+            requestsBySessionID: Dictionary(grouping: scopedForms, by: \.sessionID))
             .sorted { $0.id < $1.id }
     }
 
@@ -185,6 +187,7 @@ final class SessionInteractionStore: ObservableObject {
         sessions: [OpenCodeSession],
         requestsBySessionID: [String: [Request]]
     ) -> [Request] {
+        guard !requestsBySessionID.isEmpty else { return [] }
         let childrenByParentID = Dictionary(grouping: sessions.compactMap { session -> (String, String)? in
             session.parentID.map { ($0, session.id) }
         }, by: \.0)

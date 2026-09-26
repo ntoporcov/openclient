@@ -58,7 +58,16 @@ describe("notification native setup contract", () => {
     cleanups.push(async () => { await bridge.stop(); await lease.release(); await rm(dataDir, { recursive: true, force: true }) })
 
     const health = await fetch(`http://127.0.0.1:${bridge.port}/openclient/v1/health`).then((response) => response.json())
-    expect(health.notifications).toEqual({ version: 1, state: "ready", publicOrigin: "https://notify.example.com" })
+    expect(health.notifications).toEqual({
+      version: 1,
+      state: "ready",
+      publicOrigin: "https://notify.example.com",
+      pairing: {
+        version: 1,
+        cliPath: expect.stringMatching(/\/dist\/notifications\/src\/cli\.mjs$/),
+        dataDir,
+      },
+    })
     const response = await fetch(`http://127.0.0.1:${bridge.port}/openclient/v1/notifications/setup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

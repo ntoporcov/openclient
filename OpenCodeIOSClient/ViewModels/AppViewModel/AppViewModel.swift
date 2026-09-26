@@ -158,6 +158,9 @@ final class AppViewModel: ObservableObject {
     var effectiveTerminalDirectory: String? {
         effectiveSelectedDirectory ?? (connectionStore.apiProfile == .v2 ? projectStore.defaultServerDirectory : nil)
     }
+    var effectiveTerminalWorkspaceID: String? {
+        selectedSession?.workspaceID
+    }
     let projectFilesStore = ProjectFilesStore()
     lazy var projectFilesFacade = ProjectFilesFacade(
         store: projectFilesStore,

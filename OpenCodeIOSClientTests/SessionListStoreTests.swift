@@ -44,6 +44,25 @@ final class SessionListStoreTests: XCTestCase {
         XCTAssertEqual(store.workspaceSessionsByDirectory["/tmp/project"]?.sessions.first?.title, "Generated title")
     }
 
+    func testWorkspacePageMergePreservesOrderAndReplacesFourHundredCanonicalSessions() {
+        let store = SessionListStore()
+        let previous = (0..<400).map { index in
+            OpenCodeSession(id: "session-\(index)", title: "Old \(index)", workspaceID: nil,
+                directory: "/tmp/project", projectID: "project", parentID: nil)
+        }
+        let canonical = previous.reversed().map { session in
+            OpenCodeSession(id: session.id, title: "New \(session.id)", workspaceID: nil,
+                directory: session.directory, projectID: session.projectID, parentID: nil)
+        }
+        let appended = OpenCodeSession(id: "session-400", title: "New", workspaceID: nil,
+            directory: "/tmp/project", projectID: "project", parentID: nil)
+
+        let merged = store.workspacePageSessions(previous, applying: canonical + [appended])
+
+        XCTAssertEqual(merged.map(\.id), previous.map(\.id) + [appended.id])
+        XCTAssertEqual(merged.prefix(400).map(\.title), previous.map { Optional("New \($0.id)") })
+    }
+
     func testGlobalScopePreservesLoadedSessionsWithoutDirectoryFiltering() {
         let store = SessionListStore()
         let global = OpenCodeSession(id: "ses_global", title: "Global", workspaceID: nil, directory: "/", projectID: "global", parentID: nil)

@@ -76,6 +76,7 @@ final class ProjectFacade: ObservableObject {
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.$config.map { _ in () }.eraseToAnyPublisher(),
+            viewModel.$backendConnection.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$isShowingProjectSettingsSheet.map { _ in () }.eraseToAnyPublisher(),
         ])
         .receive(on: DispatchQueue.main)

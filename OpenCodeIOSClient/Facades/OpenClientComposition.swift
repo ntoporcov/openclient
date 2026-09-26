@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 @MainActor
@@ -6,6 +7,7 @@ final class OpenClientComposition: ObservableObject {
     let whatsNew: OpenClientWhatsNewStore
     let bridgeStore: OpenClientBridgeStore
     private let bridgeCoordinator: OpenClientBridgeCoordinator
+    private var observations: Set<AnyCancellable> = []
     let bridge: OpenClientBridgeFacade
     let imageContent: OpenClientImageContentCoordinator
     let videoStreams: OpenClientVideoStreamCoordinator
@@ -51,8 +53,16 @@ final class OpenClientComposition: ObservableObject {
             store: bridgeStore,
             connectionStore: viewModel.connectionStore,
             chatStore: viewModel.chatStore,
-            configProvider: { [weak viewModel] in viewModel?.compatibilityClient(for: .bridge)?.config ?? OpenCodeServerConfig() },
+             configProvider: { [weak viewModel] in viewModel?.compatibilityClient(for: .bridge)?.config },
             client: bridgeClient,
+            notificationPairingRunner: OpenClientNotificationPairingRunner(
+                clientProvider: { [weak viewModel] in viewModel?.compatibilityClient(for: .terminal) },
+                directoryProvider: { [weak viewModel] in viewModel?.effectiveTerminalDirectory },
+                apiProfileProvider: { [weak viewModel] in
+                    viewModel?.backendConnection?.openCodeCompatibility?.profile
+                },
+                workspaceIDProvider: { [weak viewModel] in viewModel?.effectiveTerminalWorkspaceID }
+            ),
             notificationContextProvider: { [weak viewModel] in
                 guard let viewModel,
                       viewModel.connectionStore.isConnected,
@@ -87,6 +97,21 @@ final class OpenClientComposition: ObservableObject {
                 bridgeCoordinator?.notificationBrowserOpenFailed(request: request)
             }
         )
+        let backendContextPublisher: AnyPublisher<(UUID?, OpenCodeServerConfig?), Never> =
+            viewModel.$backendConnection
+            .map { connection -> (UUID?, OpenCodeServerConfig?) in
+                let connectionID = connection?.id
+                let config = connection?.openCodeCompatibility?.client.config
+                return (connectionID, config)
+            }
+            .eraseToAnyPublisher()
+        backendContextPublisher
+            .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak bridgeCoordinator] connectionID, config in
+                bridgeCoordinator?.backendContextChanged(connectionID: connectionID, config: config)
+            }
+            .store(in: &observations)
         viewModel.chatFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
         viewModel.connectionFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)
         viewModel.sessionListFacade.attachLiveActivityBackgroundBridge(liveActivityBackgroundBridge)

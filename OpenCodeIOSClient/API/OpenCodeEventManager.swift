@@ -67,7 +67,7 @@ struct OpenCodeV2ManagedEvent: Decodable, Sendable {
         switch type {
         case "session.input.admitted", "session.input.promoted", "session.input.cancelled":
             return data.objectValue?["inputID"]?.literalStringValue
-        case "session.inbox.enqueued", "session.inbox.delivered", "session.inbox.cancelled":
+        case "session.inbox.enqueued", "session.inbox.delivery.changed", "session.inbox.delivered", "session.inbox.cancelled":
             return data.objectValue?["inboxID"]?.literalStringValue
         default: return nil
         }
@@ -102,6 +102,7 @@ struct OpenCodeV2ManagedEvent: Decodable, Sendable {
         type == "session.execution.succeeded"
             || type == "session.execution.failed"
             || type == "session.execution.interrupted"
+            || type == "session.idle"
     }
 }
 

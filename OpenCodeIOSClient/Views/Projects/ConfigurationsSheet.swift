@@ -10,9 +10,28 @@ struct ConfigurationsSheet: View {
     @State private var navigationPath = NavigationPath()
 
     var body: some View {
+        NavigationStack(path: $navigationPath) {
+            ConfigurationsView(viewModel: viewModel, connection: connection, bridge: bridge, navigationPath: $navigationPath)
+                .toolbar {
+                    ToolbarItem(placement: .opencodeTrailing) {
+                        Button("Done") { viewModel.dismiss() }
+                    }
+                }
+        }
+        .id(viewModel.configurationRevision)
+        .presentationDetents([.medium, .large])
+    }
+}
+
+struct ConfigurationsView: View {
+    @ObservedObject var viewModel: ConfigurationsFacade
+    @ObservedObject var connection: ConnectionFacade
+    let bridge: OpenClientBridgeFacade?
+    @Binding var navigationPath: NavigationPath
+
+    var body: some View {
         let connectedProviders = viewModel.sortedConnectedProviders
 
-        NavigationStack(path: $navigationPath) {
             Form {
                 Section {
                     NavigationLink {
@@ -116,15 +135,8 @@ struct ConfigurationsSheet: View {
                 }
 
             }
-            .navigationTitle("Configurations")
+            .navigationTitle("Connection Settings")
             .opencodeInlineNavigationTitle()
-            .toolbar {
-                ToolbarItem(placement: .opencodeTrailing) {
-                    Button("Done") {
-                        viewModel.isShowingConfigurationsSheet = false
-                    }
-                }
-            }
             .task(id: viewModel.configurationRevision) {
                 await viewModel.loadProvidersForConfigurationIfNeeded()
             }
@@ -183,9 +195,6 @@ struct ConfigurationsSheet: View {
                     }
                 }
             }
-        }
-        .id(viewModel.configurationRevision)
-        .presentationDetents([.medium, .large])
     }
 
     private func configurationRow(title: LocalizedStringResource, value: String) -> some View {
@@ -243,7 +252,16 @@ private struct PluginsConfigurationView: View {
                 List {
                     Section(pluginCountTitle(store.pluginCount)) {
                         ForEach(Array(store.v2Plugins.enumerated()), id: \.offset) { _, plugin in
-                            V2ConfiguredPluginRow(plugin: plugin)
+                            if let bridge, isOpenClientPlugin(plugin) {
+                                NavigationLink {
+                                    OpenClientBridgeDiagnosticsView(bridge: bridge)
+                                } label: {
+                                    V2ConfiguredPluginRow(plugin: plugin)
+                                }
+                                .accessibilityIdentifier("plugins.openclient.diagnostics-link")
+                            } else {
+                                V2ConfiguredPluginRow(plugin: plugin)
+                            }
                         }
                         ForEach(store.plugins) { plugin in
                             if let bridge, isOpenClientPlugin(plugin.specifier) {
@@ -270,6 +288,12 @@ private struct PluginsConfigurationView: View {
 
     private func isOpenClientPlugin(_ specifier: String) -> Bool {
         specifier.localizedCaseInsensitiveContains("openclient")
+    }
+
+    private func isOpenClientPlugin(_ plugin: OpenCodeV2Plugin) -> Bool {
+        [plugin.id, plugin.source?.target, plugin.source?.path]
+            .compactMap { $0 }
+            .contains { isOpenClientPlugin($0) }
     }
 }
 

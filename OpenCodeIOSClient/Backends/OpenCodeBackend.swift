@@ -40,26 +40,32 @@ struct OpenCodeBackendFactory: BackendFactory {
     }
 
     func makeConnection(profile: OpenCodeAPIProfile, version: String, healthy: Bool) -> BackendConnection {
-        let adapter = OpenCodeBackendAdapter(client: client, profile: profile)
-        let workspaceServices = OpenCodeWorktreeServices(client: client, profile: profile)
-        let supportsCopies = profile == .legacy || version == "0.0.0-next-17155"
+        var resolvedClient = client
+        resolvedClient.v2Contract = version == "0.0.0-next-17155" ? .preview17155 : .release
+        let adapter = OpenCodeBackendAdapter(client: resolvedClient, profile: profile)
+        let workspaceServices = OpenCodeWorktreeServices(client: resolvedClient, profile: profile)
+        let supportsPreviewV2 = profile == .v2 && version == "0.0.0-next-17155"
+        let supportsCommands = profile == .legacy || supportsPreviewV2
+        let supportsCopies = profile == .legacy || supportsPreviewV2 || (profile == .v2 && version == "2.0.16")
         return BackendConnection(
             descriptor: BackendDescriptor(
                 id: "opencode:" + SHA256.hash(data: Data(client.config.recentServerID.utf8)).map { String(format: "%02x", $0) }.joined(),
                 name: "OpenCode", version: version
             ),
-            capabilities: Set<BackendCapability>([.commands, .fork, .compaction, .files, .terminal, .mcp,
-                           .providerConfiguration, .interactions, .localCache])
+            capabilities: Set<BackendCapability>([.fork, .compaction, .files, .terminal, .mcp,
+                            .providerConfiguration, .interactions, .localCache])
                 .union([.liveActivities])
-                .union(profile == .legacy ? [.worktrees, .bridge] : []),
+                .union(supportsCommands ? [.commands] : [])
+                .union(supportsCopies ? [.worktrees] : [])
+                .union([.bridge]),
             healthy: healthy, projects: adapter, sessions: adapter, chat: adapter, models: adapter,
-            events: OpenCodeBackendEventSource(client: client, profile: profile, manager: eventManager),
-            commands: OpenCodeCommandsService.make(client: client, profile: profile, version: version, sessions: adapter, chat: adapter),
-            sessionForms: profile == .v2 ? OpenCodeSessionFormsService(client: client) : nil,
+            events: OpenCodeBackendEventSource(client: resolvedClient, profile: profile, manager: eventManager),
+            commands: OpenCodeCommandsService.make(client: resolvedClient, profile: profile, version: version, sessions: adapter, chat: adapter),
+            sessionForms: profile == .v2 ? OpenCodeSessionFormsService(client: resolvedClient) : nil,
             projectLifecycle: workspaceServices,
             worktrees: supportsCopies ? workspaceServices : nil,
             worktreeReset: profile == .legacy ? OpenCodeLegacyWorktreeResetService(client: client) : nil,
-            sessionSelection: profile == .v2 ? OpenCodeV2SessionSelectionService(client: client, version: version) : nil
+            sessionSelection: profile == .v2 ? OpenCodeV2SessionSelectionService(client: resolvedClient, version: version) : nil
         )
     }
 

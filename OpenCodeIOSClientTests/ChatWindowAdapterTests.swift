@@ -14,18 +14,18 @@ final class ChatWindowAdapterTests: XCTestCase {
         URLProtocol.unregisterClass(WindowAdapterURLProtocol.self)
     }
 
-    private func model(_ profile: OpenCodeAPIProfile) -> AppViewModel {
+    private func model(_ profile: OpenCodeAPIProfile, version: String = "0.0.0-next-17155") -> AppViewModel {
         let model = AppViewModel()
         model.localCacheRepository = NoOpOpenCodeLocalCacheRepository()
         model.config = .init(baseURL: "https://window-adapters.invalid", apiPreference: profile == .v2 ? .v2 : .legacy)
         model.commerceFacade.store.debugEntitlementOverride = .unlocked
-        if profile == .v2 { model.connectionStore.applySuccessfulV2Connection(version: "0.0.0-next-17155", healthy: true) }
+        if profile == .v2 { model.connectionStore.applySuccessfulV2Connection(version: version, healthy: true) }
         else { model.connectionStore.applySuccessfulServerConnection(version: "test", healthy: true) }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [WindowAdapterURLProtocol.self]
         let client = OpenCodeAPIClient(config: model.config, session: URLSession(configuration: configuration))
         model.backendConnection = OpenCodeBackendFactory(client: client, eventManager: model.eventManager)
-            .makeConnection(profile: profile, version: "0.0.0-next-17155", healthy: true)
+            .makeConnection(profile: profile, version: version, healthy: true)
         let root = session("ses_a", directory: "/A")
         model.directoryStoreRegistry.activate("/A").insertV2Session(root)
         model.directoryStore.selectedSession = root
@@ -94,9 +94,16 @@ final class ChatWindowAdapterTests: XCTestCase {
     }
 
     func testHeaderRenameRestoresOpeningTitleAfterExternalCanonicalRename() async throws {
-        for profile: OpenCodeAPIProfile in [.legacy, .v2] {
+        let contracts: [(profile: OpenCodeAPIProfile, version: String)] = [
+            (.legacy, "test"),
+            (.v2, "0.0.0-next-17155"),
+            (.v2, "2.0.17"),
+        ]
+        for contract in contracts {
             for usesWindow in [false, true] {
-                let model = model(profile)
+                let profile = contract.profile
+                let isPreview = profile == .v2 && contract.version == "0.0.0-next-17155"
+                let model = model(profile, version: contract.version)
                 defer { model.disconnect() }
                 let original = OpenCodeSession(id: "ses_b", title: "A", workspaceID: "workspace-b",
                     directory: "/B", projectID: "project-b", parentID: nil)
@@ -124,8 +131,8 @@ final class ChatWindowAdapterTests: XCTestCase {
                         XCTAssertEqual(mutations, 1)
                         return (200, #"{"data":{"id":"ses_b","title":"A","projectID":"project-b","location":{"directory":"/B","workspaceID":"workspace-b"},"time":{"created":1,"updated":2}}}"#)
                     }
-                    XCTAssertEqual(request.httpMethod, profile == .v2 ? "POST" : "PATCH")
-                    XCTAssertEqual(request.url?.path, profile == .v2 ? "/api/session/ses_b/rename" : "/session/ses_b")
+                    XCTAssertEqual(request.httpMethod, isPreview ? "POST" : "PATCH")
+                    XCTAssertEqual(request.url?.path, profile == .legacy ? "/session/ses_b" : isPreview ? "/api/session/ses_b/rename" : "/api/session/ses_b")
                     let body = try JSONSerialization.jsonObject(with: Self.body(request)) as? [String: String]
                     XCTAssertEqual(body?["title"], "A")
                     mutations += 1
@@ -144,8 +151,15 @@ final class ChatWindowAdapterTests: XCTestCase {
     }
 
     func testWindowMCPUsesActualOriginDirectoryAndWorkspaceForBothProfiles() async throws {
-        for profile: OpenCodeAPIProfile in [.legacy, .v2] {
-            let model = model(profile)
+        let contracts: [(profile: OpenCodeAPIProfile, version: String)] = [
+            (.legacy, "test"),
+            (.v2, "0.0.0-next-17155"),
+            (.v2, "2.0.17"),
+        ]
+        for contract in contracts {
+            let profile = contract.profile
+            let isPreview = profile == .v2 && contract.version == "0.0.0-next-17155"
+            let model = model(profile, version: contract.version)
             defer { model.disconnect() }
             let chat = window(model, session: session("ses_b", directory: "/B", workspace: "workspace-b"))
             defer { chat.windowContext?.close() }
@@ -159,9 +173,10 @@ final class ChatWindowAdapterTests: XCTestCase {
                 XCTAssertEqual(request.url?.host, "window-adapters.invalid")
                 let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
                 let directoryKey = profile == .v2 ? "location[directory]" : "directory"
-                let workspaceKey = profile == .v2 ? "location[workspace]" : "workspace"
                 XCTAssertEqual(query.first { $0.name == directoryKey }?.value, "/B")
-                XCTAssertEqual(query.first { $0.name == workspaceKey }?.value, "workspace-b")
+                if profile == .legacy { XCTAssertEqual(query.first { $0.name == "workspace" }?.value, "workspace-b") }
+                else if isPreview { XCTAssertEqual(query.first { $0.name == "location[workspace]" }?.value, "workspace-b") }
+                else { XCTAssertNil(query.first { $0.name == "location[workspace]" }) }
                 let path = try XCTUnwrap(request.url?.path)
                 paths.append(path)
                 if request.httpMethod == "POST" {
@@ -208,70 +223,79 @@ final class ChatWindowAdapterTests: XCTestCase {
     }
 
     func testConfigurationBarrierOrdersEveryFacadeSubmissionPathAcrossWindowsAndRoot() async throws {
-        for usesRootFacade in [false, true] {
-            for action in ["message", "v2Prompt", "command", "compact"] {
-                let model = model(.v2)
-                defer { model.disconnect() }
-                let target = session("ses_a", directory: "/A")
-                let a = window(model, session: target)
-                let b = usesRootFacade ? model.chatFacade : window(model, session: target)
-                defer { a.windowContext?.close(); b.windowContext?.close() }
-                let started = expectation(description: "Model mutation started")
-                let prematureSubmission = expectation(description: "No submission before model response")
-                prematureSubmission.isInverted = true
-                let gate = AsyncStream<Void>.makeStream()
-                defer { gate.continuation.finish() }
-                var configured = false
-                var submissionCount = 0
-                let selected = OpenCodeModelReference(providerID: "provider", modelID: "new-model")
-                WindowAdapterURLProtocol.handler = { request in
-                    let path = try XCTUnwrap(request.url?.path)
-                    if path == "/api/session/ses_a/model" {
-                        started.fulfill()
-                        for await _ in gate.stream { break }
-                        configured = true
-                        return (204, "")
+        for version in ["0.0.0-next-17155", "2.0.17"] {
+            for usesRootFacade in [false, true] {
+                for action in ["message", "v2Prompt", "command", "compact"] {
+                    let isPreview = version == "0.0.0-next-17155"
+                    let model = model(.v2, version: version)
+                    defer { model.disconnect() }
+                    let target = session("ses_a", directory: "/A")
+                    let a = window(model, session: target)
+                    let b = usesRootFacade ? model.chatFacade : window(model, session: target)
+                    defer { a.windowContext?.close(); b.windowContext?.close() }
+                    let started = expectation(description: "Model mutation started")
+                    let prematureSubmission = expectation(description: "No submission before model response")
+                    prematureSubmission.isInverted = true
+                    let gate = AsyncStream<Void>.makeStream()
+                    defer { gate.continuation.finish() }
+                    var configured = false
+                    var submissionCount = 0
+                    let selected = OpenCodeModelReference(providerID: "provider", modelID: "new-model")
+                    WindowAdapterURLProtocol.handler = { request in
+                        let path = try XCTUnwrap(request.url?.path)
+                        if path == "/api/session/ses_a/model" {
+                            started.fulfill()
+                            for await _ in gate.stream { break }
+                            configured = true
+                            return (204, "")
+                        }
+                        if ["/api/session/ses_a/prompt", "/api/session/ses_a/command", "/api/session/ses_a/compact"].contains(path) {
+                            if !configured { prematureSubmission.fulfill() }
+                            XCTAssertTrue(configured, "\(action) bypassed another facade's configuration")
+                            XCTAssertEqual(model.modelConfigurationStore.selectedModelReference(for: target.id), selected)
+                            submissionCount += 1
+                            if path.hasSuffix("/compact"), isPreview { return (204, "") }
+                            let body = try JSONSerialization.jsonObject(with: Self.body(request)) as? [String: Any]
+                            let id = try XCTUnwrap(body?["id"] as? String)
+                            let type = path.hasSuffix("/compact") ? "compaction" : "user"
+                            return (200, #"{"data":{"id":"\#(id)","sessionID":"ses_a","time":{"created":1},"type":"\#(type)","payload":{},"delivery":"queue"}}"#)
+                        }
+                        if path.hasSuffix("/wait") { return (204, "") }
+                        if path.hasSuffix("/message") { return (200, #"{"data":[],"cursor":{}}"#) }
+                        if path.hasSuffix("/permission") || path.hasSuffix("/form") { return (200, #"{"data":[]}"#) }
+                        XCTFail("Unexpected adapter request: \(path)")
+                        return (500, "{}")
                     }
-                    if ["/api/session/ses_a/prompt", "/api/session/ses_a/command", "/api/session/ses_a/compact"].contains(path) {
-                        if !configured { prematureSubmission.fulfill() }
-                        XCTAssertTrue(configured, "\(action) bypassed another facade's configuration")
-                        XCTAssertEqual(model.modelConfigurationStore.selectedModelReference(for: target.id), selected)
-                        submissionCount += 1
-                        if path.hasSuffix("/compact") { return (204, "") }
-                        let body = try JSONSerialization.jsonObject(with: Self.body(request)) as? [String: Any]
-                        let id = try XCTUnwrap(body?["id"] as? String)
-                        return (200, #"{"data":{"id":"\#(id)","sessionID":"ses_a","timeCreated":1,"delivery":"queue"}}"#)
+                    a.selectModel(selected, for: target)
+                    let configuration = try XCTUnwrap(a.v2ConfigurationTasks[target.id])
+                    XCTAssertEqual(b.v2ConfigurationTasks[target.id]?.id, configuration.id)
+                    await fulfillment(of: [started], timeout: 2)
+                    let send = Task {
+                        switch action {
+                        case "v2Prompt":
+                            return await b.sendV2TextPrompt("body", in: target, messageID: "msg_submit")
+                        case "command":
+                            return await b.sendCommand(.init(name: "review", description: nil, agent: nil, model: nil,
+                                source: "command", template: "review", subtask: false, hints: []), sessionID: target.id,
+                                userVisible: false, meterPrompt: false, messageID: "msg_submit")
+                        case "compact":
+                            return await b.compactSession(sessionID: target.id, userVisible: false, meterPrompt: false)
+                        default:
+                            return await b.sendMessage("body", in: target, userVisible: false, messageID: "msg_submit", meterPrompt: false)
+                        }
                     }
-                    if path.hasSuffix("/wait") { return (204, "") }
-                    if path.hasSuffix("/message") { return (200, #"{"data":[],"cursor":{}}"#) }
-                    if path.hasSuffix("/permission") || path.hasSuffix("/form") { return (200, #"{"data":[]}"#) }
-                    XCTFail("Unexpected adapter request: \(path)")
-                    return (500, "{}")
+                    await fulfillment(of: [prematureSubmission], timeout: 0.1)
+                    gate.continuation.yield(())
+                    let accepted = await send.value
+                    if action == "command" && !isPreview {
+                        XCTAssertFalse(accepted, "Release v2 command admission must fail closed")
+                        XCTAssertEqual(submissionCount, 0, "Unsupported release v2 commands must not reach transport")
+                    } else {
+                        XCTAssertTrue(accepted, "\(action), preview=\(isPreview), root=\(usesRootFacade)")
+                        XCTAssertEqual(submissionCount, 1)
+                    }
+                    XCTAssertNil(b.v2ConfigurationTasks[target.id])
                 }
-                a.selectModel(selected, for: target)
-                let configuration = try XCTUnwrap(a.v2ConfigurationTasks[target.id])
-                XCTAssertEqual(b.v2ConfigurationTasks[target.id]?.id, configuration.id)
-                await fulfillment(of: [started], timeout: 2)
-                let send = Task {
-                    switch action {
-                    case "v2Prompt":
-                        return await b.sendV2TextPrompt("body", in: target, messageID: "msg_submit")
-                    case "command":
-                        return await b.sendCommand(.init(name: "review", description: nil, agent: nil, model: nil,
-                            source: "command", template: "review", subtask: false, hints: []), sessionID: target.id,
-                            userVisible: false, meterPrompt: false, messageID: "msg_submit")
-                    case "compact":
-                        return await b.compactSession(sessionID: target.id, userVisible: false, meterPrompt: false)
-                    default:
-                        return await b.sendMessage("body", in: target, userVisible: false, messageID: "msg_submit", meterPrompt: false)
-                    }
-                }
-                await fulfillment(of: [prematureSubmission], timeout: 0.1)
-                gate.continuation.yield(())
-                let accepted = await send.value
-                XCTAssertTrue(accepted, "\(action), root=\(usesRootFacade)")
-                XCTAssertEqual(submissionCount, 1)
-                XCTAssertNil(b.v2ConfigurationTasks[target.id])
             }
         }
     }

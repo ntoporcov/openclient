@@ -9,9 +9,10 @@ struct OpenClientBridgeToolbarButton: View {
         if snapshot.showsToolbarButton {
             Button(action: action) {
                 Image(systemName: snapshot.toolbarSystemImage)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(snapshot.isConnected ? .green : .secondary)
             }
-            .accessibilityLabel("OpenClient Plugin: Connected")
+            .accessibilityLabel("OpenClient Plugin")
+            .accessibilityValue(Text(snapshot.statusTitle))
             .accessibilityIdentifier("projects.bridge.status")
         }
     }
@@ -23,22 +24,45 @@ struct OpenClientBridgeStatusView: View {
 
     var body: some View {
         let snapshot = bridge.snapshot
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                OpenClientBridgeSheetHeader(dismiss: dismiss)
-                OpenClientBridgeConnectedStatus(snapshot: snapshot)
-                Divider()
-                OpenClientNotificationSetupSection(bridge: bridge, snapshot: snapshot)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    OpenClientBridgeSheetHeader(dismiss: dismiss)
+                    OpenClientBridgeConnectedStatus(snapshot: snapshot)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            bridge.forceConnect()
+                        } label: {
+                            Label(
+                                snapshot.isConnected ? LocalizedStringResource("Reconnect Now") : LocalizedStringResource("Force Connect"),
+                                systemImage: "arrow.clockwise"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("projects.bridge.force-connect")
+
+                        NavigationLink {
+                            OpenClientBridgeDiagnosticsView(bridge: bridge)
+                        } label: {
+                            Label("Diagnostics", systemImage: "stethoscope")
+                        }
+                        .accessibilityIdentifier("projects.bridge.diagnostics")
+                    }
+
+                    Divider()
+                    OpenClientNotificationSetupSection(bridge: bridge, snapshot: snapshot)
+                }
+                .frame(maxWidth: 600, alignment: .leading)
+                .padding(20)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: 600, alignment: .leading)
-            .padding(20)
-            .frame(maxWidth: .infinity)
-        }
-        .accessibilityIdentifier("projects.bridge.compact-status")
+            .accessibilityIdentifier("projects.bridge.compact-status")
 #if os(iOS)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
 #endif
+        }
     }
 }
 
@@ -73,7 +97,7 @@ private struct OpenClientBridgeConnectedStatus: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(bridgeStatusTitle(snapshot))
                     .font(.title3.weight(.semibold))
-                Text(snapshot.isConnected ? LocalizedStringResource("Plugin tools are ready in OpenCode.") : LocalizedStringResource("OpenClient will reconnect automatically."))
+                Text(snapshot.isConnected ? String(localized: "Plugin tools are ready in OpenCode.") : snapshot.statusDetail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -99,6 +123,7 @@ private struct OpenClientNotificationSetupSection: View {
                     setup: setup,
                     open: {
                         guard let request = bridge.notificationOpenRequest() else { return }
+                        OpenCodeClipboard.copy(request.clipboardPayload)
                         openURL(request.url) { accepted in
                             guard !accepted else { return }
                             Task { @MainActor in
@@ -148,24 +173,8 @@ private struct OpenClientNotificationSetupResult: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Connection setup code")
-                .font(.subheadline.weight(.semibold))
-            HStack {
-                Text(setup.code)
-                    .font(.title3.monospaced().weight(.semibold))
-                    .textSelection(.enabled)
-                Spacer()
-                Button {
-                    OpenCodeClipboard.copy(setup.code)
-                } label: {
-                    Label("Copy Code", systemImage: "doc.on.doc")
-                }
-                .accessibilityLabel("Copy connection setup code")
-                .accessibilityIdentifier("projects.bridge.notifications.copy-code")
-            }
-
             Button(action: open) {
-                Label("Open OC Notify", systemImage: "arrow.up.right.square")
+                Label("Copy Setup & Open Guide", systemImage: "arrow.up.right.square")
             }
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("projects.bridge.notifications.open")
@@ -174,13 +183,6 @@ private struct OpenClientNotificationSetupResult: View {
                 .accessibilityIdentifier("projects.bridge.notifications.generate")
 
             Text("Code expires at \(setup.expiresAt, format: .dateTime.hour().minute())")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Text("If OC Notify is already installed, open it from your Home Screen and paste this code. Notification permission is granted in OC Notify, not OpenClient.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Text("First-time devices still use the separate pairing code shown on your Mac.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

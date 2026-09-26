@@ -318,13 +318,16 @@ extension AppViewModel {
             upsertVisibleSession(session)
             isLoadingSessions = false
             stage = "selection"
+            let presentationRequestBeforeSelection = chatDetailPresentationRequest
             await selectSession(session)
             guard isCurrentBackendConnection(connection), widgetConnectionMatches(request),
                   selectedSession?.id == sessionID else { return }
             // Present only after selection/hydration has committed. Otherwise RootView can consume
             // the request while the detail route is still a loading or empty destination.
             appShellFacade.selectProjectContent()
-            chatDetailPresentationRequest &+= 1
+            if chatDetailPresentationRequest == presentationRequestBeforeSelection {
+                chatDetailPresentationRequest &+= 1
+            }
             appendDebugLog(
                 "widget session handoff committed selected=\(selectedSession?.id == sessionID) prepared=\(chatStore.preparedSessionID == sessionID) tab=\(selectedProjectContentTab.rawValue)"
             )

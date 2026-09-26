@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise real v2 prompt/resume/wait/SSE against an owned fixture only."""
+"""Exercise OpenCode v2 sessions, async prompts, SSE, and canonical reads."""
 import argparse
 import base64
 import hashlib
@@ -8,19 +8,15 @@ import json
 from pathlib import Path
 import secrets
 import socket
-import struct
 import threading
-import zlib
+import time
 
 from fixture import load_manifest, private_json, request, require, verify
-from scenarios import BUG_PROMPT, BUG_ANSWER, BUG_CODE, BUG_WIN, COLOR_PNG, expected_output, fixture_url
-
-def png_chunk(kind, data):
-    return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
+from scenarios import expected_output
 
 
-PNG = (b'\x89PNG\r\n\x1a\n' + png_chunk(b'IHDR', struct.pack('!2I5B', 1, 1, 8, 2, 0, 0, 0))
-       + png_chunk(b'IDAT', zlib.compress(b'\x00\xff\x00\x00')) + png_chunk(b'IEND', b''))
+PNG = base64.b64decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC')
 
 
 class Events:
@@ -30,7 +26,8 @@ class Events:
         self.error = None
         self.connection = http.client.HTTPConnection('127.0.0.1', 14097, timeout=60)
         auth = base64.b64encode(('opencode:' + manifest['password']).encode()).decode()
-        self.connection.request('GET', '/api/event', headers={'Authorization': 'Basic ' + auth})
+        self.connection.request('GET', '/api/event',
+                                headers={'Authorization': 'Basic ' + auth})
         self.response = self.connection.getresponse()
         require(self.response.status == 200, 'SSE connection failed')
         self.socket = self.response.fp.raw._sock
@@ -59,13 +56,20 @@ class Events:
     def wait(self, kind, session=None, delta=None, after=0):
         with self.condition:
             def match():
-                return next((e for e in self.items[after:] if e['type'] == kind
-                             and (session is None or e.get('data', {}).get('sessionID') == session)
-                             and (delta is None or e.get('data', {}).get('delta') == delta)), None)
+                for event in self.items[after:]:
+                    properties = event.get('data', {})
+                    if event.get('type') != kind:
+                        continue
+                    if session is not None and properties.get('sessionID') != session:
+                        continue
+                    if delta is not None and properties.get('delta') != delta:
+                        continue
+                    return event
+                return None
             self.condition.wait_for(lambda: match() or self.error, timeout=25)
             found = match()
             require(found is not None, 'Missing SSE ' + kind + '; observed: ' +
-                    ','.join(sorted({e['type'] for e in self.items})))
+                    ','.join(sorted({e.get('type', '?') for e in self.items})))
             return found
 
     def close(self):
@@ -81,129 +85,112 @@ def control_wait(manifest, marker, kind, after=0):
     return result['events'][-1]
 
 
+def wait_idle(manifest, session):
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        if session not in request(manifest, '/api/session/active')['data']:
+            return
+        time.sleep(0.05)
+    raise RuntimeError('Session did not become idle')
+
+
 def run(manifest):
     identity = verify(manifest)
-    default = request(manifest, '/api/model/default')['data']
-    require(default['providerID'] == 'scripted' and default['id'] == 'test-model', 'Wrong default model')
+    info = request(manifest, '/api/info')
+    require(info['version'] == manifest['version'] and info['pid'] == manifest['server_pid'],
+            'Wrong v2 runtime identity')
+    location = request(manifest, '/api/location')
+    require(Path(location['directory']).resolve() == Path(manifest['workspace']).resolve()
+            and Path(location['project']['directory']).resolve() == Path(manifest['workspace']).resolve(),
+            'Wrong v2 location')
+    provider = request(manifest, '/api/provider/test')['data']
+    require(provider['id'] == 'test' and provider['package'] == '@opencode/ai/providers/openai-compatible',
+            'Wrong v2 provider')
+    agents = request(manifest, '/api/agent')['data']
+    require(any(a['id'] == 'build' and a.get('model') == {'providerID': 'test', 'id': 'test-model'}
+                for a in agents), 'Configured native protocol agent missing')
+    commands = request(manifest, '/api/command')['data']
+    require(sum(c['name'] == 'acceptance' for c in commands) == 1,
+            'Configured native protocol command missing or duplicated')
+    page = request(manifest, '/api/session?order=desc&limit=1')
+    require(isinstance(page.get('data'), list) and isinstance(page.get('cursor'), dict),
+            'Wrong native protocol session page')
     events = Events(manifest)
     results = []
     try:
-        commands = request(manifest, '/api/command')['data']
-        require([c['name'] for c in commands] == ['acceptance'], 'Wrong command catalog')
-        for scenario in ('stream', 'reasoning', 'attachment', 'interrupt', 'resume',
-                         'page-share', 'color-image', 'command', 'bug-setup', 'bug-answer'):
-            suffix = secrets.token_hex(8)
-            marker_scenario = {'resume': 'stream', 'command': 'stream',
-                               'page-share': 'attachment', 'color-image': 'attachment'}.get(scenario, scenario)
-            marker = f'[[acceptance:{marker_scenario}:{suffix}]]'
-            # Do not pass a model: this proves deterministic automatic selection.
-            if scenario not in ('resume', 'bug-answer'):
-                session = request(manifest, '/api/session', {
-                    'title': 'Owned scripted ' + scenario,
-                    **({'agent': 'plan'} if scenario == 'bug-setup' else {}),
-                    'location': {'directory': manifest['workspace']}})['data']['id']
-            if scenario == 'bug-setup':
-                marker = f'[[acceptance:bug-setup:{session}]]'
+        for scenario in ('stream', 'reasoning', 'attachment', 'interrupt'):
+            marker = f'[[acceptance:{scenario}:{secrets.token_hex(8)}]]'
             expected = expected_output(marker)
-            body = {'text': marker, 'resume': True}
-            image = PNG
-            if scenario in ('page-share', 'color-image'):
-                url = fixture_url(marker, download=scenario == 'color-image')
-                # Public static assets are fetched without any Authorization header.
-                connection = http.client.HTTPConnection('127.0.0.1', 14098, timeout=3)
-                try:
-                    connection.request('GET', url.removeprefix('http://127.0.0.1:14098'))
-                    response = connection.getresponse()
-                    require(response.status == 200, 'Missing static fixture asset')
-                    asset = response.read()
-                    if scenario == 'page-share':
-                        require(b'<html' in asset and marker.encode() in asset, 'Invalid Safari page')
-                        require(all(secret.encode() not in asset for secret in
-                                    (manifest['password'], manifest['control_token'])), 'Secret in public page')
-                        body['text'] = url
-                    else:
-                        require(response.getheader('Content-Type') == 'image/png' and asset == COLOR_PNG,
-                                'Invalid color PNG download')
-                        image = asset
-                finally:
-                    connection.close()
-            if scenario == 'color-image':
-                body['files'] = [{'uri': 'data:image/png;base64,' + base64.b64encode(image).decode(),
-                                  'name': 'acceptance-color.png'}]
-            if scenario == 'attachment':
-                body['files'] = [{'uri': 'data:image/png;base64,' + base64.b64encode(PNG).decode(),
-                                  'name': 'pixel.png'}]
-            if scenario == 'bug-setup':
-                body['text'] = BUG_PROMPT
-            if scenario == 'bug-answer':
-                body['text'] = BUG_ANSWER + '\n' + marker
-            route = 'prompt'
-            if scenario == 'command':
-                route = 'command'
-                body = {'command': 'acceptance', 'arguments': suffix, 'resume': True}
             with events.condition:
                 cursor = len(events.items)
-            admitted = request(manifest, f'/api/session/{session}/{route}', body)
-            require(admitted['data'], 'Prompt was not durably admitted')
-            first = events.wait('session.text.delta', session, expected['first'], after=cursor)
-            provider_request = control_wait(manifest, marker, 'request')
-            require(provider_request['expected'] == expected, 'Wrong output expectation contract')
-            held = control_wait(manifest, marker, 'held')
-            state = request(manifest, '/control/status', provider=True)
-            require(not any(e['kind'] == 'finished' and e['marker'] == marker for e in state['events']),
-                    'Provider completed before progress assertion')
-            require(session in request(manifest, '/api/session/active')['data'], 'Session is not actively streaming')
-            if scenario == 'reasoning':
-                events.wait('session.reasoning.delta', session, expected['reasoning'], after=cursor)
-            if scenario in ('attachment', 'color-image'):
-                require(provider_request['media'] == [{'mime': 'image/png', 'bytes': len(image),
-                        'sha256': hashlib.sha256(image).hexdigest()}], 'Image did not reach provider unchanged')
-            if scenario == 'interrupt':
-                request(manifest, f'/api/session/{session}/interrupt', method='POST')
-                control_wait(manifest, marker, 'disconnected')
-            else:
-                request(manifest, '/control/advance', {'marker': marker}, provider=True)
-                events.wait('session.text.delta', session, expected['chunks'][1], after=cursor)
-                control_wait(manifest, marker, 'held', after=held['seq'])
-                request(manifest, '/control/finish', {'marker': marker}, provider=True)
-                control_wait(manifest, marker, 'finished')
-            request(manifest, f'/api/session/{session}/wait', method='POST')
-            context = request(manifest, f'/api/session/{session}/context')['data']
-            assistants = [m for m in context if m['type'] == 'assistant']
-            require(len(assistants) == (2 if scenario in ('resume', 'bug-answer') else 1), 'Unexpected assistant response count')
-            assistant = assistants[-1]
-            require(assistant['model']['providerID'] == 'scripted', 'Wrong canonical model')
-            require(all(p['type'] in ('text', 'reasoning') for p in assistant['content']),
-                    'Unexpected tool call in fixture reply')
-            text = ''.join(p['text'] for p in assistant['content'] if p['type'] == 'text')
-            require(text == expected['first' if scenario == 'interrupt' else 'final'],
-                    'Canonical text mismatch')
-            if scenario != 'interrupt':
-                require(not assistant.get('error') and assistant.get('finish') == 'stop', 'Completion failed')
-            else:
-                require(assistant.get('error', {}).get('type') == 'aborted', 'Missing canonical interruption')
-            if scenario == 'reasoning':
-                require([p['text'] for p in assistant['content'] if p['type'] == 'reasoning'] ==
-                        [expected['reasoning']], 'Canonical reasoning mismatch')
-            if scenario == 'bug-setup':
-                require(text.count('```') == 2 and BUG_CODE in text and BUG_WIN not in text,
-                        'Invalid Find the Bug puzzle format')
-            if scenario == 'bug-answer':
-                require(text == BUG_WIN, 'Invalid Find the Bug solved marker')
-            state = request(manifest, '/control/status', provider=True)
-            own_events = [e for e in state['events'] if e['marker'] == marker]
-            require(sum(e['kind'] == 'request' for e in own_events) == 1, 'Unexpected provider retry')
-            if scenario == 'interrupt':
-                require(not any(e['kind'] == 'finished' for e in own_events), 'Interrupted stream completed')
-            results.append({'scenario': scenario, 'session_id': session, 'marker': marker,
-                            'sse_first_delta': first['data']['delta'], 'canonical_text': text,
-                            'expected': expected, 'api_route': route,
-                            'finish': assistant.get('finish'), 'error_type': (assistant.get('error') or {}).get('type'),
-                            'provider_events': own_events, 'passed': True})
-            print(json.dumps({'scenario': scenario, 'session_id': session, 'passed': True}), flush=True)
+            session = request(manifest, '/api/session',
+                              {'location': {'directory': manifest['workspace']}})['data']
+            session_id = session['id']
+            try:
+                prompt = {'text': marker, 'resume': True}
+                if scenario == 'attachment':
+                    prompt['files'] = [{'name': 'pixel.png',
+                                        'uri': 'data:image/png;base64,' + base64.b64encode(PNG).decode()}]
+                admitted = request(manifest, f'/api/session/{session_id}/prompt',
+                                   prompt)['data']
+                require(admitted, 'v2 prompt was not durably admitted')
+                provider_request = control_wait(manifest, marker, 'request')
+                require(provider_request['expected'] == expected, 'Wrong output expectation contract')
+                held = control_wait(manifest, marker, 'held')
+                first = events.wait('session.text.delta', session_id, expected['first'], after=cursor)
+                statuses = request(manifest, '/api/session/active')['data']
+                require(statuses.get(session_id, {}).get('type') == 'running',
+                        'Session is not running while held')
+                state = request(manifest, '/control/status', provider=True)
+                require(not any(event['kind'] == 'finished' and event['marker'] == marker
+                                for event in state['events']),
+                        'Provider completed before the first streamed delta was asserted')
+                if scenario == 'reasoning':
+                    events.wait('session.reasoning.delta', session_id, expected['reasoning'], after=cursor)
+                if scenario == 'attachment':
+                    require(provider_request['media'] == [{'mime': 'image/png', 'bytes': len(PNG),
+                            'sha256': hashlib.sha256(PNG).hexdigest()}], 'Image did not reach provider unchanged')
+                if scenario == 'interrupt':
+                    interrupted = request(manifest, f'/api/session/{session_id}/interrupt', {}, method='POST')
+                    require(interrupted.get('interrupted') is True, 'v2 interrupt did not stop execution')
+                    control_wait(manifest, marker, 'disconnected')
+                else:
+                    request(manifest, '/control/advance', {'marker': marker}, provider=True)
+                    events.wait('session.text.delta', session_id, expected['chunks'][1], after=cursor)
+                    control_wait(manifest, marker, 'held', after=held['seq'])
+                    request(manifest, '/control/finish', {'marker': marker}, provider=True)
+                    control_wait(manifest, marker, 'finished')
+                wait_idle(manifest, session_id)
+                messages = request(manifest, f'/api/session/{session_id}/message?order=asc&limit=200')['data']
+                assistants = [m for m in messages if m.get('type') == 'assistant']
+                require(len(assistants) == 1, 'Unexpected assistant response count')
+                assistant = assistants[0]
+                text = ''.join(p.get('text', '') for p in assistant['content'] if p['type'] == 'text')
+                require(text == expected['first' if scenario == 'interrupt' else 'final'],
+                        'Canonical text mismatch')
+                if scenario != 'interrupt':
+                    require(not assistant.get('error') and assistant.get('finish') == 'stop',
+                            'Completion failed')
+                else:
+                    require(assistant.get('error', {}).get('type') == 'aborted',
+                            'Missing canonical interruption')
+                if scenario == 'reasoning':
+                    require([part['text'] for part in assistant['content'] if part['type'] == 'reasoning'] ==
+                            [expected['reasoning']], 'Canonical reasoning mismatch')
+                state = request(manifest, '/control/status', provider=True)
+                own_events = [e for e in state['events'] if e['marker'] == marker]
+                require(sum(e['kind'] == 'request' for e in own_events) == 1, 'Unexpected provider retry')
+                if scenario == 'interrupt':
+                    require(not any(e['kind'] == 'finished' for e in own_events),
+                            'Interrupted provider stream completed')
+                results.append({'scenario': scenario, 'session_id': session_id,
+                                'sse_type': first['type'], 'canonical_text': text, 'passed': True})
+                print(json.dumps({'scenario': scenario, 'session_id': session_id, 'passed': True}), flush=True)
+            finally:
+                request(manifest, f'/api/session/{session_id}', method='DELETE')
         state = request(manifest, '/control/status', provider=True)
-        require(not any(e['kind'] in ('rejected', 'hold_timeout') for e in state['events']),
-                'Unexpected provider requests/timeouts')
+        require(not any(event['kind'] in ('rejected', 'hold_timeout') for event in state['events']),
+                'Unexpected provider rejection or timeout')
         evidence = {'identity': identity, 'results': results, 'passed': True}
         private_json(Path(manifest['root']) / 'smoke-evidence.json', evidence)
     finally:

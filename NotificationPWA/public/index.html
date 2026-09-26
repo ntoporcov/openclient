@@ -10,11 +10,28 @@
   <meta name="apple-mobile-web-app-title" content="OC Notify">
   <link rel="apple-touch-icon" href="/icons/icon-180.png?v=5">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css?v=8">
+  <link rel="stylesheet" href="/styles.css?v=11">
   <title>OC Notify</title>
 </head>
 <body>
-  <main class="settings-shell">
+  <main class="install-gate" id="install-gate">
+    <div class="install-card">
+      <span class="install-app-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9.8 21h4.4"/></svg></span>
+      <p class="context" data-i18n="context">OpenCode</p>
+      <h1 data-i18n="installTitle">Add to Home Screen</h1>
+      <p class="install-lead" id="install-instruction" data-i18n="installMobile">Install OC Notify, then open it from your Home Screen to finish setup.</p>
+      <ol class="install-steps" id="install-steps">
+        <li id="install-copy-step" data-i18n="installStepCopy" hidden>Copy the secure setup below.</li>
+        <li data-i18n="installStepShare">Open your browser menu or Share sheet.</li>
+        <li data-i18n="installStepAdd">Choose Add to Home Screen or Install app.</li>
+        <li data-i18n="installStepOpen">Open OC Notify from your Home Screen.</li>
+      </ol>
+      <button class="install-action" id="copy-setup" type="button" data-i18n="copySetup" hidden>Copy Secure Setup</button>
+      <button class="install-action" id="install-action" type="button" data-i18n="installAction" hidden>Install OC Notify</button>
+      <p class="install-footnote" id="install-footnote" data-i18n="installKeepsSetup">Your secure setup will be waiting in the installed app.</p>
+    </div>
+  </main>
+  <main class="settings-shell" id="settings-shell" hidden>
     <header class="page-header">
       <div>
         <p class="context" data-i18n="context">OpenCode</p>
@@ -40,26 +57,12 @@
       <span><strong data-i18n="installTitle">Add to Home Screen</strong><span data-i18n="installBody">In Safari, tap Share, then Add to Home Screen. Open the installed app to enable notifications.</span></span>
     </aside>
 
-    <section class="settings-section" id="setup-section" aria-labelledby="setup-heading">
-      <h2 id="setup-heading" data-i18n="setupTitle">Connection Setup Code</h2>
-      <div class="group">
-        <label class="field-row" for="setup-code"><span data-i18n="setupLabel">Connection setup code</span><input id="setup-code" autocomplete="one-time-code" autocapitalize="characters" maxlength="10" placeholder="A1B2C3D4E5"></label>
-        <button class="action-row" id="use-connection" type="button" data-i18n="useConnection">Use Connection</button>
-      </div>
-      <p class="section-footer" data-i18n="setupHint">Install or reopen this Home Screen app, enter this code, pair the device with a separate Mac pairing code if needed, then tap Use Connection. Review the draft and tap Save Changes.</p>
+    <section class="settings-section" id="transfer-section" aria-labelledby="transfer-heading">
+      <h2 id="transfer-heading" data-i18n="transferTitle">OpenClient Setup</h2>
+      <div class="group single-action-group"><button class="action-row primary" id="paste-setup" type="button" data-i18n="pasteSetup">Paste Setup from OpenClient</button></div>
+      <p class="inline-status" id="transfer-status" role="status" aria-live="polite" hidden></p>
+      <p class="section-footer" data-i18n="transferHint">In OpenClient, choose Copy Setup & Open Guide, then return here and paste. Setup codes expire after 10 minutes.</p>
     </section>
-
-    <details class="pairing-disclosure" id="pairing-details" open>
-      <summary><span data-i18n="pairTitle">Pair this device</span><span class="disclosure-label" id="pairing-summary" data-i18n="pairNeeded">Required</span></summary>
-      <div class="disclosure-content">
-        <label class="field-row" for="pair-code">
-          <span data-i18n="pairLabel">Pairing code</span>
-          <input id="pair-code" autocomplete="one-time-code" autocapitalize="characters" maxlength="10" placeholder="A1B2C3D4E5">
-        </label>
-        <button class="action-row" id="pair" type="button" data-i18n="pairButton">Pair Device</button>
-        <p class="section-footer" data-i18n="pairHint">Generate a fresh 10-minute code with npm run pair on the Mac.</p>
-      </div>
-    </details>
 
     <section class="settings-section" aria-labelledby="permission-heading">
       <h2 id="permission-heading" data-i18n="permissionHeading">Device Permissions</h2>
@@ -122,6 +125,6 @@
       <div class="group single-action-group"><button class="action-row destructive" id="reset" type="button" data-i18n="reset">Unsubscribe and Reset Device</button></div>
     </section>
   </main>
-  <script type="module" src="/app.js?v=8"></script>
+  <script type="module" src="/app.js?v=11"></script>
 </body>
 </html>

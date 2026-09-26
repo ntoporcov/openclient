@@ -102,7 +102,7 @@ enum OpenCodeToolActivityPolicy {
     }
 
     static func isToolCall(_ part: OpenCodePart) -> Bool {
-        !nonToolPartNames.contains(toolName(for: part).lowercased())
+        part.timelineContextType == nil && !nonToolPartNames.contains(toolName(for: part).lowercased())
     }
 
     static func isRunning(_ part: OpenCodePart) -> Bool {

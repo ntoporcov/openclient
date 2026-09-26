@@ -2071,13 +2071,23 @@ private final class ShareV2ReadFailureURLProtocol: URLProtocol {
     override func startLoading() {
         let path = request.url?.path ?? ""
         // Creation and submission use the injected core services; provider/model reads are forbidden.
-        XCTAssertTrue(path.hasPrefix("/api/session/") || path == "/api/location" || path == "/api/project")
+        XCTAssertTrue(path.hasPrefix("/api/session/") || path == "/api/location" || path == "/api/project"
+            || path == "/api/health" || path == "/api/info" || path == "/api/form"
+            || path == "/api/permission/request", "Unexpected v2 handoff read: \(path)")
         let body: String?
         switch path {
+        case "/api/health":
+            let response = HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        case "/api/info": body = #"{"version":"2.0.16","pid":1,"urls":[],"paths":{}}"#
         case "/api/location":
             body = #"{"directory":"/home-project","project":{"id":"home-project","directory":"/home-project","canonical":"/home-project"}}"#
         case "/api/project":
             body = #"[{"id":"home-project","canonical":"/home-project","sandboxes":[]}]"#
+        case "/api/form": body = #"{"location":{"directory":"/home-project"},"data":[]}"#
+        case "/api/permission/request": body = #"{"data":[]}"#
         case "/api/session/active": body = #"{"data":{}}"#
         default: body = path.hasSuffix("/permission") || path.hasSuffix("/form") ? #"{"data":[]}"# : nil
         }

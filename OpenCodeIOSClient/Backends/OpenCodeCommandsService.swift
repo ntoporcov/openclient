@@ -54,27 +54,27 @@ final class OpenCodeCommandsService: BackendCommandsService {
             guard receipt.id == request.messageID, receipt.sessionID == request.sessionID else {
                 return .uncertain(sessionID: request.sessionID, messageID: request.messageID)
             }
-        } else {
-            // Legacy command is synchronous and supports caller-assigned messageID.
-            struct Command: Encodable, Sendable {
-                struct File: Encodable, Sendable { let type = "file"; let mime: String; let filename: String; let url: String }
-                let messageID: String
-                let command: String
-                let arguments: String
-                let agent: String?
-                let model: String?
-                let variant: String?
-                let parts: [File]
-            }
-            let response: OpenCodeMessageEnvelope = try await client.send(
-                path: "/session/\(request.sessionID)/command", method: "POST", queryItems: query(request.scope),
-                body: Command(messageID: request.messageID, command: request.command, arguments: request.arguments,
-                    agent: request.agent, model: request.model.map { "\($0.providerID)/\($0.modelID)" }, variant: request.variant,
-                    parts: request.attachments.map { .init(mime: $0.mime, filename: $0.filename, url: $0.dataURL) })
-            )
-            guard response.info.sessionID == request.sessionID, response.info.parentID == request.messageID else {
-                return .uncertain(sessionID: request.sessionID, messageID: request.messageID)
-            }
+            return .accepted(sessionID: request.sessionID, messageID: request.messageID)
+        }
+        // Legacy command is synchronous and supports caller-assigned messageID.
+        struct Command: Encodable, Sendable {
+            struct File: Encodable, Sendable { let type = "file"; let mime: String; let filename: String; let url: String }
+            let messageID: String
+            let command: String
+            let arguments: String
+            let agent: String?
+            let model: String?
+            let variant: String?
+            let parts: [File]
+        }
+        let response: OpenCodeMessageEnvelope = try await client.send(
+            path: "/session/\(request.sessionID)/command", method: "POST", queryItems: query(request.scope),
+            body: Command(messageID: request.messageID, command: request.command, arguments: request.arguments,
+                agent: request.agent, model: request.model.map { "\($0.providerID)/\($0.modelID)" }, variant: request.variant,
+                parts: request.attachments.map { .init(mime: $0.mime, filename: $0.filename, url: $0.dataURL) })
+        )
+        guard response.info.sessionID == request.sessionID, response.info.parentID == request.messageID else {
+            return .uncertain(sessionID: request.sessionID, messageID: request.messageID)
         }
         return .accepted(sessionID: request.sessionID, messageID: request.messageID)
     }

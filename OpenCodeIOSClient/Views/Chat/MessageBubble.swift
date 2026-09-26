@@ -43,7 +43,7 @@ enum MessageBubbleUserPartPolicy {
 
 enum MessageBubblePartVisibilityPolicy {
     static func renderableText(for part: OpenCodePart, isUser: Bool) -> String? {
-        guard isUser || part.type == "text" || part.type == "reasoning",
+        guard isUser || part.type == "text" || part.type == "reasoning" || part.timelineContextType != nil,
               let text = part.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !text.isEmpty else { return nil }
         return text
@@ -587,7 +587,9 @@ struct MessageBubble: View {
         isActiveRevealPart: Bool,
         retainedVisualHTMLPartIDs: Set<String>
     ) -> some View {
-        if hidesReasoningBlocks, textStyle(for: part) == .reasoning {
+        if let kind = part.timelineContextType, let text = renderableText(for: part) {
+            TimelineContextBlock(kind: kind, text: text)
+        } else if hidesReasoningBlocks, textStyle(for: part) == .reasoning {
             EmptyView()
         } else if let attachment = attachment(for: part) {
             AttachmentBubblePart(attachment: attachment, isUser: isUser)
@@ -1082,6 +1084,7 @@ struct MessageBubble: View {
     }
 
     private func activityStyle(for part: OpenCodePart) -> ActivityStyle? {
+        guard part.timelineContextType == nil else { return nil }
         let tool = toolName(for: part)
         let running = OpenCodeToolActivityPolicy.isRunning(part)
         let appearance = OpenCodeToolActivityAppearance.resolve(tool)

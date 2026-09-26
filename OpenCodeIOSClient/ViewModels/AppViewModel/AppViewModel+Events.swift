@@ -403,7 +403,7 @@ extension AppViewModel {
         } else if wasSelected {
             _ = sessionInteractionStore.applyVisibleInteractions(todos: [], permissions: [], questions: [])
         }
-        sessionListFacade.invalidateWorkspaceSnapshot()
+        sessionListFacade.invalidateWorkspaceSnapshot(transcriptOnly: event.affectsTranscript)
         liveActivityFacade.reducerDidCommit(sessionIDs: [sessionID])
         objectWillChange.send()
     }

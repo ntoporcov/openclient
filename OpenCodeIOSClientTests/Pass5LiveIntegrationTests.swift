@@ -10,11 +10,11 @@ final class Pass5LiveIntegrationTests: XCTestCase {
         let (client, service, connection, directory) = try await context()
         XCTAssertEqual(service.connections().filter { $0.id == connection.id }, [connection])
         let projects = try await service.projects(connection: connection)
-        let global = try XCTUnwrap(projects.first { $0.projectID == "global" })
-        XCTAssertEqual(global.connectionID, connection.id)
-        XCTAssertNil(global.directory, "Global discovery retains its special scope; creation resolves the server directory")
-        let matchedProjects = try await service.projects(matching: [global.id])
-        XCTAssertEqual(matchedProjects.map(\.id), [global.id])
+        let project = try XCTUnwrap(projects.first { $0.directory == directory } ?? projects.first)
+        XCTAssertEqual(project.connectionID, connection.id)
+        XCTAssertEqual(project.directory, directory)
+        let matchedProjects = try await service.projects(matching: [project.id])
+        XCTAssertEqual(matchedProjects.map(\.id), [project.id])
 
         let models = try await service.models(connection: connection)
         XCTAssertTrue(models.allSatisfy { $0.connectionID == connection.id })
@@ -23,8 +23,8 @@ final class Pass5LiveIntegrationTests: XCTestCase {
             XCTAssertEqual(matchedModels.map(\.id), [model.id])
         }
         let created = try await createOwnedSession(client: client, service: service, connection: connection,
-                                                   project: global, directory: directory)
-        let sessions = try await service.sessions(connection: connection, project: global)
+                                                   project: project, directory: directory)
+        let sessions = try await service.sessions(connection: connection, project: project)
         XCTAssertEqual(sessions.filter { $0.sessionID == created.sessionID }.map(\.id), [created.id])
         let matched = try await service.sessions(matching: [created.id])
         XCTAssertEqual(matched.map(\.sessionID), [created.sessionID])
@@ -36,45 +36,40 @@ final class Pass5LiveIntegrationTests: XCTestCase {
     func testExistingSessionModelSelectionUsesLiveCatalogWithoutShortcutSendAgainstIsolatedBackend() async throws {
         let (client, service, connection, directory) = try await context()
         let projects = try await service.projects(connection: connection)
-        let global = try XCTUnwrap(projects.first { $0.projectID == "global" })
+        let project = try XCTUnwrap(projects.first { $0.directory == directory } ?? projects.first)
         let models = try await service.models(connection: connection)
         // Prefer the disposable server's test model, but any enabled catalog reference
         // is safe here: the model-selection endpoint does not execute a provider turn.
-        let testModel = try XCTUnwrap(models.first { $0.modelID == "testModel" } ?? models.first,
+        let testModel = try XCTUnwrap(models.first { $0.modelID == "test-model" } ?? models.first,
                                      "The isolated server must expose an enabled model for selection coverage")
         let created = try await createOwnedSession(client: client, service: service, connection: connection,
-                                                   project: global, directory: directory)
+                                                   project: project, directory: directory)
         let factory = OpenCodeBackendFactory(client: client, eventManager: OpenCodeEventManager())
         let backend = try await factory.connect()
         defer { backend.close() }
         let selection = try XCTUnwrap(backend.sessionSelection)
-        let scope = BackendScope(projectID: global.projectID, directory: directory)
+        let scope = BackendScope(projectID: project.projectID, directory: directory)
         try await selection.setModel(sessionID: created.sessionID, model: testModel.modelReference, variant: nil, scope: scope)
         let canonical = try await client.getV2Session(sessionID: created.sessionID)
         XCTAssertEqual(canonical.model?.providerID, testModel.providerID)
         XCTAssertEqual(canonical.model?.modelID, testModel.modelID)
-        // Runtime next-17155 canonicalizes an omitted variant to "default".
-        XCTAssertEqual(canonical.model?.variant, "default")
+        XCTAssertTrue(canonical.model?.variant == nil || canonical.model?.variant == "default")
         try await assertNoProviderTurn(client, sessionID: created.sessionID)
         // OpenCodeShortcutService.sendMessage has no paused-submit option. Do not
         // call it and do not describe a model-selection response as prompt admission.
     }
 
     private func context() async throws -> (OpenCodeAPIClient, OpenCodeShortcutService, OpenCodeShortcutConnectionEntity, String) {
-        let env = ProcessInfo.processInfo.environment
-        guard let base = env["OPENCODE_V2_TEST_BASE_URL"], !base.isEmpty,
-              let username = env["OPENCODE_V2_TEST_USERNAME"], !username.isEmpty,
-              let password = env["OPENCODE_V2_TEST_PASSWORD"], !password.isEmpty else {
-            throw XCTSkip("Set OPENCODE_V2_TEST_BASE_URL/USERNAME/PASSWORD for disposable pass5 integration tests")
-        }
+        let fixture = try OpenCodeV2LiveFixture.load()
+        let base = OpenCodeV2LiveFixture.baseURL
         guard let url = URL(string: base), url.scheme == "http", url.host == "127.0.0.1", url.port == 14097,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               url.path.isEmpty || url.path == "/" else {
             throw Pass5LiveFailure("Only http://127.0.0.1:14097 is permitted; persistent 4096/4097 are forbidden")
         }
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 20
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 10
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
         let session = URLSession(configuration: configuration, delegate: Pass5LiveRedirectGuard(), delegateQueue: nil)
@@ -82,55 +77,43 @@ final class Pass5LiveIntegrationTests: XCTestCase {
         // The trailing-slash identity is distinct from the usual UI saved connection.
         // Even this identity is never overwritten if already present in defaults/Keychain.
         let config = OpenCodeServerConfig(name: "Pass5 \(UUID().uuidString)", baseURL: "http://127.0.0.1:14097/",
-                                          username: username, password: password, apiPreference: .v2)
+                                          username: fixture.username, password: fixture.password, apiPreference: .v2)
         let client = OpenCodeAPIClient(config: config, session: session)
-        let health = try await object(client, "/api/health")
-        guard health["version"] == .string("0.0.0-next-17155") else { throw Pass5LiveFailure("Unexpected disposable server version") }
+        let info = try await object(client, "/api/info")
+        guard info["version"] == .string(OpenCodeV2LiveFixture.version) else { throw Pass5LiveFailure("Unexpected disposable server version") }
         let location = try await client.getV2Location()
-        let expected = "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode/pass2-VwCj6l/workspace"
-        let standardized = URL(fileURLWithPath: location.directory).standardizedFileURL.path
-        let normalized = standardized.hasPrefix("/private/var/") ? String(standardized.dropFirst("/private".count)) : standardized
-        guard location.project.id == "global", normalized == expected else {
-            throw Pass5LiveFailure("Refusing a server outside the approved disposable workspace")
+        let directory = URL(fileURLWithPath: location.directory).resolvingSymlinksInPath().standardizedFileURL
+        let projectDirectory = URL(fileURLWithPath: location.project.directory).resolvingSymlinksInPath().standardizedFileURL
+        guard directory == fixture.workspace, projectDirectory == fixture.workspace, fixture.owns(directory) else {
+            throw Pass5LiveFailure("Refusing a server outside the manifest-owned v2 workspace")
         }
 
         let saved = OpenCodeSavedServer(config: config)
         let key = "recentServerConfigs"
         let store = OpenCodeServerPasswordStore()
-        var entries: [Any] = []
-        if UserDefaults.standard.object(forKey: key) != nil, UserDefaults.standard.data(forKey: key) == nil {
-            throw Pass5LiveFailure("Refusing to replace an unrecognized saved-server storage format")
-        }
-        if let data = UserDefaults.standard.data(forKey: key) {
-            entries = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [Any])
-            let servers = try JSONDecoder().decode([OpenCodeSavedServer].self, from: data)
-            guard !servers.contains(where: { $0.recentServerID == saved.recentServerID }) else {
-                throw XCTSkip("The exact 14097 test identity is already saved; refusing to replace it")
-            }
-        }
-        guard store.loadPassword(for: saved.recentServerID) == nil else {
-            throw XCTSkip("The exact 14097 test identity already has Keychain credentials; refusing to replace them")
-        }
-        // Register before the first persistence write. Cleanup filters only this exact
-        // identity and retains concurrent additions instead of restoring an old snapshot.
+        let previousMetadata = UserDefaults.standard.data(forKey: key)
+        let previousMirror = UserDefaults(suiteName: OpenClientSharePayloadStore.appGroupID)?.data(forKey: key)
+        let previousPassword = store.loadPassword(for: saved.recentServerID)
+        // Register before the first write. The live shortcut test gets an isolated saved-server
+        // view, then restores personal metadata and the exact pre-test credential byte-for-byte.
         addTeardownBlock { @MainActor in
-            if let data = UserDefaults.standard.data(forKey: key) {
-                let current = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [Any])
-                let retained = try current.filter { entry in
-                    let data = try JSONSerialization.data(withJSONObject: entry)
-                    let server = try JSONDecoder().decode(OpenCodeSavedServer.self, from: data)
-                    guard server.recentServerID == saved.recentServerID else { return true }
-                    guard server == saved else { throw Pass5LiveFailure("Test saved identity changed; refusing to remove another owner's entry") }
-                    return false
-                }
-                UserDefaults.standard.set(try JSONSerialization.data(withJSONObject: retained), forKey: key)
+            if let previousMetadata {
+                UserDefaults.standard.set(previousMetadata, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
             }
-            store.deletePassword(for: saved.recentServerID)
+            OpenClientSharePayloadStore.mirrorRecentServersData(previousMirror)
+            if let previousPassword {
+                store.savePassword(previousPassword, for: saved.recentServerID)
+            } else {
+                store.deletePassword(for: saved.recentServerID)
+            }
         }
-        entries.append(try JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)))
-        UserDefaults.standard.set(try JSONSerialization.data(withJSONObject: entries), forKey: key)
-        store.savePassword(password, for: saved.recentServerID)
-        guard store.loadPassword(for: saved.recentServerID) == password else {
+        let isolatedMetadata = try JSONEncoder().encode([saved])
+        UserDefaults.standard.set(isolatedMetadata, forKey: key)
+        OpenClientSharePayloadStore.mirrorRecentServersData(isolatedMetadata)
+        store.savePassword(fixture.password, for: saved.recentServerID)
+        guard store.loadPassword(for: saved.recentServerID) == fixture.password else {
             throw Pass5LiveFailure("The test host cannot round-trip its own Keychain identity")
         }
         let suite = "Pass5LiveIntegrationTests.\(UUID().uuidString)"
@@ -150,7 +133,7 @@ final class Pass5LiveIntegrationTests: XCTestCase {
         // lookup before POST, covering response loss without a broad session cleanup.
         addTeardownBlock { @MainActor in
             let request = try client.makeRequest(path: "/api/session", method: "GET", queryItems: [
-                .init(name: "search", value: title), .init(name: "project", value: "global")
+                .init(name: "search", value: title), .init(name: "project", value: project.projectID)
             ])
             let (data, response) = try await client.session.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Pass5LiveFailure("Owned session cleanup discovery failed") }
@@ -162,7 +145,8 @@ final class Pass5LiveIntegrationTests: XCTestCase {
                     throw Pass5LiveFailure("Invalid owned session ID")
                 }
                 let canonical = try await client.getV2Session(sessionID: id)
-                guard canonical.id == id, canonical.title == title, canonical.directory == directory, canonical.projectID == "global" else {
+                guard canonical.id == id, canonical.title == title, canonical.directory == directory,
+                      canonical.projectID == project.projectID else {
                     throw Pass5LiveFailure("Refusing cleanup without exact ID/title/directory/project ownership")
                 }
                 try await client.deleteV2Session(sessionID: id)
@@ -175,12 +159,12 @@ final class Pass5LiveIntegrationTests: XCTestCase {
         let canonical = try await client.getV2Session(sessionID: created.sessionID)
         XCTAssertEqual(canonical.title, title)
         XCTAssertEqual(canonical.directory, directory)
-        XCTAssertEqual(canonical.projectID, "global")
+        XCTAssertEqual(canonical.projectID, project.projectID)
         return created
     }
 
     private func assertNoProviderTurn(_ client: OpenCodeAPIClient, sessionID: String) async throws {
-        let pending = try await object(client, "/api/session/\(sessionID)/pending")
+        let pending = try await object(client, "/api/session/\(sessionID)/inbox")
         XCTAssertEqual(pending["data"]?.arrayValue, [])
         let transcript = try await object(client, "/api/session/\(sessionID)/message")
         let messages = try XCTUnwrap(transcript["data"]?.arrayValue)

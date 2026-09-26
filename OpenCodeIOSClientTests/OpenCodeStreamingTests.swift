@@ -287,7 +287,7 @@ final class OpenCodeStreamingTests: XCTestCase {
     }
 
     func testV2ManagedEventRecognizesTerminalExecutionEvents() throws {
-        for type in ["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"] {
+        for type in ["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted", "session.idle"] {
             let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"\#(type)","data":{"sessionID":"ses_1"}}"#))
             XCTAssertTrue(event.isExecutionTerminal, type)
         }

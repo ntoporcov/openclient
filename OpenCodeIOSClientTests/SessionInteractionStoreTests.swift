@@ -124,6 +124,18 @@ final class SessionInteractionStoreTests: XCTestCase {
         XCTAssertFalse(store.applyVisibleInteractions(todos: [todo], permissions: [permission], questions: [question]))
     }
 
+    func testEmptyFormsAcrossFourHundredSessionsRemainEmpty() {
+        let sessions = (0..<400).map { session(id: "session-\($0)") }
+
+        for session in sessions {
+            XCTAssertTrue(SessionInteractionStore.forms(
+                forSessionTreeRootID: session.id,
+                sessions: sessions,
+                forms: []
+            ).isEmpty)
+        }
+    }
+
     private func permission(id: String, sessionID: String) -> OpenCodePermission {
         OpenCodePermission(
             id: id,

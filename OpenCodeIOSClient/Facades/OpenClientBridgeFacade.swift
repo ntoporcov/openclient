@@ -17,7 +17,7 @@ struct OpenClientBridgeSnapshot: Equatable {
         return false
     }
 
-    var showsToolbarButton: Bool { isConnected }
+    var showsToolbarButton: Bool { true }
 
     var isBusy: Bool {
         switch phase {
@@ -59,7 +59,10 @@ struct OpenClientBridgeSnapshot: Equatable {
     }
 
     var notificationGuidance: LocalizedStringResource {
-        switch notifications {
+        guard isConnected else {
+            return "Connect the OpenClient plugin first to configure OC Notify."
+        }
+        return switch notifications {
         case .ready:
             "Set up OC Notify in your browser, then install it on your Home Screen and allow notifications."
         case .unconfigured:

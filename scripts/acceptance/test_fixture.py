@@ -23,18 +23,18 @@ from scenarios import (BUG_PROMPT, BUG_SETUP, BUG_CODE, BUG_WIN, BUG_ANSWER, COL
 class SafetyTests(unittest.TestCase):
     def test_configuration_has_one_native_provider_and_deny_default(self):
         config = fixture.configuration()
-        self.assertEqual(list(config['providers']), ['scripted'])
-        provider = config['providers']['scripted']
-        self.assertEqual(provider['package'], 'aisdk:@ai-sdk/openai-compatible')
-        self.assertEqual(provider['settings']['baseURL'], fixture.PROVIDER + '/v1')
+        self.assertEqual(list(config['provider']), ['test'])
+        provider = config['provider']['test']
+        self.assertEqual(provider['npm'], '@ai-sdk/openai-compatible')
+        self.assertNotIn('env', provider)
+        self.assertEqual(provider['options']['baseURL'], fixture.PROVIDER + '/v1')
         self.assertEqual(list(provider['models']), ['test-model'])
-        self.assertEqual(config['experimental']['policies'], [
-            {'action': 'provider.use', 'resource': '*', 'effect': 'deny'},
-            {'action': 'provider.use', 'resource': 'scripted', 'effect': 'allow'}])
-        self.assertEqual(config['plugins'], ['-opencode.command'])
-        self.assertEqual(list(config['commands']), ['acceptance'])
-        self.assertEqual(config['commands']['acceptance']['template'], '[[acceptance:stream:$ARGUMENTS]]')
-        self.assertEqual(config['permissions'], [{'action': '*', 'resource': '*', 'effect': 'deny'}])
+        self.assertNotIn('experimental', config)
+        self.assertEqual(config['plugin'], [])
+        self.assertEqual(config['enabled_providers'], ['test'])
+        self.assertEqual(list(config['command']), ['acceptance'])
+        self.assertEqual(config['command']['acceptance']['template'], '[[acceptance:stream:$ARGUMENTS]]')
+        self.assertEqual(config['permission'], {'*': 'deny'})
 
     def test_environment_is_not_inherited(self):
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'must-not-leak', 'HTTPS_PROXY': 'must-not-leak'}):
@@ -149,7 +149,7 @@ class ScenarioTests(unittest.TestCase):
 
 class EndpointTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix='acceptance-unit-', dir=fixture.TEMP)
+        self.directory = tempfile.TemporaryDirectory(prefix='acceptance-unit-')
         self.state = fixture.State({'root': self.directory.name, 'run_id': 'unit', 'control_token': 'unit-token'})
         self.server = fixture.ThreadingHTTPServer(('127.0.0.1', 0), fixture.Handler)
         self.server.daemon_threads = True

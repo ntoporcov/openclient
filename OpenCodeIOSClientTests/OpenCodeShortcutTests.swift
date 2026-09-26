@@ -50,7 +50,7 @@ final class OpenCodeShortcutTests: XCTestCase {
 
         ShortcutMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            if request.url?.path == "/api/health" {
+            if ["/api/health", "/api/info"].contains(request.url?.path) {
                 return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
             }
             if request.url?.path == "/global/health" {
@@ -154,6 +154,8 @@ final class OpenCodeShortcutTests: XCTestCase {
             case ("GET", "/api/health"):
                 XCTAssertNil(request.url?.query)
                 return (HTTPURLResponse(url: request.url!, statusCode: probeStatus, httpVersion: nil, headerFields: nil)!, Self.data(probeBody))
+            case ("GET", "/api/info"):
+                return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
             case ("GET", "/global/health"):
                 return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Self.data(#"{"healthy":true,"version":"legacy"}"#))
             case ("GET", "/session/ses_1"):
@@ -204,7 +206,9 @@ final class OpenCodeShortcutTests: XCTestCase {
         XCTAssertEqual(session.providerID, "openai")
         XCTAssertEqual(session.modelID, "gpt-5")
         XCTAssertEqual(session.reasoningVariant, "balanced")
-        let expectedPaths = ["/api/health", "/global/health", "/session", "/session/ses_1", "/session/ses_1/prompt_async"]
+        let probesInfo = probeStatus == 404 || probeStatus == 405 || probeBody.hasPrefix("<!doctype html")
+        let expectedPaths = ["/api/health"] + (probesInfo ? ["/api/info"] : [])
+            + ["/global/health", "/session", "/session/ses_1", "/session/ses_1/prompt_async"]
         XCTAssertEqual(requests.map { $0.url?.path }, expectedPaths)
     }
 
@@ -248,7 +252,7 @@ final class OpenCodeShortcutTests: XCTestCase {
                     XCTAssertNil(json["model"])
                     XCTAssertNil(json["variant"])
                     let id = try XCTUnwrap(json["id"] as? String)
-                    body = "{\"data\":{\"id\":\"\(id)\",\"sessionID\":\"ses_1\",\"timeCreated\":1,\"delivery\":\"queued\"}}"
+                    body = "{\"data\":{\"id\":\"\(id)\",\"sessionID\":\"ses_1\",\"time\":{\"created\":1},\"type\":\"user\",\"payload\":{},\"delivery\":\"queue\"}}"
                 default:
                     XCTFail("Unexpected request: \(request.url?.path ?? "nil")")
                     throw URLError(.unsupportedURL)
@@ -380,7 +384,7 @@ final class OpenCodeShortcutTests: XCTestCase {
         } catch OpenCodeAPIError.httpError(let code, _) {
             XCTAssertEqual(code, 404)
         }
-        XCTAssertEqual(paths, ["/api/health", "/global/health"])
+        XCTAssertEqual(paths, ["/api/health", "/api/info", "/global/health"])
     }
 
     func testIntentionallyEmptyPasswordPreservesBasicAuthForDiscoveryAndSendButMissingCredentialFails() async throws {
@@ -408,7 +412,7 @@ final class OpenCodeShortcutTests: XCTestCase {
                 case ("POST", "/api/session/ses_1/prompt"):
                     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBodyData)) as? [String: Any])
                     let id = try XCTUnwrap(json["id"] as? String)
-                    body = "{\"data\":{\"id\":\"\(id)\",\"sessionID\":\"ses_1\",\"timeCreated\":1,\"delivery\":\"queued\"}}"
+                    body = "{\"data\":{\"id\":\"\(id)\",\"sessionID\":\"ses_1\",\"time\":{\"created\":1},\"type\":\"user\",\"payload\":{},\"delivery\":\"queue\"}}"
                 case ("POST", "/session/ses_1/prompt_async"): body = ""
                 default:
                     XCTFail("Unexpected empty-password request")
@@ -449,6 +453,8 @@ final class OpenCodeShortcutTests: XCTestCase {
                         return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
                     }
                     body = Self.v2Health
+                case "/api/info":
+                    return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
                 case "/global/health": body = #"{"healthy":true,"version":"legacy"}"#
                 case "/api/session/ses_1": body = "{\"data\":\(Self.v2Session)}"
                 case "/session/ses_1": body = Self.legacySession
@@ -461,9 +467,9 @@ final class OpenCodeShortcutTests: XCTestCase {
                     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBodyData)) as? [String: Any])
                     XCTAssertNil(json["model"])
                     let id = try XCTUnwrap(json["id"] as? String)
-                    body = "{\"data\":{\"id\":\"\(id)\",\"sessionID\":\"ses_1\",\"timeCreated\":1,\"delivery\":\"queued\"}}"
+                    body = "{\"data\":{\"id\":\"\(id)\",\"sessionID\":\"ses_1\",\"time\":{\"created\":1},\"type\":\"user\",\"payload\":{},\"delivery\":\"queue\"}}"
                 case "/session/ses_1/prompt_async":
-                    XCTAssertEqual(paths.count, 4)
+                    XCTAssertEqual(paths.count, 5)
                     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBodyData)) as? [String: Any])
                     XCTAssertEqual(json["model"] as? [String: String], ["providerID": "openai", "modelID": "gpt-5"])
                     XCTAssertEqual(json["variant"] as? String, "deep")
@@ -522,6 +528,9 @@ final class OpenCodeShortcutTests: XCTestCase {
                             return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
                         }
                         return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Self.data(Self.v2Health))
+                    }
+                    if request.url?.path == "/api/info" {
+                        return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
                     }
                     if request.url?.path == "/global/health" {
                         return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Self.data(#"{"healthy":true,"version":"legacy"}"#))
@@ -752,6 +761,8 @@ final class OpenCodeShortcutTests: XCTestCase {
             switch (request.httpMethod, request.url?.path) {
             case ("GET", "/api/health"):
                 return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Self.data("{}"))
+            case ("GET", "/api/info"):
+                return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Self.data("{}"))
             case ("GET", "/global/health"): body = #"{"healthy":true,"version":"legacy-test"}"#
             case ("GET", "/session"): body = "[\(record)]"
             case ("GET", "/session/ses_1"): body = record
@@ -764,7 +775,7 @@ final class OpenCodeShortcutTests: XCTestCase {
         let selected = try XCTUnwrap(sessions.first)
         XCTAssertEqual(selected.directory, "/server/default")
         _ = try await service.sendMessage(connection: connection, project: project, session: selected, message: "Hello", model: nil, reasoning: nil)
-        XCTAssertEqual(paths, ["/api/health", "/global/health", "/session", "/api/health", "/global/health", "/session/ses_1", "/session/ses_1/prompt_async"])
+        XCTAssertEqual(paths, ["/api/health", "/api/info", "/global/health", "/session", "/api/health", "/api/info", "/global/health", "/session/ses_1", "/session/ses_1/prompt_async"])
     }
 
     func testCanonicalWorkspaceIsPreservedWithoutRedirectingToProjectWorktree() async throws {
@@ -950,6 +961,8 @@ final class OpenCodeShortcutTests: XCTestCase {
                 case ("GET", "/api/health"):
                     let status = profile == .legacy ? 404 : 200
                     return (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, Self.data(profile == .legacy ? "" : Self.v2Health))
+                case ("GET", "/api/info"):
+                    return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
                 case ("GET", "/global/health"):
                     XCTAssertEqual(profile, .legacy)
                     return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Self.data(#"{"healthy":true,"version":"legacy"}"#))
@@ -1010,6 +1023,8 @@ final class OpenCodeShortcutTests: XCTestCase {
                         return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
                     }
                     body = Self.v2Health
+                case ("GET", "/api/info"):
+                    return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
                 case ("GET", "/global/health"): body = #"{"healthy":true,"version":"legacy"}"#
                 case ("POST", "/api/session"): body = "{\"data\":\(Self.v2Session)}"
                 case ("GET", "/session/ses_1"): body = Self.legacySession
@@ -1029,11 +1044,11 @@ final class OpenCodeShortcutTests: XCTestCase {
                     _ = try await service.createSession(connection: connection, project: project, title: nil, model: nil, reasoning: nil)
                     XCTFail("Unknown legacy creation must still fail closed")
                 } catch OpenCodeShortcutError.uncertainCreation {}
-                XCTAssertEqual(paths, ["/api/health", "/api/session", "/api/health", "/global/health"])
+                XCTAssertEqual(paths, ["/api/health", "/api/session", "/api/health", "/api/info", "/global/health"])
                 XCTAssertEqual(try store.record(for: hash), old)
             } else {
                 _ = try await service.createSession(connection: connection, project: project, title: nil, model: nil, reasoning: nil)
-                XCTAssertEqual(paths, ["/api/health", "/api/session", "/api/health", "/global/health", "/session/ses_1"])
+                XCTAssertEqual(paths, ["/api/health", "/api/session", "/api/health", "/api/info", "/global/health", "/session/ses_1"])
                 XCTAssertNil(try store.record(for: hash))
             }
         }
@@ -1495,7 +1510,7 @@ final class OpenCodeShortcutTests: XCTestCase {
             paths.append(try XCTUnwrap(request.url?.path))
             XCTAssertEqual(request.httpMethod, "GET")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Basic b3BlbmNvZGU6cHc=")
-            if request.url?.path == "/api/health" {
+            if ["/api/health", "/api/info"].contains(request.url?.path) {
                 return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
             }
             if request.url?.path == "/global/health" {
@@ -1505,8 +1520,8 @@ final class OpenCodeShortcutTests: XCTestCase {
         }
         let projects = try await service.projects(connection: connection)
         XCTAssertTrue(projects.isEmpty)
-        XCTAssertEqual(Array(paths.prefix(2)), ["/api/health", "/global/health"])
-        XCTAssertEqual(Set(paths), ["/api/health", "/global/health", "/project", "/project/current"])
+        XCTAssertEqual(Array(paths.prefix(3)), ["/api/health", "/api/info", "/global/health"])
+        XCTAssertEqual(Set(paths), ["/api/health", "/api/info", "/global/health", "/project", "/project/current"])
     }
 
     private func shortcutProject(connection: OpenCodeShortcutConnectionEntity) -> OpenCodeShortcutProjectEntity {

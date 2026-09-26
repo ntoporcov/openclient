@@ -1,7 +1,7 @@
 import Foundation
 
 private struct V2ConfigurationResponse<Value: Decodable & Sendable>: Decodable, Sendable {
-    let location: OpenCodeV2Location
+    let location: OpenCodeV2ResponseLocation
     let data: Value
 }
 

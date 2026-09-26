@@ -43,13 +43,29 @@ final class OpenClientBridgeTests: XCTestCase {
     }
 
     func testDiscoveryBuildsEntirePortRangeFromServerHost() {
-        let config = OpenCodeServerConfig(baseURL: "http://100.64.0.10:4096")
+        let config = OpenCodeServerConfig(baseURL: "http://100.64.0.10:4097")
         let endpoints = OpenClientBridgeEndpointDiscovery.candidateEndpoints(config: config)
 
         XCTAssertEqual(endpoints.count, 21)
         XCTAssertEqual(endpoints.first?.healthURL.absoluteString, "http://100.64.0.10:4070/openclient/v1/health")
         XCTAssertEqual(endpoints.last?.webSocketURL.absoluteString, "ws://100.64.0.10:4090/openclient/v1/ws")
-        XCTAssertEqual(endpoints.first?.openCodePort, 4096)
+        XCTAssertEqual(endpoints.first?.openCodePort, 4097)
+    }
+
+    func testDiscoveryRejectsHealthyBridgeForDifferentOpenCodePort() {
+        let candidate = OpenClientBridgeEndpointDiscovery.candidateEndpoints(
+            config: OpenCodeServerConfig(baseURL: "http://100.64.0.10:4097")
+        )[0]
+        let health = OpenClientBridgeHealth(
+            service: "openclient-plugin", protocol: 1, port: candidate.port, openCodePort: 4096
+        )
+
+        XCTAssertFalse(OpenClientBridgeEndpointDiscovery.matches(candidate: candidate, health: health))
+        XCTAssertTrue(OpenClientBridgeEndpointDiscovery.matches(
+            candidate: candidate,
+            health: OpenClientBridgeHealth(service: "openclient-plugin", protocol: 1,
+                                           port: candidate.port, openCodePort: 4097)
+        ))
     }
 
     func testBridgeHealthDecodesOldAndNotificationAdvertisementsWithoutBreakingBridge() throws {
@@ -62,12 +78,13 @@ final class OpenClientBridgeTests: XCTestCase {
 
         let ready = try JSONDecoder().decode(
             OpenClientBridgeHealth.self,
-            from: Data(#"{"service":"openclient-plugin","protocol":1,"port":4070,"openCodePort":4096,"notifications":{"version":1,"state":"ready","publicOrigin":"https://notify.example.com"}}"#.utf8)
+            from: Data(#"{"service":"openclient-plugin","protocol":1,"port":4070,"openCodePort":4096,"notifications":{"version":1,"state":"ready","publicOrigin":"https://notify.example.com","pairing":{"version":1,"cliPath":"/cache/node_modules/@openclient-ios/opencode-plugin/dist/notifications/src/cli.mjs","dataDir":"/state/notify"}}}"#.utf8)
         )
         XCTAssertEqual(
             OpenClientBridgeNotificationsCapability(advertisement: ready.notifications),
             .ready(publicOrigin: "https://notify.example.com")
         )
+        XCTAssertTrue(try XCTUnwrap(ready.notifications?.pairing).isTrustedShape)
 
         let unknownState = try JSONDecoder().decode(
             OpenClientBridgeHealth.self,
@@ -80,6 +97,137 @@ final class OpenClientBridgeTests: XCTestCase {
             from: Data(#"{"service":"openclient-plugin","protocol":1,"port":4070,"openCodePort":4096,"notifications":"invalid"}"#.utf8)
         )
         XCTAssertNil(malformedCapability.notifications)
+    }
+
+    func testNotificationPairingLauncherRejectsArbitraryCommandsAndQuotesPaths() {
+        let trusted = OpenClientNotificationPairingLauncher(
+            version: 1,
+            cliPath: "/tmp/plugin's files/dist/notifications/src/cli.mjs",
+            dataDir: "/tmp/notify data's"
+        )
+        XCTAssertTrue(trusted.isTrustedShape)
+        XCTAssertEqual(
+            OpenClientNotificationPairingRunner.command(for: trusted),
+            "'/tmp/plugin'\\''s files/dist/notifications/src/cli.mjs' pair --data-dir '/tmp/notify data'\\''s'\r"
+        )
+        XCTAssertFalse(OpenClientNotificationPairingLauncher(version: 1, cliPath: "/bin/sh", dataDir: "/tmp").isTrustedShape)
+        XCTAssertFalse(OpenClientNotificationPairingLauncher(version: 1, cliPath: "/tmp/dist/notifications/src/cli.mjs", dataDir: "relative").isTrustedShape)
+    }
+
+    @MainActor
+    func testNotificationPairingRunnerCleansUpAfterPairingCodeWithoutWaitingForSocketTask() async throws {
+        var deleted = false
+        OpenClientNotificationMockURLProtocol.requestHandler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/pty"):
+                return Self.notificationResponse(request: request, body: #"{"id":"pty-1","title":"OC Notify Setup","command":"","args":[],"cwd":"/tmp","status":"running","pid":1}"#)
+            case ("DELETE", "/pty/pty-1"):
+                deleted = true
+                return Self.notificationResponse(request: request, status: 204, body: "")
+            default:
+                XCTFail("Unexpected pairing request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")")
+                return Self.notificationResponse(request: request, status: 500, body: "")
+            }
+        }
+        let configuration = Self.notificationSessionConfiguration()
+        let client = OpenCodeAPIClient(
+            config: OpenCodeServerConfig(baseURL: "http://server.example:4096"),
+            session: URLSession(configuration: configuration)
+        )
+        let launcher = OpenClientNotificationPairingLauncher(
+            version: 1,
+            cliPath: "/tmp/node_modules/@openclient-ios/opencode-plugin/dist/notifications/src/cli.mjs",
+            dataDir: "/tmp/notify"
+        )
+        let runner = OpenClientNotificationPairingRunner(
+            clientProvider: { client },
+            directoryProvider: { "/tmp" },
+            connectionRunner: { _, _, _, onEvent in
+                await onEvent(.output("Pairing code (valid 10 minutes, one use): 0123456789", cursor: 1))
+                try await Task.sleep(for: .seconds(60))
+            },
+            timeout: .seconds(2)
+        )
+
+        let code = try await runner.createPairingCode(launcher: launcher)
+
+        XCTAssertEqual(code, "0123456789")
+        XCTAssertTrue(deleted)
+    }
+
+    @MainActor
+    func testNotificationPairingRunnerTimeoutCancelsSocketTaskAndCleansUp() async throws {
+        var deleted = false
+        OpenClientNotificationMockURLProtocol.requestHandler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/pty"):
+                return Self.notificationResponse(request: request, body: #"{"id":"pty-1","title":"OC Notify Setup","command":"","args":[],"cwd":"/tmp","status":"running","pid":1}"#)
+            case ("DELETE", "/pty/pty-1"):
+                deleted = true
+                return Self.notificationResponse(request: request, status: 204, body: "")
+            default:
+                XCTFail("Unexpected pairing request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")")
+                return Self.notificationResponse(request: request, status: 500, body: "")
+            }
+        }
+        let configuration = Self.notificationSessionConfiguration()
+        let client = OpenCodeAPIClient(
+            config: OpenCodeServerConfig(baseURL: "http://server.example:4096"),
+            session: URLSession(configuration: configuration)
+        )
+        let launcher = OpenClientNotificationPairingLauncher(
+            version: 1,
+            cliPath: "/tmp/node_modules/@openclient-ios/opencode-plugin/dist/notifications/src/cli.mjs",
+            dataDir: "/tmp/notify"
+        )
+        let runner = OpenClientNotificationPairingRunner(
+            clientProvider: { client },
+            directoryProvider: { "/tmp" },
+            connectionRunner: { _, _, _, _ in
+                try await Task.sleep(for: .seconds(60))
+            },
+            timeout: .milliseconds(50)
+        )
+        let clock = ContinuousClock()
+        let started = clock.now
+
+        do {
+            _ = try await runner.createPairingCode(launcher: launcher)
+            XCTFail("Expected pairing timeout")
+        } catch let error as OpenClientNotificationSetupError {
+            XCTAssertEqual(error, .pairingTimedOut)
+        }
+
+        XCTAssertLessThan(clock.now - started, .seconds(1))
+        XCTAssertTrue(deleted)
+    }
+
+    @MainActor
+    func testNotificationSetupPairsThroughNativeRunnerAndHandsBothCodesToPWA() async throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.Pairing.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let pairing = RecordingNotificationPairingRunner()
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: ConnectionStore(),
+            chatStore: ChatStore(),
+            configProvider: { OpenCodeServerConfig() },
+            client: PassiveOpenClientBridgeConnection(),
+            notificationSetupClient: RecordingNotificationSetupRequester(),
+            notificationPairingRunner: pairing,
+            notificationContextProvider: { try? Self.notificationContext() }
+        )
+        store.apply(.connected(Self.notificationEndpoint()))
+
+        await coordinator.setupNotifications()
+
+        guard case .ready(let setup) = store.notificationSetupPhase else {
+            return XCTFail("Expected paired setup")
+        }
+        XCTAssertEqual(setup.url.absoluteString, "https://notify.example.com/#setup=ABCDEF1234&pair=0123456789")
+        XCTAssertEqual(pairing.launcher?.dataDir, "/state/notify")
     }
 
     func testNotificationAdvertisementsFailClosedWithoutDisablingBridge() throws {
@@ -115,10 +263,20 @@ final class OpenClientBridgeTests: XCTestCase {
                 protocol: 1,
                 port: 4070,
                 openCodePort: 4096,
-                notifications: .init(version: 1, state: .ready, publicOrigin: "https://notify.example.com")
+                notifications: .init(
+                    version: 1,
+                    state: .ready,
+                    publicOrigin: "https://notify.example.com",
+                    pairing: .init(
+                        version: 1,
+                        cliPath: "/cache/node_modules/@openclient-ios/opencode-plugin/dist/notifications/src/cli.mjs",
+                        dataDir: "/state/notify"
+                    )
+                )
             )
         )
         XCTAssertEqual(endpoint.notifications, .ready(publicOrigin: "https://notify.example.com"))
+        XCTAssertEqual(endpoint.notificationPairingLauncher?.dataDir, "/state/notify")
     }
 
     func testNotificationSetupClientSendsOnlyAllowlistedConnectionFields() async throws {
@@ -432,12 +590,14 @@ final class OpenClientBridgeTests: XCTestCase {
             configProvider: { OpenCodeServerConfig() },
             client: PassiveOpenClientBridgeConnection(),
             notificationSetupClient: requester,
+            notificationPairingRunner: RecordingNotificationPairingRunner(),
             notificationContextProvider: { context },
             now: { now }
         )
         store.apply(.connected(Self.notificationEndpoint()))
         await coordinator.setupNotifications()
         let oldOpenRequest = try XCTUnwrap(coordinator.notificationOpenRequest())
+        XCTAssertEqual(oldOpenRequest.clipboardPayload, "ocnotify:v1:ABCDEF1234:0123456789")
         await coordinator.setupNotifications()
         let currentOpenRequest = try XCTUnwrap(coordinator.notificationOpenRequest())
         XCTAssertNotEqual(oldOpenRequest.requestID, currentOpenRequest.requestID)
@@ -483,6 +643,21 @@ final class OpenClientBridgeTests: XCTestCase {
         XCTAssertEqual(
             String(localized: facade.snapshot.notificationGuidance),
             "Update the OpenClient plugin on the OpenCode host to set up OC Notify from this app."
+        )
+    }
+
+    @MainActor
+    func testDisconnectedNotificationGuidePrioritizesConnection() throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.Disconnected.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let facade = OpenClientBridgeFacade(store: store, forceConnect: {})
+
+        XCTAssertFalse(facade.snapshot.isConnected)
+        XCTAssertEqual(
+            String(localized: facade.snapshot.notificationGuidance),
+            "Connect the OpenClient plugin first to configure OC Notify."
         )
     }
 
@@ -1487,7 +1662,7 @@ final class OpenClientBridgeTests: XCTestCase {
 
         XCTAssertEqual(facade.snapshot.statusTitle, "Disconnected")
         XCTAssertEqual(facade.snapshot.toolbarSystemImage, "link.circle")
-        XCTAssertFalse(facade.snapshot.showsToolbarButton)
+        XCTAssertTrue(facade.snapshot.showsToolbarButton)
 
         let endpoint = OpenClientBridgeEndpoint(
             healthURL: try XCTUnwrap(URL(string: "http://100.64.0.10:4070/openclient/v1/health")),
@@ -1504,6 +1679,119 @@ final class OpenClientBridgeTests: XCTestCase {
 
         facade.forceConnect()
         XCTAssertEqual(forceConnectCount, 1)
+    }
+
+    @MainActor
+    func testBridgeCoordinatorReconcilesBackendReplacementWithoutPhaseChange() async throws {
+        let suiteName = "OpenClientBridgeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let connectionStore = ConnectionStore(backendMode: .server, isConnected: true)
+        let client = FlakyOpenClientBridgeConnection()
+        var config = OpenCodeServerConfig(baseURL: "http://100.64.0.10:4096")
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: connectionStore,
+            chatStore: ChatStore(),
+            configProvider: { config },
+            client: client,
+            reconnectDelay: { _ in .milliseconds(10) }
+        )
+
+        for _ in 0 ..< 50 {
+            if await client.connectCount >= 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let firstConfig = await client.configs.first
+        XCTAssertEqual(firstConfig?.sanitizedBaseURL?.port, 4096)
+
+        config = OpenCodeServerConfig(baseURL: "http://100.78.83.51:4097", apiPreference: .v2)
+        coordinator.backendContextChanged(connectionID: UUID(), config: config)
+
+        for _ in 0 ..< 50 {
+            let configs = await client.configs
+            if configs.contains(where: { $0.sanitizedBaseURL?.port == 4097 }) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let configs = await client.configs
+        XCTAssertTrue(configs.contains { $0.sanitizedBaseURL?.host() == "100.78.83.51" })
+        withExtendedLifetime(coordinator) {}
+    }
+
+    @MainActor
+    func testBridgeCoordinatorWaitsForBackendConfigAfterStartup() async throws {
+        let suiteName = "OpenClientBridgeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let connectionStore = ConnectionStore(backendMode: .server, isConnected: true)
+        let client = FlakyOpenClientBridgeConnection()
+        var config: OpenCodeServerConfig?
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: connectionStore,
+            chatStore: ChatStore(),
+            configProvider: { config },
+            client: client,
+            reconnectDelay: { _ in .milliseconds(10) }
+        )
+
+        coordinator.start()
+        try await Task.sleep(for: .milliseconds(20))
+        let initialConnectCount = await client.connectCount
+        XCTAssertEqual(initialConnectCount, 0)
+
+        config = OpenCodeServerConfig(baseURL: "http://100.78.83.51:4097", apiPreference: .v2)
+        coordinator.backendContextChanged(connectionID: UUID(), config: config)
+        for _ in 0 ..< 50 {
+            if await client.connectCount > 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let configs = await client.configs
+        XCTAssertEqual(configs.first?.sanitizedBaseURL?.host(), "100.78.83.51")
+        XCTAssertEqual(configs.first?.sanitizedBaseURL?.port, 4097)
+        withExtendedLifetime(coordinator) {}
+    }
+
+    @MainActor
+    func testBridgeCoordinatorDisconnectsWhenBackendBecomesIncompatibleAndIgnoresStaleEvents() async throws {
+        let suiteName = "OpenClientBridgeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let connectionStore = ConnectionStore(backendMode: .server, isConnected: true)
+        let client = LifecycleRecordingOpenClientBridgeConnection()
+        var config: OpenCodeServerConfig? = OpenCodeServerConfig(baseURL: "http://100.78.83.51:4097", apiPreference: .v2)
+        let coordinator = OpenClientBridgeCoordinator(
+            store: store,
+            connectionStore: connectionStore,
+            chatStore: ChatStore(),
+            configProvider: { config },
+            client: client
+        )
+
+        coordinator.start()
+        for _ in 0 ..< 50 {
+            if store.phase == .connected(port: 4070) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(store.phase, .connected(port: 4070))
+
+        config = nil
+        coordinator.backendContextChanged(connectionID: UUID(), config: nil)
+        for _ in 0 ..< 50 {
+            if await client.disconnectCount > 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let disconnectCount = await client.disconnectCount
+        XCTAssertEqual(disconnectCount, 2)
+        XCTAssertEqual(store.phase, .idle)
+
+        await client.emitStaleConnectedEvent()
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(store.phase, .idle)
+        withExtendedLifetime(coordinator) {}
     }
 
     @MainActor
@@ -1539,7 +1827,7 @@ final class OpenClientBridgeTests: XCTestCase {
     }
 
     @MainActor
-    func testBridgeCoordinatorDoesNotConnectForResolvedV2Profile() async throws {
+    func testBridgeCoordinatorConnectsForResolvedV2ProfileUsingConfiguredServerPort() async throws {
         let suiteName = "OpenClientBridgeTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -1560,8 +1848,28 @@ final class OpenClientBridgeTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(50))
 
         let connectCount = await client.connectCount
-        XCTAssertEqual(connectCount, 0)
-        XCTAssertEqual(store.phase, .idle)
+        let firstConfig = await client.configs.first
+        XCTAssertEqual(connectCount, 2)
+        XCTAssertEqual(firstConfig?.sanitizedBaseURL?.port, 4097)
+        XCTAssertEqual(store.phase, .connected(port: 4070))
+
+        // Use the actual post-bootstrap transition. Merely resolving the v2
+        // profile leaves the coordinator in its permissive loading phase.
+        connectionStore.applySuccessfulV2Connection(version: "0.0.0-next-17155", healthy: true)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(connectionStore.backendMode, .serverV2)
+        XCTAssertEqual(connectionStore.connectionPhase, .idle)
+        XCTAssertEqual(store.phase, .connected(port: 4070))
+
+        coordinator.forceConnect()
+        for _ in 0 ..< 50 {
+            if await client.connectCount >= 3, store.phase == .connected(port: 4070) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let forcedConnectCount = await client.connectCount
+        XCTAssertEqual(forcedConnectCount, 3)
+        XCTAssertEqual(store.phase, .connected(port: 4070))
+        XCTAssertNil(store.errorMessage)
         withExtendedLifetime(coordinator) {}
     }
 
@@ -1835,7 +2143,12 @@ final class OpenClientBridgeTests: XCTestCase {
             webSocketURL: URL(string: "ws://100.64.0.10:4070/openclient/v1/ws")!,
             port: 4070,
             openCodePort: 4096,
-            notifications: .ready(publicOrigin: "https://notify.example.com")
+            notifications: .ready(publicOrigin: "https://notify.example.com"),
+            notificationPairingLauncher: .init(
+                version: 1,
+                cliPath: "/cache/node_modules/@openclient-ios/opencode-plugin/dist/notifications/src/cli.mjs",
+                dataDir: "/state/notify"
+            )
         )
     }
 
@@ -2041,6 +2354,16 @@ private actor RecordingNotificationSetupRequester: OpenClientNotificationSetupRe
     }
 }
 
+@MainActor
+private final class RecordingNotificationPairingRunner: OpenClientNotificationPairingRunning {
+    private(set) var launcher: OpenClientNotificationPairingLauncher?
+
+    func createPairingCode(launcher: OpenClientNotificationPairingLauncher) async throws -> String {
+        self.launcher = launcher
+        return "0123456789"
+    }
+}
+
 private actor SuspendedNotificationSetupRequester: OpenClientNotificationSetupRequesting {
     private var continuation: CheckedContinuation<Void, Never>?
     private(set) var hasRequest = false
@@ -2097,6 +2420,7 @@ private actor PassiveOpenClientBridgeConnection: OpenClientBridgeConnecting {
 
 private actor FlakyOpenClientBridgeConnection: OpenClientBridgeConnecting {
     private(set) var connectCount = 0
+    private(set) var configs: [OpenCodeServerConfig] = []
 
     func connect(
         config: OpenCodeServerConfig,
@@ -2105,6 +2429,7 @@ private actor FlakyOpenClientBridgeConnection: OpenClientBridgeConnecting {
         eventHandler: @escaping @Sendable (OpenClientBridgeClientEvent) -> Void
     ) async throws {
         connectCount += 1
+        configs.append(config)
         if connectCount == 1 {
             throw OpenClientBridgeDiscoveryError.notFound
         }
@@ -2120,6 +2445,40 @@ private actor FlakyOpenClientBridgeConnection: OpenClientBridgeConnecting {
     func updateSession(_ sessionID: String?) async {}
 
     func disconnect() async {}
+}
+
+private actor LifecycleRecordingOpenClientBridgeConnection: OpenClientBridgeConnecting {
+    private(set) var disconnectCount = 0
+    private var eventHandler: (@Sendable (OpenClientBridgeClientEvent) -> Void)?
+
+    func connect(
+        config: OpenCodeServerConfig,
+        registration: OpenClientBridgeRegistration,
+        initialSessionID: String?,
+        eventHandler: @escaping @Sendable (OpenClientBridgeClientEvent) -> Void
+    ) async throws {
+        self.eventHandler = eventHandler
+        eventHandler(.connected(Self.endpoint))
+    }
+
+    func updateSession(_ sessionID: String?) async {}
+
+    func disconnect() async {
+        disconnectCount += 1
+    }
+
+    func emitStaleConnectedEvent() {
+        eventHandler?(.connected(Self.endpoint))
+    }
+
+    private static var endpoint: OpenClientBridgeEndpoint {
+        OpenClientBridgeEndpoint(
+            healthURL: URL(string: "http://100.78.83.51:4070/openclient/v1/health")!,
+            webSocketURL: URL(string: "ws://100.78.83.51:4070/openclient/v1/ws")!,
+            port: 4070,
+            openCodePort: 4097
+        )
+    }
 }
 
 private actor DisconnectingOpenClientBridgeConnection: OpenClientBridgeConnecting {

@@ -30,6 +30,7 @@ struct OpenClientNotificationSetupOwner: Equatable, Sendable {
 struct OpenClientNotificationOpenRequest: Equatable, Sendable {
     let requestID: UUID
     let url: URL
+    let clipboardPayload: String
 }
 
 @MainActor

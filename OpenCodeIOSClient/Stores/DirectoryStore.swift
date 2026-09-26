@@ -64,6 +64,35 @@ final class DirectoryStoreRegistry: ObservableObject {
 
     var allStores: [DirectoryStore] { Array(storesByKey.values) }
 
+    func ownerStoresBySessionID() -> [String: DirectoryStore] {
+        var owners: [String: DirectoryStore] = [:]
+        for store in storesByKey.values where store !== activeStore {
+            for sessionID in sessionStateIDs(in: store) where owners[sessionID] == nil {
+                owners[sessionID] = store
+            }
+        }
+        for sessionID in sessionStateIDs(in: activeStore) where owners[sessionID] == nil {
+            owners[sessionID] = activeStore
+        }
+        let activePreferredIDs = Set(activeStore.sessions.map(\.id))
+            .union(activeStore.syncState.messagesBySessionID.keys)
+            .union(activeStore.selectedSession.map { [$0.id] } ?? [])
+        for sessionID in activePreferredIDs {
+            owners[sessionID] = activeStore
+        }
+        return owners
+    }
+
+    private func sessionStateIDs(in store: DirectoryStore) -> Set<String> {
+        Set(store.sessions.map(\.id))
+            .union(store.syncState.messagesBySessionID.keys)
+            .union(store.syncState.todosBySessionID.keys)
+            .union(store.syncState.permissionsBySessionID.keys)
+            .union(store.syncState.questionsBySessionID.keys)
+            .union(store.sessionStatuses.keys)
+            .union(store.selectedSession.map { [$0.id] } ?? [])
+    }
+
     func targetStore(forV2Event event: OpenCodeV2ManagedEvent) -> DirectoryStore {
         if let location = event.routingLocation {
             if let id = event.sessionID, let owner = knownV2Owner(sessionID: id, directory: location.directory, workspaceID: location.workspaceID) {
@@ -225,7 +254,8 @@ final class DirectoryStoreRegistry: ObservableObject {
             || activeStore.sessions.contains(where: { $0.id == sessionID }) {
             return activeStore
         }
-        return storesByKey.values.first { containsSessionState(sessionID, in: $0) }
+        return storesByKey.values.first { $0 !== activeStore && containsSessionState(sessionID, in: $0) }
+            ?? (containsSessionState(sessionID, in: activeStore) ? activeStore : nil)
     }
 
     func session(matching sessionID: String) -> OpenCodeSession? {
@@ -352,6 +382,8 @@ final class DirectoryStore: ObservableObject {
     let syncStore: DirectorySyncStore
     private(set) var permissionRevision: UInt = 0
     private(set) var questionRevision: UInt = 0
+    private var permissionRevisionsBySessionID: [String: UInt] = [:]
+    private var questionRevisionsBySessionID: [String: UInt] = [:]
     private(set) var statusRevision: UInt = 0
     private var statusRevisionsBySessionID: [String: UInt] = [:]
     private(set) var v2SessionRevision: UInt = 0
@@ -411,6 +443,8 @@ final class DirectoryStore: ObservableObject {
         syncStore.state = OpenCodeDirectorySyncState()
         permissionRevision = 0
         questionRevision = 0
+        permissionRevisionsBySessionID = [:]
+        questionRevisionsBySessionID = [:]
         statusRevision = 0
         statusRevisionsBySessionID = [:]
         v2SessionRevision = 0
@@ -783,6 +817,7 @@ final class DirectoryStore: ObservableObject {
                 tool: source.map { OpenCodePermissionTool(messageID: $0["messageID"]?.stringValue, callID: $0["id"]?.stringValue, name: nil) }
             )
             permissionRevision &+= 1
+            permissionRevisionsBySessionID[sessionID] = permissionRevision
             var requests = syncState.permissionsBySessionID[sessionID] ?? []
             requests.removeAll { $0.id == id }
             requests.append(permission)
@@ -810,6 +845,8 @@ final class DirectoryStore: ObservableObject {
         v2SessionRevision &+= 1
         permissionRevision &+= 1
         questionRevision &+= 1
+        permissionRevisionsBySessionID[sessionID] = permissionRevision
+        questionRevisionsBySessionID[sessionID] = questionRevision
         statusRevision &+= 1
         statusRevisionsBySessionID[sessionID] = statusRevision
         sessions.removeAll { $0.id == sessionID }
@@ -848,20 +885,32 @@ final class DirectoryStore: ObservableObject {
         sessionID: String, permissions: [OpenCodePermission], forms: [OpenCodeV2Form],
         permissionRevisionAtRequestStart: UInt, questionRevisionAtRequestStart: UInt
     ) {
-        if permissionRevision == permissionRevisionAtRequestStart {
+        if permissionRevisionsBySessionID[sessionID, default: 0] <= permissionRevisionAtRequestStart {
+            let scoped = permissions.filter { $0.sessionID == sessionID }
             permissionRevision &+= 1
-            syncStore.state.permissionsBySessionID[sessionID] = permissions.filter { $0.sessionID == sessionID }
+            permissionRevisionsBySessionID[sessionID] = permissionRevision
+            if (syncStore.state.permissionsBySessionID[sessionID] ?? []) != scoped {
+                syncStore.state.permissionsBySessionID[sessionID] = scoped.isEmpty ? nil : scoped
+            }
         }
-        if questionRevision == questionRevisionAtRequestStart {
-            questionRevision &+= 1
+        if questionRevisionsBySessionID[sessionID, default: 0] <= questionRevisionAtRequestStart {
             let scoped = forms.filter { $0.sessionID == sessionID }
-            sessionFormStore.replacePendingForms(scoped.map(\.backendForm), sessionID: sessionID)
-            syncStore.state.questionsBySessionID[sessionID] = nil
+            let backendForms = scoped.map(\.backendForm)
+            let existingForms = sessionFormStore.forms.filter { $0.key.sessionID == sessionID }
+            let nextForms = Dictionary(backendForms.map { ($0.key, $0) }, uniquingKeysWith: { _, latest in latest })
+            let hasLegacyQuestions = syncStore.state.questionsBySessionID[sessionID] != nil
+            questionRevision &+= 1
+            questionRevisionsBySessionID[sessionID] = questionRevision
+            if existingForms != nextForms || hasLegacyQuestions {
+                sessionFormStore.replacePendingForms(backendForms, sessionID: sessionID)
+                if hasLegacyQuestions { syncStore.state.questionsBySessionID[sessionID] = nil }
+            }
         }
     }
 
     func removeV2Permission(id: String, sessionID: String) {
         permissionRevision &+= 1
+        permissionRevisionsBySessionID[sessionID] = permissionRevision
         guard var requests = syncStore.state.permissionsBySessionID[sessionID] else { return }
         requests.removeAll { $0.id == id }
         syncStore.state.permissionsBySessionID[sessionID] = requests.isEmpty ? nil : requests
@@ -869,6 +918,7 @@ final class DirectoryStore: ObservableObject {
 
     func removeV2Question(id: String, sessionID: String) {
         questionRevision &+= 1
+        questionRevisionsBySessionID[sessionID] = questionRevision
         sessionFormStore.settle(.init(sessionID: sessionID, formID: id))
         guard var requests = syncStore.state.questionsBySessionID[sessionID] else { return }
         requests.removeAll { $0.id == id }
@@ -879,12 +929,14 @@ final class DirectoryStore: ObservableObject {
     func applySessionForms(_ forms: [BackendForm], sessionID: String, ifUnchangedSince revision: UInt) {
         guard sessionFormStore.revision == revision else { return }
         questionRevision &+= 1
+        questionRevisionsBySessionID[sessionID] = questionRevision
         sessionFormStore.replacePendingForms(forms, sessionID: sessionID, ifUnchangedSince: revision)
         syncStore.state.questionsBySessionID[sessionID] = nil
     }
 
     func applySessionFormCreated(_ form: BackendForm) {
         questionRevision &+= 1
+        questionRevisionsBySessionID[form.sessionID] = questionRevision
         sessionFormStore.upsert(form)
         syncStore.state.questionsBySessionID[form.sessionID]?.removeAll { $0.id == form.id }
     }
@@ -939,10 +991,18 @@ final class DirectoryStore: ObservableObject {
 
     func recordInteractionEvent(_ event: OpenCodeTypedEvent) {
         switch event {
-        case .permissionAsked, .permissionReplied:
+        case .permissionAsked(let permission):
             permissionRevision &+= 1
-        case .questionAsked, .questionReplied, .questionRejected:
+            permissionRevisionsBySessionID[permission.sessionID] = permissionRevision
+        case .permissionReplied(let sessionID, _, _):
+            permissionRevision &+= 1
+            permissionRevisionsBySessionID[sessionID] = permissionRevision
+        case .questionAsked(let question):
             questionRevision &+= 1
+            questionRevisionsBySessionID[question.sessionID] = questionRevision
+        case .questionReplied(let sessionID, _), .questionRejected(let sessionID, _):
+            questionRevision &+= 1
+            questionRevisionsBySessionID[sessionID] = questionRevision
         default:
             break
         }

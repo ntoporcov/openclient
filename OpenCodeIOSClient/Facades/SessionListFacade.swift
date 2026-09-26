@@ -182,6 +182,18 @@ final class SessionListFacade: ObservableObject {
         let isLoading: Bool
     }
 
+    private struct DirectoryPresentationMetadata: Equatable {
+        let sessions: [OpenCodeSession]
+        let selectedSessionID: String?
+        let isLoadingSessions: Bool
+        let statuses: [String: String]
+        let syncStatuses: [String: String]
+        let todos: [String: [OpenCodeTodo]]
+        let permissions: [String: [OpenCodePermission]]
+        let questions: [String: [OpenCodeQuestionRequest]]
+        let forms: [BackendFormKey: BackendForm]
+    }
+
     private unowned let viewModel: AppViewModel
     private weak var liveActivityBackgroundBridge: LiveActivityBackgroundBridge?
     struct WorktreeRemovalConfirmation: Identifiable {
@@ -231,10 +243,16 @@ final class SessionListFacade: ObservableObject {
     private var observations: Set<AnyCancellable> = []
     private var activeDirectoryObservations: Set<AnyCancellable> = []
     private var snapshotRefreshTask: Task<Void, Never>?
+    private var snapshotRefreshIsTranscriptOnly = false
+    private var previewRefreshTask: Task<Void, Never>?
+    private var lastSnapshotRefresh = ContinuousClock.now
+    private var presentationMetadata: [ObjectIdentifier: DirectoryPresentationMetadata] = [:]
+    private(set) var snapshotBuildCount = 0
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
         snapshot = makeSnapshot()
+        presentationMetadata = makePresentationMetadata()
         Publishers.MergeMany([
             viewModel.sessionListStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.projectActionStore.objectWillChange.eraseToAnyPublisher(),
@@ -274,6 +292,7 @@ final class SessionListFacade: ObservableObject {
     }
 
     private func makeSnapshot() -> Snapshot {
+        snapshotBuildCount += 1
         var sessions: [OpenCodeSession] = []
         var sessionIndexByID: [String: Int] = [:]
         for session in viewModel.sessions {
@@ -289,13 +308,23 @@ final class SessionListFacade: ObservableObject {
         let showsWorkspaces = !isReadOnly && viewModel.backendConnection?.worktrees != nil
             && viewModel.isProjectWorkspacesEnabled && viewModel.hasGitProject
         let workspaceDirectories = showsWorkspaces ? viewModel.workspaceDirectories() : []
+        let ownerBySessionID = viewModel.directoryStoreRegistry.ownerStoresBySessionID()
+        var canonicalSessionByID: [String: OpenCodeSession] = [:]
+        for store in viewModel.directoryStoreRegistry.allStores where store !== viewModel.directoryStoreRegistry.activeStore {
+            for session in store.sessions where canonicalSessionByID[session.id] == nil {
+                canonicalSessionByID[session.id] = session
+            }
+        }
+        for session in viewModel.directoryStoreRegistry.activeStore.sessions {
+            canonicalSessionByID[session.id] = session
+        }
         var sessionsByID: [String: OpenCodeSession] = [:]
         for session in sessions {
             sessionsByID[session.id] = session
         }
         for directory in workspaceDirectories {
             for session in viewModel.workspaceSessionsByDirectory[directory]?.rootSessions ?? [] where !viewModel.isActionSession(session) {
-                sessionsByID[session.id] = viewModel.directoryStoreRegistry.session(matching: session.id) ?? session
+                sessionsByID[session.id] = canonicalSessionByID[session.id] ?? session
             }
         }
         let permissionRootIDs = SessionInteractionStore.sessionTreeRootIDsWithRequests(
@@ -316,15 +345,18 @@ final class SessionListFacade: ObservableObject {
                     for: $0,
                     showsPinnedBadge: true,
                     workspaceOverline: showsWorkspaces ? viewModel.workspaceDisplayName(for: $0.directory) : nil,
-                    hasPermissionRequest: showsWorkspaces ? nil : permissionRootIDs.contains($0.id)
+                    hasPermissionRequest: showsWorkspaces ? nil : permissionRootIDs.contains($0.id),
+                    ownerBySessionID: ownerBySessionID
                 )
             },
             unpinnedRows: unpinnedSessions.map {
-                rowSnapshot(for: $0, hasPermissionRequest: permissionRootIDs.contains($0.id))
+                rowSnapshot(for: $0, hasPermissionRequest: permissionRootIDs.contains($0.id),
+                    ownerBySessionID: ownerBySessionID)
             },
             showsWorkspaces: showsWorkspaces,
             workspaceSections: showsWorkspaces
-                ? workspaceSections(directories: workspaceDirectories, excluding: pinnedIDSet)
+                ? workspaceSections(directories: workspaceDirectories, excluding: pinnedIDSet,
+                    ownerBySessionID: ownerBySessionID)
                 : [],
             hasMoreSessions: !showsWorkspaces && viewModel.directoryStore.hasMoreSessions,
             errorMessage: isScreenshotScene ? nil : viewModel.errorMessage,
@@ -346,17 +378,61 @@ final class SessionListFacade: ObservableObject {
         )
     }
 
-    private func scheduleSnapshotRefresh() {
-        guard snapshotRefreshTask == nil else { return }
-        snapshotRefreshTask = Task { @MainActor [weak self] in
-            await Task.yield()
-            guard let self, !Task.isCancelled else { return }
-            let nextSnapshot = makeSnapshot()
-            if snapshot != nextSnapshot {
-                snapshot = nextSnapshot
-            }
+    private func scheduleSnapshotRefresh(throttlesTranscriptOnly: Bool = false) {
+        if snapshotRefreshTask != nil {
+            guard !throttlesTranscriptOnly, snapshotRefreshIsTranscriptOnly else { return }
+            snapshotRefreshTask?.cancel()
             snapshotRefreshTask = nil
         }
+        snapshotRefreshIsTranscriptOnly = throttlesTranscriptOnly
+        snapshotRefreshTask = Task { @MainActor [weak self] in
+            if throttlesTranscriptOnly {
+                try? await Task.sleep(for: .milliseconds(50))
+            } else {
+                await Task.yield()
+            }
+            guard let self, !Task.isCancelled else { return }
+            snapshotRefreshTask = nil
+            snapshotRefreshIsTranscriptOnly = false
+            let metadata = makePresentationMetadata()
+            let metadataChanged = metadata != presentationMetadata
+            let remaining = Duration.milliseconds(200) - lastSnapshotRefresh.duration(to: .now)
+            if !throttlesTranscriptOnly || metadataChanged || remaining <= .zero {
+                refreshSnapshot(metadata: metadata)
+            } else if previewRefreshTask == nil {
+                previewRefreshTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: remaining)
+                    guard let self, !Task.isCancelled else { return }
+                    previewRefreshTask = nil
+                    refreshSnapshot()
+                }
+            }
+        }
+    }
+
+    private func makePresentationMetadata() -> [ObjectIdentifier: DirectoryPresentationMetadata] {
+        Dictionary(uniqueKeysWithValues: viewModel.directoryStoreRegistry.allStores.map { store in
+            (ObjectIdentifier(store), DirectoryPresentationMetadata(
+                sessions: store.sessions,
+                selectedSessionID: store.selectedSession?.id,
+                isLoadingSessions: store.isLoadingSessions,
+                statuses: store.sessionStatuses,
+                syncStatuses: store.syncState.sessionStatusesBySessionID,
+                todos: store.syncState.todosBySessionID,
+                permissions: store.syncState.permissionsBySessionID,
+                questions: store.syncState.questionsBySessionID,
+                forms: store.sessionFormStore.forms
+            ))
+        })
+    }
+
+    private func refreshSnapshot(metadata: [ObjectIdentifier: DirectoryPresentationMetadata]? = nil) {
+        previewRefreshTask?.cancel()
+        previewRefreshTask = nil
+        lastSnapshotRefresh = .now
+        presentationMetadata = metadata ?? makePresentationMetadata()
+        let nextSnapshot = makeSnapshot()
+        if snapshot != nextSnapshot { snapshot = nextSnapshot }
     }
 
     var remainingFreePromptsToday: Int { viewModel.commerceFacade.remainingFreePromptsToday }
@@ -607,11 +683,14 @@ final class SessionListFacade: ObservableObject {
     }
 
     /// Called after the shared pipeline changes an inactive workspace's canonical session store.
-    func invalidateWorkspaceSnapshot() { scheduleSnapshotRefresh() }
+    func invalidateWorkspaceSnapshot(transcriptOnly: Bool = false) {
+        scheduleSnapshotRefresh(throttlesTranscriptOnly: transcriptOnly)
+    }
 
     private func workspaceSections(
         directories: [String],
-        excluding pinnedIDSet: Set<String>
+        excluding pinnedIDSet: Set<String>,
+        ownerBySessionID: [String: DirectoryStore]
     ) -> [WorkspaceSection] {
         directories.map { directory in
             let key = viewModel.workspacePageKey(directory: directory)
@@ -630,7 +709,7 @@ final class SessionListFacade: ObservableObject {
                 directory: directory,
                 title: viewModel.workspaceDisplayName(for: directory) ?? URL(fileURLWithPath: directory).lastPathComponent,
                 isMain: viewModel.currentProject.map { viewModel.workspaceKey($0.worktree) == viewModel.workspaceKey(directory) } ?? false,
-                rows: sessions.map { rowSnapshot(for: $0) },
+                rows: sessions.map { rowSnapshot(for: $0, ownerBySessionID: ownerBySessionID) },
                 isLoading: state.isLoading,
                 hasMore: state.hasMore,
                 operation: viewModel.sessionListStore.workspaceOperation(for: directory),
@@ -644,14 +723,16 @@ final class SessionListFacade: ObservableObject {
         for session: OpenCodeSession,
         showsPinnedBadge: Bool = false,
         workspaceOverline: String? = nil,
-        hasPermissionRequest: Bool? = nil
+        hasPermissionRequest: Bool? = nil,
+        ownerBySessionID: [String: DirectoryStore]
     ) -> RowSnapshot {
         let generatedTitle = session.defaultGeneratedTitleDisplayName
         let showsActivity = viewModel.appCustomizationStore.sessionCardStyle == .activity
         let isBusy = viewModel.sessionStatuses[session.id] == "busy"
-        let owner = viewModel.directoryStoreRegistry.ownerStore(forSessionID: session.id)
+        let owner = ownerBySessionID[session.id]
         let preview = viewModel.sessionPreviews[session.id]
-        let messages = showsActivity || preview == nil
+        let prefersCanonicalPreview = viewModel.selectedSession?.id == session.id
+        let messages = showsActivity || preview == nil || prefersCanonicalPreview
             ? (owner?.syncState.messageEnvelopes(forSessionID: session.id) ?? []).filter { $0.info.sessionID == session.id }
             : []
         let status = owner?.sessionStatuses[session.id] ?? owner?.syncState.sessionStatusesBySessionID[session.id]
@@ -672,7 +753,7 @@ final class SessionListFacade: ObservableObject {
             showsPinnedBadge: showsPinnedBadge,
             workspaceOverline: workspaceOverline,
             style: .regular,
-            preview: preview ?? (messages.isEmpty ? nil : viewModel.buildSessionPreview(from: messages)),
+            preview: messages.isEmpty ? preview : viewModel.buildSessionPreview(from: messages),
             isBusy: isBusy,
             hasLiveActivity: viewModel.isLiveActivityActive(for: session),
             hasDraft: viewModel.hasMessageDraft(for: session),
@@ -772,7 +853,7 @@ final class SessionListFacade: ObservableObject {
         Publishers.Merge(store.objectWillChange, store.syncStore.objectWillChange)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.scheduleSnapshotRefresh()
+                self?.scheduleSnapshotRefresh(throttlesTranscriptOnly: true)
             }
             .store(in: &activeDirectoryObservations)
     }

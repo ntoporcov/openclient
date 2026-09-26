@@ -128,14 +128,15 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             XCTAssertTrue(done.waitForExistence(timeout: 5))
             let scroll = app.scrollViews.firstMatch
             let keys = [
-                "More control, at a glance",
-                "Choose your composer",
-                "Usage, without leaving OpenClient",
-                "Home Screen widgets",
+                "Private push, straight to you",
+                "Web Push, without the middleman",
+                "HOW THE PWA FITS IN",
+                "OpenCode v2, steadier",
             ]
-            XCTAssertFalse(app.descendants(matching: .any)["new-features.notifications-section"].exists)
+            XCTAssertTrue(app.descendants(matching: .any)["new-features.notifications-section"].exists)
+            XCTAssertTrue(app.descendants(matching: .any)["new-features.notification-flow"].exists)
             XCTAssertFalse(app.descendants(matching: .any)["new-features.notification-setup"].exists)
-            XCTAssertFalse(app.descendants(matching: .any)["new-features.notification-guide"].exists)
+            XCTAssertTrue(app.descendants(matching: .any)["new-features.notification-guide"].exists)
             let initial = XCTAttachment(screenshot: app.screenshot())
             initial.name = "\(profile)-hero"
             initial.lifetime = .keepAlways
@@ -179,7 +180,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
     }
 
     @MainActor
-    func testLatestAnnouncementComposerAndOpenAISetupStayInsideSheet() {
+    func testLatestAnnouncementNotificationFlowStaysInsideSheet() {
         let app = XCUIApplication()
         app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "connection"
         app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "1"
@@ -193,56 +194,28 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         XCTAssertTrue(entry.isHittable)
         entry.tap()
 
-        let composerPicker = app.segmentedControls["new-features.composer-style"]
-        let isRunningOniPad = UIDevice.current.userInterfaceIdiom == .pad
-            || environment["SIMULATOR_DEVICE_NAME"]?.localizedCaseInsensitiveContains("iPad") == true
-        if !isRunningOniPad {
-            XCTAssertTrue(composerPicker.waitForExistence(timeout: 5))
-            let initialStyle = composerPicker.buttons.allElementsBoundByIndex.first(where: \.isSelected)?.label
-            composerPicker.buttons["Assistant"].tap()
-            let preview = app.descendants(matching: .any)["chat.appearance.composer-preview"]
-            XCTAssertTrue(preview.waitForExistence(timeout: 5))
-            XCTAssertTrue(preview.label.contains("Assistant composer preview"))
-            attachScreenshot(named: "announcement-assistant-preview")
-            composerPicker.buttons["Messenger"].tap()
-            XCTAssertTrue(preview.label.contains("Messenger composer preview"))
-            attachScreenshot(named: "announcement-messenger-preview")
-            if let initialStyle { composerPicker.buttons[initialStyle].tap() }
-        } else {
-            XCTAssertFalse(composerPicker.exists)
-            XCTAssertFalse(app.descendants(matching: .any)["new-features.composer-section"].exists)
-        }
-
-        let widgetGallery = app.descendants(matching: .any)["new-features.usage-widget-gallery"]
         let done = app.buttons["new-features.continue"]
         let scroll = app.scrollViews.firstMatch
-        XCTAssertTrue(widgetGallery.waitForExistence(timeout: 5))
+        let flow = app.descendants(matching: .any)["new-features.notification-flow"]
+        XCTAssertTrue(flow.waitForExistence(timeout: 5))
         // XCTest can report content behind the pinned footer as hittable.
-        for _ in 0..<10 where !widgetGallery.isHittable || widgetGallery.frame.maxY > done.frame.minY - 12 {
+        for _ in 0..<10 where !flow.isHittable || flow.frame.maxY > done.frame.minY - 12 {
             scroll.swipeUp()
         }
-        XCTAssertLessThan(widgetGallery.frame.maxY, done.frame.minY)
-        XCTAssertTrue(app.descendants(matching: .any)["new-features.usage-widget-bars"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["new-features.usage-widget-rings"].exists)
-        attachScreenshot(named: "announcement-usage-widget-previews")
+        XCTAssertLessThan(flow.frame.maxY, done.frame.minY)
+        XCTAssertTrue(flow.label.contains("No OpenClient cloud"))
+        attachScreenshot(named: "announcement-private-web-push-flow")
 
-        let setup = app.buttons["new-features.openai-usage-setup"]
-        for _ in 0..<10 where !setup.isHittable || setup.frame.maxY > done.frame.minY - 12 {
+        let guide = app.buttons["new-features.notification-guide"]
+        for _ in 0..<12 where !guide.isHittable || guide.frame.maxY > done.frame.minY - 12 {
             scroll.swipeUp()
         }
-        XCTAssertTrue(setup.isHittable)
-        XCTAssertLessThan(setup.frame.maxY, done.frame.minY)
-        setup.tap()
-
-        XCTAssertTrue(app.navigationBars["OpenAI"].waitForExistence(timeout: 5))
-        attachScreenshot(named: "announcement-openai-setup")
-        XCTAssertTrue(app.buttons["new-features.continue"].exists == false)
-        app.navigationBars["OpenAI"].buttons.firstMatch.tap()
-         XCTAssertTrue(app.buttons["new-features.continue"].waitForExistence(timeout: 5))
-     }
+        XCTAssertTrue(guide.isHittable)
+        XCTAssertLessThan(guide.frame.maxY, done.frame.minY)
+    }
 
     @MainActor
-    func testLatestAnnouncementWidgetPreviewsBrazilianPortugueseAXXXLLayout() {
+    func testLatestAnnouncementWebPushBrazilianPortugueseAXXXLLayout() {
         let app = XCUIApplication()
         app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "connection"
         app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "1"
@@ -260,51 +233,33 @@ final class OpenCodeIOSClientUITests: XCTestCase {
 
         let scroll = app.scrollViews.firstMatch
         let done = app.buttons["new-features.continue"]
-        let gallery = app.descendants(matching: .any)["new-features.usage-widget-gallery"]
-        let bars = app.descendants(matching: .any)["new-features.usage-widget-bars"]
-        let rings = app.descendants(matching: .any)["new-features.usage-widget-rings"]
-        XCTAssertTrue(gallery.waitForExistence(timeout: 5))
-        XCTAssertTrue(bars.waitForExistence(timeout: 5))
-        XCTAssertTrue(rings.waitForExistence(timeout: 5))
-        let initialBarsFrame = bars.frame
-        let initialRingsFrame = rings.frame
+        let flow = app.descendants(matching: .any)["new-features.notification-flow"]
+        XCTAssertTrue(flow.waitForExistence(timeout: 5))
 
-        func reachPreview(_ preview: XCUIElement, named name: String) {
-            for _ in 0..<16 {
-                let previewFrame = preview.frame
-                let scrollFrame = scroll.frame
-                let footerTop = done.frame.minY - 12
-                let horizontallyInsideScroll = previewFrame.minX >= scrollFrame.minX
-                    && previewFrame.maxX <= scrollFrame.maxX
-                if preview.isHittable && previewFrame.maxY <= footerTop && horizontallyInsideScroll {
-                    break
-                }
-
-                if previewFrame.minY < scrollFrame.minY {
-                    let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
-                    let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
-                    start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
-                } else {
-                    scroll.swipeUp(velocity: .slow)
-                }
+        for _ in 0..<16 {
+            let flowFrame = flow.frame
+            let scrollFrame = scroll.frame
+            let footerTop = done.frame.minY - 12
+            let horizontallyInsideScroll = flowFrame.minX >= scrollFrame.minX
+                && flowFrame.maxX <= scrollFrame.maxX
+            if flow.isHittable && flowFrame.maxY <= footerTop && horizontallyInsideScroll {
+                break
             }
 
-            XCTAssertTrue(preview.isHittable, "Expected reachable \(name) preview")
-            XCTAssertLessThanOrEqual(preview.frame.maxY, done.frame.minY - 12,
-                                     "Expected \(name) preview above the pinned Continue button")
-            XCTAssertGreaterThanOrEqual(preview.frame.minX, scroll.frame.minX,
-                                        "Expected \(name) preview inside the scroll view horizontally")
-            XCTAssertLessThanOrEqual(preview.frame.maxX, scroll.frame.maxX,
-                                     "Expected \(name) preview inside the scroll view horizontally")
-            attachScreenshot(named: "announcement-pt-BR-AXXXL-\(name)")
+            if flowFrame.minY < scrollFrame.minY {
+                let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
+                let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
+            } else {
+                scroll.swipeUp(velocity: .slow)
+            }
         }
 
-        reachPreview(bars, named: "bars")
-        reachPreview(rings, named: "rings")
-        if initialBarsFrame != .zero && initialRingsFrame != .zero {
-            XCTAssertLessThanOrEqual(initialBarsFrame.maxY, initialRingsFrame.minY,
-                                     "Expected usage bars to appear above usage rings")
-        }
+        XCTAssertTrue(flow.isHittable, "Expected reachable Web Push flow")
+        XCTAssertLessThanOrEqual(flow.frame.maxY, done.frame.minY - 12)
+        XCTAssertGreaterThanOrEqual(flow.frame.minX, scroll.frame.minX)
+        XCTAssertLessThanOrEqual(flow.frame.maxX, scroll.frame.maxX)
+        attachScreenshot(named: "announcement-pt-BR-AXXXL-web-push")
     }
 
     @MainActor
@@ -1053,11 +1008,11 @@ final class OpenCodeIOSClientUITests: XCTestCase {
     @MainActor
     func testV2GlobalSessionSmokeAgainstIsolatedBackend() async throws {
         continueAfterFailure = false
-        guard let urlString = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_BASE_URL"),
-              let username = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_USERNAME"),
-              let password = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_PASSWORD") else {
-            throw XCTSkip("Set OPENCODE_V2_TEST_BASE_URL, OPENCODE_V2_TEST_USERNAME, and OPENCODE_V2_TEST_PASSWORD for the isolated v2 smoke test")
-        }
+        let fixture = try DeletionFixture.loadOwnedManifest(legacy: false)
+        try await fixture.verify()
+        let urlString = fixture.baseURL
+        let username = fixture.username
+        let password = fixture.password
         let url = try XCTUnwrap(URL(string: urlString))
         // Never fall back to the normal local backend or allow a user server as a target.
         guard url.scheme == "http", url.host == "127.0.0.1", url.port == 14097,
@@ -1070,8 +1025,8 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let backend = V2SmokeBackend(baseURL: url, username: username, password: password)
         let location = try await backend.request("api/location")
         let project = try XCTUnwrap(location["project"] as? [String: Any])
-        XCTAssertEqual(project["id"] as? String, "global", "Start the isolated server in a non-git workspace")
         let directory = try XCTUnwrap(location["directory"] as? String)
+        XCTAssertEqual(URL(fileURLWithPath: project["directory"] as? String ?? "").resolvingSymlinksInPath(), fixture.workspace)
         XCTAssertFalse(directory.isEmpty)
         XCTAssertNotEqual(directory, "/", "Global session creation must resolve a concrete workspace")
 
@@ -1245,11 +1200,11 @@ final class OpenCodeIOSClientUITests: XCTestCase {
 
     @MainActor
     func testV2ConfigurationAndTerminalSmokeAgainstIsolatedBackend() async throws {
-        guard let urlString = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_BASE_URL"),
-              let username = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_USERNAME"),
-              let password = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_PASSWORD") else {
-            throw XCTSkip("Set OPENCODE_V2_TEST_BASE_URL/USERNAME/PASSWORD for the isolated v2 feature smoke test")
-        }
+        let fixture = try DeletionFixture.loadOwnedManifest(legacy: false)
+        try await fixture.verify()
+        let urlString = fixture.baseURL
+        let username = fixture.username
+        let password = fixture.password
         let url = try XCTUnwrap(URL(string: urlString))
         guard url.scheme == "http", url.host == "127.0.0.1", url.port == 14097,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
@@ -1259,12 +1214,10 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let backend = V2SmokeBackend(baseURL: url, username: username, password: password)
         let location = try await backend.request("api/location")
         let directory = try XCTUnwrap(location["directory"] as? String)
-        let root = "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode/pass2-VwCj6l"
         let standardized = URL(fileURLWithPath: directory).standardizedFileURL.path
-        let normalized = standardized.hasPrefix("/private/var/") ? String(standardized.dropFirst(8)) : standardized
-        guard (location["project"] as? [String: Any])?["id"] as? String == "global",
-              normalized == root || normalized.hasPrefix(root + "/") else {
-            throw NSError(domain: "V2UISmoke", code: 1, userInfo: [NSLocalizedDescriptionKey: "Refusing a server outside the dedicated pass2 temporary root"])
+        let expected = fixture.workspace.standardizedFileURL.path
+        guard standardized == expected || URL(fileURLWithPath: standardized).resolvingSymlinksInPath().path == fixture.workspace.path else {
+            throw NSError(domain: "V2UISmoke", code: 1, userInfo: [NSLocalizedDescriptionKey: "Refusing a server outside the manifest-owned v2 fixture"])
         }
         let query = [URLQueryItem(name: "location[directory]", value: directory)]
         let integrationResponse = try await backend.request("api/integration", query: query)
@@ -1406,7 +1359,11 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         }
         // Logos are intentionally hidden from accessibility; retain the shared row rendering for visual review.
         attachScreenshot(named: "v2-feature-add-provider-popular-logos")
-        let otherProvider = try XCTUnwrap(integrations.first { $0["id"] as? String == "302ai" }, "The isolated catalog must contain Other provider 302.AI")
+        let popularProviderIDs: Set<String> = ["opencode", "opencode-go", "anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
+        let otherProvider = try XCTUnwrap(integrations.first {
+            guard let id = $0["id"] as? String else { return false }
+            return !popularProviderIDs.contains(id)
+        }, "The isolated catalog must contain at least one provider in Other")
         let otherName = try XCTUnwrap(otherProvider["name"] as? String)
         let providerSearch = app.searchFields.firstMatch
         let providerList = app.collectionViews["configurations.v2.providers"]
@@ -2026,7 +1983,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         try await waitForV2Smoke(in: app, "Expected the active chat app to enter background") {
             app.state == .runningBackground || app.state == .runningBackgroundSuspended
         }
-        // next-17155 import rejects existing IDs (409), and messages have no update
+        // v2.0.16 import rejects existing IDs (409), and messages have no update
         // route. Change only the HTTP fixture, never delete/reimport the active session.
         await proxy.replaceAssistant(with: replacement)
         app.activate()
@@ -2254,7 +2211,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         add(hierarchy)
         let after = try await backend.request("api/session/\(fixture.sessionID)/message")
         XCTAssertTrue(NSDictionary(dictionary: after).isEqual(to: before))
-        let pending = try await backend.request("api/session/\(fixture.sessionID)/pending")
+        let pending = try await backend.request("api/session/\(fixture.sessionID)/inbox")
         XCTAssertEqual((pending["data"] as? [[String: Any]])?.count, 0, "ActivityKit controls must not submit model input")
     }
 
@@ -2468,7 +2425,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let before = try await backend.request("api/session/\(fixture.sessionID)/message")
         let beforeMessages = try XCTUnwrap(before["data"] as? [[String: Any]])
         XCTAssertEqual(beforeMessages.count, 2)
-        let beforePending = try await backend.request("api/session/\(fixture.sessionID)/pending")
+        let beforePending = try await backend.request("api/session/\(fixture.sessionID)/inbox")
         XCTAssertEqual((beforePending["data"] as? [[String: Any]])?.count, 0)
         try await deliverV2WarmURL(try XCTUnwrap(link.url), in: app)
         let rejected = app.staticTexts["Open the app to reconnect the server used by this widget."].firstMatch
@@ -2494,7 +2451,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let afterMessages = try XCTUnwrap(after["data"] as? [[String: Any]])
         XCTAssertEqual(afterMessages.compactMap { $0["id"] as? String }, beforeMessages.compactMap { $0["id"] as? String })
         XCTAssertTrue(NSArray(array: afterMessages).isEqual(to: beforeMessages), "Widget session opens must not mutate the transcript")
-        let afterPending = try await backend.request("api/session/\(fixture.sessionID)/pending")
+        let afterPending = try await backend.request("api/session/\(fixture.sessionID)/inbox")
         XCTAssertEqual((afterPending["data"] as? [[String: Any]])?.count, 0, "Opening a widget session must not submit a prompt")
         XCTAssertFalse(app.navigationBars["New Session"].exists)
         attachScreenshot(named: "v2-pass7-widget-canonical-session-opened-without-send")
@@ -2787,9 +2744,9 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         addTeardownBlock { @MainActor in
             app.terminate()
             for id in ids {
-                let result = try await backend.request("api/session/global/form/\(id)/state", query: query, allowsNotFound: true)
-                if (result["data"] as? [String: Any])?["status"] as? String == "pending" {
-                    _ = try await backend.request("api/session/global/form/\(id)/cancel", method: "POST", query: query)
+                let result = try await backend.request("api/session/global/form/\(id)", query: query, allowsNotFound: true)
+                if ((result["data"] as? [String: Any])?["state"] as? [String: Any])?["status"] as? String == "pending" {
+                    _ = try await backend.request("api/session/global/form/\(id)", method: "DELETE", query: query)
                 }
             }
         }
@@ -2810,8 +2767,8 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         enabled.buttons.firstMatch.tap()
         app.buttons["No"].firstMatch.tap()
         app.buttons["globalForms.close"].tap()
-        let stillPending = try await backend.request("api/session/global/form/\(ids[0])/state", query: query)
-        XCTAssertEqual((stillPending["data"] as? [String: Any])?["status"] as? String, "pending")
+        let stillPending = try await backend.request("api/session/global/form/\(ids[0])", query: query)
+        XCTAssertEqual(((stillPending["data"] as? [String: Any])?["state"] as? [String: Any])?["status"] as? String, "pending")
         open.tap()
         let submit = app.buttons.matching(identifier: "chat.sessionForm.\(ids[0])").matching(NSPredicate(format: "label == %@", "Submit")).firstMatch
         try await waitForV2Smoke(in: app, "Reopened draft can submit") { submit.exists && submit.isHittable && submit.isEnabled }
@@ -2822,8 +2779,9 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let hierarchy = XCTAttachment(string: app.debugDescription)
         hierarchy.name = "pass6-global-home-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
         submit.tap()
-        let state = try await backend.request("api/session/global/form/\(ids[0])/state", query: query)
-        let answer = try XCTUnwrap((state["data"] as? [String: Any])?["answer"] as? [String: Any])
+        let state = try await backend.request("api/session/global/form/\(ids[0])", query: query)
+        let embeddedState = try XCTUnwrap((state["data"] as? [String: Any])?["state"] as? [String: Any])
+        let answer = try XCTUnwrap(embeddedState["answer"] as? [String: Any])
         XCTAssertEqual(answer["enabled"] as? Bool, false)
         XCTAssertEqual(answer["count"] as? Int, 7)
         let cancel = app.buttons.matching(identifier: "chat.sessionForm.\(ids[1])").matching(NSPredicate(format: "label == %@", "Cancel Request")).firstMatch
@@ -2853,8 +2811,8 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         try await waitForV2Smoke(in: app, "Cancelled global request disappears") { app.staticTexts["globalForms.empty"].exists }
         app.buttons["globalForms.close"].tap()
         try await waitForV2Smoke(in: app, "Chat composer is restored without session reassignment") { app.buttons["chat.composer.menu"].isEnabled }
-        let cancelled = try await backend.request("api/session/global/form/\(ids[2])/state", query: query)
-        XCTAssertEqual((cancelled["data"] as? [String: Any])?["status"] as? String, "cancelled")
+        let cancelled = try await backend.request("api/session/global/form/\(ids[2])", query: query)
+        XCTAssertEqual(((cancelled["data"] as? [String: Any])?["state"] as? [String: Any])?["status"] as? String, "cancelled")
         attachScreenshot(named: "pass6-global-chat-restored")
     }
 
@@ -2993,11 +2951,11 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         XCTAssertEqual(try normalizedV2FixturePath(canonical), try normalizedV2FixturePath(source.path))
         let serverParent = (sourceDirectory as NSString).deletingLastPathComponent + "/copies"
         XCTAssertEqual(try normalizedV2FixturePath(serverParent), try normalizedV2FixturePath(parent.path))
-        let query = [URLQueryItem(name: "location[directory]", value: sourceDirectory)]
+        let query = [URLQueryItem(name: "projectID", value: projectID)]
         let name = "backend-ui-\(UUID().uuidString.lowercased())"
         let ownedDirectory = serverParent + "/" + name
-        let copyPath = "experimental/project/\(projectID)/copy"
-        let inventoryPath = "api/project/\(projectID)/directories"
+        let copyPath = "api/worktree"
+        let inventoryPath = "api/worktree"
         addTeardownBlock { @MainActor in
             let inventory = try await backend.request(inventoryPath, query: query)
             let normalizedOwned = try self.normalizedV2FixturePath(ownedDirectory)
@@ -3007,12 +2965,14 @@ final class OpenCodeIOSClientUITests: XCTestCase {
                 guard worktree["strategy"] as? String == "git_worktree", ownedDirectory.hasPrefix(serverParent + "/backend-ui-") else {
                     throw NSError(domain: "V2UIFeature", code: 1, userInfo: [NSLocalizedDescriptionKey: "Refusing unowned worktree cleanup"])
                 }
-                _ = try await backend.request(copyPath, method: "DELETE", body: ["directory": actual, "force": true], query: query)
+                _ = try await backend.request(copyPath, method: "DELETE", body: [
+                    "projectID": projectID, "directory": actual, "force": true,
+                ])
             }
         }
         let created = try await backend.request(copyPath, method: "POST", body: [
-            "strategy": "git_worktree", "directory": serverParent, "name": name
-        ], query: query)
+            "projectID": projectID, "directory": serverParent, "name": name,
+        ])
         XCTAssertEqual(created["directory"] as? String, ownedDirectory)
         let fixture = try await ownedV2Chat(backend: backend, directory: ownedDirectory)
         app.launch()
@@ -3089,10 +3049,11 @@ final class OpenCodeIOSClientUITests: XCTestCase {
 
     @MainActor
     private func normalizedV2FixturePath(_ path: String) throws -> String {
-        let approved = "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode/pass2-VwCj6l/"
+        let fixture = try DeletionFixture.loadOwnedManifest(legacy: false)
+        let approved = fixture.root.standardizedFileURL.path + "/"
         // Lexical normalization only: never resolve arbitrary host symlinks for ownership.
         let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
-        let normalized = standardized.hasPrefix("/private" + approved) ? String(standardized.dropFirst("/private".count)) : standardized
+        let normalized = standardized.hasPrefix("/var/") ? "/private" + standardized : standardized
         guard path.hasPrefix("/"), normalized.hasPrefix(approved) else {
             throw NSError(domain: "V2UIFeature", code: 1, userInfo: [NSLocalizedDescriptionKey: "Path is outside the exact approved fixture"])
         }
@@ -3196,11 +3157,11 @@ final class OpenCodeIOSClientUITests: XCTestCase {
 
     @MainActor
     private func isolatedV2FeatureContext() async throws -> (V2SmokeBackend, XCUIApplication, String) {
-        guard let base = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_BASE_URL"),
-              let username = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_USERNAME"),
-              let password = nonEmptyEnvironmentValue("OPENCODE_V2_TEST_PASSWORD") else {
-            throw XCTSkip("Set OPENCODE_V2_TEST_BASE_URL/USERNAME/PASSWORD for isolated feature UI tests")
-        }
+        let fixture = try DeletionFixture.loadOwnedManifest(legacy: false)
+        try await fixture.verify()
+        let base = fixture.baseURL
+        let username = fixture.username
+        let password = fixture.password
         let url = try XCTUnwrap(URL(string: base))
         guard url.scheme == "http", url.host == "127.0.0.1", url.port == 14097,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
@@ -3208,18 +3169,21 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             throw NSError(domain: "V2UIFeature", code: 1, userInfo: [NSLocalizedDescriptionKey: "Only the isolated server on port 14097 is permitted"])
         }
         let backend = V2SmokeBackend(baseURL: url, username: username, password: password)
-        let health = try await backend.request("api/health")
-        XCTAssertEqual(health["version"] as? String, "0.0.0-next-17155")
+        let info = try await backend.request("api/info")
+        XCTAssertEqual(info["version"] as? String, "2.0.16")
         let location = try await backend.request("api/location")
         let directory = try XCTUnwrap(location["directory"] as? String)
         let workspace = URL(fileURLWithPath: directory).resolvingSymlinksInPath().standardizedFileURL
         let root = workspace.deletingLastPathComponent()
-        let approved = URL(fileURLWithPath: "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode")
+        let hostRoot = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCLIENT_ACCEPTANCE_HOST_ROOT"])
+        let approved = URL(fileURLWithPath: hostRoot)
             .resolvingSymlinksInPath().standardizedFileURL
-        guard (location["project"] as? [String: Any])?["id"] as? String == "global",
-              workspace.lastPathComponent == "workspace", root.lastPathComponent == "pass2-VwCj6l",
-              root.deletingLastPathComponent() == approved else {
-            throw NSError(domain: "V2UIFeature", code: 1, userInfo: [NSLocalizedDescriptionKey: "Refusing a server outside the approved disposable pass2 fixture"])
+        let projectDirectory = URL(fileURLWithPath: (location["project"] as? [String: Any])?["directory"] as? String ?? "")
+            .resolvingSymlinksInPath().standardizedFileURL
+        guard projectDirectory.path == fixture.workspace.path, workspace.path == fixture.workspace.path,
+              workspace.lastPathComponent == "workspace", root.lastPathComponent.hasPrefix("acceptance-v2_0_16-"),
+              root.deletingLastPathComponent().path == approved.path else {
+            throw NSError(domain: "V2UIFeature", code: 1, userInfo: [NSLocalizedDescriptionKey: "Refusing a server outside the approved v2 fixture"])
         }
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
@@ -4028,7 +3992,7 @@ private struct V2SmokeBackend {
              "model": info["model"] as? [String: Any] ?? ["providerID": "smoke", "id": "offline-fixture"],
              "content": [["type": "text", "text": assistantText]], "finish": "stop"]
         ]
-        let imported = try await request("api/session/import", method: "POST", body: [
+        let imported = try await request("api/experimental/session/import", method: "POST", body: [
             "info": info, "messages": messages, "location": ["directory": directory]
         ])
         XCTAssertEqual((imported["data"] as? [String: Any])?["id"] as? String, sessionID)
@@ -4037,8 +4001,10 @@ private struct V2SmokeBackend {
     }
 
     func formState(sessionID: String, formID: String) async throws -> V2UIFormState {
-        let response = try await request("api/session/\(sessionID)/form/\(formID)/state")
-        return try JSONDecoder().decode(V2UIFormState.self, from: JSONSerialization.data(withJSONObject: XCTUnwrap(response["data"])))
+        let response = try await request("api/session/\(sessionID)/form/\(formID)")
+        let form = try XCTUnwrap(response["data"] as? [String: Any])
+        return try JSONDecoder().decode(V2UIFormState.self,
+                                        from: JSONSerialization.data(withJSONObject: try XCTUnwrap(form["state"])))
     }
 
     func request(
@@ -4068,8 +4034,7 @@ private struct V2SmokeBackend {
         }
         if data.isEmpty { return [:] }
         let json = try JSONSerialization.jsonObject(with: data)
-        // next-17155 project directory inventory is a bare array, not a data envelope.
-        if path.hasSuffix("/directories"), let directories = json as? [[String: Any]] { return ["data": directories] }
+        if let array = json as? [[String: Any]] { return ["data": array] }
         return try XCTUnwrap(json as? [String: Any])
     }
 

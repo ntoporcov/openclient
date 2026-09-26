@@ -223,6 +223,38 @@ struct OpenClientBridgeNotificationsAdvertisement: Decodable, Equatable, Sendabl
     let version: Int
     let state: State
     let publicOrigin: String?
+    let pairing: OpenClientNotificationPairingLauncher?
+
+    init(
+        version: Int,
+        state: State,
+        publicOrigin: String?,
+        pairing: OpenClientNotificationPairingLauncher? = nil
+    ) {
+        self.version = version
+        self.state = state
+        self.publicOrigin = publicOrigin
+        self.pairing = pairing
+    }
+}
+
+struct OpenClientNotificationPairingLauncher: Codable, Equatable, Sendable {
+    let version: Int
+    let cliPath: String
+    let dataDir: String
+
+    var isTrustedShape: Bool {
+        guard version == 1,
+              cliPath.hasPrefix("/"),
+              cliPath.hasSuffix("/dist/notifications/src/cli.mjs"),
+              dataDir.hasPrefix("/"),
+              cliPath.utf8.count <= 4_096,
+              dataDir.utf8.count <= 4_096,
+              (cliPath as NSString).standardizingPath == cliPath,
+              (dataDir as NSString).standardizingPath == dataDir else { return false }
+        return !cliPath.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+            && !dataDir.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
 }
 
 enum OpenClientBridgeNotificationsCapability: Equatable, Sendable {
@@ -278,6 +310,8 @@ enum OpenClientNotificationSetupError: LocalizedError, Equatable {
     case invalidExpiry
     case staleSetup
     case browserOpenFailed
+    case pairingUnavailable
+    case pairingTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -293,6 +327,10 @@ enum OpenClientNotificationSetupError: LocalizedError, Equatable {
             String(localized: "This OC Notify setup code is no longer valid. Generate a new code.")
         case .browserOpenFailed:
             String(localized: "OC Notify could not be opened. Try again or generate a new code.")
+        case .pairingUnavailable:
+            String(localized: "OC Notify pairing is not available from this plugin. Update the plugin and try again.")
+        case .pairingTimedOut:
+            String(localized: "OC Notify pairing timed out. Try again.")
         }
     }
 }

@@ -350,36 +350,33 @@ final class SessionFormTests: XCTestCase {
         SessionFormURLProtocol.handler = { request in
             let url = try XCTUnwrap(request.url)
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
-            XCTAssertEqual(query, [URLQueryItem(name: "location[directory]", value: "/origin"), URLQueryItem(name: "location[workspace]", value: "wrk_origin")])
+            XCTAssertEqual(query, [URLQueryItem(name: "location[directory]", value: "/origin")])
             XCTAssertNil(request.value(forHTTPHeaderField: "x-opencode-directory"))
             switch url.path {
-            case "/api/form/request":
+            case "/api/form":
                 XCTAssertEqual(request.httpMethod, "GET")
                 return (200, #"{"location":{"directory":"/canonical","workspaceID":"wrk_canonical","project":{"id":"global","directory":"/canonical","canonical":"/canonical"}},"data":[{"id":"frm_g","sessionID":"global","title":"Global","fields":[{"key":"v","type":"boolean"}]},{"id":"frm_s","sessionID":"ses_real","title":"Session","fields":[{"key":"v","type":"boolean"}]}]}"#)
             case "/api/session/global/form":
                 XCTAssertEqual(request.httpMethod, "GET")
                 return (200, #"{"data":[]}"#)
             case "/api/session/global/form/frm_test":
+                if request.httpMethod == "DELETE" {
+                    XCTAssertTrue(SessionFormURLProtocol.body(request).isEmpty)
+                    return (204, "")
+                }
                 XCTAssertEqual(request.httpMethod, "GET")
-                return (200, #"{"data":{"id":"frm_test","sessionID":"global","title":"External","fields":[{"key":"ack","type":"external","url":"https://external.invalid"}]}}"#)
-            case "/api/session/global/form/frm_test/state":
-                XCTAssertEqual(request.httpMethod, "GET")
-                return (200, #"{"data":{"status":"answered","answer":{"enabled":false,"count":2,"tags":["a","custom"],"ack":true}}}"#)
+                return (200, #"{"data":{"id":"frm_test","sessionID":"global","title":"External","fields":[{"key":"ack","type":"external","url":"https://external.invalid"}],"state":{"status":"answered","answer":{"enabled":false,"count":2,"tags":["a","custom"],"ack":true}}}}"#)
             case "/api/session/global/form/frm_test/reply":
                 XCTAssertEqual(request.httpMethod, "POST")
                 let body = try JSONDecoder().decode([String: BackendFormAnswer].self, from: SessionFormURLProtocol.body(request))
                 XCTAssertEqual(body, ["answer": ["enabled": .boolean(false), "count": .number(2), "tags": .strings(["a", "custom"]), "ack": .boolean(true)]])
-                return (204, "")
-            case "/api/session/global/form/frm_test/cancel":
-                XCTAssertEqual(request.httpMethod, "POST")
-                XCTAssertTrue(SessionFormURLProtocol.body(request).isEmpty)
                 return (204, "")
             default: XCTFail("Unexpected form endpoint"); return (404, "")
             }
         }
         let pending = try await service.pendingForms(sessionID: "global", scope: .init(directory: "/origin", workspaceID: "wrk_origin"))
         let inventory = try await service.pendingGlobalForms(scope: .init(directory: "/origin", workspaceID: "wrk_origin"))
-        XCTAssertEqual(inventory.location, .init(directory: "/canonical", workspaceID: "wrk_canonical"))
+        XCTAssertEqual(inventory.location, .init(directory: "/canonical", workspaceID: nil))
         XCTAssertEqual(inventory.forms.map(\.id), ["frm_g"])
         XCTAssertTrue(pending.isEmpty)
         let definition = try await service.readForm(reference)

@@ -39,6 +39,78 @@ final class BrowserStoreTests: XCTestCase {
             let tabBar = try XCTUnwrap(views.compactMap { $0 as? UITabBar }.first)
             return (probe.convert(probe.bounds, to: window), tabBar.convert(tabBar.bounds, to: window))
         }
+        func snapshot() throws -> CGImage {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            return try XCTUnwrap(image.cgImage)
+        }
+        func changedPixelCount(from baseline: CGImage, to current: CGImage, in rect: CGRect) throws -> Int {
+            XCTAssertEqual(current.width, baseline.width)
+            XCTAssertEqual(current.height, baseline.height)
+            let baselineData = try XCTUnwrap(baseline.dataProvider?.data)
+            let currentData = try XCTUnwrap(current.dataProvider?.data)
+            let baselineBytes = try XCTUnwrap(CFDataGetBytePtr(baselineData))
+            let currentBytes = try XCTUnwrap(CFDataGetBytePtr(currentData))
+            let bytesPerPixel = baseline.bitsPerPixel / 8
+            XCTAssertEqual(current.bitsPerPixel, baseline.bitsPerPixel)
+            XCTAssertEqual(current.bytesPerRow, baseline.bytesPerRow)
+            XCTAssertGreaterThanOrEqual(bytesPerPixel, 3)
+
+            let bounds = rect.integral.intersection(CGRect(
+                x: 0,
+                y: 0,
+                width: CGFloat(baseline.width),
+                height: CGFloat(baseline.height)
+            ))
+            guard !bounds.isNull, !bounds.isEmpty else { return 0 }
+            var count = 0
+            for y in Int(bounds.minY)..<Int(bounds.maxY) {
+                for x in Int(bounds.minX)..<Int(bounds.maxX) {
+                    let offset = y * baseline.bytesPerRow + x * bytesPerPixel
+                    let difference = (0..<bytesPerPixel).reduce(0) { partial, component in
+                        partial + abs(Int(baselineBytes[offset + component]) - Int(currentBytes[offset + component]))
+                    }
+                    if difference > 16 { count += 1 }
+                }
+            }
+            return count
+        }
+        func assertVisibleAccessoryGeometry(_ name: String, baselineImage: CGImage) throws {
+            window.layoutIfNeeded()
+            let tabBar = try geometry().1
+            let expectedRowHeight = UIHostingController(
+                rootView: BrowserAccessoryRow(browser: browser, accessibilityIdentifier: "browser.projectAccessory")
+            ).sizeThatFits(in: CGSize(width: window.bounds.width, height: .greatestFiniteMagnitude)).height
+            XCTAssertGreaterThan(expectedRowHeight, 0, name)
+            let bandMinY = max(window.bounds.minY, tabBar.minY - expectedRowHeight)
+            let accessoryBand = CGRect(
+                x: window.bounds.minX,
+                y: bandMinY,
+                width: window.bounds.width,
+                height: window.bounds.maxY - bandMinY
+            )
+            let currentImage = try snapshot()
+            let changedPixels = try changedPixelCount(
+                from: baselineImage,
+                to: currentImage,
+                in: accessoryBand
+            )
+            XCTAssertGreaterThan(changedPixels, Int(expectedRowHeight * 4), name)
+            let pixelsChangedAboveAccessory = try changedPixelCount(
+                from: baselineImage,
+                to: currentImage,
+                in: CGRect(
+                    x: window.bounds.minX,
+                    y: window.bounds.minY,
+                    width: window.bounds.width,
+                    height: bandMinY - window.bounds.minY
+                )
+            )
+            XCTAssertLessThan(pixelsChangedAboveAccessory, Int(expectedRowHeight), name)
+        }
         func settleAndAssertBaseline(_ baseline: (CGRect, CGRect), name: String) async throws {
             try await Task.sleep(for: .milliseconds(700))
             window.layoutIfNeeded()
@@ -60,6 +132,7 @@ final class BrowserStoreTests: XCTestCase {
         let baseline = try geometry()
         let controller = try await host(BrowserAccessoryTabFixture().opencodeProjectBrowserAccessory(browser: browser))
         try await settleAndAssertBaseline(baseline, name: "Initially closed must reserve no native accessory")
+        let closedSnapshot = try snapshot()
         screenshot("Browser-accessory-closed-baseline")
         let originalProbe = try XCTUnwrap(descendants(window).first { $0.accessibilityIdentifier == "browser.layoutProbe" })
 
@@ -68,9 +141,7 @@ final class BrowserStoreTests: XCTestCase {
             try await settleAndAssertBaseline(baseline, name: "Expanded removes native accessory")
             browser.collapse()
             try await Task.sleep(for: .milliseconds(700))
-            window.layoutIfNeeded()
-            let collapsed = try geometry()
-            XCTAssertEqual(baseline.0.maxY - collapsed.0.maxY, 56, accuracy: 2, "52-point row plus native spacing")
+            try assertVisibleAccessoryGeometry("Collapsed browser must have visible accessory geometry", baselineImage: closedSnapshot)
             screenshot("Browser-accessory-collapsed-\(iteration)")
             browser.expand()
             try await settleAndAssertBaseline(baseline, name: "Re-expansion restores baseline")
@@ -88,7 +159,7 @@ final class BrowserStoreTests: XCTestCase {
         try await settleAndAssertBaseline(baseline, name: "New project hides old collapsed accessory")
         browser.selectProject("project-a")
         try await Task.sleep(for: .milliseconds(700))
-        XCTAssertEqual(baseline.0.maxY - (try geometry()).0.maxY, 56, accuracy: 2)
+        try assertVisibleAccessoryGeometry("Returning to the project must restore accessory geometry", baselineImage: closedSnapshot)
         browser.clearAllBrowserSessions()
         try await settleAndAssertBaseline(baseline, name: "Root reset removes accessory")
         XCTAssertTrue(descendants(window).contains { $0 === originalProbe })
@@ -101,7 +172,7 @@ final class BrowserStoreTests: XCTestCase {
         XCTAssertTrue(descendants(window).contains { $0 === originalProbe }, "Changing the caller's gate must preserve TabView identity")
         controller.rootView = BrowserAccessoryTabFixture().opencodeProjectBrowserAccessory(browser: browser, isEnabled: true)
         try await Task.sleep(for: .milliseconds(700))
-        XCTAssertEqual(baseline.0.maxY - (try geometry()).0.maxY, 56, accuracy: 2)
+        try assertVisibleAccessoryGeometry("Re-enabling the project accessory must restore its geometry", baselineImage: closedSnapshot)
 
         let replacement = BrowserStore(projectID: "project-b")
         controller.rootView = BrowserAccessoryTabFixture().opencodeProjectBrowserAccessory(browser: replacement)

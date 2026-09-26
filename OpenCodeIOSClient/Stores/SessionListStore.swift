@@ -54,10 +54,12 @@ final class SessionListStore: ObservableObject {
 
     func workspacePageSessions(_ previous: [OpenCodeSession], applying canonical: [OpenCodeSession]) -> [OpenCodeSession] {
         var sessions = previous
+        var indexByID = Dictionary(sessions.indices.map { (sessions[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
         for session in canonical {
-            if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            if let index = indexByID[session.id] {
                 sessions[index] = session
             } else {
+                indexByID[session.id] = sessions.count
                 sessions.append(session)
             }
         }

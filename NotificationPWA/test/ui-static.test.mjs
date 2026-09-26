@@ -7,11 +7,12 @@ const publicFile = (name) => readFile(new URL(`../public/${name}`, import.meta.u
 
 const deferred = () => {
   let resolve;
-  const promise = new Promise((completion) => { resolve = completion; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((completion, failure) => { resolve = completion; reject = failure; });
+  return { promise, resolve, reject };
 };
 
-async function appHarness({ permission = "default", supportsPush = true, request, hostname = "notify.example" }) {
+async function appHarness({ permission = "default", supportsPush = true, request, hostname = "notify.example", standalone = true, paired = true, hash = "", clipboardText = "", userAgent = "test", platform = "test", maxTouchPoints = 0 }) {
   const source = await publicFile("app.js");
   const elements = new Map();
   const listeners = new Map();
@@ -28,27 +29,35 @@ async function appHarness({ permission = "default", supportsPush = true, request
     elements.set(id, value);
     return value;
   };
-  const storage = new Map([["notification-pwa-device-token", "token"]]);
+  const storage = new Map(paired ? [["notification-pwa-device-token", "token"]] : []);
   const serviceWorker = { register: async () => ({ update: async () => {} }), addEventListener: () => {} };
-  const navigator = { language: "en", userAgent: "test", platform: "test", maxTouchPoints: 0, standalone: false, ...(supportsPush ? { serviceWorker } : {}) };
+  const clipboardWrites = [];
+  const clipboard = { readText: async () => clipboardText, writeText: async (value) => { clipboardWrites.push(value); } };
+  const navigator = { language: "en", userAgent, platform, maxTouchPoints, standalone, clipboard, ...(supportsPush ? { serviceWorker } : {}) };
   const Notification = { permission };
-  const window = { isSecureContext: true, location: { hostname }, ...(supportsPush ? { PushManager: function PushManager() {}, Notification } : {}) };
+  const location = { hostname, hash, pathname: "/", search: "" };
+  const window = { isSecureContext: true, location, matchMedia: () => ({ matches: standalone }), addEventListener: () => {}, ...(supportsPush ? { PushManager: function PushManager() {}, Notification } : {}) };
   const context = {
-    window, navigator, Notification, Uint8Array, atob, confirm: () => true,
+    window, navigator, Notification, Uint8Array, URLSearchParams, atob, confirm: () => true, location,
+    history: { replaceState: () => { location.hash = ""; } },
     localStorage: { getItem: (key) => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     document: { documentElement: {}, title: "", querySelectorAll: () => [], getElementById: element, createElement: () => element(`generated-${elements.size}`) },
-    fetch: async (path, options) => ({ ok: true, json: async () => request(path, options) })
+    fetch: async (path, options) => {
+      const body = await request(path, options);
+      if (body?.response) return { ok: body.response.ok, json: async () => body.response.body };
+      return { ok: true, json: async () => body };
+    }
   };
   vm.createContext(context);
   vm.runInContext(source, context);
-  return { context, element, listeners };
+  return { context, element, listeners, clipboardWrites };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test("settings markup preserves functional IDs and native control semantics", async () => {
   const html = await publicFile("index.html");
-  for (const id of ["pair-code", "pair", "enable", "base-url", "username", "profile", "real-events", "save-destination", "auto-open", "delay", "schedule", "status", "refresh", "jobs", "reset"]) {
+  for (const id of ["paste-setup", "transfer-status", "enable", "base-url", "username", "profile", "real-events", "save-destination", "auto-open", "delay", "schedule", "status", "refresh", "jobs", "reset"]) {
     assert.match(html, new RegExp(`id=["']${id}["']`), `missing #${id}`);
   }
   assert.equal(html.match(/id="delay"/g)?.length, 1);
@@ -58,7 +67,75 @@ test("settings markup preserves functional IDs and native control semantics", as
   assert.match(html, /id="status-banner"[^>]+aria-live="polite"/);
   assert.match(html, /id="advanced-details"/);
   assert.match(html, /id="connection-summary"/);
+  assert.doesNotMatch(html, /id="setup-code"|id="pair-code"|npm run pair/);
   assert.doesNotMatch(html, /TRANSPORT PROTOTYPE|fake-status-bar|drag-handle/);
+});
+
+test("browser launch shows only the full-screen installation gate", async () => {
+  const app = await appHarness({ standalone: false, request: async () => { throw new Error("browser gate must not hydrate settings"); } });
+  await settle();
+  assert.equal(app.element("install-gate").hidden, false);
+  assert.equal(app.element("settings-shell").hidden, true);
+  assert.equal(app.element("install-instruction").textContent, "OC Notify must be installed on a phone or tablet that supports Home Screen web apps and notifications. Open this address on that device to continue.");
+});
+
+test("installed app automatically pairs, imports, and saves a same-context handoff", async () => {
+  const requests = [];
+  const state = { subscribed: false, destination: { optIn: false, baseURL: "", username: "opencode", profile: "legacy", delaySeconds: 15 }, jobs: [], bridge: null };
+  const app = await appHarness({
+    paired: false,
+    hash: "#setup=ABCDEF1234&pair=0123456789",
+    request: async (path, options) => {
+      requests.push({ path, options });
+      if (path === "/api/pair") return { token: "paired-token" };
+      if (path === "/api/setup/redeem") return { baseURL: "http://server.example:4096", username: "opencode", profile: "legacy" };
+      return state;
+    }
+  });
+  await settle();
+  await settle();
+  assert.deepEqual(requests.map((item) => item.path), ["/api/pair", "/api/status", "/api/setup/redeem", "/api/destination", "/api/status"]);
+  assert.equal(requests[2].options.headers.Authorization, "Bearer paired-token");
+  assert.deepEqual(JSON.parse(requests[3].options.body), { optIn: false, baseURL: "http://server.example:4096", username: "opencode", profile: "legacy", delaySeconds: 15 });
+  assert.equal(app.element("base-url").value, "http://server.example:4096");
+  assert.equal(app.element("save-destination").disabled, true);
+  assert.equal(app.element("transfer-status").textContent, "Setup complete. Your notification preference was preserved.");
+});
+
+test("isolated installed storage completes setup from one clipboard payload and preserves preferences", async () => {
+  const requests = [];
+  const state = { subscribed: true, destination: { optIn: true, baseURL: "https://old.example", username: "old", profile: "v2", delaySeconds: 45 }, jobs: [], bridge: null };
+  const app = await appHarness({
+    paired: false,
+    clipboardText: "ocnotify:v1:abcdef1234:0123456789",
+    request: async (path, options) => {
+      requests.push({ path, options });
+      if (path === "/api/pair") return { token: "new-token" };
+      if (path === "/api/setup/redeem") return { baseURL: "http://server.example:4096", username: "opencode", profile: "legacy" };
+      return state;
+    }
+  });
+  await app.listeners.get("paste-setup:click")();
+  const saved = JSON.parse(requests.find((item) => item.path === "/api/destination").options.body);
+  assert.deepEqual(saved, { optIn: true, baseURL: "http://server.example:4096", username: "opencode", profile: "legacy", delaySeconds: 45 });
+  assert.equal(app.element("paste-setup").disabled, false);
+  assert.equal(app.element("save-destination").disabled, true);
+  assert.deepEqual(app.clipboardWrites, [""]);
+});
+
+test("browser guide copies the opaque setup without depending on browser storage", async () => {
+  const app = await appHarness({
+    standalone: false,
+    paired: false,
+    hash: "#setup=ABCDEF1234&pair=0123456789",
+    userAgent: "iPhone",
+    request: async () => { throw new Error("browser gate must not call the API"); }
+  });
+  assert.equal(app.element("copy-setup").hidden, false);
+  await app.listeners.get("copy-setup:click")();
+  assert.deepEqual(app.clipboardWrites, ["ocnotify:v1:ABCDEF1234:0123456789"]);
+  assert.equal(app.element("install-gate").hidden, false);
+  assert.equal(app.element("settings-shell").hidden, true);
 });
 
 test("PWA pages use translucent standalone status bars without a header gradient", async () => {
@@ -134,6 +211,30 @@ test("browser permission truth takes priority over a retained server subscriptio
   await settle();
   assert.equal(unsupported.element("permission-summary").textContent, "Unavailable in this browser");
   assert.equal(unsupported.element("status").textContent, "This browser does not support installed-app notifications.");
+});
+
+test("expired transfer reports an inline error and remains retryable", async () => {
+  const failed = deferred();
+  const app = await appHarness({ paired: false, clipboardText: "ocnotify:v1:ABCDEF1234:0123456789", request: () => failed.promise });
+  const pairing = app.listeners.get("paste-setup:click")();
+  assert.equal(app.element("paste-setup").disabled, true);
+  await settle();
+  assert.equal(app.element("transfer-status").hidden, false);
+  assert.equal(app.element("transfer-status").textContent, "Pairing...");
+  failed.resolve({ response: { ok: false, body: { error: "The pairing code is invalid or expired." } } });
+  await pairing;
+  assert.equal(app.element("paste-setup").disabled, false);
+  assert.equal(app.element("transfer-status").textContent, "The pairing code is invalid or expired.");
+  assert.equal(app.element("status").textContent, "The pairing code is invalid or expired.");
+});
+
+test("malformed clipboard content is rejected without sending secrets", async () => {
+  let requestCount = 0;
+  const app = await appHarness({ paired: false, clipboardText: "not-a-setup", request: async () => { requestCount += 1; return {}; } });
+  await app.listeners.get("paste-setup:click")();
+  assert.equal(requestCount, 0);
+  assert.match(app.element("transfer-status").textContent, /does not contain a valid OC Notify setup/);
+  assert.equal(app.element("paste-setup").disabled, false);
 });
 
 test("slow initial hydration does not overwrite destination edits", async () => {

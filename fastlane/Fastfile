@@ -9,7 +9,7 @@ platform :ios do
   def xcodegen_generate_command(repo_root)
     local_override = File.join(repo_root, "project.local.yml")
     include_local = File.exist?(local_override) ? "INCLUDE_PROJECT_LOCAL_YAML=1 " : ""
-    "cd #{repo_root.shellescape} && #{include_local}/Users/mininic/.local/bin/xcodegen generate"
+    "cd #{repo_root.shellescape} && #{include_local}xcodegen generate"
   end
 
   def screenshot_devices

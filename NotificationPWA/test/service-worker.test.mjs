@@ -5,7 +5,7 @@ import test from "node:test";
 
 test("service worker awaits successful shell caching and skips request-specific URLs", async () => {
   const source = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
-  assert.match(source, /notification-pwa-shell-v9/);
+  assert.match(source, /notification-pwa-shell-v12/);
   assert.match(source, /"\/events\.html"/);
   assert.match(source, /"\/events\.js"/);
   assert.doesNotMatch(source, /skipWaiting\s*\(/);

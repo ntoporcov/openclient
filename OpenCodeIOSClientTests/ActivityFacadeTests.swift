@@ -14,12 +14,12 @@ private final class ActivityMetadataURLProtocol: URLProtocol {
             body = #"{"data":{"home-session":{"type":"running"},"sandbox-session":{"type":"running"}}}"#
         case "/api/permission/request":
             body = #"{"data":[]}"#
-        case "/api/form/request":
+        case "/api/form":
             let directory = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
                 .queryItems?.first { $0.name == "location[directory]" }?.value
             body = directory == "/home-sandbox"
-                ? #"{"data":[{"id":"external-form","sessionID":"sandbox-session","title":"Authenticate","fields":[{"key":"auth","type":"external","required":true}]}]}"#
-                : #"{"data":[]}"#
+                ? #"{"location":{"directory":"/home-sandbox","project":{"id":"project","directory":"/home-sandbox","canonical":"/home"}},"data":[{"id":"external-form","sessionID":"sandbox-session","title":"Authenticate","fields":[{"key":"auth","type":"external","required":true}]}]}"#
+                : #"{"location":{"directory":"/home","project":{"id":"project","directory":"/home","canonical":"/home"}},"data":[]}"#
         default:
             XCTFail("Activity must not call legacy routes or bypass core session/transcript services: \(request.url?.path ?? "")")
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
@@ -958,6 +958,60 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertNil(facade.sessionSwitcherTarget(id: deleted.id))
         XCTAssertNil(facade.sessionSwitcherTarget(id: archived.id))
         XCTAssertNil(facade.sessionSwitcherTarget(id: child.id))
+    }
+
+    func testSessionListCoalescesFourHundredTranscriptInvalidationsAndEscalatesImmediateRefresh() async {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "large-project", directory: "/tmp/large-project")
+        let sessions = (0..<400).map { index in
+            makeSession(id: "session-\(index)", title: "Session \(index)", directory: project.worktree,
+                projectID: project.id, updated: Double(index))
+        }
+        viewModel.projects = [project]
+        viewModel.currentProject = project
+        viewModel.selectedDirectory = project.worktree
+        viewModel.allSessions = sessions
+        let facade = SessionListFacade(viewModel: viewModel)
+        XCTAssertEqual(facade.snapshot.unpinnedRows.count, 400)
+        XCTAssertEqual(facade.snapshotBuildCount, 1)
+
+        for _ in 0..<400 {
+            facade.invalidateWorkspaceSnapshot(transcriptOnly: true)
+        }
+
+        XCTAssertEqual(facade.snapshotBuildCount, 1)
+        facade.invalidateWorkspaceSnapshot()
+        for _ in 0..<10 where facade.snapshotBuildCount == 1 { await Task.yield() }
+        XCTAssertEqual(facade.snapshotBuildCount, 2)
+    }
+
+    func testSelectedSimpleRowPrefersCanonicalTranscriptOverStaleCachedPreview() async throws {
+        let viewModel = AppViewModel()
+        let project = makeProject(id: "preview-project", directory: "/tmp/preview-project")
+        let session = makeSession(id: "preview-session", title: "Preview", directory: project.worktree,
+            projectID: project.id, updated: 1_000)
+        viewModel.projects = [project]
+        viewModel.currentProject = project
+        viewModel.selectedDirectory = project.worktree
+        viewModel.allSessions = [session]
+        viewModel.selectedSession = session
+        viewModel.sessionListStore.previews[session.id] = .init(text: "No messages yet", date: nil)
+        let facade = SessionListFacade(viewModel: viewModel)
+        XCTAssertEqual(facade.snapshot.unpinnedRows.first?.preview?.text, "No messages yet")
+
+        viewModel.directoryStore.syncState.replaceMessages([
+            makeMessage(id: "answer", sessionID: session.id, role: "assistant", text: "Canonical answer"),
+        ], forSessionID: session.id)
+        facade.invalidateWorkspaceSnapshot()
+        for _ in 0..<10 where facade.snapshot.unpinnedRows.first?.preview?.text != "Canonical answer" {
+            await Task.yield()
+        }
+
+        let row = try XCTUnwrap(facade.snapshot.unpinnedRows.first)
+
+        XCTAssertEqual(facade.snapshot.cardStyle, .simple)
+        XCTAssertEqual(row.preview?.text, "Canonical answer")
+        XCTAssertEqual(viewModel.sessionPreviews[session.id]?.text, "No messages yet")
     }
 
     func testProjectSessionSwitcherCandidatesIncludeOnlyShownWorkspaceRows() throws {

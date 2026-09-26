@@ -41,8 +41,8 @@ final class SessionDeletionUITests: XCTestCase {
         for _ in 0..<5 where !connect.isHittable { form.swipeUp() }
         XCTAssertTrue(connect.isHittable)
         connect.tap()
-        let global = app.staticTexts["Global"].firstMatch
-        let connected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in global.isHittable && !connect.exists }, object: nil)
+        let project = app.staticTexts[fixture.isLegacy ? "Global" : fixture.workspace.lastPathComponent].firstMatch
+        let connected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in project.isHittable && !connect.exists }, object: nil)
         await fulfillment(of: [connected], timeout: 40)
         if fixture.isLegacy {
             XCTAssertFalse(app.buttons["connection.v2-notice.dismiss"].exists)
@@ -52,7 +52,7 @@ final class SessionDeletionUITests: XCTestCase {
             XCTAssertTrue(dismissNotice.isHittable)
             dismissNotice.tap()
         }
-        global.tap()
+        project.tap()
         func row(_ id: String) -> XCUIElement { app.buttons["session.row.\(id)"] }
         func chatTitle(_ index: Int) -> XCUIElement {
             app.navigationBars.descendants(matching: .any).matching(NSPredicate(format: "label == %@", titles[index])).firstMatch
@@ -201,17 +201,26 @@ final class DeletionFixture: NSObject, URLSessionTaskDelegate {
         guard let path = selectedPath else {
             throw XCTSkip("Owned acceptance fixture manifest required")
         }
-        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
-        let root = url.deletingLastPathComponent()
-        let parent = URL(fileURLWithPath: "/var/folders/v1/gzrsgbkd24b3l3dslnjtmv700000gq/T/opencode").resolvingSymlinksInPath()
-        let legacy = root.lastPathComponent.hasPrefix("deletion-legacy-")
-        guard root.deletingLastPathComponent() == parent, legacy || root.lastPathComponent.hasPrefix("acceptance-next17155-") else {
+        guard let hostRoot = environment["OPENCLIENT_ACCEPTANCE_HOST_ROOT"], hostRoot.hasPrefix("/") else {
             throw NSError(domain: "DeletionFixture", code: 1)
         }
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        let root = url.deletingLastPathComponent()
+        let parent = URL(fileURLWithPath: hostRoot).resolvingSymlinksInPath()
+        let legacy = root.lastPathComponent.hasPrefix("deletion-legacy-")
+        guard url.lastPathComponent == "manifest.json", root.deletingLastPathComponent().path == parent.path,
+              legacy || root.lastPathComponent.hasPrefix("acceptance-v2_0_16-") else {
+            throw NSError(domain: "DeletionFixture", code: 1)
+        }
+        let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int ?? 0
+        guard mode & 0o077 == 0 else { throw NSError(domain: "DeletionFixture", code: 1) }
         let value = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         guard value["base_url"] as? String == (legacy ? "http://127.0.0.1:14096" : "http://127.0.0.1:14097"),
-              value["version"] as? String == (legacy ? "1.18.29" : "0.0.0-next-17155"), value["password"] is String,
-              try String(contentsOf: root.appendingPathComponent(legacy ? ".deletion-root" : ".acceptance-root"), encoding: .utf8)
+              value["version"] as? String == (legacy ? "1.18.29" : "2.0.16"), value["password"] is String,
+              legacy || deletionCanonicalPath(value["host_root"] as? String ?? "") == parent.path,
+              legacy || value["provider_url"] as? String == "http://127.0.0.1:14098",
+              legacy || deletionCanonicalPath(value["workspace"] as? String ?? "") == deletionCanonicalPath(root.appendingPathComponent("workspace").path),
+               try String(contentsOf: root.appendingPathComponent(legacy ? ".deletion-root" : ".acceptance-root"), encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines) == value["run_id"] as? String else {
             throw NSError(domain: "DeletionFixture", code: 2)
         }
@@ -223,16 +232,16 @@ final class DeletionFixture: NSObject, URLSessionTaskDelegate {
             let health = try await request("/api/health")
             let location = try await request("/api/location")
             guard health["version"] as? String == "1.18.29",
-                  URL(fileURLWithPath: location["directory"] as? String ?? "").resolvingSymlinksInPath() == workspace else {
+                  deletionCanonicalPath(location["directory"] as? String ?? "") == workspace.path else {
                 throw NSError(domain: "DeletionFixture", code: 3)
             }
             return
         }
-        let health = try await request("/api/health")
+        let health = try await request("/api/info")
         let location = try await request("/api/location")
         guard health["pid"] as? Int == serverPID,
-              health["version"] as? String == "0.0.0-next-17155",
-              URL(fileURLWithPath: location["directory"] as? String ?? "").resolvingSymlinksInPath() == workspace else {
+              health["version"] as? String == "2.0.16",
+              deletionCanonicalPath(location["directory"] as? String ?? "") == workspace.path else {
             throw NSError(domain: "DeletionFixture", code: 3)
         }
     }
@@ -272,4 +281,8 @@ final class DeletionFixture: NSObject, URLSessionTaskDelegate {
                     newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
         completionHandler(nil)
     }
+}
+
+private func deletionCanonicalPath(_ path: String) -> String {
+    URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
 }

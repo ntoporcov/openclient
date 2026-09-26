@@ -244,8 +244,8 @@ final class TalkSessionCoordinatorTests: XCTestCase {
                 XCTAssertEqual(messageID, controller.submittedMessageID)
                 postedMessageIDs.append(messageID)
                 mutationOrder.append("prompt")
-                return (200, #"{"data":{"id":"\#(messageID)","sessionID":"talk-created","timeCreated":1,"delivery":"accepted"}}"#)
-            case "/api/session/talk-created/wait":
+                return (200, #"{"data":{"id":"\#(messageID)","sessionID":"talk-created","time":{"created":1},"type":"user","payload":{},"delivery":"queue"}}"#)
+            case "/api/experimental/session/talk-created/wait":
                 XCTAssertEqual(request.httpMethod, "POST")
                 mutationOrder.append("wait")
                 await withCheckedContinuation { continuation in
@@ -308,8 +308,8 @@ final class TalkSessionCoordinatorTests: XCTestCase {
                 posts += 1
                 let id = try XCTUnwrap(talk.pendingMessageID)
                 await withCheckedContinuation { promptReceipt = $0; posted.fulfill() }
-                return (200, #"{"data":{"id":"\#(id)","sessionID":"talk-created","timeCreated":1,"delivery":"accepted"}}"#)
-            case "/api/session/talk-created/wait":
+                return (200, #"{"data":{"id":"\#(id)","sessionID":"talk-created","time":{"created":1},"type":"user","payload":{},"delivery":"queue"}}"#)
+            case "/api/experimental/session/talk-created/wait":
                 waited.fulfill()
                 return (204, "")
             default:

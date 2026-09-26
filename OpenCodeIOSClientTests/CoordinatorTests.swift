@@ -149,6 +149,33 @@ final class CoordinatorTests: XCTestCase {
         XCTAssertTrue(store.isConnected)
     }
 
+    func testConnectionCoordinatorAutomaticDetectsV2ThroughInfo() async {
+        let store = ConnectionStore()
+        let coordinator = ConnectionCoordinator(connectionStore: store)
+        var paths: [String] = []
+        var appliedV2Connection = false
+        CoordinatorMockURLProtocol.requestHandler = { request in
+            paths.append(try XCTUnwrap(request.url?.path))
+            if request.url?.path == "/api/health" {
+                return try jsonResponse(for: request, statusCode: 404, body: "")
+            }
+            return try jsonResponse(for: request, body: #"{"version":"2.0.11","pid":42,"urls":{}}"#)
+        }
+
+        await coordinator.connect(
+            client: makeClient(apiPreference: .automatic),
+            applyLegacyBootstrap: { _ in XCTFail("Detected v2 must not fall back") },
+            applyV2Connection: { appliedV2Connection = true },
+            handleFailure: { XCTFail("Valid v2 info must connect") }
+        )
+
+        XCTAssertTrue(appliedV2Connection)
+        XCTAssertEqual(paths, ["/api/health", "/api/info"])
+        XCTAssertEqual(store.apiProfile, .v2)
+        XCTAssertEqual(store.serverVersion, "2.0.11")
+        XCTAssertTrue(store.isConnected)
+    }
+
     func testConnectionCoordinatorFailsWhenV2NavigationBootstrapFails() async {
         struct NavigationError: Error {}
 
@@ -299,7 +326,7 @@ final class CoordinatorTests: XCTestCase {
 
     func testForcedV2UnavailableDoesNotFallBackToLegacy() async {
         CoordinatorMockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.url?.path, "/api/health")
+            XCTAssertTrue(["/api/health", "/api/info"].contains(request.url?.path))
             return try jsonResponse(for: request, statusCode: 404, body: "{}")
         }
         let store = ConnectionStore()

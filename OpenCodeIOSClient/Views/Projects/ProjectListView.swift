@@ -7,7 +7,7 @@ import AppKit
 
 struct ProjectListView: View {
     @ObservedObject var facade: ProjectFacade
-    let connection: ConnectionFacade
+    @ObservedObject var connection: ConnectionFacade
     @ObservedObject var configurations: ConfigurationsFacade
     @ObservedObject var games: FunAndGamesFacade
     let bridge: OpenClientBridgeFacade?
@@ -57,6 +57,26 @@ struct ProjectListView: View {
         let projectIDs = displayedProjects.map { $0.id }.joined(separator: "|")
 
         List {
+            if let connectionID = connection.v2NoticeConnectionID {
+                V2ConnectionNoticeCard {
+                    connection.dismissV2Notice(connectionID: connectionID)
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 8)
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        connection.dismissV2Notice(connectionID: connectionID)
+                    } label: {
+                        Label("Dismiss", systemImage: "xmark")
+                    }
+                    .accessibilityIdentifier("connection.v2-notice.dismiss")
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             if snapshot.isShowingSearchResults {
                 ProjectSessionSearchSection(
                     query: snapshot.searchQuery,
@@ -356,6 +376,7 @@ struct ProjectListView: View {
         }
         .animation(opencodeSelectionAnimation, value: snapshot.selectedDirectory)
         .animation(opencodeSelectionAnimation, value: projectIDs)
+        .animation(opencodeSelectionAnimation, value: connection.v2NoticeConnectionID)
         .onChange(of: snapshot.isShowingSearchResults) { _, isShowingSearchResults in
             if isShowingSearchResults {
                 isEditingProjects = false

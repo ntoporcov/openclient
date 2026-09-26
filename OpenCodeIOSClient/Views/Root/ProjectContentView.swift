@@ -5,6 +5,7 @@ import UIKit
 
 struct ProjectContentView: View {
     @ObservedObject var shell: AppShellFacade
+    let bridge: OpenClientBridgeFacade?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let onDetailChosen: () -> Void
 
@@ -73,7 +74,9 @@ struct ProjectContentView: View {
         )) {
             ProjectSettingsSheet(
                 facade: shell.projects,
-                connection: shell.connection
+                connection: shell.connection,
+                configurations: shell.configurations,
+                bridge: bridge
             )
         }
         .onChange(of: snapshot.currentProjectID) { _, _ in

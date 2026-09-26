@@ -1,8 +1,8 @@
 const text = {
   en: {
     context: "OpenCode", title: "OC Notify", refresh: "Refresh status", thisDevice: "This device", notPaired: "Not paired", checking: "Paired · Checking notifications", pairedDevice: "Paired · Notifications not enabled", enabledDevice: "Paired · Notifications enabled", deniedDevice: "Paired · Notifications blocked",
-    installTitle: "Add to Home Screen", installBody: "In Safari, tap Share, then Add to Home Screen. Open the installed app to enable notifications.", setupTitle: "Connection Setup Code", setupLabel: "Connection setup code", useConnection: "Use Connection", setupHint: "Install or reopen this Home Screen app, enter this code, pair the device with a separate Mac pairing code if needed, then tap Use Connection. Review the draft and tap Save Changes.", setupImported: "Connection draft imported. Review it, then tap Save Changes. Your notification preference is unchanged.", setupPairFirst: "Pair this device with a separate pairing code first. This connection code will remain here.",
-    pairTitle: "Pair this device", pairNeeded: "Required", repair: "Re-pair or reset", pairLabel: "Pairing code", pairButton: "Pair Device", pairHint: "Generate a fresh 10-minute code with npm run pair on the Mac.",
+    installTitle: "Add to Home Screen", installBody: "In Safari, tap Share, then Add to Home Screen. Open the installed app to enable notifications.", installMobile: "Install OC Notify, then open it from your Home Screen to finish setup.", installDesktop: "OC Notify must be installed on a phone or tablet that supports Home Screen web apps and notifications. Open this address on that device to continue.", installStepShare: "Open your browser menu or Share sheet.", installStepAdd: "Choose Add to Home Screen or Install app.", installStepOpen: "Open OC Notify from your Home Screen.", installAction: "Install OC Notify", installKeepsSetup: "Your secure setup will be waiting in the installed app.", installDesktopNote: "This desktop browser cannot complete OC Notify setup.",
+    pairing: "Pairing...", transferTitle: "OpenClient Setup", pasteSetup: "Paste Setup from OpenClient", transferHint: "In OpenClient, choose Copy Setup & Open Guide, then return here and paste. Setup codes expire after 10 minutes.", installStepCopy: "Copy the secure setup below.", copySetup: "Copy Secure Setup", setupCopied: "Setup copied. Install OC Notify, open it from your Home Screen, then tap Paste Setup from OpenClient.", setupComplete: "Setup complete. Your notification preference was preserved.", invalidTransfer: "The clipboard does not contain a valid OC Notify setup. Return to OpenClient and copy a new setup.", pasteUnavailable: "Clipboard access is unavailable. Return to the browser guide and tap Copy Secure Setup.",
     permissionHeading: "Device Permissions", notifyButton: "Enable Notifications", permissionNotEnabled: "Not enabled", permissionEnabled: "Enabled", permissionDenied: "Blocked in Settings", permissionUnavailable: "Unavailable in this browser", notifyHint: "iOS shows its permission prompt only after you tap this row.",
     destinationTitle: "OpenClient Destination", connectionLabel: "Connection", suggested: "Suggested", advanced: "Advanced", manualSetup: "Manual setup required", destinationHelp: "Suggested from this app. Must match the server saved in OpenClient; edit in Advanced if needed.", baseURLLabel: "Server URL", usernameLabel: "Username", profileLabel: "Server Profile", profileLegacy: "Legacy", profileV2: "V2",
     deliveryHeading: "Delivery", realEventsLabel: "OpenCode Activity", realEventsSublabel: "Notify for idle sessions and requests", autoLabel: "Try Auto-Open", autoSublabel: "Continue from handoff automatically", delayLabel: "Notification Delay", seconds: "sec", deliveryHelp: "OpenCode Activity starts only after you save. Auto-open is experimental and iOS may still require a tap.", saveDestination: "Save Changes", saved: "Saved", unsaved: "Unsaved changes",
@@ -14,8 +14,8 @@ const text = {
   },
   "pt-BR": {
     context: "OpenCode", title: "OC Notify", refresh: "Atualizar status", thisDevice: "Este dispositivo", notPaired: "Não emparelhado", checking: "Emparelhado · Verificando notificações", pairedDevice: "Emparelhado · Notificações desativadas", enabledDevice: "Emparelhado · Notificações ativadas", deniedDevice: "Emparelhado · Notificações bloqueadas",
-    installTitle: "Adicionar à Tela de Início", installBody: "No Safari, toque em Compartilhar e Adicionar à Tela de Início. Abra o app instalado para ativar as notificações.", setupTitle: "Código de Configuração da Conexão", setupLabel: "Código de configuração da conexão", useConnection: "Usar Conexão", setupHint: "Instale ou reabra este app da Tela de Início, digite este código, emparelhe o dispositivo com um código separado do Mac se necessário e toque em Usar Conexão. Revise o rascunho e toque em Salvar Alterações.", setupImported: "Rascunho da conexão importado. Revise-o e toque em Salvar Alterações. Sua preferência de notificação permanece inalterada.", setupPairFirst: "Primeiro emparelhe este dispositivo com um código de emparelhamento separado. Este código de conexão permanecerá aqui.",
-    pairTitle: "Emparelhar este dispositivo", pairNeeded: "Obrigatório", repair: "Emparelhar novamente ou redefinir", pairLabel: "Código de emparelhamento", pairButton: "Emparelhar Dispositivo", pairHint: "Gere no Mac um código novo válido por 10 minutos com npm run pair.",
+    installTitle: "Adicionar à Tela de Início", installBody: "No Safari, toque em Compartilhar e Adicionar à Tela de Início. Abra o app instalado para ativar as notificações.", installMobile: "Instale o OC Notify e abra-o pela Tela de Início para concluir a configuração.", installDesktop: "O OC Notify deve ser instalado em um celular ou tablet compatível com apps da Tela de Início e notificações. Abra este endereço nesse dispositivo para continuar.", installStepShare: "Abra o menu do navegador ou a folha Compartilhar.", installStepAdd: "Escolha Adicionar à Tela de Início ou Instalar app.", installStepOpen: "Abra o OC Notify pela Tela de Início.", installAction: "Instalar OC Notify", installKeepsSetup: "Sua configuração segura estará disponível no app instalado.", installDesktopNote: "Este navegador de computador não pode concluir a configuração do OC Notify.",
+    pairing: "Emparelhando...", transferTitle: "Configuração do OpenClient", pasteSetup: "Colar Configuração do OpenClient", transferHint: "No OpenClient, escolha Copiar Configuração e Abrir Guia, volte aqui e cole. Os códigos expiram após 10 minutos.", installStepCopy: "Copie a configuração segura abaixo.", copySetup: "Copiar Configuração Segura", setupCopied: "Configuração copiada. Instale o OC Notify, abra-o pela Tela de Início e toque em Colar Configuração do OpenClient.", setupComplete: "Configuração concluída. Sua preferência de notificações foi preservada.", invalidTransfer: "A área de transferência não contém uma configuração válida do OC Notify. Volte ao OpenClient e copie uma nova configuração.", pasteUnavailable: "O acesso à área de transferência está indisponível. Volte ao guia do navegador e toque em Copiar Configuração Segura.",
     permissionHeading: "Permissões do Dispositivo", notifyButton: "Ativar Notificações", permissionNotEnabled: "Desativadas", permissionEnabled: "Ativadas", permissionDenied: "Bloqueadas nos Ajustes", permissionUnavailable: "Indisponíveis neste navegador", notifyHint: "O iOS mostra o pedido de permissão somente depois que você toca nesta linha.",
     destinationTitle: "Destino no OpenClient", connectionLabel: "Conexão", suggested: "Sugerida", advanced: "Avançado", manualSetup: "Configuração manual necessária", destinationHelp: "Sugerida por este app. Deve corresponder ao servidor salvo no OpenClient; edite em Avançado se necessário.", baseURLLabel: "URL do Servidor", usernameLabel: "Nome de Usuário", profileLabel: "Perfil do Servidor", profileLegacy: "Legado", profileV2: "V2",
     deliveryHeading: "Entrega", realEventsLabel: "Atividade do OpenCode", realEventsSublabel: "Notificar sobre sessões ociosas e solicitações", autoLabel: "Tentar Abertura Automática", autoSublabel: "Continuar automaticamente após a passagem", delayLabel: "Atraso da Notificação", seconds: "s", deliveryHelp: "A Atividade do OpenCode começa somente após salvar. A abertura automática é experimental e o iOS ainda pode exigir um toque.", saveDestination: "Salvar Alterações", saved: "Salvo", unsaved: "Alterações não salvas",
@@ -27,8 +27,8 @@ const text = {
   },
   it: {
     context: "OpenCode", title: "OC Notify", refresh: "Aggiorna stato", thisDevice: "Questo dispositivo", notPaired: "Non abbinato", checking: "Abbinato · Verifica notifiche", pairedDevice: "Abbinato · Notifiche non abilitate", enabledDevice: "Abbinato · Notifiche abilitate", deniedDevice: "Abbinato · Notifiche bloccate",
-    installTitle: "Aggiungi alla schermata Home", installBody: "In Safari, tocca Condividi e Aggiungi alla schermata Home. Apri l’app installata per abilitare le notifiche.", setupTitle: "Codice di Configurazione Connessione", setupLabel: "Codice di configurazione connessione", useConnection: "Usa Connessione", setupHint: "Installa o riapri questa app dalla schermata Home, inserisci il codice, abbina il dispositivo con un codice Mac separato se necessario, quindi tocca Usa Connessione. Controlla la bozza e tocca Salva Modifiche.", setupImported: "Bozza della connessione importata. Controllala, quindi tocca Salva Modifiche. La preferenza per le notifiche rimane invariata.", setupPairFirst: "Prima abbina questo dispositivo con un codice di abbinamento separato. Questo codice di connessione rimarrà qui.",
-    pairTitle: "Abbina questo dispositivo", pairNeeded: "Obbligatorio", repair: "Abbina di nuovo o reimposta", pairLabel: "Codice di abbinamento", pairButton: "Abbina Dispositivo", pairHint: "Genera sul Mac un nuovo codice valido 10 minuti con npm run pair.",
+    installTitle: "Aggiungi alla schermata Home", installBody: "In Safari, tocca Condividi e Aggiungi alla schermata Home. Apri l’app installata per abilitare le notifiche.", installMobile: "Installa OC Notify, quindi aprilo dalla schermata Home per completare la configurazione.", installDesktop: "OC Notify deve essere installato su un telefono o tablet che supporta le web app nella schermata Home e le notifiche. Apri questo indirizzo su quel dispositivo per continuare.", installStepShare: "Apri il menu del browser o il pannello Condividi.", installStepAdd: "Scegli Aggiungi alla schermata Home o Installa app.", installStepOpen: "Apri OC Notify dalla schermata Home.", installAction: "Installa OC Notify", installKeepsSetup: "La configurazione sicura sarà disponibile nell’app installata.", installDesktopNote: "Questo browser desktop non può completare la configurazione di OC Notify.",
+    pairing: "Abbinamento...", transferTitle: "Configurazione OpenClient", pasteSetup: "Incolla Configurazione da OpenClient", transferHint: "In OpenClient, scegli Copia Configurazione e Apri Guida, poi torna qui e incolla. I codici scadono dopo 10 minuti.", installStepCopy: "Copia la configurazione sicura qui sotto.", copySetup: "Copia Configurazione Sicura", setupCopied: "Configurazione copiata. Installa OC Notify, aprilo dalla schermata Home e tocca Incolla Configurazione da OpenClient.", setupComplete: "Configurazione completata. La preferenza per le notifiche è stata mantenuta.", invalidTransfer: "Gli appunti non contengono una configurazione valida di OC Notify. Torna in OpenClient e copia una nuova configurazione.", pasteUnavailable: "L’accesso agli appunti non è disponibile. Torna alla guida nel browser e tocca Copia Configurazione Sicura.",
     permissionHeading: "Permessi del Dispositivo", notifyButton: "Abilita Notifiche", permissionNotEnabled: "Non abilitate", permissionEnabled: "Abilitate", permissionDenied: "Bloccate nelle Impostazioni", permissionUnavailable: "Non disponibili in questo browser", notifyHint: "iOS mostra la richiesta di autorizzazione solo dopo aver toccato questa riga.",
     destinationTitle: "Destinazione OpenClient", connectionLabel: "Connessione", suggested: "Suggerita", advanced: "Avanzate", manualSetup: "Configurazione manuale richiesta", destinationHelp: "Suggerita da questa app. Deve corrispondere al server salvato in OpenClient; modificala in Avanzate se necessario.", baseURLLabel: "URL Server", usernameLabel: "Nome Utente", profileLabel: "Profilo Server", profileLegacy: "Legacy", profileV2: "V2",
     deliveryHeading: "Consegna", realEventsLabel: "Attività OpenCode", realEventsSublabel: "Notifica sessioni inattive e richieste", autoLabel: "Prova Apertura Automatica", autoSublabel: "Continua automaticamente dal passaggio", delayLabel: "Ritardo Notifica", seconds: "sec", deliveryHelp: "Attività OpenCode inizia solo dopo il salvataggio. L’apertura automatica è sperimentale e iOS potrebbe richiedere un tocco.", saveDestination: "Salva Modifiche", saved: "Salvato", unsaved: "Modifiche non salvate",
@@ -57,7 +57,7 @@ function suggestedBaseURL(hostname, sourceEndpoint) {
 }
 const tokenKey = "notification-pwa-device-token";
 const autoKey = "notification-pwa-auto-open";
-const setupKey = "notification-pwa-setup-code";
+const transferPrefix = "ocnotify:v1:";
 const destinationControls = ["base-url", "username", "profile", "real-events", "delay"].map($);
 let token = localStorage.getItem(tokenKey);
 let destinationLoaded = false;
@@ -65,22 +65,29 @@ let destinationDirty = false;
 let subscribed = false;
 let showingSuggestion = false;
 
-const fragmentSetup = /^#setup=([A-Fa-f0-9]{10})$/.exec(window.location.hash)?.[1]?.toUpperCase();
-if (fragmentSetup) {
-  localStorage.setItem(setupKey, fragmentSetup);
-  history.replaceState(null, "", `${location.pathname}${location.search}`);
-}
-const pendingSetup = fragmentSetup || localStorage.getItem(setupKey) || "";
-$("setup-code").value = pendingSetup;
-$("setup-section").hidden = false;
+const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+const fragmentSetup = /^[A-Fa-f0-9]{10}$/.test(fragment.get("setup") || "") ? fragment.get("setup").toUpperCase() : "";
+const fragmentPair = /^[A-Fa-f0-9]{10}$/.test(fragment.get("pair") || "") ? fragment.get("pair").toUpperCase() : "";
+if (fragmentSetup || fragmentPair) history.replaceState(null, "", `${location.pathname}${location.search}`);
+const fragmentTransfer = fragmentSetup && fragmentPair ? `${transferPrefix}${fragmentSetup}:${fragmentPair}` : "";
 
 $("auto-open").checked = localStorage.getItem(autoKey) === "true";
 $("auto-open").addEventListener("change", () => localStorage.setItem(autoKey, String($("auto-open").checked)));
 
 function setStatus(message) { $("status").textContent = message; }
+function setTransferStatus(message) {
+  $("transfer-status").textContent = message;
+  $("transfer-status").hidden = !message;
+  setStatus(message);
+}
+function parseTransfer(value) {
+  const match = /^ocnotify:v1:([A-F0-9]{10}):([A-F0-9]{10})$/i.exec(typeof value === "string" ? value.trim() : "");
+  return match ? { setup: match[1].toUpperCase(), pair: match[2].toUpperCase() } : null;
+}
 function supported() { return window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window; }
 function isIOSDevice() { return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); }
 function installedOnIOS() { return !isIOSDevice() || navigator.standalone === true; }
+function isStandalone() { return navigator.standalone === true || window.matchMedia?.("(display-mode: standalone)").matches === true; }
 function notificationPermission() { return "Notification" in window ? Notification.permission : "unsupported"; }
 
 function updateDevicePresentation() {
@@ -107,8 +114,6 @@ function updateDevicePresentation() {
     $("permission-summary").textContent = supported() ? strings.permissionNotEnabled : strings.permissionUnavailable;
     $("device-dot").classList.add("paired");
   }
-  $("pairing-summary").textContent = token ? strings.repair : strings.pairNeeded;
-  if (token && !$("pairing-details").dataset.userToggled) $("pairing-details").open = false;
   $("save-destination").disabled = !token || !destinationDirty;
 }
 
@@ -229,44 +234,57 @@ destinationControls.forEach((control) => {
     updateConnectionSummary();
   });
 });
-$("pairing-details").addEventListener("toggle", () => { $("pairing-details").dataset.userToggled = "true"; });
+async function pairAutomatically(code) {
+  const result = await api("/api/pair", { method: "POST", body: JSON.stringify({ code }) });
+  token = result.token;
+  localStorage.setItem(tokenKey, token);
+  subscribed = false;
+  resetDestinationForm();
+  updateDevicePresentation();
+}
 
-$("pair").addEventListener("click", async () => {
-  try {
-    const result = await api("/api/pair", { method: "POST", body: JSON.stringify({ code: $("pair-code").value }) });
-    token = result.token;
-    localStorage.setItem(tokenKey, token);
-    subscribed = false;
-    resetDestinationForm();
-    $("pair-code").value = "";
-    $("pairing-details").open = false;
-    setStatus(strings.paired);
-    updateDevicePresentation();
-    await refresh();
-  } catch (error) { setStatus(error.message); }
-});
+async function importSetupAutomatically(code) {
+  const state = await api("/api/status");
+  const draft = await api("/api/setup/redeem", { method: "POST", body: JSON.stringify({ code }) });
+  const destination = { ...state.destination, baseURL: draft.baseURL, username: draft.username, profile: draft.profile };
+  $("base-url").value = destination.baseURL;
+  $("username").value = destination.username;
+  $("profile").value = destination.profile;
+  $("delay").value = destination.delaySeconds;
+  $("real-events").checked = destination.optIn;
+  showingSuggestion = false;
+  $("advanced-details").open = true;
+  updateConnectionSummary();
+  updateSaveState(true);
+  await api("/api/destination", { method: "PUT", body: JSON.stringify(destination) });
+  destinationLoaded = true;
+  updateSaveState(false);
+}
 
-$("setup-code").addEventListener("input", () => {
-  const code = $("setup-code").value.trim().toUpperCase();
-  $("setup-section").hidden = false;
-  if (/^[A-F0-9]{10}$/.test(code)) localStorage.setItem(setupKey, code);
-});
-$("use-connection").addEventListener("click", async () => {
-  const code = $("setup-code").value.trim().toUpperCase();
-  if (!token) return setStatus(strings.setupPairFirst);
+async function completeGuidedSetup(payload, clearClipboard = false) {
+  const transfer = parseTransfer(payload);
+  if (!transfer) throw new Error(strings.invalidTransfer);
+  if (!token) {
+    setTransferStatus(strings.pairing);
+    await pairAutomatically(transfer.pair);
+  }
+  await importSetupAutomatically(transfer.setup);
+  if (clearClipboard) await navigator.clipboard?.writeText("").catch(() => {});
+  await refresh();
+  setTransferStatus(strings.setupComplete);
+}
+
+$("paste-setup").addEventListener("click", async () => {
+  const button = $("paste-setup");
+  button.disabled = true;
   try {
-    const draft = await api("/api/setup/redeem", { method: "POST", body: JSON.stringify({ code }) });
-    $("base-url").value = draft.baseURL;
-    $("username").value = draft.username;
-    $("profile").value = draft.profile;
-    showingSuggestion = false;
-    $("advanced-details").open = true;
-    updateConnectionSummary();
-    updateSaveState(true);
-    localStorage.removeItem(setupKey);
-    $("setup-section").hidden = true;
-    setStatus(strings.setupImported);
-  } catch (error) { setStatus(error.message); }
+    if (!navigator.clipboard?.readText) throw new Error(strings.pasteUnavailable);
+    await completeGuidedSetup(await navigator.clipboard.readText(), true);
+  } catch (error) {
+    setTransferStatus(error.message || strings.unknown);
+  } finally {
+    button.disabled = false;
+  }
 });
 
 async function saveDestination() {
@@ -327,14 +345,44 @@ $("reset").addEventListener("click", async () => {
   $("jobs").replaceChildren();
   $("empty-activity").hidden = false;
   $("activity-count").textContent = "";
-  $("pairing-details").open = true;
   updateDevicePresentation();
   setStatus(strings.resetDone);
 });
 
-$("install-note").hidden = !isIOSDevice() || installedOnIOS();
+const standalone = isStandalone();
+$("install-gate").hidden = standalone;
+$("settings-shell").hidden = !standalone;
+$("install-note").hidden = true;
+if (!standalone) {
+  const mobile = /Android|iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (!mobile) {
+    $("install-instruction").textContent = strings.installDesktop;
+    $("install-steps").hidden = true;
+    $("install-footnote").textContent = strings.installDesktopNote;
+  }
+  if (mobile) {
+    window.addEventListener?.("beforeinstallprompt", (event) => {
+      event.preventDefault();
+      $("install-action").hidden = false;
+      $("install-action").onclick = async () => { await event.prompt(); $("install-action").hidden = true; };
+    });
+  }
+  if (mobile && fragmentTransfer) {
+    $("install-copy-step").hidden = false;
+    $("copy-setup").hidden = false;
+    $("copy-setup").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(fragmentTransfer);
+        $("install-footnote").textContent = strings.setupCopied;
+      } catch {
+        $("install-footnote").textContent = strings.pasteUnavailable;
+      }
+    });
+  }
+}
 $("empty-activity").hidden = false;
 updateDevicePresentation();
 updateConnectionSummary();
-if (supported()) navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((registration) => registration.update()).catch(() => {});
-refresh();
+if (standalone && supported()) navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((registration) => registration.update()).catch(() => {});
+if (standalone && fragmentTransfer) completeGuidedSetup(fragmentTransfer).catch((error) => setTransferStatus(error.message || strings.unknown));
+else if (standalone) refresh();

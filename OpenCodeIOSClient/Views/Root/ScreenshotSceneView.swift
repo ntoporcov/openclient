@@ -71,7 +71,9 @@ struct ScreenshotSceneView: View {
                 ActivityView(
                     facade: viewModel.activityFacade,
                     connection: viewModel.connectionFacade,
-                    providerUsage: viewModel.providerUsageFacade
+                    providerUsage: viewModel.providerUsageFacade,
+                    configurations: viewModel.configurationsFacade,
+                    bridge: nil
                 ) {}
             }
         case .chat:

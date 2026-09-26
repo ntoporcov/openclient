@@ -125,6 +125,7 @@ async function runCase(browser, [name, width, height, mobile, scheme, paired, de
   const fixtureScript = `
     localStorage.setItem("notification-pwa-auto-open", "false");
     ${paired ? 'localStorage.setItem("notification-pwa-device-token", "smoke-token");' : 'localStorage.removeItem("notification-pwa-device-token");'}
+    try { Object.defineProperty(navigator, "clipboard", { configurable: true, value: { readText: async () => "ocnotify:v1:ABCDEF1234:0123456789", writeText: async () => {} } }); } catch {}
     try { Object.defineProperty(Notification, "permission", { configurable: true, get: () => "granted" }); } catch {}
     try { Notification.requestPermission = () => Promise.resolve("granted"); } catch {}
   `;
@@ -160,7 +161,7 @@ async function runCase(browser, [name, width, height, mobile, scheme, paired, de
     return result.result.value;
   };
   await deadline(evaluate(`new Promise(resolve => { const check = () => document.readyState === "complete" && document.querySelector("#status") ? resolve(true) : setTimeout(check, 50); check(); })`));
-  const controls = await evaluate(`["pair-code","pair","enable","base-url","username","profile","delay","real-events","save-destination","auto-open","schedule","status","refresh","jobs","reset"].filter(id => !document.getElementById(id))`);
+  const controls = await evaluate(`["paste-setup","transfer-status","enable","base-url","username","profile","delay","real-events","save-destination","auto-open","schedule","status","refresh","jobs","reset"].filter(id => !document.getElementById(id))`);
   if (controls.length) throw new Error(`${name}: missing controls: ${controls.join(", ")}`);
   const expectedURL = destinationMode === "fresh" ? `http://${new URL(TARGET_URL).hostname}:4096` : "http://mac.local:4096";
   const initialState = await deadline(evaluate(`new Promise(resolve => { const check = () => { const text = document.querySelector("#status").textContent; const initialized = ${paired ? `/notifications are enabled|paired/i.test(text) && document.querySelector("#base-url").value === ${JSON.stringify(expectedURL)}` : '/pair|ready/i.test(text)'}; if (initialized) resolve({ status: text, baseURL: document.querySelector("#base-url").value, advancedOpen: document.querySelector("#advanced-details").open }); else setTimeout(check, 50); }; check(); })`));
@@ -184,10 +185,10 @@ async function runCase(browser, [name, width, height, mobile, scheme, paired, de
     const afterRefresh = await evaluate(`(async () => { document.getElementById("refresh").click(); await new Promise(r => setTimeout(r, 100)); return ({ status: document.querySelector("#status").textContent, hint: [...document.querySelectorAll(".section-footer")].some(e => /close|leave/i.test(e.textContent)) }); })()`);
     if (!afterRefresh.hint || !/enabled|paired/i.test(afterRefresh.status)) throw new Error(`${name}: refresh verification failed`);
     const priorOptIn = await evaluate(`document.getElementById("real-events").checked`);
-    await evaluate(`(() => { const input = document.getElementById("setup-code"); input.value = "A1B2C3D4E5"; input.dispatchEvent(new Event("input", { bubbles: true })); document.getElementById("use-connection").click(); })()`);
-    await deadline(evaluate(`new Promise(resolve => { const check = () => /Connection draft imported/i.test(document.querySelector("#status").textContent) ? resolve(true) : setTimeout(check, 50); check(); })`));
+    await evaluate(`document.getElementById("paste-setup").click()`);
+    await deadline(evaluate(`new Promise(resolve => { const check = () => /Setup complete/i.test(document.querySelector("#status").textContent) ? resolve(true) : setTimeout(check, 50); check(); })`));
     const imported = await evaluate(`({ baseURL: document.getElementById("base-url").value, username: document.getElementById("username").value, optIn: document.getElementById("real-events").checked, dirty: !document.getElementById("save-destination").disabled })`);
-    if (imported.baseURL !== "http://native-saved.local:4096/" || imported.username !== "" || imported.optIn !== priorOptIn || !imported.dirty) throw new Error(`${name}: native connection import changed consent or identity`);
+    if (imported.baseURL !== "http://native-saved.local:4096/" || imported.username !== "" || imported.optIn !== priorOptIn || imported.dirty) throw new Error(`${name}: native connection import changed consent, identity, or save state`);
   } else if (!dimensions.hint) throw new Error(`${name}: missing leave/close hint`);
   await call("Page.navigate", { url: new URL("/events.html", TARGET_URL).href });
   await deadline(evaluate(`new Promise(resolve => { const check = () => { const ready = document.readyState === "complete" && document.querySelector("#events-refresh"); const state = ${paired ? 'document.querySelectorAll("#event-list > li").length === 3' : '!document.querySelector("#events-unpaired").hidden'}; if (ready && state) resolve(true); else setTimeout(check, 50); }; check(); })`));

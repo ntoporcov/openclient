@@ -1,138 +1,167 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "CFBundleDisplayName": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient"
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Bundle display name",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient"
           }
         },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient"
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient"
           }
         },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient"
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient"
           }
         }
       }
     },
-    "NSLocalNetworkUsageDescription": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient connects to your OpenCode server and its device-tool bridge on your local network."
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient"
           }
         },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O OpenClient se conecta ao seu servidor OpenCode e à ponte de ferramentas do dispositivo pela rede local."
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient"
           }
         },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient si connette al tuo server OpenCode e al suo bridge degli strumenti del dispositivo sulla tua rete locale."
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient"
           }
         }
       }
     },
-    "NSMicrophoneUsageDescription": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient uses the microphone for dictation and voice conversations."
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Privacy - Local Network Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient connects to your OpenCode server and its device-tool bridge on your local network."
           }
         },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O OpenClient usa o microfone para ditado e conversas por voz."
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient si connette al tuo server OpenCode e al suo bridge degli strumenti del dispositivo sulla tua rete locale."
           }
         },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient usa il microfono per la dettatura e le conversazioni vocali."
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O OpenClient se conecta ao seu servidor OpenCode e à ponte de ferramentas do dispositivo pela rede local."
           }
         }
       }
     },
-    "NSPersonalVoiceUsageDescription": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient uses your Personal Voice to read AI responses aloud when you select it."
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Privacy - Microphone Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient uses the microphone for dictation and voice conversations."
           }
         },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O OpenClient usa sua Voz Pessoal para ler as respostas da IA em voz alta quando você a seleciona."
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient usa il microfono per la dettatura e le conversazioni vocali."
           }
         },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient usa la tua Voce personale per leggere ad alta voce le risposte dell'IA quando la selezioni."
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O OpenClient usa o microfone para ditado e conversas por voz."
           }
         }
       }
     },
-    "NSPhotoLibraryUsageDescription": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient uses your photo library to show recent photos and attach selected images to messages."
+    "NSPersonalVoiceUsageDescription" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient uses your Personal Voice to read AI responses aloud when you select it."
           }
         },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O OpenClient usa sua fototeca para mostrar fotos recentes e anexar as imagens selecionadas às mensagens."
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient usa la tua Voce personale per leggere ad alta voce le risposte dell'IA quando la selezioni."
           }
         },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient usa la tua libreria foto per mostrare foto recenti e allegare le immagini selezionate ai messaggi."
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O OpenClient usa sua Voz Pessoal para ler as respostas da IA em voz alta quando você a seleciona."
           }
         }
       }
     },
-    "NSSpeechRecognitionUsageDescription": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient uses speech recognition to transcribe dictation and voice conversations."
+    "NSPhotoLibraryUsageDescription" : {
+      "comment" : "Privacy - Photo Library Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient uses your photo library to show recent photos and attach selected images to messages."
           }
         },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O OpenClient usa o reconhecimento de fala para transcrever ditados e conversas por voz."
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient usa la tua libreria foto per mostrare foto recenti e allegare le immagini selezionate ai messaggi."
           }
         },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenClient usa il riconoscimento vocale per trascrivere la dettatura e le conversazioni vocali."
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O OpenClient usa sua fototeca para mostrar fotos recentes e anexar as imagens selecionadas às mensagens."
+          }
+        }
+      }
+    },
+    "NSSpeechRecognitionUsageDescription" : {
+      "comment" : "Privacy - Speech Recognition Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient uses speech recognition to transcribe dictation and voice conversations."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenClient usa il riconoscimento vocale per trascrivere la dettatura e le conversazioni vocali."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O OpenClient usa o reconhecimento de fala para transcrever ditados e conversas por voz."
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

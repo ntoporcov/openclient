@@ -12,6 +12,11 @@ struct OpenCodeV2Health: Decodable, Equatable, Sendable {
     let pid: Int
 }
 
+private struct OpenCodeV2Info: Decodable, Sendable {
+    let version: String
+    let pid: Int
+}
+
 enum OpenCodeV2ProbeResult: Equatable, Sendable {
     case available(OpenCodeV2Health)
     case unavailable
@@ -45,6 +50,11 @@ enum OpenCodeV2PendingInputEndpoint: String, Sendable {
     case pending
 }
 
+enum OpenCodeV2Contract: Equatable, Sendable {
+    case preview17155
+    case release
+}
+
 private struct OpenCodeV2Project: Decodable, Sendable {
     let id: String
     let canonical: String
@@ -67,12 +77,6 @@ private struct OpenCodeV2Project: Decodable, Sendable {
     }
 }
 
-private struct OpenCodeV2CurrentProject: Decodable, Sendable {
-    let id: String
-    let directory: String
-    let canonical: String
-}
-
 struct OpenCodeV2Location: Decodable, Equatable, Sendable {
     struct Project: Decodable, Equatable, Sendable {
         let id: String
@@ -89,8 +93,12 @@ private struct OpenCodeV2DataResponse<Value: Decodable & Sendable>: Decodable, S
     let data: Value
 }
 
+struct OpenCodeV2ResponseLocation: Decodable, Equatable, Sendable {
+    let directory: String
+}
+
 private struct OpenCodeV2LocationResponse<Value: Decodable & Sendable>: Decodable, Sendable {
-    let location: OpenCodeV2Location
+    let location: OpenCodeV2ResponseLocation
     let data: Value
 }
 
@@ -99,6 +107,9 @@ enum OpenCodeV2TransportError: Error {
     case invalidPermissionReply
     case invalidFormAnswer(String)
     case unsupportedFormField(String)
+    case unsupportedCommandAdmission
+    case unsupportedPausedCommand
+    case unsupportedCommandSelection
     case invalidTimelineRecord
 }
 
@@ -304,10 +315,15 @@ private struct OpenCodeV2PromptRequest: Encodable, Sendable {
 
 private struct OpenCodeV2PromptResponse: Decodable, Sendable {
     struct Receipt: Decodable, Sendable {
+        struct Time: Decodable, Sendable { let created: Double }
+
         let id: String
         let sessionID: String
-        let timeCreated: Double
         let delivery: String
+        private let time: Time?
+        private let timeCreated: Double?
+
+        var created: Double? { time?.created ?? timeCreated }
     }
 
     let data: Receipt
@@ -356,6 +372,20 @@ struct OpenCodeV2Form: Decodable, Equatable, Sendable {
     let title: String
     let metadata: [String: OpenCodeJSONValue]?
     let fields: [[String: OpenCodeJSONValue]]
+    let state: OpenCodeV2FormState?
+
+    init(
+        id: String, sessionID: String, title: String,
+        metadata: [String: OpenCodeJSONValue]?, fields: [[String: OpenCodeJSONValue]],
+        state: OpenCodeV2FormState? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.title = title
+        self.metadata = metadata
+        self.fields = fields
+        self.state = state
+    }
 
     var backendForm: BackendForm {
         .init(id: id, sessionID: sessionID, title: title, metadata: metadata, fields: fields.map(BackendFormField.init(raw:)))
@@ -606,7 +636,7 @@ private struct OpenCodeV2TimelineRecord: Decodable, Sendable {
                 ?? value.object("model")?.string("id")
                 ?? value.object("location")?.string("directory")
             guard let text else { return nil }
-            let part = textPart(id: "\(id):v2:text:0", messageID: id, sessionID: sessionID, type: "text", text: text, synthetic: true)
+            let part = textPart(id: "\(id):v2:text:0", messageID: id, sessionID: sessionID, type: type, text: text, synthetic: true)
             return envelope(
                 id: id,
                 role: "assistant",
@@ -618,6 +648,14 @@ private struct OpenCodeV2TimelineRecord: Decodable, Sendable {
             return nil
         }
     }
+
+    var isDisplayableType: Bool {
+        guard let type = value.string("type") else { return false }
+        return ["user", "assistant", "compaction", "shell", "synthetic", "system", "skill",
+                "agent-switched", "model-switched", "location-switched"].contains(type)
+    }
+
+    var hasType: Bool { value.string("type") != nil }
 
     private func projectedPart(
         _ value: OpenCodeJSONValue,
@@ -778,6 +816,7 @@ private extension Dictionary where Key == String, Value == OpenCodeJSONValue {
 struct OpenCodeAPIClient: Sendable {
     let config: OpenCodeServerConfig
     var session: URLSession = .shared
+    var v2Contract: OpenCodeV2Contract = .release
 
     func health() async throws -> HealthResponse {
         try await send(path: "/global/health", method: "GET")
@@ -792,7 +831,7 @@ struct OpenCodeAPIClient: Sendable {
         debugLog(response: http, for: request, body: data)
 
         if http.statusCode == 404 || http.statusCode == 405 {
-            return .unavailable
+            return try await probeV2Info()
         }
         guard (200 ..< 300).contains(http.statusCode) else {
             throw OpenCodeAPIError.httpError(http.statusCode, String(data: data, encoding: .utf8) ?? "")
@@ -803,7 +842,7 @@ struct OpenCodeAPIClient: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
         if contentType.contains("text/html") || body.hasPrefix("<!doctype html") || body.hasPrefix("<html") {
-            return .unavailable
+            return try await probeV2Info()
         }
 
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -815,6 +854,25 @@ struct OpenCodeAPIClient: Sendable {
             throw OpenCodeAPIError.invalidResponse
         }
         return .available(health)
+    }
+
+    private func probeV2Info() async throws -> OpenCodeV2ProbeResult {
+        let request = try makeRequest(path: "/api/info", method: "GET", queryItems: [])
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw OpenCodeAPIError.invalidResponse }
+        debugLog(response: http, for: request, body: data)
+        if http.statusCode == 404 || http.statusCode == 405 { return .unavailable }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            throw OpenCodeAPIError.httpError(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+        let body = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if contentType.contains("text/html") || body.hasPrefix("<!doctype html") || body.hasPrefix("<html") {
+            return .unavailable
+        }
+        let info = try JSONDecoder().decode(OpenCodeV2Info.self, from: data)
+        guard !info.version.isEmpty, info.pid >= 0 else { throw OpenCodeAPIError.invalidResponse }
+        return .available(OpenCodeV2Health(healthy: true, version: info.version, pid: info.pid))
     }
 
     func bootstrapV2Projects() async throws -> OpenCodeV2ProjectBootstrap {
@@ -843,12 +901,16 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     func currentV2Project(directory: String? = nil, workspaceID: String? = nil) async throws -> OpenCodeProject {
-        let current: OpenCodeV2CurrentProject = try await send(path: "/api/project/current", method: "GET", queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID))
+        let location = try await getV2Location(directory: directory, workspaceID: workspaceID)
+        return try await project(for: location)
+    }
+
+    func project(for location: OpenCodeV2Location) async throws -> OpenCodeProject {
         let projects: [OpenCodeV2Project] = try await send(path: "/api/project", method: "GET")
-        if let project = projects.first(where: { $0.id == current.id }) {
-            return project.normalized(primaryDirectory: current.directory, directories: project.sandboxes)
+        if let project = projects.first(where: { $0.id == location.project.id }) {
+            return project.normalized(primaryDirectory: location.project.directory, directories: project.sandboxes)
         }
-        return OpenCodeProject(id: current.id, worktree: current.directory, vcs: nil, name: nil, sandboxes: [], icon: nil, time: nil)
+        return OpenCodeProject(id: location.project.id, worktree: location.project.directory, vcs: nil, name: nil, sandboxes: [], icon: nil, time: nil)
     }
 
     func updateV2Project(projectID: String, directory: String? = nil, name: String? = nil, icon: OpenCodeProject.Icon? = nil) async throws -> OpenCodeProject {
@@ -867,22 +929,26 @@ struct OpenCodeAPIClient: Sendable {
 
     func updateV2SessionTitle(sessionID: String, title: String) async throws -> OpenCodeSession {
         struct Rename: Encodable { let title: String }
-        try await sendNoContent(path: "/api/session/\(sessionID)/rename", method: "POST", body: Rename(title: title))
+        let path = v2Contract == .preview17155
+            ? "/api/session/\(sessionID)/rename"
+            : "/api/session/\(sessionID)"
+        try await sendNoContent(path: path, method: v2Contract == .preview17155 ? "POST" : "PATCH", body: Rename(title: title))
         return try await getV2Session(sessionID: sessionID)
     }
 
     func forkV2Session(sessionID: String, messageID: String? = nil) async throws -> OpenCodeSession {
-        struct Fork: Encodable {
-            struct Boundary: Encodable {
-                let type: String
-                let messageID: String?
+        let response: OpenCodeV2SessionResponse
+        if v2Contract == .preview17155 {
+            struct Fork: Encodable {
+                struct Boundary: Encodable { let type: String; let messageID: String? }
+                let boundary: Boundary
             }
-            let boundary: Boundary
+            response = try await send(path: "/api/session/\(sessionID)/fork", method: "POST",
+                body: Fork(boundary: .init(type: messageID == nil ? "through" : "before", messageID: messageID)))
+        } else {
+            struct Fork: Encodable { let before: String? }
+            response = try await send(path: "/api/session/\(sessionID)/fork", method: "POST", body: Fork(before: messageID))
         }
-        let response: OpenCodeV2SessionResponse = try await send(
-            path: "/api/session/\(sessionID)/fork", method: "POST",
-            body: Fork(boundary: .init(type: messageID == nil ? "through" : "before", messageID: messageID))
-        )
         return response.data.normalized()
     }
 
@@ -916,13 +982,39 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     func compactV2Session(sessionID: String) async throws {
-        try await sendNoContent(path: "/api/session/\(sessionID)/compact", method: "POST", body: [String: String]())
+        if v2Contract == .preview17155 {
+            try await sendNoContent(path: "/api/session/\(sessionID)/compact", method: "POST", body: [String: String]())
+            return
+        }
+        struct Compact: Encodable { let id: String; let delivery: String }
+        let id = OpenCodeIdentifier.message()
+        let response: OpenCodeV2PromptResponse = try await send(
+            path: "/api/session/\(sessionID)/compact", method: "POST",
+            body: Compact(id: id, delivery: "steer")
+        )
+        guard response.data.id == id, response.data.sessionID == sessionID else {
+            throw OpenCodeAPIError.invalidResponse
+        }
     }
 
     func sendV2Command(sessionID: String, command: String, arguments: String = "", attachments: [OpenCodeComposerAttachment] = []) async throws {
-        let messageID = OpenCodeIdentifier.message()
-        let receipt = try await admitV2Command(sessionID: sessionID, messageID: messageID, command: command, arguments: arguments, attachments: attachments)
-        guard receipt.id == messageID, receipt.sessionID == sessionID else { throw OpenCodeAPIError.invalidResponse }
+        if v2Contract == .preview17155 {
+            let messageID = OpenCodeIdentifier.message()
+            let receipt = try await admitV2Command(sessionID: sessionID, messageID: messageID, command: command,
+                arguments: arguments, attachments: attachments)
+            guard receipt.id == messageID, receipt.sessionID == sessionID else { throw OpenCodeAPIError.invalidResponse }
+            return
+        }
+        struct Command: Encodable {
+            let name: String
+            let text: String
+            let files: [OpenCodeV2PromptRequest.File]?
+        }
+        try await sendNoContent(
+            path: "/api/session/\(sessionID)/command", method: "POST",
+            body: Command(name: command, text: arguments,
+                files: attachments.isEmpty ? nil : attachments.map { .init(uri: $0.dataURL, name: $0.filename) })
+        )
     }
 
     func admitV2Command(
@@ -930,22 +1022,33 @@ struct OpenCodeAPIClient: Sendable {
         agent: String? = nil, model: OpenCodeModelReference? = nil, variant: String? = nil,
         attachments: [OpenCodeComposerAttachment] = [], resume: Bool = true
     ) async throws -> OpenCodeV2PromptReceipt {
-        struct Command: Encodable {
-            let id: String
-            let command: String
-            let arguments: String
-            let agent: String?
-            let model: OpenCodeV2ModelReference?
-            let files: [OpenCodeV2PromptRequest.File]?
-            let resume: Bool
+        if v2Contract == .preview17155 {
+            struct Command: Encodable {
+                let id: String
+                let command: String
+                let arguments: String
+                let agent: String?
+                let model: OpenCodeV2ModelReference?
+                let files: [OpenCodeV2PromptRequest.File]?
+                let resume: Bool
+            }
+            let response: OpenCodeV2PromptResponse = try await send(
+                path: "/api/session/\(sessionID)/command", method: "POST",
+                body: Command(id: messageID, command: command, arguments: arguments, agent: agent,
+                    model: model.map { .init(providerID: $0.providerID, id: $0.modelID, variant: variant) },
+                    files: attachments.isEmpty ? nil : attachments.map { .init(uri: $0.dataURL, name: $0.filename) },
+                    resume: resume)
+            )
+            guard let created = response.data.created else { throw OpenCodeAPIError.invalidResponse }
+            return .init(id: response.data.id, sessionID: response.data.sessionID,
+                timeCreated: created, delivery: response.data.delivery)
         }
-        let response: OpenCodeV2PromptResponse = try await send(
-            path: "/api/session/\(sessionID)/command", method: "POST",
-            body: Command(id: messageID, command: command, arguments: arguments, agent: agent,
-                model: model.map { .init(providerID: $0.providerID, id: $0.modelID, variant: variant) },
-                files: attachments.isEmpty ? nil : attachments.map { .init(uri: $0.dataURL, name: $0.filename) }, resume: resume)
-        )
-        return .init(id: response.data.id, sessionID: response.data.sessionID, timeCreated: response.data.timeCreated, delivery: response.data.delivery)
+        guard resume else { throw OpenCodeV2TransportError.unsupportedPausedCommand }
+        guard agent == nil, model == nil, variant == nil else {
+            throw OpenCodeV2TransportError.unsupportedCommandSelection
+        }
+        _ = (sessionID, messageID, command, arguments, attachments)
+        throw OpenCodeV2TransportError.unsupportedCommandAdmission
     }
 
     func listV2Commands(directory: String? = nil, workspaceID: String? = nil) async throws -> [OpenCodeCommand] {
@@ -1156,8 +1259,12 @@ struct OpenCodeAPIClient: Sendable {
             method: "GET",
             queryItems: queryItems
         )
-        let messages = try response.data.reversed().map {
-            guard let message = $0.normalized(sessionID: sessionID) else { throw OpenCodeV2TransportError.invalidTimelineRecord }
+        let messages: [OpenCodeMessageEnvelope] = try response.data.reversed().compactMap { record -> OpenCodeMessageEnvelope? in
+            guard record.hasType else { throw OpenCodeV2TransportError.invalidTimelineRecord }
+            guard record.isDisplayableType else { return nil }
+            guard let message = record.normalized(sessionID: sessionID) else {
+                throw OpenCodeV2TransportError.invalidTimelineRecord
+            }
             return message
         }
         // next-17155 applies the SQL limit without filtering, but emits cursors even
@@ -1200,16 +1307,18 @@ struct OpenCodeAPIClient: Sendable {
                 }
             )
         )
+        guard let created = response.data.created else { throw OpenCodeAPIError.invalidResponse }
         return OpenCodeV2PromptReceipt(
             id: response.data.id,
             sessionID: response.data.sessionID,
-            timeCreated: response.data.timeCreated,
+            timeCreated: created,
             delivery: response.data.delivery
         )
     }
 
     func waitForV2Session(sessionID: String) async throws {
-        try await sendNoContent(path: "/api/session/\(sessionID)/wait", method: "POST")
+        let prefix = v2Contract == .preview17155 ? "/api/session" : "/api/experimental/session"
+        try await sendNoContent(path: "\(prefix)/\(sessionID)/wait", method: "POST")
     }
 
     func interruptV2Session(sessionID: String) async throws {
@@ -1226,20 +1335,23 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     func listV2PendingForms(directory: String?, workspaceID: String? = nil) async throws -> [OpenCodeV2Form] {
-        let response: OpenCodeV2DataResponse<[OpenCodeV2Form]> = try await send(
-            path: "/api/form/request",
-            method: "GET",
-            queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID)
-        )
+        let response = try await listV2FormInventory(directory: directory, workspaceID: workspaceID)
         return response.data
     }
 
     func listV2GlobalForms(directory: String?, workspaceID: String? = nil) async throws -> BackendGlobalFormInventory {
-        let response: OpenCodeV2LocationResponse<[OpenCodeV2Form]> = try await send(
-            path: "/api/form/request", method: "GET",
-            queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID))
-        return .init(location: .init(directory: response.location.directory, workspaceID: response.location.workspaceID),
+        let response = try await listV2FormInventory(directory: directory, workspaceID: workspaceID)
+        return .init(location: .init(directory: response.location.directory, workspaceID: nil),
                      forms: response.data.filter { $0.sessionID == "global" }.map(\.backendForm))
+    }
+
+    private func listV2FormInventory(directory: String?, workspaceID: String?) async throws -> OpenCodeV2LocationResponse<[OpenCodeV2Form]> {
+        let queryItems = v2LocationQueryItems(directory: directory, workspaceID: workspaceID)
+        do {
+            return try await send(path: "/api/form", method: "GET", queryItems: queryItems)
+        } catch let OpenCodeAPIError.httpError(status, _) where status == 404 || status == 405 {
+            return try await send(path: "/api/form/request", method: "GET", queryItems: queryItems)
+        }
     }
 
     func listV2PendingQuestions(directory: String?, workspaceID: String? = nil) async throws -> [OpenCodeQuestionRequest] {
@@ -1248,11 +1360,13 @@ struct OpenCodeAPIClient: Sendable {
 
     func replyToV2Permission(sessionID: String, requestID: String, reply: String, message: String? = nil) async throws {
         guard ["once", "always", "reject"].contains(reply) else { throw OpenCodeV2TransportError.invalidPermissionReply }
-        try await sendNoContent(
-            path: "/api/session/\(sessionID)/permission/\(requestID)/reply",
-            method: "POST",
-            body: OpenCodePermissionReplyRequest(reply: reply, message: message)
-        )
+        let path = "/api/session/\(sessionID)/permission/\(requestID)/reply"
+        if v2Contract == .preview17155 {
+            try await sendNoContent(path: path, method: "POST", body: OpenCodePermissionReplyRequest(reply: reply, message: message))
+        } else {
+            struct Decision: Encodable { let decision: String; let message: String? }
+            try await sendNoContent(path: path, method: "POST", body: Decision(decision: reply, message: message))
+        }
     }
 
     func replyToV2Question(sessionID: String, requestID: String, answers: [[String]]) async throws {
@@ -1277,7 +1391,10 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     func getV2FormState(sessionID: String, formID: String, directory: String? = nil, workspaceID: String? = nil) async throws -> OpenCodeV2FormState {
-        let response: OpenCodeV2DataResponse<OpenCodeV2FormState> = try await send(path: "/api/session/\(sessionID)/form/\(formID)/state", method: "GET",
+        let form = try await getV2Form(sessionID: sessionID, formID: formID, directory: directory, workspaceID: workspaceID)
+        if let state = form.state { return state }
+        let response: OpenCodeV2DataResponse<OpenCodeV2FormState> = try await send(
+            path: "/api/session/\(sessionID)/form/\(formID)/state", method: "GET",
             queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID))
         return response.data
     }
@@ -1301,14 +1418,18 @@ struct OpenCodeAPIClient: Sendable {
     }
 
     func cancelV2Form(sessionID: String, formID: String, directory: String? = nil, workspaceID: String? = nil) async throws {
-        try await sendNoContent(path: "/api/session/\(sessionID)/form/\(formID)/cancel", method: "POST",
+        let suffix = v2Contract == .preview17155 ? "/cancel" : ""
+        try await sendNoContent(path: "/api/session/\(sessionID)/form/\(formID)\(suffix)",
+            method: v2Contract == .preview17155 ? "POST" : "DELETE",
             queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID), directoryHeader: nil)
     }
 
     func v2LocationQueryItems(directory: String?, workspaceID: String? = nil) -> [URLQueryItem] {
         var items: [URLQueryItem] = []
         if let directory, !directory.isEmpty { items.append(URLQueryItem(name: "location[directory]", value: directory)) }
-        if let workspaceID, !workspaceID.isEmpty { items.append(URLQueryItem(name: "location[workspace]", value: workspaceID)) }
+        if v2Contract == .preview17155, let workspaceID, !workspaceID.isEmpty {
+            items.append(URLQueryItem(name: "location[workspace]", value: workspaceID))
+        }
         return items
     }
 

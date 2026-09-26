@@ -75,7 +75,7 @@ final class ModelConfigurationStoreTests: XCTestCase {
         XCTAssertEqual(store.sourceTitle(for: provider), "Config")
     }
 
-    func testVisibleModelsAreCappedForLargeConnectedCatalogs() {
+    func testVisibleModelsIncludeEntireLargeConnectedCatalog() {
         let store = ModelConfigurationStore()
         let models = Dictionary(uniqueKeysWithValues: (0 ..< 140).map { index in
             let id = String(format: "model-%03d", index)
@@ -86,9 +86,9 @@ final class ModelConfigurationStoreTests: XCTestCase {
         store.applyProviderState(OpenCodeProviderListResponse(all: [provider], connected: ["openrouter"], default: [:]))
 
         let visibleModels = store.visibleModels(for: provider)
-        XCTAssertEqual(visibleModels.count, ModelConfigurationStore.visibleModelLimitPerProvider)
+        XCTAssertEqual(visibleModels.count, 140)
         XCTAssertEqual(visibleModels.first?.id, "model-000")
-        XCTAssertEqual(visibleModels.last?.id, "model-079")
+        XCTAssertEqual(visibleModels.last?.id, "model-139")
     }
 
     func testSyncingUnchangedComposerSelectionDoesNotPublish() {

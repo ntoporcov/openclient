@@ -5,6 +5,8 @@ import { createOpenClientTools } from "./tools.js"
 
 export type OpenClientPluginOptions = {
   notifications?: NotificationsOptions
+  /** Optional override for v2 hosts that do not expose their listening port in argv. */
+  serverURL?: string
 }
 
 const OpenClientPlugin = async (input: Parameters<Plugin>[0], options: OpenClientPluginOptions = {}) => {
@@ -78,7 +80,14 @@ const OpenClientPlugin = async (input: Parameters<Plugin>[0], options: OpenClien
   }
 }
 
-export default OpenClientPlugin
+export default {
+  id: "openclient",
+  server: OpenClientPlugin,
+  async setup(context: import("@opencode/plugin").Plugin.Context) {
+    const { setupV2 } = await import("./v2.js")
+    return setupV2(context)
+  },
+}
 
 function normalizedPort(url: URL): number {
   if (!url.port) return url.protocol === "https:" ? 443 : 80

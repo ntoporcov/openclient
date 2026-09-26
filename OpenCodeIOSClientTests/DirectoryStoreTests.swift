@@ -78,6 +78,10 @@ final class DirectoryStoreTests: XCTestCase {
         XCTAssertEqual(store.sessionStatuses["ses_new"], "busy")
         store.applyV2ActiveStatuses([:], requestedAtRevision: store.statusRevision)
         XCTAssertEqual(store.sessionStatuses["ses_new"], "idle")
+        store.applySessionStatus("busy", forSessionID: "ses_new")
+        let idle = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"type":"session.idle","data":{"sessionID":"ses_new"}}"#))
+        XCTAssertTrue(store.applyV2Event(idle))
+        XCTAssertEqual(store.sessionStatuses["ses_new"], "idle")
         let renamed = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: #"{"created":2000,"type":"session.renamed","data":{"sessionID":"ses_new","title":"Renamed"}}"#))
         XCTAssertTrue(store.applyV2Event(renamed))
         XCTAssertEqual(store.sessions.first?.title, "Renamed")
@@ -191,6 +195,43 @@ final class DirectoryStoreTests: XCTestCase {
         background.sessionStatuses["metadata-only"] = "busy"
         XCTAssertTrue(registry.ownerStore(forSessionID: "metadata-only") === background)
         XCTAssertNil(registry.ownerStore(forSessionID: "missing"))
+    }
+
+    func testOwnerSnapshotIndexesFourHundredSessionsAndPrefersActiveStore() {
+        let registry = DirectoryStoreRegistry(activeDirectory: "/tmp/active")
+        let background = registry.store(for: "/tmp/background")
+        let sessions = (0..<400).map { session(id: "session-\($0)", directory: "/tmp/background") }
+        background.sessions = sessions
+        registry.activeStore.sessions = [sessions[200]]
+
+        let owners = registry.ownerStoresBySessionID()
+
+        XCTAssertEqual(owners.count, 400)
+        XCTAssertTrue(owners[sessions[0].id] === background)
+        XCTAssertTrue(owners[sessions[200].id] === registry.activeStore)
+    }
+
+    func testOwnerSnapshotMatchesOwnerLookupActivePriorityRules() {
+        let registry = DirectoryStoreRegistry(activeDirectory: "/tmp/active")
+        let active = registry.activeStore
+        let background = registry.store(for: "/tmp/background")
+        let canonical = session(id: "canonical", directory: "/tmp/background")
+        let transcript = session(id: "transcript", directory: "/tmp/background")
+        let metadataOnly = session(id: "metadata", directory: "/tmp/background")
+        background.sessions = [canonical, transcript, metadataOnly]
+        active.sessions = [canonical]
+        active.syncState.replaceMessages(
+            [message(id: "msg", role: "assistant", text: "Live", sessionID: transcript.id)],
+            forSessionID: transcript.id
+        )
+        active.sessionStatuses[metadataOnly.id] = "busy"
+
+        let owners = registry.ownerStoresBySessionID()
+
+        XCTAssertTrue(owners[canonical.id] === active)
+        XCTAssertTrue(owners[transcript.id] === active)
+        XCTAssertTrue(owners[metadataOnly.id] === background)
+        XCTAssertTrue(registry.ownerStore(forSessionID: metadataOnly.id) === background)
     }
 
     func testV2SessionListSnapshotCannotResurrectUnknownSessionDeletedInFlight() throws {
@@ -403,6 +444,57 @@ final class DirectoryStoreTests: XCTestCase {
         store.removeV2Question(id: question.id, sessionID: question.sessionID)
         XCTAssertNil(store.syncState.permissionsBySessionID["ses_1"])
         XCTAssertNil(store.syncState.questionsBySessionID["ses_1"])
+    }
+
+    func testFourHundredEmptyV2InteractionHydrationsDoNotPublishOrAdvanceRevisions() {
+        let store = DirectoryStore()
+        var storePublications = 0
+        var syncPublications = 0
+        let storeObservation = store.objectWillChange.sink { storePublications += 1 }
+        let syncObservation = store.syncStore.objectWillChange.sink { syncPublications += 1 }
+
+        for index in 0..<400 {
+            store.applyV2SessionInteractions(
+                sessionID: "session-\(index)",
+                permissions: [],
+                forms: [],
+                permissionRevisionAtRequestStart: 0,
+                questionRevisionAtRequestStart: 0
+            )
+        }
+
+        XCTAssertEqual(storePublications, 0)
+        XCTAssertEqual(syncPublications, 0)
+        XCTAssertEqual(store.permissionRevision, 400)
+        XCTAssertEqual(store.questionRevision, 400)
+        XCTAssertTrue(store.syncState.permissionsBySessionID.isEmpty)
+        XCTAssertTrue(store.syncState.questionsBySessionID.isEmpty)
+        XCTAssertTrue(store.sessionFormStore.forms.isEmpty)
+        withExtendedLifetime((storeObservation, syncObservation)) {}
+    }
+
+    func testV2InteractionHydrationUsesSessionScopedStaleGuards() {
+        let store = DirectoryStore()
+        let sessionAPermission = permission(id: "permission-a", sessionID: "session-a")
+        let form = OpenCodeV2Form(id: "form-a", sessionID: "session-a", title: "A", metadata: nil,
+            fields: [["key": .string("answer"), "type": .string("string")]])
+
+        // Session A changing must not discard an overlapping empty result for session B.
+        store.applyV2SessionInteractions(sessionID: "session-a", permissions: [sessionAPermission], forms: [form],
+            permissionRevisionAtRequestStart: 0, questionRevisionAtRequestStart: 0)
+        store.applyV2SessionInteractions(sessionID: "session-b", permissions: [], forms: [],
+            permissionRevisionAtRequestStart: 0, questionRevisionAtRequestStart: 0)
+        XCTAssertEqual(store.permissionRevision, 2)
+        XCTAssertEqual(store.questionRevision, 2)
+
+        // The accepted newer no-op for B is still a stale barrier for B's older request.
+        let stalePermission = permission(id: "stale", sessionID: "session-b")
+        let staleForm = OpenCodeV2Form(id: "stale", sessionID: "session-b", title: "Stale", metadata: nil,
+            fields: [["key": .string("answer"), "type": .string("string")]])
+        store.applyV2SessionInteractions(sessionID: "session-b", permissions: [stalePermission], forms: [staleForm],
+            permissionRevisionAtRequestStart: 0, questionRevisionAtRequestStart: 0)
+        XCTAssertNil(store.syncState.permissionsBySessionID["session-b"])
+        XCTAssertNil(store.sessionFormStore.forms[staleForm.backendForm.key])
     }
 
     func testApplyDirectoryReloadOwnsSessionsCommandsStatusesAndInteractionSyncMaps() {

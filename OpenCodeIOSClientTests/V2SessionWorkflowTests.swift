@@ -519,7 +519,7 @@ final class V2SessionWorkflowTests: XCTestCase {
                 return (404, #"{"message":"Still queued"}"#)
             case "/api/session/ses_v2/inbox":
                 return (200, #"{"data":[{"id":"msg_queued"}]}"#)
-            case "/api/session/ses_v2/wait":
+            case "/api/experimental/session/ses_v2/wait":
                 XCTAssertEqual(model.chatStore.submissionRecoveries["msg_queued"]?.phase, .admitted)
                 return (204, "")
             case "/api/session/ses_v2/message":
@@ -551,8 +551,8 @@ final class V2SessionWorkflowTests: XCTestCase {
         V2SessionWorkflowURLProtocol.handler = { request in
             switch request.url?.path {
             case "/api/session/ses_v2/prompt":
-                return (200, #"{"data":{"id":"msg_first","sessionID":"ses_v2","timeCreated":1,"delivery":"accepted"}}"#)
-            case "/api/session/ses_v2/wait":
+                return (200, #"{"data":{"id":"msg_first","sessionID":"ses_v2","time":{"created":1},"type":"user","payload":{},"delivery":"queue"}}"#)
+            case "/api/experimental/session/ses_v2/wait":
                 await withCheckedContinuation { release = $0; waiting.fulfill() }
                 return (204, "")
             case "/api/session/ses_v2/message":
@@ -582,7 +582,7 @@ final class V2SessionWorkflowTests: XCTestCase {
         let completionObserved = expectation(description: "Completion observes a newer submission")
         V2SessionWorkflowURLProtocol.handler = { request in
             if request.url?.path.hasSuffix("/prompt") == true {
-                return (200, #"{"data":{"id":"msg_first","sessionID":"ses_v2","timeCreated":1,"delivery":"queue"}}"#)
+                return (200, #"{"data":{"id":"msg_first","sessionID":"ses_v2","time":{"created":1},"type":"user","payload":{},"delivery":"queue"}}"#)
             }
             XCTAssertTrue(request.url?.path.hasSuffix("/wait") == true)
             let second = OpenCodeMessageEnvelope.local(role: "user", text: "second", messageID: "msg_second", sessionID: session.id)

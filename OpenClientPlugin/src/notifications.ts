@@ -51,9 +51,28 @@ export type NotificationLease = {
   release(): Promise<void>
 }
 
-export function notificationCapability(): { version: 1; state: "ready" | "unconfigured" | "unavailable"; publicOrigin?: string } {
+export type NotificationCapability = {
+  version: 1
+  state: "ready" | "unconfigured" | "unavailable"
+  publicOrigin?: string
+  pairing?: { version: 1; cliPath: string; dataDir: string }
+}
+
+export function notificationCapability(): NotificationCapability {
   const state = global[stateKey]
-  if (state?.service) return { version: 1, state: "ready", publicOrigin: state.service.publicOrigin.origin }
+  if (state?.service && state.key) {
+    const options = JSON.parse(state.key) as { dataDir?: string }
+    return {
+      version: 1,
+      state: "ready",
+      publicOrigin: state.service.publicOrigin.origin,
+      pairing: {
+        version: 1,
+        cliPath: notificationCLIPath(),
+        dataDir: options.dataDir ?? defaultNotificationDataDir(),
+      },
+    }
+  }
   return { version: 1, state: state?.unavailable ? "unavailable" : "unconfigured" }
 }
 
@@ -179,6 +198,16 @@ function normalizeOptions(options: NotificationsOptions) {
   if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("notifications.port must be an integer from 1 through 65535")
   if (options.dataDir !== undefined && (typeof options.dataDir !== "string" || !options.dataDir.trim())) throw new Error("notifications.dataDir must be a non-empty path")
   return { publicOrigin: origin.origin, port, ...(options.dataDir ? { dataDir: resolve(options.dataDir) } : {}) }
+}
+
+function defaultNotificationDataDir(): string {
+  const stateHome = process.env.XDG_STATE_HOME || (process.env.HOME ? resolve(process.env.HOME, ".local", "state") : undefined)
+  if (!stateHome) throw new Error("notifications.dataDir is required when no user state directory is available")
+  return resolve(stateHome, "opencode", "openclient", "notifications")
+}
+
+function notificationCLIPath(): string {
+  return fileURLToPath(new URL("../dist/notifications/src/cli.mjs", import.meta.url))
 }
 
 async function loadNotificationModule(): Promise<NotificationModule> {

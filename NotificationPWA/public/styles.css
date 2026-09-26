@@ -26,6 +26,20 @@ button { color: inherit; }
 svg { display: block; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 [hidden] { display: none !important; }
 
+.install-gate { display: grid; min-height: 100vh; min-height: 100dvh; padding: calc(env(safe-area-inset-top) + 28px) 22px calc(env(safe-area-inset-bottom) + 28px); place-items: center; }
+.install-card { width: min(100%, 460px); padding: 34px 28px; border-radius: 32px; background: var(--surface); box-shadow: 0 18px 60px rgba(0, 0, 0, .09); text-align: center; }
+.install-app-icon { display: grid; width: 84px; height: 84px; margin: 0 auto 22px; border-radius: 25px; background: linear-gradient(145deg, #2879ff, #0a4fc9); color: #fff; box-shadow: 0 12px 26px rgba(26, 103, 238, .28); place-items: center; }
+.install-app-icon svg { width: 42px; height: 42px; stroke-width: 1.7; }
+.install-card .context { margin-bottom: 5px; }
+.install-card h1 { font-size: 32px; }
+.install-lead { margin: 14px auto 0; color: var(--secondary); font-size: 17px; line-height: 1.45; }
+.install-steps { display: grid; gap: 14px; margin: 28px 0 0; padding: 0; list-style: none; counter-reset: install-step; text-align: left; }
+.install-steps li { display: flex; align-items: center; color: var(--label); font-size: 16px; line-height: 1.35; counter-increment: install-step; }
+.install-steps li::before { display: grid; flex: 0 0 30px; width: 30px; height: 30px; margin-right: 12px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); content: counter(install-step); font-size: 14px; font-weight: 700; place-items: center; }
+.install-action { width: 100%; min-height: 50px; margin-top: 24px; border: 0; border-radius: 15px; background: var(--accent); color: #fff; font-size: 17px; font-weight: 650; cursor: pointer; }
+.install-action + .install-action { margin-top: 10px; }
+.install-footnote { margin: 22px 0 0; color: var(--tertiary); font-size: 13px; line-height: 1.4; }
+
 .settings-shell {
   position: relative;
   z-index: 1;
@@ -217,6 +231,7 @@ button:disabled { cursor: default; opacity: .42; }
 .switch input:focus-visible + span { outline: 3px solid rgba(26, 103, 238, .3); outline-offset: 2px; }
 
 .section-footer { margin: 7px 16px 0; color: var(--secondary); font-size: 13px; font-weight: 400; line-height: 1.35; }
+.inline-status { margin: 10px 16px 0; color: var(--secondary); font-size: 14px; line-height: 1.35; }
 .save-line { display: flex; align-items: center; justify-content: flex-end; min-height: 44px; gap: 10px; padding: 4px 8px 0 16px; }
 .save-line span { color: var(--secondary); font-size: 13px; }
 .save-line span.unsaved { color: #ad6a00; }
