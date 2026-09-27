@@ -17,6 +17,70 @@ final class V2SessionWorkflowTests: XCTestCase {
         UserDefaults.standard.set(originalDraftData, forKey: OpenClientStorageKey.messageDraftsByChat)
     }
 
+    func testV2StreamHapticsFollowVisibleAnswerDeltasAndThrottle() throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        _ = model.beginSessionNavigation(session)
+        model.activeChatSessionID = session.id
+        var time = Date(timeIntervalSince1970: 100)
+        var impacts = 0
+        model.chatStore.streamHapticFeedback = .init(now: { time }, impact: { impacts += 1 }, interval: { 0.1 })
+        func emit(_ type: String, delta: String = "Hello", ordinal: Int = 0) throws {
+            let raw = #"{"type":"session.\#(type)","location":{"directory":"/repo"},"data":{"sessionID":"ses_v2","assistantMessageID":"msg_answer","ordinal":\#(ordinal),"delta":"\#(delta)"}}"#
+            model.handleV2Event(try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from: raw)))
+        }
+        try emit("text.started")
+        XCTAssertEqual(impacts, 0)
+        try emit("text.delta")
+        XCTAssertEqual(impacts, 1)
+        try emit("text.delta")
+        XCTAssertEqual(impacts, 1, "Rapid chunks share the legacy throttle")
+        time = time.addingTimeInterval(1)
+        try emit("text.delta", delta: " ")
+        try emit("reasoning.started")
+        try emit("reasoning.delta")
+        try emit("text.delta", ordinal: 9)
+        XCTAssertEqual(impacts, 1, "Whitespace, reasoning, and unprojected parts are silent")
+        model.activeChatSessionID = nil
+        try emit("text.delta")
+        XCTAssertEqual(impacts, 1, "Background chat is silent")
+        model.activeChatSessionID = session.id
+        try emit("text.delta")
+        XCTAssertEqual(impacts, 2)
+    }
+
+    func testReconnectKeepsV2ProjectCatalogConsistentWithRefresh() async throws {
+        for projectID in ["proj_root", "global"] {
+            let model = makeModel()
+            defer { model.stopEventStream() }
+            var projectReads = 0
+            V2SessionWorkflowURLProtocol.handler = { request in
+                switch request.url?.path {
+                case "/api/location":
+                    return (200, #"{"directory":"/workspace","project":{"id":"\#(projectID)","directory":"/","canonical":"/"}}"#)
+                case "/api/project":
+                    projectReads += 1
+                    return (200, #"[{"id":"\#(projectID)","canonical":"/","time":{"created":1,"updated":1},"sandboxes":[]}]"#)
+                default:
+                    return (404, #"{"message":"Not configured"}"#)
+                }
+            }
+            try await model.refreshProjects()
+            let initialProjects = model.projects
+            XCTAssertEqual(initialProjects.map(\.id), [projectID])
+
+            model.directoryStoreRegistry.requestV2Reconciliation(reconnect: true)
+            model.scheduleV2TimelineReconciliation(immediate: true)
+            await model.v2TimelineReconcileTask?.value
+
+            XCTAssertEqual(projectReads, 2)
+            XCTAssertEqual(model.projects, initialProjects, "Reconnect must not synthesize a legacy Global row")
+            try await model.refreshProjects()
+            XCTAssertEqual(model.projects, initialProjects)
+        }
+    }
+
     func testCommittedRootTranscriptReachesExistingGlobalOwnerWindowsBeforeBridgeRetirement() async throws {
         for viaHTTP in [true, false] {
             let model = makeModel()

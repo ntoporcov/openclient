@@ -1492,6 +1492,27 @@ final class ChatStore: ObservableObject {
         }
     }
 
+    func emitV2StreamHapticIfNeeded(
+        for event: OpenCodeV2ManagedEvent,
+        selectedSessionID: String?,
+        activeChatSessionID: String?
+    ) {
+        guard event.type == "session.text.delta",
+              let sessionID = event.sessionID,
+              let data = event.data.objectValue,
+              let messageID = data["assistantMessageID"]?.literalStringValue,
+              let ordinal = data["ordinal"]?.intValue, ordinal >= 0,
+              let delta = data["delta"]?.literalStringValue else { return }
+        let partID = OpenCodeV2ManagedEvent.partID(messageID: messageID, type: "text", ordinal: ordinal)
+        guard Self.shouldEmitStreamPartHaptic(
+            for: .messagePartDelta(sessionID: sessionID, messageID: messageID, partID: partID, field: "text", delta: delta),
+            selectedSessionID: selectedSessionID,
+            activeChatSessionID: activeChatSessionID,
+            messages: cachedMessagesBySessionID[sessionID] ?? []
+        ) else { return }
+        streamHapticFeedback.emit(nextAllowedAt: &nextStreamPartHapticAllowedAt)
+    }
+
     nonisolated static func shouldEmitStreamPartHaptic(
         for event: OpenCodeTypedEvent,
         selectedSessionID: String?,

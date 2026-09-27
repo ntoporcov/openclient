@@ -3325,6 +3325,7 @@ struct ChatView: View {
         let originalMentions = composerDraftStore.agentMentions
         let messageID = OpenCodeIdentifier.message()
         if !(attachments.isEmpty && command.map({ chatFacade.isCompactClientCommand($0.command) }) == true) {
+            OpenCodeHaptics.impact(.strong)
             thinkingEntryGate.begin(messageID: messageID, contextID: thinkingEntryContextID,
                 alreadyVisible: timedChatDisplaySnapshot.snapshot.showsThinking)
             preparingOutgoingMessageID = messageID

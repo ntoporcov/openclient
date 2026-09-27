@@ -17886,6 +17886,23 @@
         }
       }
     },
+    "Root" : {
+      "comment" : "Display name for the project at the filesystem root directory (/).",
+      "localizations" : {
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radice"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raiz"
+          }
+        }
+      }
+    },
     "Ruminating" : {
       "localizations" : {
         "it" : {

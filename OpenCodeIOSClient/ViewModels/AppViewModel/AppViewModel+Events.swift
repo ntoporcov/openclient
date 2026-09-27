@@ -379,6 +379,8 @@ extension AppViewModel {
             }
             if projected {
                 owner.applyV2Messages(chatStore.cachedMessagesBySessionID[sessionID] ?? [], forSessionID: sessionID)
+                chatStore.emitV2StreamHapticIfNeeded(for: event, selectedSessionID: selectedSession?.id,
+                    activeChatSessionID: activeChatSessionID)
             } else {
                 owner.applyV2Messages(chatStore.withoutRecoveryMessages(owner.syncState.messageEnvelopes(forSessionID: sessionID),
                     sessionID: sessionID), forSessionID: sessionID)
@@ -464,7 +466,9 @@ extension AppViewModel {
             guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
             if directoryStoreRegistry.v2ProjectRevision == projectRevision {
                 projectStore.defaultServerDirectory = bootstrap.selectedDirectory
-                projects = projectCoordinator.bootstrapProjects(bootstrap.projects, currentProject: bootstrap.currentProject)
+                // V2 already supplies the complete catalog. Legacy normalization adds a
+                // synthetic Global project that disappears on the next normal refresh.
+                projects = bootstrap.projects
                     .map { projectStore.preservingSelectedDirectory($0, connectionID: connection.id) }
                 if let selected = currentProject, let updated = projects.first(where: { $0.id == selected.id }) {
                     currentProject = updated

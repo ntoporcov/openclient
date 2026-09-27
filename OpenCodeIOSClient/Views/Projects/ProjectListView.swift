@@ -121,7 +121,7 @@ struct ProjectListView: View {
                                 subtitle: project.id == "global" ? String(localized: "Shared sessions across the current server context") : project.worktree,
                                 systemImage: project.id == "global" ? "globe" : "folder.fill",
                                 icon: project.icon,
-                                usesSystemImageFallback: project.id == "global",
+                                usesSystemImageFallback: project.id == "global" || project.worktree == "/",
                                 isSelected: !isActivitySelected && facade.isSelected(project),
                                 isPreparing: facade.isPreparingSelection(project),
                                 subtitleLineLimit: isEditingProjects ? 2 : 1
@@ -395,6 +395,9 @@ struct ProjectListView: View {
     private func projectTitle(_ project: OpenCodeProject) -> String {
         if project.id == "global" {
             return String(localized: "Global", comment: "Name of the special project containing sessions shared across the server context.")
+        }
+        if project.worktree == "/", project.name == nil || project.name == "/" {
+            return String(localized: "Root", comment: "Display name for the project at the filesystem root directory (/).")
         }
         return project.name ?? project.worktree.split(separator: "/").last.map(String.init) ?? project.worktree
     }
