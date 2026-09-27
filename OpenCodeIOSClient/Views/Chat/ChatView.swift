@@ -3150,10 +3150,10 @@ struct ChatView: View {
             } else if !sessionForms.isEmpty && overlaySnapshot.permissions.isEmpty {
                 SessionFormPanel(forms: sessionForms, store: chatFacade.sessionFormStore(forSessionID: sessionID),
                     contextID: chatFacade.promptContextID, allowsActions: chatFacade.allowsSessionForms,
+                    usesQuestionStyle: true,
                     submit: { await chatFacade.submitSessionForm($0) },
                     cancel: { await chatFacade.cancelSessionForm($0) },
                     refresh: { await chatFacade.refreshSessionForm($0) })
-                .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .padding(.bottom, questionPanelBottomPadding)
             } else {
@@ -3321,6 +3321,8 @@ struct ChatView: View {
         }
         let session = liveSession
         let contextID = chatFacade.v2DraftContextID
+        let originalText = composerDraftStore.text
+        let originalMentions = composerDraftStore.agentMentions
         let messageID = OpenCodeIdentifier.message()
         if !(attachments.isEmpty && command.map({ chatFacade.isCompactClientCommand($0.command) }) == true) {
             thinkingEntryGate.begin(messageID: messageID, contextID: thinkingEntryContextID,
@@ -3332,8 +3334,9 @@ struct ChatView: View {
             scheduleOutgoingEntryAnimation(messageID: messageID)
             requestBottomReadjustment()
         }
-        clearComposerDraft()
-        chatFacade.clearDraftAttachments()
+        // Keep the draft through preflight and transport. A rejected/cancelled send
+        // may finish after navigation or a configuration change, when restoring a
+        // previously cleared composer would no longer be safe.
         v2DraftAttemptID = messageID
         let requestRevision = v2DraftRevision
         let requestResetToken = composerStore.resetToken
@@ -3359,20 +3362,20 @@ struct ChatView: View {
                 accepted = await chatFacade.sendV2TextPrompt(prompt, in: session, attachments: attachments,
                     agentMentions: mentions, messageID: messageID)
             }
-            guard !accepted, chatFacade.activeChatSessionID == session.id,
-                  chatFacade.v2DraftContextID == contextID, v2DraftRevision == requestRevision,
-                  composerStore.resetToken == requestResetToken,
-                  composerDraftStore.text.isEmpty, composerDraftStore.agentMentions.isEmpty,
-                  composerStore.draftAttachments.isEmpty else { return }
-            if tracksAdmission, chatFacade.isPromptAdmitted(messageID: messageID, sessionID: session.id) { return }
-            restoreComposerDraft(prompt)
-            composerDraftStore.agentMentions = mentions
-            chatFacade.setDraftAgentMentions(mentions, forSessionID: session.id)
-            chatFacade.addDraftAttachments(attachments)
+            guard chatFacade.activeChatSessionID == session.id,
+                   chatFacade.v2DraftContextID == contextID, v2DraftRevision == requestRevision,
+                   composerStore.resetToken == requestResetToken,
+                   composerDraftStore.text == originalText, composerDraftStore.agentMentions == originalMentions,
+                   composerStore.draftAttachments == attachments else { return }
+            if accepted || (tracksAdmission && chatFacade.isPromptAdmitted(messageID: messageID, sessionID: session.id)) {
+                clearComposerDraft()
+                chatFacade.clearDraftAttachments()
+                return
+            }
             if tracksAdmission, chatFacade.promptAdmissionPhase(messageID: messageID, sessionID: session.id) == .uncertain {
                 v2RetryDraft = OpenCodeV2RetryDraft(messageID: messageID, sessionID: session.id, contextID: contextID,
                     revision: v2DraftRevision, resetToken: composerStore.resetToken,
-                    text: prompt, mentions: mentions, attachments: attachments)
+                    text: originalText, mentions: originalMentions, attachments: attachments)
                 clearConfirmedV2RetryDraftIfUnchanged()
             }
         }

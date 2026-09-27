@@ -1,5 +1,9 @@
 # V2 Parity Checklist
 
+For the September 2026 native presentation audit and question/tool UI fixes, see [V2 Visual Parity](V2_VISUAL_PARITY.md).
+
+September 27 follow-up: the published stable V2 schema supports `/api/worktree` list/create/remove/refresh, optional destination defaults, and optional `from`/`branch` creation inputs. The older next-17155 contract boundaries below are historical, not claims about current stable V2. Current-schema todo discovery and the worktree/error-presentation fixes are recorded in the visual audit's pass 2.
+
 September 9, 2026: the user approved **public automatic detection by default and only, with no API picker**, superseding Legacy-default and explicit Experimental/v2 opt-in instructions. Experimental "mostly works" remains the confidence goal, not full parity or release certification. The remote rollout flag stays Track Later, separately from this approved default change; no remote flag implementation is required. Final source verification retains its explicit exclusion and combined-run failure. The fresh automatic-detection build is now installed on Nic iPhone; launch failed because the phone was locked.
 
 **Status:** Implemented = code path exists, remaining verification stated; Verified = stated behavior passed the specified tests, not universal parity; Partial = some behavior works but gaps remain; Blocked = unavailable pending a contract or prerequisite; Deferred = explicit user decision, not a current blocker. Evidence details and historical results live in [the adoption guide](OPENCODE_V2_ADOPTION_PLAN.md); service boundaries live in [Backend Injection](BACKEND_INJECTION.md).

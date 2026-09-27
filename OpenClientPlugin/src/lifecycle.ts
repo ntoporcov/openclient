@@ -1,4 +1,4 @@
-import { startBridgeServer, type BridgeServer, type BridgeServerOptions } from "./server.js"
+import { startBridgeServer, type BridgeServer, type BridgeServerOptions } from "./bridge-server.js"
 
 const stateKey = Symbol.for("@openclient/opencode-plugin/bridge")
 

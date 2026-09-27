@@ -18,7 +18,9 @@ export function v2ServerURL(options: Pick<OpenClientPluginOptions, "serverURL">,
   const index = argv.indexOf("--port")
   const raw = index >= 0 ? argv[index + 1] : argv.find((value) => value.startsWith("--port="))?.slice(7) ?? env.OPENCODE_SERVER_PORT
   // Default serve port is 4096. Other embedding modes must supply their origin.
-  if (raw === undefined && !argv.includes("serve")) throw new Error("This v2 host requires the OpenClient serverURL option")
+  if (raw === undefined && (!argv.includes("serve") || argv.includes("--service"))) {
+    throw new Error("This v2 host requires the OpenClient serverURL option")
+  }
   const port = Number(raw ?? 4096)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid OpenCode server port")
   return new URL(`http://127.0.0.1:${port}`)

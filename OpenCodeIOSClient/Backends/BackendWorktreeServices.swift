@@ -71,11 +71,22 @@ struct BackendWorkspacePageKey: Hashable, Sendable {
 
 @MainActor protocol BackendWorktreesService: Sendable {
     var requiresDestinationParent: Bool { get }
+    var supportsDestinationParent: Bool { get }
     func inventory(scope: BackendScope) async throws -> [BackendWorktree]
     func create(_ request: BackendWorktreeCreation) async throws -> BackendWorktreeCreationResult
     func remove(scope: BackendScope, directory: String, force: Bool) async throws
     /// Reconciles the directory inventory, never resets checkout contents.
     func refresh(scope: BackendScope) async throws -> [BackendWorktree]
+}
+
+extension BackendWorktreesService {
+    var supportsDestinationParent: Bool { requiresDestinationParent }
+
+    func isValidDestinationParent(_ value: String) -> Bool {
+        guard supportsDestinationParent else { return true }
+        let path = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? !requiresDestinationParent : path.hasPrefix("/") && !path.contains("\0")
+    }
 }
 
 @MainActor protocol BackendWorktreeResetService: Sendable {

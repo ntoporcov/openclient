@@ -3,6 +3,83 @@ import XCTest
 @MainActor
 final class SessionDeletionUITests: XCTestCase {
     func testNativeDeletionOfMiddlePinnedAndLastSession() async throws {
+        try await exerciseDeletionOfMiddlePinnedAndLastSession(using: .contextMenu)
+    }
+
+    func testNativeSwipeButtonDeletionOfSelectedMiddlePinnedAndLastSession() async throws {
+        try await exerciseDeletionOfMiddlePinnedAndLastSession(using: .swipeButton)
+    }
+
+    func testNativeFullSwipeDeletionOfSelectedMiddlePinnedAndLastSession() async throws {
+        try await exerciseDeletionOfMiddlePinnedAndLastSession(using: .fullSwipe)
+    }
+
+    func testNativeFullSwipeDeletionOfSelectedActivitySessions() async throws {
+        continueAfterFailure = false
+        let fixture = try DeletionFixture.loadOwnedManifest()
+        try await fixture.verify()
+        let initial = try await fixture.request("/api/session")
+        guard (initial["data"] as? [[String: Any]])?.isEmpty == true else {
+            throw NSError(domain: "DeletionFixture", code: 5, userInfo: [NSLocalizedDescriptionKey: "Activity last-row reproduction requires a fresh empty fixture"])
+        }
+        let app = XCUIApplication()
+        defer { app.terminate() }
+        var owned: [String] = []
+        var titles: [String] = []
+        for index in 0..<2 {
+            let title = "Activity Deletion \(index) \(UUID().uuidString.prefix(8))"
+            let response = try await fixture.request("/api/session", method: "POST", body: [
+                "title": title,
+                "location": ["directory": fixture.workspace.path]
+            ])
+            owned.append(try XCTUnwrap((response["data"] as? [String: Any])?["id"] as? String))
+            registerCleanup(owned[index], fixture: fixture)
+            titles.append(title)
+        }
+        try await launchAndConnect(app, fixture: fixture)
+        XCTAssertTrue(app.buttons["projects.activity"].waitForExistence(timeout: 10))
+        app.buttons["projects.activity"].tap()
+        for index in 0..<2 {
+            let row = app.buttons["activity.session.\(owned[index])"]
+            XCTAssertTrue(row.waitForExistence(timeout: 20))
+            capture(app, "activity-\(index)-before-selection")
+            row.tap()
+            let title = app.navigationBars.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", titles[index])).firstMatch
+            XCTAssertTrue(app.textViews["chat.input"].waitForExistence(timeout: 20))
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            capture(app, "activity-\(index)-selected-chat")
+            if !row.isHittable {
+                let back = app.navigationBars.buttons["BackButton"].firstMatch
+                XCTAssertTrue(back.isHittable)
+                back.tap()
+            } else {
+                XCTAssertTrue(title.exists, "Split detail must remain on the selected Activity session")
+            }
+            XCTAssertTrue(row.isHittable)
+            capture(app, "activity-\(index)-selected-row-before-full-swipe")
+            fullSwipe(row)
+            try await waitForRemoval(app, element: row)
+            let status = try await fixture.status("/api/session/\(owned[index])")
+            XCTAssertEqual(status, 404)
+            XCTAssertFalse(title.exists)
+            XCTAssertFalse(app.textViews["chat.input"].exists)
+            if index == 0 {
+                XCTAssertTrue(app.buttons["activity.session.\(owned[1])"].isHittable)
+                let survivorStatus = try await fixture.status("/api/session/\(owned[1])")
+                XCTAssertEqual(survivorStatus, 200)
+            } else {
+                XCTAssertTrue(app.staticTexts["No Recent Activity"].waitForExistence(timeout: 10))
+            }
+            capture(app, "activity-\(index)-after-selected-full-swipe")
+        }
+    }
+
+    private enum SelectedDeletionGesture {
+        case contextMenu, swipeButton, fullSwipe
+    }
+
+    private func exerciseDeletionOfMiddlePinnedAndLastSession(using gesture: SelectedDeletionGesture) async throws {
         continueAfterFailure = false
         let fixture = try DeletionFixture.loadOwnedManifest()
         try await fixture.verify()
@@ -11,6 +88,7 @@ final class SessionDeletionUITests: XCTestCase {
             throw NSError(domain: "DeletionFixture", code: 5, userInfo: [NSLocalizedDescriptionKey: "Last-row reproduction requires a fresh empty fixture"])
         }
         let app = XCUIApplication()
+        defer { app.terminate() }
         var owned: [String] = []
         var titles: [String] = []
         for index in 0..<4 {
@@ -20,12 +98,127 @@ final class SessionDeletionUITests: XCTestCase {
                 "location": ["directory": fixture.workspace.path]
             ])
             owned.append(try XCTUnwrap((response["data"] as? [String: Any])?["id"] as? String))
+            registerCleanup(owned[index], fixture: fixture)
             titles.append(title)
         }
-        addTeardownBlock { @MainActor in
-            app.terminate()
-            for id in owned { _ = try? await fixture.request("/api/session/\(id)", method: "DELETE") }
+        try await launchAndConnect(app, fixture: fixture)
+        let project = app.staticTexts[fixture.isLegacy ? "Global" : fixture.workspace.lastPathComponent].firstMatch
+        project.tap()
+        func row(_ id: String) -> XCUIElement { app.buttons["session.row.\(id)"] }
+        func chatTitle(_ index: Int) -> XCUIElement {
+            app.navigationBars.descendants(matching: .any).matching(NSPredicate(format: "label == %@", titles[index])).firstMatch
         }
+        func selectAndRevealList(_ index: Int, phase: String) async throws {
+            row(owned[index]).tap()
+            guard app.textViews["chat.input"].waitForExistence(timeout: 20), chatTitle(index).waitForExistence(timeout: 5) else {
+                throw NSError(domain: "DeletionUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Requested chat was not presented"])
+            }
+            capture(app, phase + "-selected-chat")
+            if !row(owned[index]).isHittable, app.navigationBars.buttons["BackButton"].firstMatch.exists {
+                // Compact back navigation changes the column, not the canonical selection.
+                app.navigationBars.buttons["BackButton"].firstMatch.tap()
+            } else {
+                XCTAssertTrue(chatTitle(index).exists, "Split detail must remain on the selected session")
+            }
+            XCTAssertTrue(row(owned[index]).isHittable)
+            capture(app, phase + "-selected-row-before-delete")
+        }
+        func deleteSelected(_ index: Int) async throws {
+            let selectedRow = row(owned[index])
+            switch gesture {
+            case .contextMenu:
+                selectedRow.press(forDuration: 1)
+            case .swipeButton:
+                // Reveal the native action without crossing the full-swipe threshold.
+                selectedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+                    .press(forDuration: 0.05, thenDragTo: selectedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+            case .fullSwipe:
+                // Commit through UIKit's destructive full-swipe path; never fall back to tapping Delete.
+                fullSwipe(selectedRow)
+            }
+            if gesture != .fullSwipe {
+                let action = app.buttons["Delete"].firstMatch
+                guard action.waitForExistence(timeout: 5) else {
+                    capture(app, "selected-\(index)-delete-action-missing")
+                    throw NSError(domain: "DeletionUI", code: 3, userInfo: [NSLocalizedDescriptionKey: "Native Delete action did not appear"])
+                }
+                capture(app, "selected-\(index)-delete-action-visible")
+                action.tap()
+            }
+            try await waitForRemoval(app, element: selectedRow)
+            let status = try await fixture.status("/api/session/\(owned[index])")
+            XCTAssertEqual(status, 404)
+            XCTAssertFalse(chatTitle(index).exists)
+            XCTAssertFalse(app.textViews["chat.input"].exists)
+            if app.buttons["Show Sidebar"].exists {
+                XCTAssertTrue(app.staticTexts["Select a Session"].waitForExistence(timeout: 5))
+            }
+        }
+        XCTAssertTrue(row(owned[1]).waitForExistence(timeout: 20))
+        try await selectAndRevealList(1, phase: "middle")
+        // Control: deleting another row must leave the selected chat and its peers intact.
+        row(owned[3]).swipeLeft()
+        let delete = app.buttons["Delete"].firstMatch
+        if delete.waitForExistence(timeout: 3) { delete.tap() }
+        try await waitForRemoval(app, element: row(owned[3]))
+        let controlStatus = try await fixture.status("/api/session/\(owned[3])")
+        XCTAssertEqual(controlStatus, 404)
+        for index in 0..<3 { XCTAssertTrue(row(owned[index]).exists) }
+        if app.buttons["Show Sidebar"].exists { XCTAssertTrue(chatTitle(1).exists) }
+        capture(app, "after-unselected-control-delete")
+
+        try await deleteSelected(1)
+        for index in [0, 2] {
+            XCTAssertTrue(row(owned[index]).isHittable)
+            let status = try await fixture.status("/api/session/\(owned[index])")
+            XCTAssertEqual(status, 200)
+        }
+        capture(app, "after-selected-middle-delete-two-survivors")
+
+        row(owned[0]).press(forDuration: 1)
+        XCTAssertTrue(app.buttons["Pin"].waitForExistence(timeout: 5))
+        app.buttons["Pin"].tap()
+        XCTAssertTrue(app.staticTexts["Pinned"].waitForExistence(timeout: 5))
+        try await selectAndRevealList(0, phase: "pinned")
+        try await deleteSelected(0)
+        XCTAssertTrue(row(owned[2]).isHittable)
+        XCTAssertFalse(app.staticTexts["Pinned"].exists)
+        capture(app, "after-selected-pinned-delete-one-survivor")
+
+        try await selectAndRevealList(2, phase: "last")
+        try await deleteSelected(2)
+        XCTAssertTrue(app.staticTexts["Create a session to start chatting."].waitForExistence(timeout: 10))
+        capture(app, "after-last-session-delete")
+        for id in owned {
+            let status = try await fixture.status("/api/session/\(id)")
+            XCTAssertEqual(status, 404)
+        }
+
+        let activityResponse = try await fixture.request("/api/session", method: "POST", body: [
+            "title": "Deletion Activity \(UUID().uuidString.prefix(8))",
+            "location": ["directory": fixture.workspace.path]
+        ])
+        let activityID = try XCTUnwrap((activityResponse["data"] as? [String: Any])?["id"] as? String)
+        owned.append(activityID)
+        registerCleanup(activityID, fixture: fixture)
+        if app.buttons["Show Sidebar"].exists { app.buttons["Show Sidebar"].tap() }
+        else { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
+        XCTAssertTrue(app.buttons["projects.activity"].waitForExistence(timeout: 10))
+        app.buttons["projects.activity"].tap()
+        let activityRow = app.buttons["activity.session.\(activityID)"]
+        XCTAssertTrue(activityRow.waitForExistence(timeout: 20))
+        capture(app, "before-last-activity-delete")
+        activityRow.press(forDuration: 1)
+        let activityDelete = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(activityDelete.waitForExistence(timeout: 5))
+        activityDelete.tap()
+        try await waitForRemoval(app, element: activityRow)
+        let activityStatus = try await fixture.status("/api/session/\(activityID)")
+        XCTAssertEqual(activityStatus, 404)
+        capture(app, "after-last-activity-delete")
+    }
+
+    private func launchAndConnect(_ app: XCUIApplication, fixture: DeletionFixture) async throws {
         app.launchEnvironment = [
             "OPENCODE_UI_TEST_MODE": "1", "OPENCODE_UI_TEST_AUTO_CONNECT": "0",
             "OPENCODE_UI_TEST_BASE_URL": fixture.baseURL,
@@ -48,107 +241,23 @@ final class SessionDeletionUITests: XCTestCase {
             XCTAssertFalse(app.buttons["connection.v2-notice.dismiss"].exists)
         } else {
             let dismissNotice = app.buttons["connection.v2-notice.dismiss"]
-            XCTAssertTrue(dismissNotice.waitForExistence(timeout: 15))
-            XCTAssertTrue(dismissNotice.isHittable)
-            dismissNotice.tap()
-        }
-        project.tap()
-        func row(_ id: String) -> XCUIElement { app.buttons["session.row.\(id)"] }
-        func chatTitle(_ index: Int) -> XCUIElement {
-            app.navigationBars.descendants(matching: .any).matching(NSPredicate(format: "label == %@", titles[index])).firstMatch
-        }
-        func selectAndRevealList(_ index: Int, phase: String) async throws {
-            row(owned[index]).tap()
-            guard app.textViews["chat.input"].waitForExistence(timeout: 20), chatTitle(index).waitForExistence(timeout: 5) else {
-                throw NSError(domain: "DeletionUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Requested chat was not presented"])
-            }
-            capture(app, phase + "-selected-chat")
-            if !row(owned[index]).isHittable, app.navigationBars.buttons["BackButton"].firstMatch.exists {
-                // Compact back navigation changes the column, not the canonical selection.
-                app.navigationBars.buttons["BackButton"].firstMatch.tap()
-            } else {
-                XCTAssertTrue(chatTitle(index).exists, "Split detail must remain on the selected session")
-            }
-            XCTAssertTrue(row(owned[index]).isHittable)
-            capture(app, phase + "-selected-row-before-delete")
-        }
-        func deleteFromMenu(_ index: Int) async throws {
-            row(owned[index]).press(forDuration: 1)
-            let action = app.buttons["Delete"].firstMatch
-            guard action.waitForExistence(timeout: 5) else {
-                throw NSError(domain: "DeletionUI", code: 3, userInfo: [NSLocalizedDescriptionKey: "Native Delete action did not appear"])
-            }
-            action.tap()
-            try await waitForRemoval(app, element: row(owned[index]))
-            let status = try await fixture.status("/api/session/\(owned[index])")
-            XCTAssertEqual(status, 404)
-            XCTAssertFalse(chatTitle(index).exists)
-            XCTAssertFalse(app.textViews["chat.input"].exists)
-            if app.buttons["Show Sidebar"].exists {
-                XCTAssertTrue(app.staticTexts["Select a Session"].waitForExistence(timeout: 5))
+            // This notice is persisted per installation and may have been dismissed by an earlier test.
+            if dismissNotice.waitForExistence(timeout: 3) {
+                XCTAssertTrue(dismissNotice.isHittable)
+                dismissNotice.tap()
             }
         }
-        XCTAssertTrue(row(owned[1]).waitForExistence(timeout: 20))
-        try await selectAndRevealList(1, phase: "middle")
-        // Control: deleting another row must leave the selected chat and its peers intact.
-        row(owned[3]).swipeLeft()
-        let delete = app.buttons["Delete"].firstMatch
-        if delete.waitForExistence(timeout: 3) { delete.tap() }
-        try await waitForRemoval(app, element: row(owned[3]))
-        let controlStatus = try await fixture.status("/api/session/\(owned[3])")
-        XCTAssertEqual(controlStatus, 404)
-        for index in 0..<3 { XCTAssertTrue(row(owned[index]).exists) }
-        if app.buttons["Show Sidebar"].exists { XCTAssertTrue(chatTitle(1).exists) }
-        capture(app, "after-unselected-control-delete")
+    }
 
-        try await deleteFromMenu(1)
-        for index in [0, 2] {
-            XCTAssertTrue(row(owned[index]).isHittable)
-            let status = try await fixture.status("/api/session/\(owned[index])")
-            XCTAssertEqual(status, 200)
-        }
-        capture(app, "after-selected-middle-delete-two-survivors")
+    nonisolated private func registerCleanup(_ id: String, fixture: DeletionFixture) {
+        // XCTest can synchronously interrupt a MainActor test on assertion failure.
+        // Keep async network teardown off that actor so recording a crash cannot deadlock cleanup.
+        addTeardownBlock { _ = try? await fixture.request("/api/session/\(id)", method: "DELETE") }
+    }
 
-        row(owned[0]).press(forDuration: 1)
-        XCTAssertTrue(app.buttons["Pin"].waitForExistence(timeout: 5))
-        app.buttons["Pin"].tap()
-        XCTAssertTrue(app.staticTexts["Pinned"].waitForExistence(timeout: 5))
-        try await selectAndRevealList(0, phase: "pinned")
-        try await deleteFromMenu(0)
-        XCTAssertTrue(row(owned[2]).isHittable)
-        XCTAssertFalse(app.staticTexts["Pinned"].exists)
-        capture(app, "after-selected-pinned-delete-one-survivor")
-
-        try await selectAndRevealList(2, phase: "last")
-        try await deleteFromMenu(2)
-        XCTAssertTrue(app.staticTexts["Create a session to start chatting."].waitForExistence(timeout: 10))
-        capture(app, "after-last-session-delete")
-        for id in owned {
-            let status = try await fixture.status("/api/session/\(id)")
-            XCTAssertEqual(status, 404)
-        }
-
-        let activityResponse = try await fixture.request("/api/session", method: "POST", body: [
-            "title": "Deletion Activity \(UUID().uuidString.prefix(8))",
-            "location": ["directory": fixture.workspace.path]
-        ])
-        let activityID = try XCTUnwrap((activityResponse["data"] as? [String: Any])?["id"] as? String)
-        owned.append(activityID)
-        if app.buttons["Show Sidebar"].exists { app.buttons["Show Sidebar"].tap() }
-        else { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
-        XCTAssertTrue(app.buttons["projects.activity"].waitForExistence(timeout: 10))
-        app.buttons["projects.activity"].tap()
-        let activityRow = app.buttons["activity.session.\(activityID)"]
-        XCTAssertTrue(activityRow.waitForExistence(timeout: 20))
-        capture(app, "before-last-activity-delete")
-        activityRow.press(forDuration: 1)
-        let activityDelete = app.buttons["Delete"].firstMatch
-        XCTAssertTrue(activityDelete.waitForExistence(timeout: 5))
-        activityDelete.tap()
-        try await waitForRemoval(app, element: activityRow)
-        let activityStatus = try await fixture.status("/api/session/\(activityID)")
-        XCTAssertEqual(activityStatus, 404)
-        capture(app, "after-last-activity-delete")
+    private func fullSwipe(_ row: XCUIElement) {
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)))
     }
 
     private func waitForRemoval(_ app: XCUIApplication, element: XCUIElement) async throws {

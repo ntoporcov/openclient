@@ -109,6 +109,7 @@ private struct OpenClientNotificationSetupSection: View {
     @ObservedObject var bridge: OpenClientBridgeFacade
     let snapshot: OpenClientBridgeSnapshot
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -117,6 +118,28 @@ private struct OpenClientNotificationSetupSection: View {
             Text(snapshot.notificationGuidance)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+            if snapshot.canConfigureNotificationsWithAI {
+                Button {
+                    Task {
+                        if await bridge.configureNotificationsWithAI() { dismiss() }
+                    }
+                } label: {
+                    Label("Configure with AI", systemImage: "sparkles")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(bridge.isStartingNotificationConfiguration)
+                .accessibilityIdentifier("projects.bridge.notifications.configure-ai")
+            }
+
+            if bridge.isStartingNotificationConfiguration {
+                ProgressView("Starting configuration chat...")
+            }
+            if let message = bridge.notificationConfigurationError {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+            }
 
             if case .ready(let setup) = snapshot.notificationSetupPhase {
                 OpenClientNotificationSetupResult(

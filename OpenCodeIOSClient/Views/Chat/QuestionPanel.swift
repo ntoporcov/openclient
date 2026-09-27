@@ -226,7 +226,8 @@ private struct QuestionCarouselPage: View {
             VStack(spacing: 8) {
                 ForEach(question.options) { option in
                     QuestionOptionButton(
-                        option: option,
+                        title: option.label,
+                        detail: option.description,
                         isSelected: selectedOptions.contains(option.label),
                         allowsMultipleSelection: question.multiple,
                         action: { onSelectOption(option.label) }
@@ -250,8 +251,10 @@ private struct QuestionCarouselPage: View {
     }
 }
 
-private struct QuestionOptionButton: View {
-    let option: OpenCodeQuestionOption
+/// Shared choice styling for legacy questions and typed V2 forms.
+struct QuestionOptionButton: View {
+    let title: String
+    let detail: String
     let isSelected: Bool
     let allowsMultipleSelection: Bool
     let action: () -> Void
@@ -264,11 +267,11 @@ private struct QuestionOptionButton: View {
                     .foregroundStyle(isSelected ? .blue : .secondary)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(option.label)
+                    Text(title)
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
-                    if !option.description.isEmpty {
-                        Text(option.description)
+                    if !detail.isEmpty {
+                        Text(detail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -296,7 +299,7 @@ private struct QuestionOptionButton: View {
     }
 }
 
-private struct QuestionPageIndicator: View {
+struct QuestionPageIndicator: View {
     let count: Int
     let selectedIndex: Int
     let onSelect: (Int) -> Void

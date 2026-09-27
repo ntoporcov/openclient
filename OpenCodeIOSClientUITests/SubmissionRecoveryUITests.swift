@@ -2,6 +2,47 @@ import XCTest
 
 @MainActor
 final class SubmissionRecoveryUITests: XCTestCase {
+    func testV2DraftClearsOnlyAfterAdmissionInRootAndWindow() {
+        continueAfterFailure = false
+        for window in [false, true] {
+          for accepted in [false, true] {
+            let app = XCUIApplication()
+            app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "submission-recovery"
+            app.launchEnvironment["OPENCLIENT_TRANSCRIPT_CONTINUITY"] = "1"
+            app.launchEnvironment["OPENCLIENT_PROMPT_REJECTION"] = accepted ? "accept" : "1"
+            app.launchEnvironment["OPENCLIENT_RECOVERY_PROFILE"] = "v2"
+            app.launchEnvironment["OPENCLIENT_RECOVERY_WINDOW"] = window ? "1" : "0"
+            app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launch()
+            let input = app.textViews["chat.input"].firstMatch
+            XCTAssertTrue(input.waitForExistence(timeout: 15))
+            let draft = "  Keep this rejected V2 draft  "
+            input.tap()
+            input.typeText(draft)
+            app.buttons["chat.send"].firstMatch.tap()
+            let diagnostics = app.staticTexts["continuity.diagnostics"]
+            let posted = NSPredicate(format: "label CONTAINS %@", "posts=1")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: posted, object: diagnostics)], timeout: 10), .completed)
+            XCTAssertEqual(input.value as? String, draft, "Do not clear text before admission, even while the request is pending")
+            app.buttons["continuity.reject"].tap()
+            let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "settled"),
+                object: app.staticTexts["continuity.admission"])
+            XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
+            if accepted {
+                let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", draft), object: input)
+                XCTAssertEqual(XCTWaiter.wait(for: [cleared], timeout: 5), .completed)
+            } else {
+                XCTAssertEqual(input.value as? String, draft, "Rejection must retain the original untrimmed draft")
+            }
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "v2-draft-\(accepted ? "accepted" : "rejected")-\(window ? "window" : "root")"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            app.terminate()
+          }
+        }
+    }
+
     func testSeededRecoveryCardAndAttachmentDetailsInRootAndWindow() {
         checkSeededRecovery(profile: "v2")
     }

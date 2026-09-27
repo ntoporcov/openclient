@@ -901,29 +901,29 @@ private struct OpenClientWhatsNewV2Preview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(.orange)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: .orange.opacity(0.55), radius: 5)
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.purple)
+                    .accessibilityHidden(true)
 
-                Text("EXPERIMENTAL PREVIEW")
+                Text("V2 IS STABLE")
                     .font(.caption.weight(.bold))
                     .tracking(0.8)
                     .foregroundStyle(.primary)
             }
 
             HStack(alignment: .top, spacing: 14) {
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: "party.popper.fill")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(.purple)
                     .frame(width: 48, height: 48)
-                    .background(.cyan.opacity(0.12), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .background(.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("OpenCode v2, ready to try")
+                    Text("Let’s celebrate v2!")
                         .font(.title3.bold())
 
-                    Text("Connect to OpenCode v2 and explore early support as it evolves. Some features may still be incomplete or change along the way.")
+                    Text("OpenCode v2 has officially gone stable—a milestone worth celebrating! We’re strengthening OpenClient’s connection to v2 and getting ready to embrace its new features, starting with steering.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

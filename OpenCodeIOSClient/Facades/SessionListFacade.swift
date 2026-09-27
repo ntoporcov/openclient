@@ -613,6 +613,11 @@ final class SessionListFacade: ObservableObject {
         await viewModel.runAction(action)
     }
     var requiresWorktreeDestinationParent: Bool { viewModel.backendConnection?.worktrees?.requiresDestinationParent == true }
+    var supportsWorktreeDestinationParent: Bool { viewModel.backendConnection?.worktrees?.supportsDestinationParent == true }
+
+    func isValidWorktreeDestination(_ value: String) -> Bool {
+        viewModel.projectFacade.isValidWorktreeDestination(value)
+    }
     var allowsWorkspaceCreation: Bool {
         viewModel.projectFacade.supportsWorkspaceManagement && viewModel.hasGitProject && viewModel.isProjectWorkspacesEnabled
     }

@@ -90,6 +90,10 @@ final class OpenClientComposition: ObservableObject {
             setupNotifications: { [weak bridgeCoordinator] in
                 await bridgeCoordinator?.setupNotifications()
             },
+            configureNotifications: { [weak viewModel] in
+                guard let viewModel else { return false }
+                return try await OpenClientNotificationConfigurationCoordinator.start(using: viewModel)
+            },
             notificationOpenRequest: { [weak bridgeCoordinator] in
                 bridgeCoordinator?.notificationOpenRequest()
             },

@@ -57,26 +57,6 @@ struct ProjectListView: View {
         let projectIDs = displayedProjects.map { $0.id }.joined(separator: "|")
 
         List {
-            if let connectionID = connection.v2NoticeConnectionID {
-                V2ConnectionNoticeCard {
-                    connection.dismissV2Notice(connectionID: connectionID)
-                }
-                .padding(.horizontal, 5)
-                .padding(.vertical, 8)
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        connection.dismissV2Notice(connectionID: connectionID)
-                    } label: {
-                        Label("Dismiss", systemImage: "xmark")
-                    }
-                    .accessibilityIdentifier("connection.v2-notice.dismiss")
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
             if snapshot.isShowingSearchResults {
                 ProjectSessionSearchSection(
                     query: snapshot.searchQuery,
@@ -376,7 +356,6 @@ struct ProjectListView: View {
         }
         .animation(opencodeSelectionAnimation, value: snapshot.selectedDirectory)
         .animation(opencodeSelectionAnimation, value: projectIDs)
-        .animation(opencodeSelectionAnimation, value: connection.v2NoticeConnectionID)
         .onChange(of: snapshot.isShowingSearchResults) { _, isShowingSearchResults in
             if isShowingSearchResults {
                 isEditingProjects = false
@@ -1365,7 +1344,7 @@ struct ProjectNewChatSheet: View, Equatable {
                     .frame(maxWidth: 280)
                     .accessibilityIdentifier("projects.newChat.worktree.name")
 
-                if viewModel.requiresWorktreeDestinationParent, let selectedProject {
+                if viewModel.supportsWorktreeDestinationParent, let selectedProject {
                     TextField("Destination Parent Directory", text: Binding(
                         get: { viewModel.worktreeDestinationParent(for: selectedProject) },
                         set: { viewModel.setWorktreeDestinationParent($0, for: selectedProject) }
@@ -1383,6 +1362,13 @@ struct ProjectNewChatSheet: View, Equatable {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 320)
+                    if !viewModel.requiresWorktreeDestinationParent {
+                        Text("Leave blank to use the server’s default worktree directory.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 320)
+                    }
                 }
 
                 Text("OpenCode will create a separate git worktree before sending.")
@@ -1674,8 +1660,7 @@ struct ProjectNewChatSheet: View, Equatable {
         guard viewModel.globalForms.pending(for: newChatFormLocation).isEmpty else { return false }
         guard workspaceSelection == .createNew else { return true }
         guard showsWorkspacePicker else { return false }
-        return !viewModel.requiresWorktreeDestinationParent
-            || viewModel.worktreeDestinationParent(for: selectedProject).trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+        return viewModel.isValidWorktreeDestination(viewModel.worktreeDestinationParent(for: selectedProject))
     }
 
     private var newChatFormLocation: BackendFormLocation? {
@@ -1769,7 +1754,7 @@ struct ProjectNewChatSheet: View, Equatable {
         let messageID = OpenCodeIdentifier.message()
         let partID = OpenCodeIdentifier.part()
         let context = viewModel.connectionContextID
-        let destinationParent = workspaceSelection == .createNew && viewModel.requiresWorktreeDestinationParent
+        let destinationParent = workspaceSelection == .createNew && viewModel.supportsWorktreeDestinationParent
             ? viewModel.worktreeDestinationParent(for: selectedProject) : nil
 
         withAnimation(.snappy(duration: 0.28, extraBounce: 0.02)) {

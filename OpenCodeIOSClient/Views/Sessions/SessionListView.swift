@@ -428,6 +428,16 @@ private struct SessionListContent: View, Equatable {
 
     private func workspaceSection(_ section: SessionListFacade.WorkspaceSection) -> some View {
         Section {
+            if case let .failed(message) = section.operation {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("workspace.error.\(section.directory)")
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             if section.isLoading && section.rows.isEmpty {
                 ForEach(0 ..< 2, id: \.self) { _ in
                     SessionRowSkeleton()
@@ -435,13 +445,8 @@ private struct SessionListContent: View, Equatable {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
-            } else if case let .failed(message) = section.operation, section.rows.isEmpty {
-                Text(message)
-                    .font(.subheadline)
-                    .foregroundStyle(.red)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+            } else if case .failed = section.operation, section.rows.isEmpty {
+                EmptyView()
             } else if section.rows.isEmpty {
                 Text("No sessions in this workspace.")
                     .font(.subheadline)

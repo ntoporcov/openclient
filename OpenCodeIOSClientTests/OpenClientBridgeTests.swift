@@ -640,6 +640,7 @@ final class OpenClientBridgeTests: XCTestCase {
         store.apply(.connected(Self.bridgeEndpoint()))
         let facade = OpenClientBridgeFacade(store: store, forceConnect: {})
         XCTAssertFalse(facade.snapshot.canSetUpNotifications)
+        XCTAssertFalse(facade.snapshot.canConfigureNotificationsWithAI)
         XCTAssertEqual(
             String(localized: facade.snapshot.notificationGuidance),
             "Update the OpenClient plugin on the OpenCode host to set up OC Notify from this app."
@@ -655,10 +656,72 @@ final class OpenClientBridgeTests: XCTestCase {
         let facade = OpenClientBridgeFacade(store: store, forceConnect: {})
 
         XCTAssertFalse(facade.snapshot.isConnected)
+        XCTAssertFalse(facade.snapshot.canConfigureNotificationsWithAI)
         XCTAssertEqual(
             String(localized: facade.snapshot.notificationGuidance),
             "Connect the OpenClient plugin first to configure OC Notify."
         )
+    }
+
+    @MainActor
+    func testNotificationAIConfigurationOnlyStartsOnceWhileUnconfigured() async throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.AI.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let base = Self.bridgeEndpoint()
+        store.apply(.connected(.init(healthURL: base.healthURL, webSocketURL: base.webSocketURL,
+                                    port: base.port, openCodePort: base.openCodePort, notifications: .unconfigured)))
+        let started = expectation(description: "Configuration started")
+        var completion: CheckedContinuation<Bool, Never>?
+        var calls = 0
+        let facade = OpenClientBridgeFacade(store: store, forceConnect: {}, configureNotifications: {
+            calls += 1
+            return await withCheckedContinuation {
+                completion = $0
+                started.fulfill()
+            }
+        })
+        XCTAssertTrue(facade.snapshot.canConfigureNotificationsWithAI)
+        let first = Task { await facade.configureNotificationsWithAI() }
+        await fulfillment(of: [started], timeout: 1)
+        XCTAssertTrue(facade.isStartingNotificationConfiguration)
+        let duplicate = await facade.configureNotificationsWithAI()
+        XCTAssertFalse(duplicate)
+        XCTAssertEqual(calls, 1)
+        completion?.resume(returning: true)
+        let opened = await first.value
+        XCTAssertTrue(opened)
+        XCTAssertFalse(facade.isStartingNotificationConfiguration)
+        store.apply(.connected(Self.notificationEndpoint()))
+        XCTAssertFalse(facade.snapshot.canConfigureNotificationsWithAI)
+        let ready = await facade.configureNotificationsWithAI()
+        XCTAssertFalse(ready)
+        XCTAssertEqual(calls, 1)
+    }
+
+    @MainActor
+    func testNotificationAIConfigurationShowsFailureAndAllowsRetry() async throws {
+        let suiteName = "OpenClientBridgeTests.Notifications.AIFailure.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = OpenClientBridgeStore(defaults: defaults)
+        let base = Self.bridgeEndpoint()
+        store.apply(.connected(.init(healthURL: base.healthURL, webSocketURL: base.webSocketURL,
+                                    port: base.port, openCodePort: base.openCodePort, notifications: .unconfigured)))
+        var calls = 0
+        let facade = OpenClientBridgeFacade(store: store, forceConnect: {}, configureNotifications: {
+            calls += 1
+            if calls == 1 { throw BackendError.disconnected }
+            return true
+        })
+        let failed = await facade.configureNotificationsWithAI()
+        XCTAssertFalse(failed)
+        XCTAssertNotNil(facade.notificationConfigurationError)
+        XCTAssertFalse(facade.isStartingNotificationConfiguration)
+        let retried = await facade.configureNotificationsWithAI()
+        XCTAssertTrue(retried)
+        XCTAssertNil(facade.notificationConfigurationError)
     }
 
     func testDeviceRegistryPublishesAndExecutesStatusTool() async throws {

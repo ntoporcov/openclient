@@ -2770,7 +2770,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let stillPending = try await backend.request("api/session/global/form/\(ids[0])", query: query)
         XCTAssertEqual(((stillPending["data"] as? [String: Any])?["state"] as? [String: Any])?["status"] as? String, "pending")
         open.tap()
-        let submit = app.buttons.matching(identifier: "chat.sessionForm.\(ids[0])").matching(NSPredicate(format: "label == %@", "Submit")).firstMatch
+        let submit = app.buttons["form.submit.\(ids[0])"]
         try await waitForV2Smoke(in: app, "Reopened draft can submit") { submit.exists && submit.isHittable && submit.isEnabled }
         _ = try await backend.request("api/session/global/form", method: "POST", body: [
             "id": ids[1], "title": "Next project request", "fields": [["key": "note", "type": "string"]]
@@ -2784,7 +2784,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let answer = try XCTUnwrap(embeddedState["answer"] as? [String: Any])
         XCTAssertEqual(answer["enabled"] as? Bool, false)
         XCTAssertEqual(answer["count"] as? Int, 7)
-        let cancel = app.buttons.matching(identifier: "chat.sessionForm.\(ids[1])").matching(NSPredicate(format: "label == %@", "Cancel Request")).firstMatch
+        let cancel = app.buttons["form.cancel.\(ids[1])"]
         try await waitForV2Smoke(in: app, "SSE next pending request replaces the settled form") { cancel.exists && cancel.isHittable }
         cancel.tap()
         try await waitForV2Smoke(in: app, "All project forms settled") { app.staticTexts["globalForms.empty"].exists }
@@ -2805,7 +2805,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         if app.buttons["chat.stop"].exists { XCTAssertTrue(app.buttons["chat.stop"].isEnabled) }
         attachScreenshot(named: "pass6-global-chat-blocked")
         open.tap()
-        let chatCancel = app.buttons.matching(identifier: "chat.sessionForm.\(ids[2])").matching(NSPredicate(format: "label == %@", "Cancel Request")).firstMatch
+        let chatCancel = app.buttons["form.cancel.\(ids[2])"]
         try await waitForV2Smoke(in: app, "Global cancellation is reachable in chat") { chatCancel.exists && chatCancel.isHittable }
         chatCancel.tap()
         try await waitForV2Smoke(in: app, "Cancelled global request disappears") { app.staticTexts["globalForms.empty"].exists }
@@ -2814,6 +2814,48 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let cancelled = try await backend.request("api/session/global/form/\(ids[2])", query: query)
         XCTAssertEqual(((cancelled["data"] as? [String: Any])?["state"] as? [String: Any])?["status"] as? String, "cancelled")
         attachScreenshot(named: "pass6-global-chat-restored")
+    }
+
+    @MainActor
+    func testV2QuestionCarouselPreservesTypedAnswers() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "question"
+        app.launchEnvironment["OPENCLIENT_V2_QUESTION_FIXTURE"] = "1"
+        app.launch()
+        let submit = app.buttons["form.submit.visual-question"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 10))
+        XCTAssertFalse(submit.isEnabled)
+        attachScreenshot(named: "v2-question-first-page")
+        app.buttons["form.option.framework.swiftui"].tap()
+        let phone = app.buttons["form.option.targets.phone"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 5))
+        let hittable = NSPredicate(format: "hittable == true")
+        expectation(for: hittable, evaluatedWith: phone)
+        waitForExpectations(timeout: 5)
+        phone.tap()
+        XCTAssertTrue(phone.isSelected)
+        XCTAssertTrue(submit.isEnabled)
+        let custom = app.textFields["Type your answer"]
+        custom.tap()
+        custom.typeText("macOS\n")
+        XCTAssertTrue(app.staticTexts["macOS"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "v2-question-multiple-choice")
+        app.buttons["Question 1"].tap()
+        let selected = app.buttons["form.option.framework.swiftui"]
+        XCTAssertTrue(selected.isSelected)
+        submit.tap()
+        let result = app.staticTexts["form.fixture.result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        let answer = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.label.utf8)) as? [String: Any])
+        XCTAssertEqual(answer["framework"] as? String, "swiftui")
+        XCTAssertEqual(answer["targets"] as? [String], ["phone", "macOS"])
+        app.terminate()
+        app.launch()
+        let cancel = app.buttons["form.cancel.visual-question"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10))
+        cancel.tap()
+        XCTAssertTrue(app.staticTexts["form.fixture.result"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["form.fixture.result"].label, "cancelled")
     }
 
     @MainActor
@@ -2894,7 +2936,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         acknowledgementControl.tap()
         try await waitForV2Smoke(in: app, "Expected explicit external acknowledgement") { self.isSwitchOn(acknowledgement) }
         // Never tap Open Browser: acknowledging an offline fixture needs no external network.
-        let submit = app.buttons.matching(identifier: "chat.sessionForm.\(formID)").matching(NSPredicate(format: "label == %@", "Submit")).firstMatch
+        let submit = app.buttons["form.submit.\(formID)"]
         try await waitForV2Smoke(in: app, "Expected enabled native form submission") { submit.exists && submit.isHittable && submit.isEnabled }
         attachScreenshot(named: "v2-native-form-ready-to-submit")
         submit.tap()
@@ -2909,7 +2951,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         _ = try await backend.request("api/session/\(fixture.sessionID)/form", method: "POST", body: [
             "id": cancelID, "title": "Owned cancellation \(cancelID)", "fields": [["key": "note", "type": "string"]]
         ])
-        let cancel = app.buttons.matching(identifier: "chat.sessionForm.\(cancelID)").matching(NSPredicate(format: "label == %@", "Cancel Request")).firstMatch
+        let cancel = app.buttons["form.cancel.\(cancelID)"]
         try await waitForV2Smoke(in: app, "Expected the next live form cancellation action", timeout: 20) { cancel.exists && cancel.isHittable }
         cancel.tap()
         try await waitForV2Smoke(in: app, "Cancellation must restore the chat composer") {
@@ -3062,9 +3104,19 @@ final class OpenCodeIOSClientUITests: XCTestCase {
 
     @MainActor
     private func revealV2FormControl(_ control: XCUIElement, panel: XCUIElement, in app: XCUIApplication) async throws {
-        // SwiftUI propagates the panel ID to sibling title/scroll/actions rather
-        // than exposing one enclosing accessibility container.
-        let scroll = app.scrollViews.matching(identifier: panel.identifier).firstMatch
+        let carousel = panel.scrollViews.matching(NSPredicate(format: "identifier BEGINSWITH %@", "form.carousel.")).firstMatch
+        if carousel.exists {
+            for _ in 0..<12 {
+                if control.exists && control.frame.midX >= carousel.frame.minX && control.frame.midX <= carousel.frame.maxX { break }
+                if control.exists && control.frame.midX < carousel.frame.minX { carousel.swipeRight() }
+                else { carousel.swipeLeft() }
+            }
+        }
+        let scroll = carousel.exists
+            ? panel.scrollViews.matching(NSPredicate(format: "identifier BEGINSWITH %@", "form.page.")).allElementsBoundByIndex.first(where: {
+                $0.frame.midX >= carousel.frame.minX && $0.frame.midX <= carousel.frame.maxX
+            }) ?? carousel
+            : panel.scrollViews.firstMatch
         try await waitForV2Smoke(in: app, "Expected the bounded native form scroll view") { scroll.exists }
         @MainActor
         func isFullyVisible() -> Bool {

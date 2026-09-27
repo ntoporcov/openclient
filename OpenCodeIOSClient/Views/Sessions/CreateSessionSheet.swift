@@ -85,7 +85,7 @@ struct CreateSessionSheet: View {
                             .autocorrectionDisabled()
                             .accessibilityIdentifier("sessions.create.worktree.name")
 
-                        if facade.requiresWorktreeDestinationParent {
+                        if facade.supportsWorktreeDestinationParent {
                             TextField("Destination Parent Directory", text: Binding(
                                 get: { facade.worktreeDestinationParent },
                                 set: { facade.worktreeDestinationParent = $0 }
@@ -96,6 +96,11 @@ struct CreateSessionSheet: View {
                             Text("Choose an absolute path on the server. New worktrees are created inside this directory.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
+                            if !facade.requiresWorktreeDestinationParent {
+                                Text("Leave blank to use the server’s default worktree directory.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         Text("OpenCode will create a separate git worktree, then start this session inside it.")
@@ -137,8 +142,8 @@ struct CreateSessionSheet: View {
     private var hasValidWorkspaceDestination: Bool {
         let snapshot = facade.createSessionSnapshot
         guard snapshot.showsWorkspacePicker, snapshot.workspaceSelection == .createNew,
-              facade.requiresWorktreeDestinationParent else { return true }
-        return facade.worktreeDestinationParent.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+               facade.supportsWorktreeDestinationParent else { return true }
+        return facade.isValidWorktreeDestination(facade.worktreeDestinationParent)
     }
 
     private var selectedWorkspaceDescription: String {

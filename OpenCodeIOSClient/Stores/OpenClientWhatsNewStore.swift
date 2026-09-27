@@ -251,8 +251,8 @@ enum OpenClientReleaseNotesCatalog {
         ),
         OpenClientReleaseNotes(
             version: "1.0.20",
-            title: "Ahead of what’s next",
-            summary: "Try OpenCode v2 early, copy exactly what you need, and enjoy more polish throughout OpenClient.",
+            title: "Welcome to v2",
+            summary: "A new chapter for OpenCode is here. Celebrate v2’s stable release with us as we strengthen OpenClient’s connection to it.",
             features: [
                 OpenClientReleaseNotes.Feature(
                     title: "Select. Copy. Done.",

@@ -14,7 +14,7 @@ struct CreateWorkspaceSheet: View {
                     TextField("Name (optional)", text: $name)
                         .opencodeDisableTextAutocapitalization()
                         .autocorrectionDisabled()
-                    if facade.requiresWorktreeDestinationParent {
+                    if facade.supportsWorktreeDestinationParent {
                         TextField("Destination Parent Directory", text: $destinationParent)
                             .opencodeDisableTextAutocapitalization()
                             .autocorrectionDisabled()
@@ -22,10 +22,19 @@ struct CreateWorkspaceSheet: View {
                         Text("Choose an absolute path on the server. New worktrees are created inside this directory.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                        if !facade.requiresWorktreeDestinationParent {
+                            Text("Leave blank to use the server’s default worktree directory.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 if let error = facade.workspaceErrorMessage {
-                    Section { Text(error).foregroundStyle(.red) }
+                    Section("Error") {
+                        Text(error).foregroundStyle(.red)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("workspace.create.error")
+                    }
                 }
             }
             .disabled(isCreating || !facade.allowsWorkspaceCreation)
@@ -34,9 +43,10 @@ struct CreateWorkspaceSheet: View {
             .toolbar {
                 ToolbarItem(placement: .opencodeLeading) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isCreating)
                 }
                 ToolbarItem(placement: .opencodeTrailing) {
-                    Button("Create Workspace") {
+                    Button {
                         isCreating = true
                         let context = facade.workspaceCreationContextID
                         Task {
@@ -45,13 +55,20 @@ struct CreateWorkspaceSheet: View {
                                 return
                             }
                             let created = await facade.createWorkspace(name: name,
-                                destinationParent: facade.requiresWorktreeDestinationParent ? destinationParent : nil)
+                                destinationParent: facade.supportsWorktreeDestinationParent ? destinationParent : nil)
                             isCreating = false
                             if created && facade.workspaceCreationContextID == context { dismiss() }
                         }
+                    } label: {
+                        if isCreating {
+                            ProgressView().accessibilityLabel("Creating Worktree...")
+                        } else {
+                            Text("Create Workspace")
+                        }
                     }
+                    .accessibilityIdentifier("workspace.create.confirm")
                     .disabled(isCreating || !facade.allowsWorkspaceCreation
-                        || (facade.requiresWorktreeDestinationParent && !destinationParent.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")))
+                        || !facade.isValidWorktreeDestination(destinationParent))
                 }
             }
         }
@@ -76,6 +93,7 @@ struct WorktreeRemovalConfirmationModifier: ViewModifier {
             Button("Cancel", role: .cancel) { facade.cancelForceWorktreeRemoval() }
         } message: {
             if let confirmation = facade.pendingWorktreeRemoval {
+                Text(confirmation.message)
                 Text("This permanently discards local changes in \(confirmation.directory). Session history is not deleted.")
             }
         }

@@ -183,6 +183,7 @@
 		44D2DB1435078BE601B299CA /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 21403F8E9E4C50E69390DA04 /* InfoPlist.xcstrings */; };
 		44E47174D62F7BE1F70907D2 /* PermissionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 462C06C5CAA57A2203DCAA3E /* PermissionCard.swift */; };
 		45486774E1B37D5BAE302895 /* AppViewModel+Commerce.swift in Sources */ = {isa = PBXBuildFile; fileRef = D820EEFB1FC5379646D6DD62 /* AppViewModel+Commerce.swift */; };
+		45A7E28C41CFCAEE2D094F8B /* OpenClientNotificationConfigurationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B13670114575969E8F55DD /* OpenClientNotificationConfigurationCoordinator.swift */; };
 		4782B39F41A3D8AC1C461021 /* OpenClientBridgeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E762A9C6F3ED33D0CE1AC144 /* OpenClientBridgeProtocol.swift */; };
 		47B91CEE698DF0EB1C551606 /* FindPlaceGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39F3209079C16C06C440EF6 /* FindPlaceGame.swift */; };
 		49CAA4615D897BB8C08490A2 /* ProviderUsageAccountRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9542471BC79C123DEBA53F9B /* ProviderUsageAccountRepository.swift */; };
@@ -336,6 +337,7 @@
 		8429493ED301FB3223F1EDE5 /* AppViewModel+Previews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED5404BF2A53DB64EC9BB8AC /* AppViewModel+Previews.swift */; };
 		845890BD449651A530356EA8 /* MCPFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83B70907FA10B03DA1D5862A /* MCPFacade.swift */; };
 		8485CB413C5F3E79DE0A4433 /* CreateSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C69B9DDEC02FCCFE6713CD /* CreateSessionSheet.swift */; };
+		84B086B4C76CD76D7E9CAA4F /* OpenClientNotificationConfigurationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B13670114575969E8F55DD /* OpenClientNotificationConfigurationCoordinator.swift */; };
 		84C94042495DA30716E6C982 /* ScreenshotSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE4DD43AEBE68274E4B039C /* ScreenshotSceneView.swift */; };
 		85937E16EA30C9300338964B /* AppViewModel+DeepLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003E56AA44E4A53A895C2015 /* AppViewModel+DeepLinks.swift */; };
 		863E93DA29C0C40F696CFA24 /* OpenClientFeatureTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F08F00F9F73042981F1215 /* OpenClientFeatureTypes.swift */; };
@@ -751,6 +753,7 @@
 		2D2D7B915C58BF24107B3B57 /* OpenClientVisualPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientVisualPreview.swift; sourceTree = "<group>"; };
 		2FBF691A45B28DA836E7479A /* ConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionView.swift; sourceTree = "<group>"; };
 		32365C3E04BA9CE086A166F1 /* ComposerSuggestionSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerSuggestionSelection.swift; sourceTree = "<group>"; };
+		32B13670114575969E8F55DD /* OpenClientNotificationConfigurationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientNotificationConfigurationCoordinator.swift; sourceTree = "<group>"; };
 		336AA13CA174A57F5F0EB8E8 /* MessageComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageComposer.swift; sourceTree = "<group>"; };
 		33A5FD49298D0A6FCA6FB55E /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		3446998277ACD10BF1A2AD1B /* ComposerSuggestionSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerSuggestionSelectionTests.swift; sourceTree = "<group>"; };
@@ -1579,6 +1582,7 @@
 				C062B901429100F912C90383 /* LiveActivityCoordinator.swift */,
 				EFD7835AA22964A289615CC0 /* OpenClientBridgeCoordinator.swift */,
 				26CB71AED9EC4155CBA5498A /* OpenClientImageContentCoordinator.swift */,
+				32B13670114575969E8F55DD /* OpenClientNotificationConfigurationCoordinator.swift */,
 				9B0BC819CEA01F6F00AB0457 /* OpenClientSpeechRecognitionController.swift */,
 				349DA238C122707F818E811A /* OpenClientVideoStreamCoordinator.swift */,
 				73879E14CD422254E046039C /* ProjectActionCoordinator.swift */,
@@ -2301,6 +2305,7 @@
 				F933C9CAA849BC48A7B594C5 /* OpenClientImageContentClient.swift in Sources */,
 				B7D4C8E7F54B605BCA4F4D09 /* OpenClientImageContentCoordinator.swift in Sources */,
 				0D0ECE26727F1FEEB90C19A7 /* OpenClientInternationalizationAnnouncementCard.swift in Sources */,
+				45A7E28C41CFCAEE2D094F8B /* OpenClientNotificationConfigurationCoordinator.swift in Sources */,
 				5309B4DF6575FCC68A0F1CBD /* OpenClientPaywallView.swift in Sources */,
 				FA5BECE4CC4D2148464C1BA6 /* OpenClientSharePayloadStore.swift in Sources */,
 				1230257B3E18263B50D0CCA4 /* OpenClientSpeechRecognitionController.swift in Sources */,
@@ -2544,6 +2549,7 @@
 				347DFB37BE6A4031EDD2D1E8 /* OpenClientImageContentClient.swift in Sources */,
 				402DF019DF6E12C2D3BBAD7C /* OpenClientImageContentCoordinator.swift in Sources */,
 				BFDEEDED60C7D296CDBBEFC6 /* OpenClientInternationalizationAnnouncementCard.swift in Sources */,
+				84B086B4C76CD76D7E9CAA4F /* OpenClientNotificationConfigurationCoordinator.swift in Sources */,
 				70E4E1C33A9EE3D0965C9018 /* OpenClientPaywallView.swift in Sources */,
 				9CF2CD2D68B22F2052447920 /* OpenClientSharePayloadStore.swift in Sources */,
 				81A15CCC5771C2F9C70709F6 /* OpenClientSpeechRecognitionController.swift in Sources */,
@@ -2728,7 +2734,7 @@
 		37A38C3C67B13A34407EB08A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 41;
+				CURRENT_PROJECT_VERSION = 43;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -2740,7 +2746,7 @@
 		37B20BB1A98ED0C0FD08E35D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 41;
+				CURRENT_PROJECT_VERSION = 43;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				ENABLE_TESTABILITY = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

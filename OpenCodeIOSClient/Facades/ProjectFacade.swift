@@ -165,6 +165,10 @@ final class ProjectFacade: ObservableObject {
             && viewModel.backendConnection?.openCodeCompatibility?.profile == .legacy
     }
     var requiresWorktreeDestinationParent: Bool { viewModel.backendConnection?.worktrees?.requiresDestinationParent == true }
+    var supportsWorktreeDestinationParent: Bool { viewModel.backendConnection?.worktrees?.supportsDestinationParent == true }
+    func isValidWorktreeDestination(_ value: String) -> Bool {
+        viewModel.backendConnection?.worktrees?.isValidDestinationParent(value) ?? false
+    }
     var worktreeDestinationParent: String {
         get {
             currentProject.map { worktreeDestinationParent(for: $0) } ?? ""

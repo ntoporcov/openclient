@@ -31,7 +31,7 @@ final class BackendWorktreeTests: XCTestCase {
         XCTAssertNotNil(legacy.commands)
     }
 
-    func testNext17155InventoryPreservesRootAndUnknownStrategy() async throws {
+    func testStableInventoryPreservesRootAndUnknownStrategy() async throws {
         let client = makeClient()
         WorktreeURLProtocol.handler = { request in
             XCTAssertEqual(request.httpMethod, "GET")
@@ -46,7 +46,7 @@ final class BackendWorktreeTests: XCTestCase {
         XCTAssertFalse(result[3].isManaged)
     }
 
-    func testNext17155CreateUsesParentAndActualReturnedDirectoryWithoutReadiness() async throws {
+    func testStableCreateUsesExplicitParentAndActualReturnedDirectoryWithoutReadiness() async throws {
         let service = OpenCodeWorktreeServices(client: makeClient(), profile: .v2)
         var requests = 0
         WorktreeURLProtocol.handler = { request in
@@ -63,20 +63,54 @@ final class BackendWorktreeTests: XCTestCase {
         }
         let result = try await service.create(.init(scope: .init(projectID: "project", directory: "/repo"),
                                                     name: "topic", destinationParent: "/copies"))
-        XCTAssertTrue(service.requiresDestinationParent)
+        XCTAssertFalse(service.requiresDestinationParent)
+        XCTAssertTrue(service.supportsDestinationParent)
         XCTAssertEqual(result.directory, "/copies/topic-2")
         XCTAssertEqual(result.readiness, .ready)
         XCTAssertEqual(requests, 1)
     }
 
-    func testNext17155RejectsMissingParentTraversalAndRemoteWorkspaceBeforeSending() async throws {
+    func testStableCreationUsesServerDefaultWhenParentIsAbsentOrBlank() async throws {
+        let service = OpenCodeWorktreeServices(client: makeClient(), profile: .v2)
+        WorktreeURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/worktree")
+            let body = try Self.body(request)
+            XCTAssertEqual(Set(body.keys), ["projectID"])
+            return Self.response(request, body: #"{"directory":"/configured/default/copy"}"#)
+        }
+        for parent: String? in [nil, "", "  \n"] {
+            let result = try await service.create(.init(scope: .init(projectID: "project", directory: "/repo"), destinationParent: parent))
+            XCTAssertEqual(result.directory, "/configured/default/copy")
+        }
+        XCTAssertTrue(service.isValidDestinationParent(""))
+        XCTAssertFalse(service.isValidDestinationParent("relative"))
+        XCTAssertFalse(service.isValidDestinationParent("/bad\0path"))
+    }
+
+    func testPreviewStillRequiresExplicitParentBeforeSending() async throws {
+        var client = makeClient()
+        client.v2Contract = .preview17155
+        let service = OpenCodeWorktreeServices(client: client, profile: .v2)
+        WorktreeURLProtocol.handler = { request in
+            XCTFail("Preview missing parent must not reach transport")
+            return Self.response(request, status: 500)
+        }
+        XCTAssertTrue(service.requiresDestinationParent)
+        XCTAssertFalse(service.isValidDestinationParent(""))
+        do {
+            _ = try await service.create(.init(scope: .init(projectID: "project", directory: "/repo")))
+            XCTFail("Expected parent validation")
+        } catch { XCTAssertEqual(error as? BackendWorktreeError, .destinationParentRequired) }
+    }
+
+    func testStableRejectsRelativeParentTraversalAndRemoteWorkspaceBeforeSending() async throws {
         let client = makeClient()
         WorktreeURLProtocol.handler = { request in
             XCTFail("Invalid worktree intent must not reach transport")
             return Self.response(request, status: 500)
         }
         let scope = BackendScope(projectID: "project", directory: "/repo")
-        for request in [BackendWorktreeCreation(scope: scope),
+        for request in [BackendWorktreeCreation(scope: scope, destinationParent: "relative"),
                         .init(scope: scope, name: "../escape", destinationParent: "/copies"),
                         .init(scope: .init(projectID: "project", directory: "/repo", workspaceID: "wrk_remote"), destinationParent: "/copies")] {
             do {

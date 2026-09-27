@@ -1,7 +1,9 @@
-Mais controle, de relance.
+Fique por dentro com o OC Notify.
 
-• Configure o uso de provedores para acompanhar o uso da assinatura do OpenAI e os gastos no OpenRouter em Projetos e Atividade.
-• Configure barras ou anéis de uso em Projetos e Atividade e veja os últimos dados sincronizados nos widgets da Tela de Início.
-• Escolha o compositor Messenger ou Assistant no iPhone; o iPad agora usa um layout Assistant refinado.
-• Navegue pelas sugestões de comandos e agentes com um teclado externo e complete-as com Tab.
-• As telas Recentes e Atividade estão mais rápidas, com correções na seleção de modelos, rascunhos e sessões de subagentes.
+• Configure notificações Web Push opcionais para sessões concluídas, pedidos de permissão e perguntas usando o OC Notify no seu próprio servidor.
+• Siga a configuração guiada para adicionar o app web complementar à Tela de Início e transferir suas configurações de conexão do OpenClient.
+• Abra as notificações para voltar à sessão correspondente no OpenClient.
+• Conexões com o OpenCode v2 mais confiáveis, com correções em projetos, espaços de trabalho, sessões, ferramentas e atualizações em tempo real.
+• Acesse as Configurações da conexão diretamente pelas configurações do projeto e de Atividade, ao lado das Configurações globais.
+
+O OC Notify requer o plugin OpenClient, um endpoint HTTPS autohospedado e o app web complementar adicionado à Tela de Início. As notificações usam Web Push sem um relay hospedado pelo OpenClient.

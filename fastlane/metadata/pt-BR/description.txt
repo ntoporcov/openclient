@@ -1,6 +1,6 @@
 O OpenClient oferece integração nativa entre iPhone, iPad e OpenCode para o seu próprio servidor autohospedado.
 
-Mantenha suas sessões de programação sempre ao alcance, mesmo longe da mesa. Navegue por projetos, retome conversas, acompanhe a atividade das ferramentas, responda a pedidos de permissão e perguntas e siga o trabalho em andamento por uma interface nativa e rápida, criada para aproveitar o iOS e o iPadOS.
+Leve suas sessões de programação com você. Navegue por projetos, retome conversas, acompanhe ferramentas e responda a permissões e perguntas em uma interface nativa para iOS e iPadOS.
 
 O OpenClient foi desenvolvido para quem já usa o OpenCode e quer mais do que uma janela de conversa remota. Ele é uma central de comando móvel para agentes ativos, tarefas de longa duração, acompanhamentos rápidos e consultas remotas.
 
@@ -51,6 +51,10 @@ Integrações com iOS e iPadOS:
 - Controles de composição preparados para ditado por voz
 - Escolha o compositor Messenger ou Assistant no iPhone; o iPad usa o compositor Assistant
 - Links diretos de widgets para o servidor, projeto e sessão corretos
+
+Notificações opcionais com o OC Notify:
+
+Receba alertas Web Push para sessões concluídas, permissões e perguntas. Requer o plugin OpenClient, seu próprio endpoint HTTPS e o app web complementar na Tela de Início. Não usa um relay de notificações hospedado pelo OpenClient.
 
 Privacidade e hospedagem própria:
 

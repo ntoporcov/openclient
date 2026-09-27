@@ -394,19 +394,19 @@ struct V2ConnectionNoticeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: "flask.fill")
+                Image(systemName: "sparkles")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.tint)
                     .frame(width: 32, height: 32)
                     .background(Color.accentColor.opacity(0.12), in: Circle())
 
-                Text("OpenCode v2 detected")
+                Text("Welcome to v2")
                     .font(.subheadline.weight(.semibold))
 
                 Spacer(minLength: 0)
             }
 
-            Text("OpenClient is using experimental v2 support. If something doesn’t work as expected, please report a bug.")
+            Text("You’re connected to OpenCode v2. We’ll be focusing on adopting new v2 features, starting with steering.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -26,8 +26,6 @@ struct ActivityView: View {
             showsLastUserMessage: facade.snapshot.showsLastUserMessage,
             usageMetrics: providerUsage.displayStore.metrics(for: .activity),
             usageDisplayMode: providerUsage.displayStore.displayMode,
-            v2NoticeConnectionID: connection.v2NoticeConnectionID,
-            dismissV2Notice: connection.dismissV2Notice,
             onSessionChosen: onSessionChosen
         )
         .equatable()
@@ -231,8 +229,6 @@ private struct ActivityContent: View, Equatable {
     let showsLastUserMessage: Bool
     let usageMetrics: [OpenCodeProviderUsageDisplayMetric]
     let usageDisplayMode: OpenCodeProviderUsageDisplayMode
-    let v2NoticeConnectionID: UUID?
-    let dismissV2Notice: (UUID) -> Void
     let onSessionChosen: () -> Void
     @State private var renamingRow: ActivityFacade.RowSnapshot?
     @State private var renameTitle = ""
@@ -245,7 +241,6 @@ private struct ActivityContent: View, Equatable {
             && lhs.showsLastUserMessage == rhs.showsLastUserMessage
             && lhs.usageMetrics == rhs.usageMetrics
             && lhs.usageDisplayMode == rhs.usageDisplayMode
-            && lhs.v2NoticeConnectionID == rhs.v2NoticeConnectionID
     }
 
     var body: some View {
@@ -267,26 +262,6 @@ private struct ActivityContent: View, Equatable {
 
     private var activityList: some View {
         List {
-            if let connectionID = v2NoticeConnectionID {
-                V2ConnectionNoticeCard {
-                    dismissV2Notice(connectionID)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        dismissV2Notice(connectionID)
-                    } label: {
-                        Label("Dismiss", systemImage: "xmark")
-                    }
-                    .accessibilityIdentifier("connection.v2-notice.dismiss")
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
             ProviderUsageDisplayRows(metrics: usageMetrics, presentation: .card, mode: usageDisplayMode)
 
             if snapshot.isEmpty {

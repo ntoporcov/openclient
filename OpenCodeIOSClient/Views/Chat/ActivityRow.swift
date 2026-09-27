@@ -75,7 +75,7 @@ struct OpenCodeToolActivityAppearance {
             return OpenCodeToolActivityAppearance(icon: "square.stack.3d.up.fill", tint: .purple)
         case "edit", "write":
             return OpenCodeToolActivityAppearance(icon: "square.and.pencil", tint: .orange)
-        case "apply_patch":
+        case "apply_patch", "patch":
             return OpenCodeToolActivityAppearance(icon: "hammer.fill", tint: .orange)
         case "question":
             return OpenCodeToolActivityAppearance(icon: "questionmark.bubble", tint: .blue)

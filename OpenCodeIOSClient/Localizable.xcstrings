@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Configure OC Notify" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure OC Notify" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Configura OC Notify" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Configurar o OC Notify" } } } },
+    "Configure with AI" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure with AI" } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Configura con l’IA" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Configurar com IA" } } } },
+    "Starting configuration chat..." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Starting configuration chat..." } }, "it" : { "stringUnit" : { "state" : "translated", "value" : "Avvio della chat di configurazione..." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Iniciando chat de configuração..." } } } },
+    "Leave blank to use the server’s default worktree directory." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Leave blank to use the server’s default worktree directory." } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Lascia vuoto per usare la cartella predefinita del server per i worktree." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Deixe em branco para usar o diretório padrão do servidor para worktrees." } }
+      }
+    },
     "Agent changed" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Agente cambiato" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Agente alterado" } } } },
     "Model changed" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Modello cambiato" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Modelo alterado" } } } },
     "Location changed" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Posizione cambiata" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Local alterado" } } } },
@@ -2146,24 +2156,46 @@
         }
       }
     },
-    "Ahead of what’s next" : {
+    "Let’s celebrate v2!" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ahead of what’s next"
+            "value" : "Let’s celebrate v2!"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Un passo avanti verso il futuro"
+            "value" : "Festeggiamo la v2!"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Um passo à frente do que vem por aí"
+            "value" : "Vamos comemorar a v2!"
+          }
+        }
+      }
+    },
+    "Welcome to v2" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Welcome to v2"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ti diamo il benvenuto nella v2"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Boas-vindas à v2"
           }
         }
       }
@@ -5077,24 +5109,24 @@
         }
       }
     },
-    "Connect to OpenCode v2 and explore early support as it evolves. Some features may still be incomplete or change along the way." : {
+    "OpenCode v2 has officially gone stable—a milestone worth celebrating! We’re strengthening OpenClient’s connection to v2 and getting ready to embrace its new features, starting with steering." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connect to OpenCode v2 and explore early support as it evolves. Some features may still be incomplete or change along the way."
+            "value" : "OpenCode v2 has officially gone stable—a milestone worth celebrating! We’re strengthening OpenClient’s connection to v2 and getting ready to embrace its new features, starting with steering."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connettiti a OpenCode v2 e prova in anteprima il supporto mentre continua a evolversi. Alcune funzionalità potrebbero essere ancora incomplete o cambiare nel tempo."
+            "value" : "OpenCode v2 è ufficialmente stabile: un traguardo da festeggiare! Stiamo rendendo più solida la connessione di OpenClient alla v2 e ci prepariamo ad accogliere le sue nuove funzionalità, a partire dallo steering."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Conecte-se ao OpenCode v2 e experimente o suporte antecipado enquanto ele evolui. Alguns recursos ainda podem estar incompletos ou mudar ao longo do tempo."
+            "value" : "O OpenCode v2 está oficialmente estável — um marco que merece comemoração! Estamos fortalecendo a conexão do OpenClient com a v2 e nos preparando para adotar seus novos recursos, começando pelo steering."
           }
         }
       }
@@ -7799,24 +7831,24 @@
         }
       }
     },
-    "EXPERIMENTAL PREVIEW" : {
+    "V2 IS STABLE" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "EXPERIMENTAL PREVIEW"
+            "value" : "V2 IS STABLE"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ANTEPRIMA SPERIMENTALE"
+            "value" : "LA V2 È STABILE"
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "PRÉVIA EXPERIMENTAL"
+            "value" : "A V2 ESTÁ ESTÁVEL"
           }
         }
       }
@@ -14145,24 +14177,24 @@
         }
       }
     },
-    "OpenClient is using experimental v2 support. If something doesn’t work as expected, please report a bug." : {
+    "You’re connected to OpenCode v2. We’ll be focusing on adopting new v2 features, starting with steering." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OpenClient is using experimental v2 support. If something doesn’t work as expected, please report a bug."
+            "value" : "You’re connected to OpenCode v2. We’ll be focusing on adopting new v2 features, starting with steering."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OpenClient sta usando il supporto sperimentale alla v2. Se qualcosa non funziona come previsto, segnala un bug."
+            "value" : "La connessione a OpenCode v2 è attiva. Ci concentreremo sull’adozione delle nuove funzionalità della v2, a partire dallo steering."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O OpenClient está usando suporte experimental à v2. Se algo não funcionar como esperado, relate um bug."
+            "value" : "Você está conectado ao OpenCode v2. Vamos nos concentrar em adotar novos recursos da v2, começando pelo steering."
           }
         }
       }
@@ -14657,50 +14689,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "O OpenCode rejeitou o prompt."
-          }
-        }
-      }
-    },
-    "OpenCode v2 detected" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenCode v2 detected"
-          }
-        },
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenCode v2 rilevato"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenCode v2 detectado"
-          }
-        }
-      }
-    },
-    "OpenCode v2, ready to try" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenCode v2, ready to try"
-          }
-        },
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenCode v2, pronto da provare"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenCode v2, pronto para experimentar"
           }
         }
       }
@@ -23851,24 +23839,24 @@
         }
       }
     },
-    "Try OpenCode v2 early, copy exactly what you need, and enjoy more polish throughout OpenClient." : {
+    "A new chapter for OpenCode is here. Celebrate v2’s stable release with us as we strengthen OpenClient’s connection to it." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Try OpenCode v2 early, copy exactly what you need, and enjoy more polish throughout OpenClient."
+            "value" : "A new chapter for OpenCode is here. Celebrate v2’s stable release with us as we strengthen OpenClient’s connection to it."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prova OpenCode v2 in anteprima, copia esattamente ciò che ti serve e scopri un OpenClient ancora più rifinito."
+            "value" : "Si apre un nuovo capitolo per OpenCode. Festeggia con noi il rilascio stabile della v2 mentre rendiamo più solida la connessione di OpenClient."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Experimente o OpenCode v2 antecipadamente, copie exatamente o que precisa e aproveite ainda mais melhorias em todo o OpenClient."
+            "value" : "Um novo capítulo do OpenCode chegou. Comemore conosco o lançamento estável da v2 enquanto fortalecemos a conexão do OpenClient com ela."
           }
         }
       }

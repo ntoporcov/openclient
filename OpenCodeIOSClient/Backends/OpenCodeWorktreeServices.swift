@@ -10,7 +10,8 @@ final class OpenCodeWorktreeServices: BackendProjectLifecycleService, BackendWor
         self.profile = profile
     }
 
-    var requiresDestinationParent: Bool { profile == .v2 }
+    var requiresDestinationParent: Bool { profile == .v2 && client.v2Contract == .preview17155 }
+    var supportsDestinationParent: Bool { profile == .v2 }
 
     func searchDirectories(query: String, root: String) async throws -> BackendDirectorySearch {
         let input = query.components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

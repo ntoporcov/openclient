@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { acquireNotifications, notificationCapability } from "../src/notifications.js"
-import { startBridgeServer } from "../src/server.js"
+import { startBridgeServer } from "../src/bridge-server.js"
 import webpush from "web-push"
 
 const cleanups: Array<() => Promise<void>> = []

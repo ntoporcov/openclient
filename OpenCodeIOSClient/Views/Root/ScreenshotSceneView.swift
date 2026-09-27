@@ -86,7 +86,13 @@ struct ScreenshotSceneView: View {
             #endif
         case .ipadRoom:
             rootView
-        case .projects, .newSession, .providerSetup, .funGames, .sessions, .terminal, .sessionActions, .sessionPinned, .permission, .question, .findPlaceGame, .findBugGame, .composerActions:
+        case .question:
+            if ProcessInfo.processInfo.environment["OPENCLIENT_V2_QUESTION_FIXTURE"] == "1" {
+                SessionFormVisualFixture()
+            } else {
+                rootView
+            }
+        case .projects, .newSession, .providerSetup, .funGames, .sessions, .terminal, .sessionActions, .sessionPinned, .permission, .findPlaceGame, .findBugGame, .composerActions:
             rootView
         case .paywall:
             OpenClientPaywallView(

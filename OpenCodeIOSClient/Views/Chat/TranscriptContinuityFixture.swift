@@ -75,11 +75,13 @@ private final class TranscriptContinuityURLProtocol: URLProtocol {
                 Self.whenPosted = nil
                 await withCheckedContinuation { Self.release = $0 }
             }
-            let success = TranscriptContinuityDiagnostics.gated && isSubmission
+            let rejectsPrompt = ProcessInfo.processInfo.environment["OPENCLIENT_PROMPT_REJECTION"] == "1"
+            let acceptsPrompt = ProcessInfo.processInfo.environment["OPENCLIENT_PROMPT_REJECTION"] == "accept"
+            let success = (TranscriptContinuityDiagnostics.gated || acceptsPrompt) && isSubmission && !rejectsPrompt
             let body = success ? "{\"data\":{\"id\":\"\(TranscriptContinuityDiagnostics.outgoingID ?? "")\",\"sessionID\":\"continuity\",\"timeCreated\":1,\"delivery\":\"queued\"}}"
                 : (isSubmission ? "{}" : (request.httpMethod == "POST" ? "" : "[]"))
             guard let url = request.url,
-                  let response = HTTPURLResponse(url: url, statusCode: success ? 200 : (isSubmission ? 408 : (request.httpMethod == "POST" ? 204 : 200)),
+                  let response = HTTPURLResponse(url: url, statusCode: success ? 200 : (isSubmission ? (rejectsPrompt ? 400 : 408) : (request.httpMethod == "POST" ? 204 : 200)),
                     httpVersion: nil, headerFields: ["Content-Type": "application/json"]) else { return }
             delivery.loader.client?.urlProtocol(delivery.loader, didReceive: response, cacheStoragePolicy: .notAllowed)
             // V2's POST /wait is a read-side completion wait, not another submission.
@@ -141,6 +143,11 @@ struct TranscriptContinuityFixture: View {
         self.session = session
         _model = State(initialValue: model)
         let facade = context.map { ChatFacade(viewModel: model, windowContext: $0) } ?? model.chatFacade
+        if ProcessInfo.processInfo.environment["OPENCLIENT_PROMPT_REJECTION"] != nil {
+            // Each held-response case starts with its own empty fixture draft.
+            facade.saveMessageDraft("", agentMentions: [], forSessionID: session.id)
+            facade.composerStore.resetActiveDraft()
+        }
         if splitOwner {
             // The window keeps the global-list owner it captured before root navigation creates the directory owner.
             _ = model.beginSessionNavigation(session)
@@ -154,7 +161,13 @@ struct TranscriptContinuityFixture: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                if ChatKeyboardFrameProbe.enabled {
+                if ProcessInfo.processInfo.environment["OPENCLIENT_PROMPT_REJECTION"] != nil {
+                    Button {
+                        TranscriptContinuityURLProtocol.release?.resume()
+                        TranscriptContinuityURLProtocol.release = nil
+                    } label: { Text(verbatim: "Reject send") }
+                    .accessibilityIdentifier("continuity.reject")
+                } else if ChatKeyboardFrameProbe.enabled {
                     Button { ChatKeyboardFrameProbe.frames = [] } label: { Text(verbatim: "Record") }
                         .accessibilityIdentifier("continuity.keyboard.record")
                     Button { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
@@ -192,6 +205,10 @@ struct TranscriptContinuityFixture: View {
                     .accessibilityIdentifier("continuity.diagnostics")
                     .accessibilityValue(Text(verbatim: TranscriptContinuityDiagnostics.gated ? gateSnapshot() : "progress=\(progress) updates=\(TranscriptContinuityDiagnostics.updates)"))
             }
+            if ProcessInfo.processInfo.environment["OPENCLIENT_PROMPT_REJECTION"] != nil {
+                Text(verbatim: facade.hasPendingPromptAdmission(sessionID: session.id) ? "pending" : "settled")
+                    .accessibilityIdentifier("continuity.admission")
+            }
             NavigationStack {
                 ChatView(chatFacade: facade, browser: facade.windowContext?.browser ?? model.appShellFacade.browser, sessionID: session.id)
             }
@@ -200,6 +217,7 @@ struct TranscriptContinuityFixture: View {
             guard confirmedID == nil, let input = values.values.first(where: { $0.id != "historical-recovery" }) else { return }
             confirmedID = input.id
             TranscriptContinuityDiagnostics.outgoingID = input.id
+            guard ProcessInfo.processInfo.environment["OPENCLIENT_PROMPT_REJECTION"] == nil else { return }
             guard !TranscriptContinuityDiagnostics.gated else { return }
             Task { @MainActor in
                 // Exact canonical content arrives during the slide, before the held receipt.

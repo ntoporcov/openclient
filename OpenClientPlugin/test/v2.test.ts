@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import type { Plugin } from "@opencode/plugin"
 import OpenClientPlugin from "../src/index.js"
 import { setupV2, v2ServerURL } from "../src/v2.js"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 describe("v2 server URL", () => {
   test("derives the host port from serve arguments, environment, and the default", () => {
@@ -13,6 +15,8 @@ describe("v2 server URL", () => {
 
   test("requires a valid port or an explicit origin", () => {
     expect(() => v2ServerURL({}, ["node", "host"], {})).toThrow("serverURL option")
+    expect(() => v2ServerURL({}, ["node", "serve", "--service"], {})).toThrow("serverURL option")
+    expect(v2ServerURL({}, ["node", "serve", "--service"], { OPENCODE_SERVER_PORT: "49375" }).port).toBe("49375")
     expect(() => v2ServerURL({}, ["node", "serve", "--port", "not-a-port"], {})).toThrow("Invalid OpenCode server port")
     expect(() => v2ServerURL({}, ["node", "serve", "--port=0"], {})).toThrow("Invalid OpenCode server port")
     expect(() => v2ServerURL({}, ["node", "serve", "--port=65536"], {})).toThrow("Invalid OpenCode server port")
@@ -25,6 +29,19 @@ describe("v2 server URL", () => {
 })
 
 describe("v2 plugin export", () => {
+  test("local discovery selects the plugin rather than a bridge helper", async () => {
+    const directory = resolve(dirname(fileURLToPath(import.meta.url)), "../src")
+    // V2 local discovery resolves server before index, independently of package exports.
+    let entrypoint: string | undefined
+    for (const name of ["server", "index"]) {
+      try { entrypoint = Bun.resolveSync(resolve(directory, name), directory); break } catch { /* Try the next entry point. */ }
+    }
+    expect(entrypoint).toBeDefined()
+    const loaded = await import(entrypoint!)
+    expect(loaded.default.id).toBe("openclient")
+    expect(typeof loaded.default.setup).toBe("function")
+  })
+
   test("exports the canonical id, legacy server, and v2 setup", () => {
     expect(OpenClientPlugin.id).toBe("openclient")
     expect(typeof OpenClientPlugin.server).toBe("function")

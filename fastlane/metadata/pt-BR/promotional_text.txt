@@ -1,1 +1,1 @@
-Acompanhe o uso do OpenAI e gastos do OpenRouter, personalize barras ou anéis e escolha o compositor do iPhone no OpenClient 1.0.21.
+Conheça o OC Notify: Web Push opcional e autohospedado para sessões do OpenCode. O OpenClient 1.0.22 também melhora a confiabilidade do OpenCode v2.

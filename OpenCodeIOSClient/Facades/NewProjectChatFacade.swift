@@ -208,6 +208,8 @@ final class NewProjectChatFacade: ObservableObject {
     }
     var connectionContextID: String { viewModel.backendConnection?.id.uuidString ?? "disconnected" }
     var requiresWorktreeDestinationParent: Bool { viewModel.projectFacade.requiresWorktreeDestinationParent }
+    var supportsWorktreeDestinationParent: Bool { viewModel.projectFacade.supportsWorktreeDestinationParent }
+    func isValidWorktreeDestination(_ value: String) -> Bool { viewModel.projectFacade.isValidWorktreeDestination(value) }
     func worktreeDestinationParent(for project: OpenCodeProject) -> String {
         viewModel.projectFacade.worktreeDestinationParent(for: project)
     }

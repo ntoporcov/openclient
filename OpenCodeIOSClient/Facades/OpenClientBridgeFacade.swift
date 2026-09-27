@@ -79,6 +79,11 @@ struct OpenClientBridgeSnapshot: Equatable {
         if case .requesting = notificationSetupPhase { return false }
         return true
     }
+
+    var canConfigureNotificationsWithAI: Bool {
+        guard isConnected, case .unconfigured = notifications else { return false }
+        return true
+    }
 }
 
 @MainActor
@@ -86,6 +91,9 @@ final class OpenClientBridgeFacade: ObservableObject {
     private let store: OpenClientBridgeStore
     private let forceConnectAction: @MainActor () -> Void
     private let setupNotificationsAction: @MainActor () async -> Void
+    private let configureNotificationsAction: @MainActor () async throws -> Bool
+    @Published private(set) var isStartingNotificationConfiguration = false
+    @Published private(set) var notificationConfigurationError: String?
     private let notificationOpenRequestAction: @MainActor () -> OpenClientNotificationOpenRequest?
     private let notificationBrowserOpenFailedAction: @MainActor (OpenClientNotificationOpenRequest) -> Void
     private var observation: AnyCancellable?
@@ -94,12 +102,14 @@ final class OpenClientBridgeFacade: ObservableObject {
         store: OpenClientBridgeStore,
         forceConnect: @escaping @MainActor () -> Void,
         setupNotifications: @escaping @MainActor () async -> Void = {},
+        configureNotifications: @escaping @MainActor () async throws -> Bool = { false },
         notificationOpenRequest: @escaping @MainActor () -> OpenClientNotificationOpenRequest? = { nil },
         notificationBrowserOpenFailed: @escaping @MainActor (OpenClientNotificationOpenRequest) -> Void = { _ in }
     ) {
         self.store = store
         forceConnectAction = forceConnect
         setupNotificationsAction = setupNotifications
+        configureNotificationsAction = configureNotifications
         notificationOpenRequestAction = notificationOpenRequest
         notificationBrowserOpenFailedAction = notificationBrowserOpenFailed
         observation = store.objectWillChange.sink { [weak self] _ in
@@ -127,6 +137,19 @@ final class OpenClientBridgeFacade: ObservableObject {
 
     func setupNotifications() async {
         await setupNotificationsAction()
+    }
+
+    func configureNotificationsWithAI() async -> Bool {
+        guard snapshot.canConfigureNotificationsWithAI, !isStartingNotificationConfiguration else { return false }
+        isStartingNotificationConfiguration = true
+        notificationConfigurationError = nil
+        defer { isStartingNotificationConfiguration = false }
+        do {
+            return try await configureNotificationsAction()
+        } catch {
+            notificationConfigurationError = error.localizedDescription
+            return false
+        }
     }
 
     func notificationOpenRequest() -> OpenClientNotificationOpenRequest? {

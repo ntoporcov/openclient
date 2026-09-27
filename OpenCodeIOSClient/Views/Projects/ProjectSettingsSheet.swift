@@ -116,7 +116,7 @@ struct ProjectSettingsSheet: View {
                     Text(workspacesDescription(snapshot))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    if snapshot.hasGitProject && facade.requiresWorktreeDestinationParent {
+                    if snapshot.hasGitProject && facade.supportsWorktreeDestinationParent {
                         TextField("Destination Parent Directory", text: Binding(
                             get: { facade.worktreeDestinationParent },
                             set: { facade.worktreeDestinationParent = $0 }
@@ -127,6 +127,11 @@ struct ProjectSettingsSheet: View {
                         Text("Choose an absolute path on the server. New worktrees are created inside this directory.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                        if !facade.requiresWorktreeDestinationParent {
+                            Text("Leave blank to use the server’s default worktree directory.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     }
                 }

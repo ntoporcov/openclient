@@ -43,10 +43,12 @@ extension OpenCodeAPIClient {
 
     func createV2Worktree(_ request: BackendWorktreeCreation) async throws -> BackendWorktreeCreationResult {
         let projectID = try worktreeProjectID(request.scope)
-        guard let parent = request.destinationParent?.trimmingCharacters(in: .whitespacesAndNewlines),
-              parent.hasPrefix("/"), !parent.contains("\0") else {
+        let trimmedParent = request.destinationParent?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parent = trimmedParent?.isEmpty == false ? trimmedParent : nil
+        if let parent, !parent.hasPrefix("/") || parent.contains("\0") {
             throw BackendWorktreeError.destinationParentRequired
         }
+        if v2Contract == .preview17155 && parent == nil { throw BackendWorktreeError.destinationParentRequired }
         let name = request.name?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let name, !name.isEmpty,
            name == "." || name == ".." || name.contains("/") || name.contains("\\") || name.contains("\0") {
@@ -55,12 +57,13 @@ extension OpenCodeAPIClient {
         do {
             let result: V2ProjectCopy
             if v2Contract == .preview17155 {
+                guard let parent else { throw BackendWorktreeError.destinationParentRequired }
                 struct Create: Encodable { let strategy = "git_worktree"; let directory: String; let name: String? }
                 result = try await send(path: "/experimental/project/\(projectID)/copy", method: "POST",
                     queryItems: v2LocationQueryItems(directory: request.scope.directory, workspaceID: request.scope.workspaceID),
                     body: Create(directory: parent, name: name?.isEmpty == false ? name : nil))
             } else {
-                struct Create: Encodable { let projectID: String; let directory: String; let name: String? }
+                struct Create: Encodable { let projectID: String; let directory: String?; let name: String? }
                 result = try await send(path: "/api/worktree", method: "POST", queryItems: [],
                     body: Create(projectID: projectID, directory: parent, name: name?.isEmpty == false ? name : nil))
             }

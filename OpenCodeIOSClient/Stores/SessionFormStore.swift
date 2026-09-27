@@ -100,6 +100,10 @@ final class SessionFormStore {
         editing[key] = state
     }
 
+    func canSubmit(_ form: BackendForm) -> Bool {
+        (try? form.contract.answer(values: state(for: form.key).draft)) != nil
+    }
+
     func begin(_ phase: Phase, reference: BackendFormReference, connectionID: UUID) -> UUID? {
         if let canonical { return canonical.begin(phase, reference: reference, connectionID: connectionID) }
         let key = reference.key

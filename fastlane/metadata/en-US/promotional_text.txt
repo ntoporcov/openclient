@@ -1,1 +1,1 @@
-Track OpenAI usage and OpenRouter spend, customize bars or rings, and choose your iPhone composer in OpenClient 1.0.21.
+Meet OC Notify: optional, self-hosted Web Push for your OpenCode sessions. OpenClient 1.0.22 also improves OpenCode v2 reliability.

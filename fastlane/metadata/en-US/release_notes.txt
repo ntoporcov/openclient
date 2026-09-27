@@ -1,7 +1,9 @@
-More control, at a glance.
+Stay in the loop with OC Notify.
 
-• Set up provider usage to track OpenAI subscription usage and OpenRouter spending from Projects and Activity.
-• Configure usage bars or rings in Projects and Activity, and add usage snapshots to Home Screen widgets.
-• Choose the Messenger or Assistant composer on iPhone; iPad now uses a refined Assistant layout.
-• Navigate command and agent suggestions with an external keyboard and complete them with Tab.
-• Recent and Activity views are faster, with fixes for model selection, drafts, and subagent sessions.
+• Set up optional Web Push notifications for completed sessions, permission requests, and questions using OC Notify on your own host.
+• Follow the guided setup to add the companion web app to your Home Screen and transfer your connection settings from OpenClient.
+• Open notifications to return to the relevant session in OpenClient.
+• Enjoy more reliable OpenCode v2 connections, with fixes across projects, workspaces, sessions, tools, and live updates.
+• Reach Connection Settings directly from project and Activity settings, alongside Global Settings.
+
+OC Notify requires the OpenClient plugin, a self-hosted HTTPS endpoint, and the companion web app added to your Home Screen. Notification delivery uses Web Push without an OpenClient-hosted relay.

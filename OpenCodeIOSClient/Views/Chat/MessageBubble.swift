@@ -1102,7 +1102,7 @@ struct MessageBubble: View {
                 showsDisclosure: true,
                 shimmerTitle: false
             )
-        case "bash":
+        case "bash", "shell":
             return ActivityStyle(
                 title: .localized("Shell"),
                 subtitle: running ? nil : verbatimActivityText(firstNonEmpty(part.state?.input?.description, toolSubtitle(for: part, fallback: nil))),
@@ -1214,7 +1214,7 @@ struct MessageBubble: View {
                 showsDisclosure: true,
                 shimmerTitle: false
             )
-        case "apply_patch":
+        case "apply_patch", "patch":
             let count = part.state?.metadata?.files?.count
             let fileSummary = count.map {
                 $0 == 1 ? ActivityText.localized("1 file") : ActivityText.localized("\($0) files")

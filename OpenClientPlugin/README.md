@@ -5,23 +5,43 @@ visuals, in-app browser automation, and optional OC Notify notifications.
 
 ## Install
 
-Add the plugin to your OpenCode configuration:
+Version `0.4.0` supports OpenCode **V1 1.18.29+** and **V2**. Both hosts load
+the same package and choose their native entry point automatically: V1 calls
+`server()`, while V2 calls `setup()`. No version-mode option is needed.
+
+### OpenCode V2
+
+Add the plugin to `opencode.json(c)`:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@openclient-ios/opencode-plugin@0.3.0"]
+  "plugins": ["@openclient-ios/opencode-plugin@0.4.0"]
 }
 ```
 
-Version `0.3.0` includes OC Notify. To enable notifications, replace the plugin
+For a managed background service, run `opencode service status` and set the
+returned server origin explicitly using the options example below.
+
+### OpenCode V1
+
+V1 uses `plugin` (singular):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@openclient-ios/opencode-plugin@0.4.0"]
+}
+```
+
+The plugin includes OC Notify. To enable notifications on V1, replace the plugin
 entry with the options form:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    ["@openclient-ios/opencode-plugin@0.3.0", {
+    ["@openclient-ios/opencode-plugin@0.4.0", {
       "notifications": {
         "enabled": true,
         "publicOrigin": "https://notify.example.com",
@@ -33,33 +53,30 @@ entry with the options form:
 }
 ```
 
-Quit and restart OpenCode after changing plugin configuration. OpenCode loads
-plugins at startup and does not hot-reload them.
-
-The current source build supports OpenCode **v1 1.18.29+** and **v2**, including
-preview `0.0.0-next-17155`. Dual-version support is not yet published in `0.3.0`.
-Both hosts load the same package and choose its native entry point automatically:
-v1 calls `server()`, while v2 calls `setup()`. No version-mode option is needed.
+Restart V1 after changing plugin configuration. V2 supports configuration reload;
+changes to local dependencies may still require `opencode service restart`.
 
 The OpenClient iOS app discovers the bridge on the connected OpenCode host and
 advertises the native tools supported by that app build.
 
-For repository development, run `npm run build` and replace the npm entry with
-`file:///absolute/path/to/OpenClientPlugin/dist/index.js`.
+For repository development, run `npm run clean && npm run build` and replace the
+npm entry with `file:///absolute/path/to/OpenClientPlugin/dist` on V2, or
+`file:///absolute/path/to/OpenClientPlugin/dist/index.js` on V1.
 Do not also load the old npm entry or the standalone notification adapter.
 OpenCode must be restarted after changing plugin code or configuration.
 
-### V2 source configuration
+### V2 options
 
 V2 uses `plugins` and an object for package options (rather than v1's `plugin`
-and tuple). Build the source and configure:
+and tuple). For example, to configure the server origin and optional notifications:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [{
-    "package": "file:///absolute/path/to/OpenClientPlugin/dist/index.js",
+    "package": "@openclient-ios/opencode-plugin@0.4.0",
     "options": {
+      "serverURL": "http://127.0.0.1:4096",
       "notifications": {
         "enabled": true,
         "publicOrigin": "https://notify-v2.example.com",
@@ -75,7 +92,9 @@ When running multiple servers on one machine, use distinct notification ports,
 HTTPS origins, and data directories. Bridge ports are selected automatically.
 V2 does not expose its listening URL to plugins, so the bridge uses the host's
 `serve --port` / `--port=` argument, or `OPENCODE_SERVER_PORT`. Embedded hosts
-without these can set the optional `serverURL` origin in plugin options.
+without these must set the `serverURL` origin in plugin options. Replace the
+example port with the actual port from `opencode service status`; managed
+services do not necessarily listen on `4096`.
 
 V2 tools use native tool-registration permissions, JSON Schema, structured
 output, and the session's canonical location. Current v2 passes cancellation
@@ -130,13 +149,13 @@ connection. Notification permission and activity opt-in remain explicit.
 For manual diagnostics, generate a pairing code with:
 
 ```bash
-npm exec --package=@openclient-ios/opencode-plugin@0.3.0 -- openclient-notify pair --data-dir /absolute/path/to/notification-state
+npm exec --package=@openclient-ios/opencode-plugin@0.4.0 -- openclient-notify pair --data-dir /absolute/path/to/notification-state
 ```
 
 For the repository prototype state, the explicit command is:
 
 ```bash
-npm exec --package=@openclient-ios/opencode-plugin@0.3.0 -- openclient-notify pair --data-dir /absolute/path/to/NotificationPWA/.data
+npm exec --package=@openclient-ios/opencode-plugin@0.4.0 -- openclient-notify pair --data-dir /absolute/path/to/NotificationPWA/.data
 ```
 
 `openclient_visual_image` accepts an absolute path to a readable regular JPEG,
@@ -210,4 +229,4 @@ On the OpenClient release Mac, this command reads the npm token from the
 `npm publish` subprocess. Publishing requires an npm account with write access
 to the `@openclient-ios` scope.
 
-Plugin documentation: <https://opencode.ai/docs/plugins/>
+Plugin documentation: <https://opencode.ai/v2/docs/build/plugins>
