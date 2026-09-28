@@ -7,6 +7,8 @@ import UIKit
 #endif
 
 struct MarkdownMessageText: View {
+    @Environment(\.appSystemAccentColor) private var appAccentColor
+    @Environment(\.appAccentForeground) private var appAccentForeground
     enum Style {
         case standard
         case reasoning
@@ -1029,7 +1031,7 @@ struct MarkdownMessageText: View {
 
     private var textForegroundStyle: Color {
         if isUser {
-            return .white
+            return appAccentForeground
         }
 
         switch style {
@@ -1041,43 +1043,43 @@ struct MarkdownMessageText: View {
     }
 
     private var blockQuoteForegroundStyle: Color {
-        isUser ? .white.opacity(0.86) : .secondary
+        isUser ? appAccentForeground.opacity(0.86) : .secondary
     }
 
     private var blockQuoteAccentStyle: Color {
-        isUser ? .white.opacity(0.55) : .secondary.opacity(0.45)
+        isUser ? appAccentForeground.opacity(0.55) : .secondary.opacity(0.45)
     }
 
     private var blockQuoteBackgroundStyle: Color {
-        isUser ? .white.opacity(0.12) : .secondary.opacity(0.09)
+        isUser ? appAccentForeground.opacity(0.12) : .secondary.opacity(0.09)
     }
 
     private var listMarkerForegroundStyle: Color {
-        isUser ? .white.opacity(0.78) : .secondary
+        isUser ? appAccentForeground.opacity(0.78) : .secondary
     }
 
     private var checkboxCheckedForegroundStyle: Color {
-        isUser ? .white : .accentColor
+        isUser ? appAccentForeground : appAccentColor
     }
 
     private var tableHeaderForegroundStyle: Color {
-        isUser ? .white : .primary
+        isUser ? appAccentForeground : .primary
     }
 
     private var tableBackgroundStyle: Color {
-        isUser ? .white.opacity(0.08) : .secondary.opacity(0.06)
+        isUser ? appAccentForeground.opacity(0.08) : .secondary.opacity(0.06)
     }
 
     private var tableHeaderBackgroundStyle: Color {
-        isUser ? .white.opacity(0.12) : .secondary.opacity(0.11)
+        isUser ? appAccentForeground.opacity(0.12) : .secondary.opacity(0.11)
     }
 
     private var tableBorderStyle: Color {
-        isUser ? .white.opacity(0.18) : .secondary.opacity(0.2)
+        isUser ? appAccentForeground.opacity(0.18) : .secondary.opacity(0.2)
     }
 
     private var tableDividerStyle: Color {
-        isUser ? .white.opacity(0.16) : .secondary.opacity(0.18)
+        isUser ? appAccentForeground.opacity(0.16) : .secondary.opacity(0.18)
     }
 
     private var textLineSpacing: CGFloat {
@@ -1648,6 +1650,7 @@ private struct ConditionalTextSelectionModifier: ViewModifier {
 
 #if canImport(UIKit)
 private struct NativeStreamingChunkTextLabel: UIViewRepresentable {
+    @Environment(\.appAccentForeground) private var appAccentForeground
     let text: String
     let isUser: Bool
     let style: MarkdownMessageText.Style
@@ -1694,7 +1697,7 @@ private struct NativeStreamingChunkTextLabel: UIViewRepresentable {
     }
 
     private var uiTextColor: UIColor {
-        if isUser { return .white }
+        if isUser { return UIColor(appAccentForeground) }
 
         switch style {
         case .standard:

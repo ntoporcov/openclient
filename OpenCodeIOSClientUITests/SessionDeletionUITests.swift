@@ -256,7 +256,8 @@ final class SessionDeletionUITests: XCTestCase {
     }
 
     private func fullSwipe(_ row: XCUIElement) {
-        row.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+        // Stay inside the row; the split-view divider's hit area overlaps its trailing edge on iPad.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)))
     }
 

@@ -193,7 +193,7 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         XCTAssertEqual(release.title, "Private push, straight to you")
         XCTAssertEqual(release.hero, .webPush)
         XCTAssertEqual(release.featureSectionTitle, "Also in this release")
-        XCTAssertEqual(release.features.map(\.title), ["OpenCode v2, steadier"])
+        XCTAssertEqual(release.features.map(\.title), ["Let’s celebrate v2!"])
         XCTAssertFalse(release.showsSetup)
     }
 

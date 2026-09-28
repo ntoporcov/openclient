@@ -7,7 +7,10 @@ final class ComposerStore: ObservableObject {
     @Published var draftAgentMentions: [OpenCodeAgentMention]
     @Published var draftAttachments: [OpenCodeComposerAttachment]
     @Published var draftsByChatKey: [String: OpenCodeMessageDraft]
-    @Published var resetToken: UUID
+    @Published var resetToken: UUID {
+        didSet { streamingDeliveryOverride = nil }
+    }
+    @Published private(set) var streamingDeliveryOverride: OpenCodePromptDelivery?
     var isStreamingFocused: Bool
 
     init(
@@ -38,6 +41,14 @@ final class ComposerStore: ObservableObject {
         guard !newItems.isEmpty else { return }
 
         draftAttachments.append(contentsOf: newItems)
+    }
+
+    func selectStreamingDelivery(_ delivery: OpenCodePromptDelivery) {
+        streamingDeliveryOverride = delivery
+    }
+
+    func streamingDelivery(default defaultDelivery: OpenCodePromptDelivery) -> OpenCodePromptDelivery {
+        streamingDeliveryOverride ?? defaultDelivery
     }
 
     func removeAttachment(id: String) {
@@ -108,6 +119,7 @@ final class ComposerStore: ObservableObject {
 
     func clearDraft(forKey key: String, clearActive: Bool) {
         if clearActive {
+            streamingDeliveryOverride = nil
             draftMessage = ""
             draftAgentMentions = []
             draftAttachments = []

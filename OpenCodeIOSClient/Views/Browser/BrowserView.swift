@@ -761,6 +761,7 @@ private struct BrowserMovableControls: View {
 }
 
 private struct BrowserAddressBar: View {
+    @Environment(\.appSystemAccentColor) private var appAccentColor
     @ObservedObject var browser: BrowserStore
     @FocusState private var isAddressFocused: Bool
 
@@ -804,7 +805,7 @@ private struct BrowserAddressBar: View {
             if browser.isLoading {
                 ProgressView()
                     .progressViewStyle(.linear)
-                    .tint(.accentColor)
+                    .tint(appAccentColor)
                     .frame(height: 2)
                     .transition(.opacity)
             } else {

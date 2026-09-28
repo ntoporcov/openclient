@@ -263,7 +263,7 @@ final class SessionListFacade: ObservableObject {
             viewModel.sessionInteractionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.composerStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
-            viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.connectionAppearances.objectWillChange.eraseToAnyPublisher(),
             viewModel.$draftTitle.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$newSessionWorkspaceSelection.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$newWorkspaceName.map { _ in () }.eraseToAnyPublisher(),
@@ -362,8 +362,8 @@ final class SessionListFacade: ObservableObject {
             errorMessage: isScreenshotScene ? nil : viewModel.errorMessage,
             hasProUnlock: viewModel.commerceFacade.hasProUnlock,
             isReadOnly: isReadOnly,
-            cardStyle: viewModel.appCustomizationStore.sessionCardStyle,
-            showsActivityLastUserMessage: viewModel.appCustomizationStore.showsActivityLastUserMessage,
+            cardStyle: viewModel.appearanceStore.sessionCardStyle,
+            showsActivityLastUserMessage: viewModel.appearanceStore.showsActivityLastUserMessage,
             canCreateSession: !viewModel.isBrowsingLocalCache,
             supportsLiveActivities: !isReadOnly && viewModel.liveActivityFacade.supportsLiveActivities,
             currentProjectActions: (viewModel.supportsProjectActionExecution ? viewModel.currentProjectActions : []).map { action in
@@ -496,7 +496,7 @@ final class SessionListFacade: ObservableObject {
 
     func prepareActivityCardsIfNeeded() async {
         guard viewModel.liveActivityFacade.supportsLiveActivities else { return }
-        guard viewModel.appCustomizationStore.sessionCardStyle == .activity else { return }
+        guard viewModel.appearanceStore.sessionCardStyle == .activity else { return }
         await viewModel.activityFacade.prepareForPresentation()
     }
 
@@ -732,7 +732,7 @@ final class SessionListFacade: ObservableObject {
         ownerBySessionID: [String: DirectoryStore]
     ) -> RowSnapshot {
         let generatedTitle = session.defaultGeneratedTitleDisplayName
-        let showsActivity = viewModel.appCustomizationStore.sessionCardStyle == .activity
+        let showsActivity = viewModel.appearanceStore.sessionCardStyle == .activity
         let isBusy = viewModel.sessionStatuses[session.id] == "busy"
         let owner = ownerBySessionID[session.id]
         let preview = viewModel.sessionPreviews[session.id]

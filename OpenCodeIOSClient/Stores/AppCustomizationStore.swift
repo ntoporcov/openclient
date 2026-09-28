@@ -44,7 +44,42 @@ enum ComposerStyle: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum ChatBubbleStyle: String, Codable, CaseIterable, Identifiable {
+    case glass
+    case solid
+
+    var id: Self { self }
+    var title: LocalizedStringResource {
+        switch self {
+        case .glass: "Glass"
+        case .solid: "Solid"
+        }
+    }
+}
+
+enum AppAccentColor: String, Codable, CaseIterable, Identifiable {
+    case blue, indigo, purple, pink, red, orange, green, teal, clear, inverted
+
+    var id: Self { self }
+    var title: LocalizedStringResource {
+        switch self {
+        case .blue: "Blue"
+        case .indigo: "Indigo"
+        case .purple: "Purple"
+        case .pink: "Pink"
+        case .red: "Red"
+        case .orange: "Orange"
+        case .green: "Green"
+        case .teal: "Teal"
+        case .clear: LocalizedStringResource("accent.color.clear", defaultValue: "Clear", comment: "Untinted, transparent appearance, not the action to erase content.")
+        case .inverted: "Inverted"
+        }
+    }
+}
+
 struct AppCustomizationPreferences: Codable, Equatable {
+    var chatBubbleStyle: ChatBubbleStyle
+    var accentColor: AppAccentColor
     var showsChatActivityShimmer: Bool
     var showsToolCalls: Bool
     var showsReasoningBlocks: Bool
@@ -55,7 +90,17 @@ struct AppCustomizationPreferences: Codable, Equatable {
     var autoConnectServerID: String?
     var autoConnectLandingDestination: AutoConnectLandingDestination
 
+    /// Connection appearance never owns app-level automatic connection behavior.
+    var appearanceOnly: Self {
+        var result = self
+        result.autoConnectServerID = nil
+        result.autoConnectLandingDestination = .projects
+        return result
+    }
+
     init(
+        chatBubbleStyle: ChatBubbleStyle = .glass,
+        accentColor: AppAccentColor = .blue,
         showsChatActivityShimmer: Bool = true,
         showsToolCalls: Bool = true,
         showsReasoningBlocks: Bool = true,
@@ -66,6 +111,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
         autoConnectServerID: String? = nil,
         autoConnectLandingDestination: AutoConnectLandingDestination = .projects
     ) {
+        self.chatBubbleStyle = chatBubbleStyle
+        self.accentColor = accentColor
         self.showsChatActivityShimmer = showsChatActivityShimmer
         self.showsToolCalls = showsToolCalls
         self.showsReasoningBlocks = showsReasoningBlocks
@@ -78,6 +125,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case chatBubbleStyle
+        case accentColor
         case showsChatActivityShimmer
         case showsToolCalls
         case showsReasoningBlocks
@@ -91,6 +140,10 @@ struct AppCustomizationPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        chatBubbleStyle = try container.decodeIfPresent(String.self, forKey: .chatBubbleStyle)
+            .flatMap(ChatBubbleStyle.init(rawValue:)) ?? .glass
+        let storedAccent = try container.decodeIfPresent(String.self, forKey: .accentColor)
+        accentColor = storedAccent == "gray" ? .clear : storedAccent.flatMap(AppAccentColor.init(rawValue:)) ?? .blue
         showsChatActivityShimmer = try container.decodeIfPresent(Bool.self, forKey: .showsChatActivityShimmer) ?? true
         showsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .showsToolCalls) ?? true
         showsReasoningBlocks = try container.decodeIfPresent(Bool.self, forKey: .showsReasoningBlocks) ?? true
@@ -112,6 +165,7 @@ final class AppCustomizationStore: ObservableObject {
 
     private let defaults: UserDefaults
     private let storageKey: String
+    private var saveAppearance: ((AppCustomizationPreferences) -> Void)?
 
     init(
         defaults: UserDefaults = .standard,
@@ -125,6 +179,17 @@ final class AppCustomizationStore: ObservableObject {
         } else {
             preferences = AppCustomizationPreferences()
         }
+    }
+
+    init(appearance: AppCustomizationPreferences, save: @escaping (AppCustomizationPreferences) -> Void) {
+        defaults = .standard
+        storageKey = ""
+        preferences = appearance.appearanceOnly
+        saveAppearance = save
+    }
+
+    func makeConnectionAppearanceRegistry() -> ConnectionAppearanceRegistry {
+        ConnectionAppearanceRegistry(defaults: defaults, storageKey: storageKey + ".connections", legacyPreferences: preferences)
     }
 
     var showsChatActivityShimmer: Bool {
@@ -199,6 +264,21 @@ final class AppCustomizationStore: ObservableObject {
         persist()
     }
 
+    var chatBubbleStyle: ChatBubbleStyle { preferences.chatBubbleStyle }
+    var accentColor: AppAccentColor { preferences.accentColor }
+
+    func setChatBubbleStyle(_ style: ChatBubbleStyle) {
+        guard preferences.chatBubbleStyle != style else { return }
+        preferences.chatBubbleStyle = style
+        persist()
+    }
+
+    func setAccentColor(_ color: AppAccentColor) {
+        guard preferences.accentColor != color else { return }
+        preferences.accentColor = color
+        persist()
+    }
+
     func setComposerStyle(_ style: ComposerStyle) {
         guard preferences.composerStyle != style else { return }
         preferences.composerStyle = style
@@ -240,6 +320,10 @@ final class AppCustomizationStore: ObservableObject {
     }
 
     private func persist() {
+        if let saveAppearance {
+            saveAppearance(preferences.appearanceOnly)
+            return
+        }
         guard let data = try? JSONEncoder().encode(preferences) else { return }
         defaults.set(data, forKey: storageKey)
     }

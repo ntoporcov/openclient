@@ -135,6 +135,9 @@ struct SessionListView: View {
 }
 
 private struct SessionListActionButton: View {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentIsClear) private var accentIsClear
+    @Environment(\.appAccentForeground) private var appAccentForeground
     let title: LocalizedStringResource
     let systemImage: String
     let accessibilityIdentifier: String
@@ -143,10 +146,10 @@ private struct SessionListActionButton: View {
     var body: some View {
         button
             .buttonStyle(.plain)
-            .foregroundStyle(.white)
+            .foregroundStyle(appAccentForeground)
             .opencodeConcentricGlassSurface(
-                clear: true,
-                tint: Color.accentColor.opacity(0.82),
+                clear: !accentIsClear,
+                tint: accentIsClear ? nil : appAccentColor.opacity(0.82),
                 isInteractive: true,
                 minimumCornerRadius: 19,
                 in: Capsule()
@@ -577,7 +580,8 @@ private struct SessionListContent: View, Equatable {
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if !snapshot.isReadOnly {
-                deleteButton(for: row.session)
+                // Server deletion is async; a destructive swipe removes the row before the canonical snapshot updates.
+                deleteButton(for: row.session, role: nil)
                 renameButton(for: row.session)
 #if !targetEnvironment(macCatalyst)
                 liveActivityButton(for: row.session)
@@ -683,12 +687,13 @@ private struct SessionListContent: View, Equatable {
         }
     }
 
-    private func deleteButton(for session: OpenCodeSession) -> some View {
-        Button(role: .destructive) {
+    private func deleteButton(for session: OpenCodeSession, role: ButtonRole? = .destructive) -> some View {
+        Button(role: role) {
             Task { await facade.delete(session) }
         } label: {
             Label("Delete", systemImage: "trash")
         }
+        .tint(.red)
     }
 
     private func renameButton(for session: OpenCodeSession) -> some View {
@@ -760,6 +765,7 @@ private struct ProjectActionStrip: View {
 }
 
 private struct ProjectActionChip: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let action: OpenCodeAction
     let command: OpenCodeCommand?
     let phase: OpenCodeActionRunPhase?
@@ -808,7 +814,7 @@ private struct ProjectActionChip: View {
     }
 
     private var tint: Color {
-        phase == nil ? .orange : .accentColor
+        phase == nil ? .orange : appAccentColor
     }
 
     private var subtitle: LocalizedStringResource {
@@ -896,6 +902,7 @@ private struct ProjectUsageCTA: View {
             }
             .font(.caption.weight(.bold))
             .buttonStyle(.borderedProminent)
+            .modifier(AppAccentActionModifier())
             .controlSize(.small)
         }
         .padding(12)

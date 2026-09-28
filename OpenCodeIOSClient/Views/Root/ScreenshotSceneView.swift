@@ -78,7 +78,11 @@ struct ScreenshotSceneView: View {
             }
         case .chat:
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            if ProcessInfo.processInfo.environment["OPENCLIENT_HEADER_FIXTURE"] == "1" {
+            if ProcessInfo.processInfo.environment["OPENCLIENT_QUEUE_LIFECYCLE_FIXTURE"] == "1" {
+                QueuedSubmissionLifecycleFixture()
+            } else if ProcessInfo.processInfo.environment["OPENCLIENT_STREAMING_DELIVERY_FIXTURE"] == "1" {
+                StreamingDeliveryFixture()
+            } else if ProcessInfo.processInfo.environment["OPENCLIENT_HEADER_FIXTURE"] == "1" {
                 ChatHeaderFixture()
             } else { rootView }
             #else

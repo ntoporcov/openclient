@@ -785,6 +785,7 @@ extension AppViewModel {
         let removedServerID = serverConfig.recentServerID
         guard persistSavedServerChange(.remove(removedServerID)) else { return }
         connectionStore.removeRecentServer(serverConfig)
+        connectionAppearances.removeServer(removedServerID)
         Task {
             await clearLocalCache(serverID: removedServerID)
         }
@@ -802,7 +803,9 @@ extension AppViewModel {
         let updatedID = config.recentServerID
         if let originalServerID, originalServerID != updatedID {
             appCustomizationStore.migrateAutoConnectServerID(from: originalServerID, to: updatedID)
+            connectionAppearances.migrateServerID(from: originalServerID, to: updatedID)
         }
+        _ = connectionAppearances.store(for: updatedID)
         appCustomizationStore.reconcileAutoConnectServer(in: recentServerConfigs)
         if let originalServerID, originalServerID != updatedID {
             Task {

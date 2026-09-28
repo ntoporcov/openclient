@@ -220,6 +220,7 @@ private struct PaywallPurchaseOptions: View {
 }
 
 private struct PaywallPurchaseOptionButton: View {
+    @Environment(\.appAccentForeground) private var appAccentForeground
     let title: LocalizedStringResource
     let detail: LocalizedStringResource
     let price: String
@@ -232,6 +233,7 @@ private struct PaywallPurchaseOptionButton: View {
         if isProminent {
             purchaseButton
                 .buttonStyle(.borderedProminent)
+                .modifier(AppAccentActionModifier())
                 .controlSize(.large)
         } else {
             purchaseButton
@@ -253,13 +255,13 @@ private struct PaywallPurchaseOptionButton: View {
                                 .font(.caption2.weight(.bold))
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
-                                .background(.white.opacity(0.2), in: Capsule())
+                                .background(appAccentForeground.opacity(0.2), in: Capsule())
                         }
                     }
 
                     Text(detail)
                         .font(.subheadline)
-                        .foregroundStyle(isProminent ? .white.opacity(0.82) : .secondary)
+                        .foregroundStyle(isProminent ? appAccentForeground.opacity(0.82) : .secondary)
                 }
 
                 Spacer(minLength: 8)

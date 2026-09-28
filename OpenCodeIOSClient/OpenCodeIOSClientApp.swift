@@ -93,6 +93,7 @@ struct OpenCodeIOSClientApp: App {
 #endif
             }
             .opencodeSoftScrollEdgeEffect()
+            .modifier(ConnectionAppearanceScopeModifier(facade: composition.connection))
             .opencodeDismissesSheetsOnBackgroundTap()
             .onOpenURL { url in
                 composition.appShell.prepareOpenURLPresentation(url)
@@ -126,6 +127,7 @@ struct OpenCodeIOSClientApp: App {
                 dedicatedChatWindow(route: route)
 #endif
             }
+            .modifier(ConnectionAppearanceScopeModifier(facade: composition.connection))
         }
     }
 
@@ -194,6 +196,7 @@ private struct IsolatedChatWindow: View {
                     videoStreams: composition.videoStreams, sessionID: context.session.id, isDedicatedWindow: true)
                     .id(context.session.id)
             }
+            .modifier(AppAppearanceModifier(store: facade.appCustomizationStore))
             .onDisappear { context.close() }
         }
     }

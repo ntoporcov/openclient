@@ -1,5 +1,13 @@
 import Foundation
 
+/// V2 inbox delivery intent. Queue waits for the current turn; steer joins it.
+enum OpenCodePromptDelivery: String, Codable, CaseIterable, Identifiable, Sendable {
+    case queue
+    case steer
+
+    var id: Self { self }
+}
+
 enum OpenCodeAPIPreference: String, Codable, CaseIterable, Identifiable, Sendable {
     case automatic
     case legacy
@@ -25,6 +33,7 @@ struct OpenCodeServerConfig: Equatable, Codable, Sendable {
     var username: String = "opencode"
     var password: String = ""
     var apiPreference: OpenCodeAPIPreference = .automatic
+    var streamingDelivery: OpenCodePromptDelivery = .queue
 
     init(
         name: String = "",
@@ -32,7 +41,8 @@ struct OpenCodeServerConfig: Equatable, Codable, Sendable {
         baseURL: String = "",
         username: String = "opencode",
         password: String = "",
-        apiPreference: OpenCodeAPIPreference = .automatic
+        apiPreference: OpenCodeAPIPreference = .automatic,
+        streamingDelivery: OpenCodePromptDelivery = .queue
     ) {
         self.name = name
         self.iconName = iconName
@@ -40,6 +50,7 @@ struct OpenCodeServerConfig: Equatable, Codable, Sendable {
         self.username = username
         self.password = password
         self.apiPreference = apiPreference
+        self.streamingDelivery = streamingDelivery
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -49,6 +60,7 @@ struct OpenCodeServerConfig: Equatable, Codable, Sendable {
         case username
         case password
         case apiPreference
+        case streamingDelivery
     }
 
     init(from decoder: Decoder) throws {
@@ -59,6 +71,7 @@ struct OpenCodeServerConfig: Equatable, Codable, Sendable {
         username = try container.decodeIfPresent(String.self, forKey: .username) ?? "opencode"
         password = try container.decodeIfPresent(String.self, forKey: .password) ?? ""
         apiPreference = try container.decodeIfPresent(OpenCodeAPIPreference.self, forKey: .apiPreference) ?? .automatic
+        streamingDelivery = try container.decodeIfPresent(OpenCodePromptDelivery.self, forKey: .streamingDelivery) ?? .queue
     }
 
     // Public saved preferences never pin a protocol. Captured API profiles remain separate.

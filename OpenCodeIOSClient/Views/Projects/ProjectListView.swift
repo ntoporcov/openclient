@@ -6,6 +6,7 @@ import AppKit
 #endif
 
 struct ProjectListView: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     @ObservedObject var facade: ProjectFacade
     @ObservedObject var connection: ConnectionFacade
     @ObservedObject var configurations: ConfigurationsFacade
@@ -72,9 +73,9 @@ struct ProjectListView: View {
                         HStack(spacing: 12) {
                             Image(systemName: "waveform.path.ecg")
                                 .font(.headline)
-                                .foregroundStyle(isActivitySelected ? Color.accentColor : .secondary)
+                                .foregroundStyle(isActivitySelected ? appAccentColor : .secondary)
                                 .frame(width: 32, height: 32)
-                                .background(Color.accentColor.opacity(isActivitySelected ? 0.14 : 0.07), in: RoundedRectangle(cornerRadius: 9))
+                                .background(appAccentColor.opacity(isActivitySelected ? 0.14 : 0.07), in: RoundedRectangle(cornerRadius: 9))
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Activity")
@@ -133,7 +134,7 @@ struct ProjectListView: View {
                                 } label: {
                                     Image(systemName: isVisible ? "eye.fill" : "eye.slash")
                                         .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(isVisible ? Color.accentColor : .secondary)
+                                        .foregroundStyle(isVisible ? appAccentColor : .secondary)
                                         .frame(width: 44, height: 44)
                                 }
                                 .buttonStyle(.borderless)
@@ -638,6 +639,9 @@ enum OpenCodeConversationControlsLayout {
 }
 
 private struct OpenCodeConversationFloatingButton: View {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentIsClear) private var accentIsClear
+    @Environment(\.appAccentForeground) private var appAccentForeground
     let systemImage: String
     let accessibilityLabel: LocalizedStringResource
     let accessibilityIdentifier: String
@@ -653,8 +657,8 @@ private struct OpenCodeConversationFloatingButton: View {
         .frame(width: ProjectListLayout.newChatButtonDiameter, height: ProjectListLayout.newChatButtonDiameter)
         .buttonStyle(.plain)
         .opencodeConcentricGlassSurface(
-            clear: true,
-            tint: Color.accentColor.opacity(0.82),
+            clear: !accentIsClear,
+            tint: accentIsClear ? nil : appAccentColor.opacity(0.82),
             isInteractive: true,
             minimumCornerRadius: ProjectListLayout.newChatButtonDiameter / 2,
             in: Circle()
@@ -667,7 +671,7 @@ private struct OpenCodeConversationFloatingButton: View {
     private var foreground: Color {
         #if os(iOS) || targetEnvironment(macCatalyst)
         if #available(iOS 26.0, *) {
-            return .white
+            return appAccentForeground
         }
         #endif
         return .primary
@@ -884,6 +888,7 @@ private struct ProjectNewChatProviderModels: View {
 }
 
 private struct ProjectNewChatModelOptionButton: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let title: String
     var providerID: String?
     var providerName: String?
@@ -908,7 +913,7 @@ private struct ProjectNewChatModelOptionButton: View {
                 }
                 Spacer()
                 Image(systemName: "checkmark")
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.clear)
+                    .foregroundStyle(isSelected ? appAccentColor : Color.clear)
             }
             .contentShape(Rectangle())
         }
@@ -924,6 +929,7 @@ private enum ProjectNewChatQuickPicker: Equatable {
 }
 
 struct ProjectNewChatSheet: View, Equatable {
+    @Environment(\.appAccentColor) private var appAccentColor
     @ObservedObject var viewModel: NewProjectChatFacade
     private let facadeIdentity: ObjectIdentifier
     let request: NewProjectChatSheetRequest
@@ -1172,11 +1178,11 @@ struct ProjectNewChatSheet: View, Equatable {
         HStack(spacing: 10) {
             Image(systemName: "bubble.left.and.bubble.right.fill")
                 .font(.system(size: 27, weight: .semibold))
-                .foregroundStyle(Color.accentColor.opacity(0.92))
+                .foregroundStyle(appAccentColor.opacity(0.92))
                 .accessibilityHidden(true)
             Text(visibleChatTitle)
                 .font(.title2.weight(.semibold))
-                .foregroundStyle(chatTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .primary : Color.accentColor)
+                .foregroundStyle(chatTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .primary : appAccentColor)
                 .lineLimit(2)
         }
             .multilineTextAlignment(.leading)
@@ -2056,6 +2062,7 @@ private enum ProjectListLayout {
 }
 
 private struct ProjectColorPickerSheet: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     @ObservedObject var facade: ProjectFacade
     let project: OpenCodeProject
     @Environment(\.dismiss) private var dismiss
@@ -2093,7 +2100,7 @@ private struct ProjectColorPickerSheet: View {
                             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .strokeBorder(project.icon?.color == color ? Color.accentColor : Color.clear, lineWidth: 2)
+                                    .strokeBorder(project.icon?.color == color ? appAccentColor : Color.clear, lineWidth: 2)
                             }
                         }
                         .buttonStyle(.plain)
@@ -2247,6 +2254,7 @@ private struct ProjectColorSwatch: View {
 }
 
 private struct ProjectImageCandidateCell: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let candidate: ProjectImageCandidate
     let dataURL: String?
     let isSelected: Bool
@@ -2268,7 +2276,7 @@ private struct ProjectImageCandidateCell: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.12), lineWidth: isSelected ? 2 : 1)
+                    .strokeBorder(isSelected ? appAccentColor : Color.secondary.opacity(0.12), lineWidth: isSelected ? 2 : 1)
             }
 
             Text(candidate.filename)

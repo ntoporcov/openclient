@@ -74,7 +74,7 @@ final class ProjectFacade: ObservableObject {
             viewModel.modelConfigurationStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.commerceFacade.objectWillChange.eraseToAnyPublisher(),
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
-            viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.connectionAppearances.objectWillChange.eraseToAnyPublisher(),
             viewModel.$config.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$backendConnection.map { _ in () }.eraseToAnyPublisher(),
             viewModel.$isShowingProjectSettingsSheet.map { _ in () }.eraseToAnyPublisher(),
@@ -133,8 +133,8 @@ final class ProjectFacade: ObservableObject {
     var settingsSnapshot: SettingsSnapshot {
         SettingsSnapshot(
             isLiveActivityAutoStartEnabled: viewModel.isLiveActivityAutoStartEnabled,
-            sessionCardStyle: viewModel.appCustomizationStore.sessionCardStyle,
-            showsActivityLastUserMessage: viewModel.appCustomizationStore.showsActivityLastUserMessage,
+            sessionCardStyle: viewModel.appearanceStore.sessionCardStyle,
+            showsActivityLastUserMessage: viewModel.appearanceStore.showsActivityLastUserMessage,
             hasProUnlock: viewModel.hasProUnlock,
             isProjectWorkspacesEnabled: viewModel.isProjectWorkspacesEnabled,
             hasGitProject: viewModel.hasGitProject,
@@ -339,11 +339,11 @@ final class ProjectFacade: ObservableObject {
         viewModel.setLiveActivityAutoStartEnabled(isEnabled)
     }
     func setSessionCardStyle(_ style: SessionCardStyle) {
-        viewModel.appCustomizationStore.setSessionCardStyle(style)
+        viewModel.appearanceStore.setSessionCardStyle(style)
         objectWillChange.send()
     }
     func setShowsActivityLastUserMessage(_ shows: Bool) {
-        viewModel.appCustomizationStore.setShowsActivityLastUserMessage(shows)
+        viewModel.appearanceStore.setShowsActivityLastUserMessage(shows)
         objectWillChange.send()
     }
 

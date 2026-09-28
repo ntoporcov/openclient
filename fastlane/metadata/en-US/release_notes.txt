@@ -5,5 +5,7 @@ Stay in the loop with OC Notify.
 • Open notifications to return to the relevant session in OpenClient.
 • Enjoy more reliable OpenCode v2 connections, with fixes across projects, workspaces, sessions, tools, and live updates.
 • Reach Connection Settings directly from project and Activity settings, alongside Global Settings.
+• Keep the project list consistent after reconnecting, with a clearer Root label and folder icon for the filesystem root.
+• Restore send-button feedback and typing-style haptics for streamed answers in OpenCode v2 chats.
 
 OC Notify requires the OpenClient plugin, a self-hosted HTTPS endpoint, and the companion web app added to your Home Screen. Notification delivery uses Web Push without an OpenClient-hosted relay.

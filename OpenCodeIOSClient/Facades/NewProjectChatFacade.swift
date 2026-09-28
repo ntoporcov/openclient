@@ -119,7 +119,7 @@ final class NewProjectChatFacade: ObservableObject {
             viewModel.projectActionStore.$runs.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.directoryStoreRegistry.$v2DeletedSessionIDs.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
-            viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.connectionAppearances.objectWillChange.eraseToAnyPublisher(),
             viewModel.commerceFacade.objectWillChange.eraseToAnyPublisher(),
             viewModel.$newProjectChatSheetRequest.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.projectPreferencesStore.$projectWorkspacesEnabledByScope.dropFirst().map { _ in () }.eraseToAnyPublisher(),
@@ -202,7 +202,7 @@ final class NewProjectChatFacade: ObservableObject {
     var selectableAgents: [OpenCodeAgent] { viewModel.selectableAgents }
     var sortedProviders: [OpenCodeProvider] { viewModel.sortedProviders }
     var newSessionDefaults: NewSessionDefaults { viewModel.newSessionDefaults }
-    var usesAssistantComposerLayout: Bool { viewModel.appCustomizationStore.composerStyle == .assistant }
+    var usesAssistantComposerLayout: Bool { viewModel.appearanceStore.composerStyle == .assistant }
     var isReadOnly: Bool {
         viewModel.isBrowsingLocalCache || !viewModel.isConnected || viewModel.backendConnection?.isClosed != false
     }

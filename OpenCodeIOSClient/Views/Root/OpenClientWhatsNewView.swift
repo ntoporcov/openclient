@@ -246,6 +246,7 @@ private struct OpenClientWhatsNewUsageSection: View {
             }
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("new-features.openai-usage-setup")
+            .modifier(AppAccentActionModifier())
 
             Text("Setup asks before reading a discovered credential, then saves it automatically when the read succeeds. If this connection cannot securely provide a supported credential, OpenClient will explain why instead.")
                 .font(.footnote)
@@ -515,6 +516,7 @@ private struct OpenClientWhatsNewNotificationsOverview: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("new-features.notification-setup")
+                .modifier(AppAccentActionModifier())
             } else {
                 Text("Setup becomes available here when OpenClient is connected to a compatible plugin with OC Notify enabled.")
                     .font(.footnote)
@@ -607,6 +609,8 @@ private struct OpenClientWhatsNewNotificationFlow: View {
 }
 
 private struct OpenClientWhatsNewNotificationStep: View {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentIsClear) private var accentIsClear
     let number: Int
     let text: LocalizedStringResource
 
@@ -614,9 +618,9 @@ private struct OpenClientWhatsNewNotificationStep: View {
         HStack(alignment: .top, spacing: 12) {
             Text(number, format: .number)
                 .font(.caption.bold())
-                .foregroundStyle(.white)
+                .foregroundStyle(AppAccentForegroundStyle())
                 .frame(width: 26, height: 26)
-                .background(Color.accentColor, in: Circle())
+                .background(appAccentColor.opacity(accentIsClear ? 0.08 : 1), in: Circle())
                 .accessibilityHidden(true)
             Text(text)
                 .font(.subheadline)
@@ -1234,6 +1238,7 @@ private struct OpenClientWhatsNewFooter: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
+        .modifier(AppAccentActionModifier())
         .accessibilityIdentifier("new-features.continue")
         .padding(.horizontal, 18)
         .padding(.top, 12)
@@ -1312,6 +1317,8 @@ private struct OpenClientWhatsNewIconPicker: View {
 }
 
 private struct OpenClientWhatsNewIconOption: View {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentIsClear) private var accentIsClear
     let icon: OpenClientAppIcon
     let isSelected: Bool
     let isDisabled: Bool
@@ -1344,11 +1351,13 @@ private struct OpenClientWhatsNewIconOption: View {
     }
 
     private var iconBackground: Color {
-        isSelected ? .accentColor : .accentColor.opacity(0.12)
+        isSelected ? appAccentColor.opacity(accentIsClear ? 0.08 : 1) : appAccentColor.opacity(0.12)
     }
 }
 
 private struct OpenClientWhatsNewIconArtwork: View {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentForeground) private var appAccentForeground
     let icon: OpenClientAppIcon
     let isSelected: Bool
     let background: Color
@@ -1374,7 +1383,7 @@ private struct OpenClientWhatsNewIconArtwork: View {
     private var fallback: some View {
         Image(systemName: icon.alternateIconName == nil ? "app.fill" : "paintpalette.fill")
             .font(.title3.weight(.semibold))
-            .foregroundStyle(isSelected ? Color.white : Color.accentColor)
+            .foregroundStyle(isSelected ? appAccentForeground : appAccentColor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(background)
     }

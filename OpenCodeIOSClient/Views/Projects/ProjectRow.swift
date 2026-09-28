@@ -46,6 +46,7 @@ struct ProjectRow: View {
 }
 
 struct ProjectAvatar: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let title: String
     let systemImage: String
     let icon: OpenCodeProject.Icon?
@@ -96,12 +97,13 @@ struct ProjectAvatar: View {
     }
 
     private var borderColor: Color {
-        if isSelected { return .accentColor.opacity(0.75) }
+        if isSelected { return appAccentColor.opacity(0.75) }
         return ProjectAvatarColors.colors(for: icon?.color).background.opacity(0.28)
     }
 }
 
 struct ProjectSelectionCard: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let project: OpenCodeProject
     let title: String
     let isSelected: Bool
@@ -135,7 +137,7 @@ struct ProjectSelectionCard: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(isSelected ? 0.82 : 0), lineWidth: 2)
+                .strokeBorder(appAccentColor.opacity(isSelected ? 0.82 : 0), lineWidth: 2)
         }
         .animation(opencodeSelectionAnimation, value: isSelected)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

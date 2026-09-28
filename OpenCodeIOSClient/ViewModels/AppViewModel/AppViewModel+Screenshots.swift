@@ -234,7 +234,7 @@ extension AppViewModel {
 
     private static func screenshotSessions() -> AppViewModel {
         let viewModel = baseConnectedScreenshotViewModel(selectedSession: nil)
-        viewModel.appCustomizationStore.setSessionCardStyle(.simple)
+        viewModel.appearanceStore.setSessionCardStyle(.simple)
         viewModel.pinnedSessionIDsByScope = [viewModel.currentPinScopeKey: [OpenClientScreenshotData.releaseSession.id]]
         return viewModel
     }
@@ -487,7 +487,7 @@ extension AppViewModel {
             draftAttachments: [],
             toolMessageDetails: OpenClientScreenshotData.toolMessageDetails
         )
-        viewModel.appCustomizationStore.setComposerStyleForFixture(.messenger)
+        viewModel.appearanceStore.setComposerStyleForFixture(.messenger)
         viewModel.config = OpenClientScreenshotData.secureConfig
         viewModel.backendMode = .server
         viewModel.errorMessage = nil

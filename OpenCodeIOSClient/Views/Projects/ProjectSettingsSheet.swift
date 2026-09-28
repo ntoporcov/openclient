@@ -29,30 +29,12 @@ struct ProjectSettingsSheet: View {
                         Label("Connection Settings", systemImage: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("project.settings.configurations")
+
                 }
 
-                Section("Sessions") {
-                    Picker("Card Style", selection: Binding(
-                        get: { facade.settingsSnapshot.sessionCardStyle },
-                        set: { facade.setSessionCardStyle($0) }
-                    )) {
-                        ForEach(SessionCardStyle.allCases) { style in
-                            Text(sessionCardStyleTitle(style)).tag(style)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("project.settings.sessionCardStyle")
-
-                    if snapshot.sessionCardStyle == .activity {
-                        Toggle("Show Last User Message", isOn: Binding(
-                            get: { facade.settingsSnapshot.showsActivityLastUserMessage },
-                            set: { facade.setShowsActivityLastUserMessage($0) }
-                        ))
-                        .accessibilityIdentifier("project.settings.showActivityLastUserMessage")
-                    }
-
 #if !targetEnvironment(macCatalyst)
-                    if !connection.isV2Connection {
+                if !connection.isV2Connection {
+                    Section("Sessions") {
                     Toggle("Auto-start Live Activity", isOn: Binding(
                         get: { facade.settingsSnapshot.isLiveActivityAutoStartEnabled },
                         set: { facade.setLiveActivityAutoStartEnabled($0) }
@@ -62,8 +44,8 @@ struct ProjectSettingsSheet: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     }
-#endif
                 }
+#endif
 
                 if facade.supportsProjectActions {
                     Section("Actions") {
@@ -313,14 +295,6 @@ private struct ProjectActionSettingsRow: View {
     }
 }
 
-private func sessionCardStyleTitle(_ style: SessionCardStyle) -> LocalizedStringResource {
-    switch style {
-    case .compact: "Compact"
-    case .simple: "Default"
-    case .activity: "Activity"
-    }
-}
-
 private func actionSettingsPhaseTitle(_ phase: OpenCodeActionRunPhase) -> LocalizedStringResource {
     switch phase {
     case .runningCommand: "Running command"
@@ -336,6 +310,7 @@ private struct ProjectActionSymbolPickerContext: Identifiable {
 }
 
 private struct ProjectActionSymbolPickerSheet: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     let selectedSymbolName: String
@@ -356,7 +331,7 @@ private struct ProjectActionSymbolPickerSheet: View {
                                 Image(systemName: symbolName)
                                     .font(.title3.weight(.semibold))
                                     .frame(width: 44, height: 44)
-                                    .background(symbolName == selectedSymbolName ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06), in: Circle())
+                                    .background(symbolName == selectedSymbolName ? appAccentColor.opacity(0.18) : Color.primary.opacity(0.06), in: Circle())
 
                                 Text(symbolName)
                                     .font(.caption2)

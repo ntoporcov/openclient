@@ -389,6 +389,7 @@ struct RootView<ChatDestination: View>: View {
 }
 
 struct V2ConnectionNoticeCard: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let dismiss: () -> Void
 
     var body: some View {
@@ -398,7 +399,7 @@ struct V2ConnectionNoticeCard: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.tint)
                     .frame(width: 32, height: 32)
-                    .background(Color.accentColor.opacity(0.12), in: Circle())
+                    .background(appAccentColor.opacity(0.12), in: Circle())
 
                 Text("Welcome to v2")
                     .font(.subheadline.weight(.semibold))
@@ -423,10 +424,10 @@ struct V2ConnectionNoticeCard: View {
                 .foregroundStyle(.tint)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(appAccentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.accentColor.opacity(0.18), lineWidth: 0.5)
+                        .strokeBorder(appAccentColor.opacity(0.18), lineWidth: 0.5)
                 }
             }
             .buttonStyle(.plain)

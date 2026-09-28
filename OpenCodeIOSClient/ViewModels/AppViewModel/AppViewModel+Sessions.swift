@@ -567,30 +567,40 @@ extension AppViewModel {
         meterPrompt: Bool = true,
         messageID requestedMessageID: String? = nil,
         reservedPromptDay: String? = nil,
-        windowContext: ChatWindowContext? = nil
+        windowContext: ChatWindowContext? = nil,
+        delivery: OpenCodePromptDelivery? = nil
     ) async -> Bool {
+        let trace = { [self] (stage: String) in
+            chatFacade.logPromptSubmission(stage, sessionID: session.id, messageID: requestedMessageID)
+        }
+        let blocked = { (reason: String) in
+            trace("v2 blocked: \(reason)")
+            return false
+        }
+        trace("v2 preflight")
         guard !Task.isCancelled, connectionStore.apiProfile == .v2,
               windowContext?.isCurrent ?? true,
               !funAndGamesStore.hasPendingSetup(for: session.id),
-              !directoryStoreRegistry.isV2SessionDeleted(session.id) else { return false }
+              !directoryStoreRegistry.isV2SessionDeleted(session.id) else { return blocked("cancelled, invalid context, game setup, or deleted session") }
         if let requestedMessageID, let phase = chatFacade.promptAdmissionPhase(messageID: requestedMessageID, sessionID: session.id) {
+            trace("v2 existing admission phase=\(phase)")
             return phase == .admitted
         }
-        guard !chatFacade.hasPendingPromptAdmission(sessionID: session.id) else { return false }
+        guard !chatFacade.hasPendingPromptAdmission(sessionID: session.id) else { return blocked("pending admission") }
         if let directory = session.directory,
            !globalFormsFacade.pending(for: .init(directory: directory, workspaceID: session.workspaceID)).isEmpty {
             // This attempt has no admission owner and has not posted. Release only its prepaid day.
             chatFacade.refundReservedPrompt(on: reservedPromptDay)
-            return false
+            return blocked("pending global form")
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return blocked("empty prompt") }
         let prompt = agentMentions.isEmpty ? trimmed : text
         guard let connection = try? requireBackendConnection(),
-              let client = try? connection.requireOpenCodeClient(for: .interactions) else { return false }
+              let client = try? connection.requireOpenCodeClient(for: .interactions) else { return blocked("backend unavailable") }
         let generation = directoryStoreRegistry.generation
         let owner = directoryStoreRegistry.ownerStore(forSessionID: session.id) ?? directoryStore
-        guard let key = directoryStoreRegistry.key(for: owner) else { return false }
+        guard let key = directoryStoreRegistry.key(for: owner) else { return blocked("unregistered directory owner") }
         let lifecycleRevision = directoryStoreRegistry.v2LifecycleRevision(sessionID: session.id)
         let navigationGeneration = sessionNavigationGeneration
         let isCurrent = { [self] in
@@ -602,10 +612,13 @@ extension AppViewModel {
         let isVisible = { [self] in
             windowContext == nil && isCurrent() && isSessionNavigationCurrent(sessionID: session.id, generation: navigationGeneration, directoryKey: key)
         }
+        trace("v2 preparing live activity")
         await maybeAutoStartLiveActivity(for: session)
-        guard isCurrent(), !funAndGamesStore.hasPendingSetup(for: session.id) else { return false }
+        guard isCurrent(), !funAndGamesStore.hasPendingSetup(for: session.id) else {
+            return blocked("stale preflight configMatches=\(config == client.config) ownerCurrent=\(directoryStoreRegistry.contains(owner, forKey: key)) lifecycleCurrent=\(directoryStoreRegistry.v2LifecycleRevision(sessionID: session.id) == lifecycleRevision)")
+        }
         let charged = reservedPromptDay != nil || (meterPrompt && !hasProUnlock)
-        guard reservedPromptDay != nil || !meterPrompt || reserveUserPromptIfAllowed() else { return false }
+        guard reservedPromptDay != nil || !meterPrompt || reserveUserPromptIfAllowed() else { return blocked("prompt allowance") }
         let chargedDay = reservedPromptDay ?? usageMeter.promptDay
         let refund = { [self] in
             if charged, usageMeter.promptDay == chargedDay,
@@ -629,9 +642,10 @@ extension AppViewModel {
             chatStore.rollbackV2Prompt(messageID: messageID, sessionID: session.id)
             _ = owner.removeMessage(sessionID: session.id, messageID: messageID)
         }
-        guard chatStore.beginV2Prompt(optimistic, sessionID: session.id, attachments: attachments, agentMentions: agentMentions) else {
+        guard chatStore.beginV2Prompt(optimistic, sessionID: session.id, attachments: attachments, agentMentions: agentMentions,
+                                     delivery: delivery) else {
             refund()
-            return false
+            return blocked("admission store refused")
         }
         owner.applyV2Messages(chatStore.withoutRecoveryMessages(owner.syncState.messageEnvelopes(forSessionID: session.id),
             sessionID: session.id), forSessionID: session.id)
@@ -644,9 +658,10 @@ extension AppViewModel {
         }
 
         do {
+            chatFacade.logPromptSubmission("v2 transport submit", sessionID: session.id, messageID: messageID)
             let admission = try await connection.chat.submit(.init(sessionID: session.id, messageID: messageID, text: prompt,
                 scope: .init(projectID: session.projectID, directory: session.directory, workspaceID: session.workspaceID),
-                attachments: attachments, agentMentions: agentMentions))
+                attachments: attachments, agentMentions: agentMentions, delivery: delivery))
             switch admission {
             case let .accepted(sessionID, admittedID) where sessionID == session.id && admittedID == messageID:
                 break
@@ -655,8 +670,10 @@ extension AppViewModel {
             default:
                 throw BackendPromptFailure.uncertain
             }
+            chatFacade.logPromptSubmission("v2 transport accepted", sessionID: session.id, messageID: messageID)
             if isCurrent() { chatStore.confirmSubmissionAdmission(messageID: messageID, sessionID: session.id) }
         } catch BackendPromptFailure.rejected {
+            chatFacade.logPromptSubmission("v2 transport rejected", sessionID: session.id, messageID: messageID)
             let hasCanonicalInput = chatStore.canonicalSubmissionSessions[messageID] == session.id
             if isCurrent(), chatStore.submissionRecoveries[messageID]?.phase == .admitted
                 || chatStore.submissionRecoveries[messageID]?.phase == .cancelled || hasCanonicalInput {
@@ -675,6 +692,7 @@ extension AppViewModel {
             return false
         } catch {
             // Never retry POST with a fresh ID. A lost receipt can still mean admitted work.
+            chatFacade.logPromptSubmission("v2 transport uncertain errorCode=\((error as NSError).code)", sessionID: session.id, messageID: messageID)
             guard isCurrent(), !Task.isCancelled else { return false }
             chatStore.markSubmissionUncertain(messageID: messageID, sessionID: session.id)
             if !(await resolveV2PromptAdmission(sessionID: session.id, messageID: messageID)) {
@@ -1889,16 +1907,23 @@ extension AppViewModel {
         appendOptimisticMessage: Bool = true,
         meterPrompt: Bool = true,
         reservedPromptDay: String? = nil,
-        windowContext: ChatWindowContext? = nil
+        windowContext: ChatWindowContext? = nil,
+        delivery: OpenCodePromptDelivery? = nil
     ) async -> Bool {
-        guard !funAndGamesStore.hasPendingSetup(for: selectedSession.id), windowContext?.isCurrent ?? true else { return false }
+        let blocked = { [self] (reason: String) in
+            chatFacade.logPromptSubmission("blocked: \(reason)", sessionID: selectedSession.id, messageID: messageID)
+            return false
+        }
+        guard !funAndGamesStore.hasPendingSetup(for: selectedSession.id), windowContext?.isCurrent ?? true else {
+            return blocked("pending game setup or stale window")
+        }
         if connectionStore.apiProfile == .v2 {
-            guard let connection = try? requireBackendConnection() else { return false }
+            guard let connection = try? requireBackendConnection() else { return blocked("backend unavailable") }
             let generation = directoryStoreRegistry.generation
             let navigationGeneration = sessionNavigationGeneration
             let accepted = await sendV2TextPrompt(text, in: selectedSession, attachments: attachments,
                 agentMentions: agentMentions, meterPrompt: userVisible && meterPrompt, messageID: messageID,
-                reservedPromptDay: reservedPromptDay, windowContext: windowContext)
+                reservedPromptDay: reservedPromptDay, windowContext: windowContext, delivery: delivery)
             if accepted, userVisible, isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation,
                sessionNavigationGeneration == navigationGeneration, self.selectedSession?.id == selectedSession.id,
                draftMessage == text, draftAttachments == attachments {
@@ -1920,11 +1945,15 @@ extension AppViewModel {
             return true
         }
 
-        guard !Task.isCancelled, let connection = try? requireBackendConnection() else { return false }
+        guard !Task.isCancelled, let connection = try? requireBackendConnection() else {
+            chatFacade.logPromptSubmission("blocked: backend unavailable or cancelled", sessionID: selectedSession.id, messageID: messageID)
+            return false
+        }
         if let messageID, let phase = chatFacade.promptAdmissionPhase(messageID: messageID, sessionID: selectedSession.id) {
+            chatFacade.logPromptSubmission("existing admission phase=\(phase)", sessionID: selectedSession.id, messageID: messageID)
             return phase == .admitted
         }
-        guard !chatFacade.hasPendingPromptAdmission(sessionID: selectedSession.id) else { return false }
+        guard !chatFacade.hasPendingPromptAdmission(sessionID: selectedSession.id) else { return blocked("pending admission") }
         let owner = directoryStoreRegistry.ownerStore(forSessionID: selectedSession.id) ?? directoryStore
         let generation = directoryStoreRegistry.generation
         let navigationGeneration = sessionNavigationGeneration
@@ -1952,21 +1981,21 @@ extension AppViewModel {
             model: modelReference,
             agent: agentName,
             variant: variant
-        ) else { return false }
+        ) else { return blocked("prompt preparation") }
 
         let submission = promptPreparation.submission
-        guard chatStore.promptAdmissions[submission.messageID]?.connectionID != connection.id else { return false }
+        guard chatStore.promptAdmissions[submission.messageID]?.connectionID != connection.id else { return blocked("duplicate admission") }
 
         if userVisible, meterPrompt, reservedPromptDay == nil, !reserveUserPromptIfAllowed() {
             appendDebugLog("send blocked paywall session=\(debugSessionLabel(selectedSession))")
-            return false
+            return blocked("prompt allowance")
         }
         let chargedDay = reservedPromptDay ?? (userVisible && meterPrompt && !hasProUnlock ? usageMeter.promptDay : nil)
         let request = BackendSubmission(sessionID: submission.sessionID, messageID: submission.messageID, text: submission.text,
             scope: .init(projectID: selectedSession.projectID, directory: submission.directory, workspaceID: selectedSession.workspaceID),
             partID: submission.partID, attachments: submission.attachments, agentMentions: submission.agentMentions,
             agent: submission.agent, model: submission.model, variant: submission.variant)
-        guard chatStore.beginPromptAdmission(request, connectionID: connection.id) else { return false }
+        guard chatStore.beginPromptAdmission(request, connectionID: connection.id) else { return blocked("admission store refused") }
         if connection.openCodeCompatibility != nil {
             owner.applyCanonicalMessages(chatStore.withoutRecoveryMessages(owner.syncState.messageEnvelopes(forSessionID: selectedSession.id),
                 sessionID: selectedSession.id), forSessionID: selectedSession.id)
@@ -2023,7 +2052,9 @@ extension AppViewModel {
         if (try? connection.requireOpenCodeClient(for: .liveActivities)) != nil { await maybeAutoStartLiveActivity(for: selectedSession) }
 
         do {
+            chatFacade.logPromptSubmission("transport submit", sessionID: selectedSession.id, messageID: submission.messageID)
             let admission = try await connection.chat.submit(request)
+            chatFacade.logPromptSubmission("transport returned", sessionID: selectedSession.id, messageID: submission.messageID)
             guard isCurrent() else { return false }
             switch admission {
             case let .accepted(sessionID, messageID) where sessionID == submission.sessionID && messageID == submission.messageID:
@@ -2081,6 +2112,7 @@ extension AppViewModel {
             if isVisible() { errorMessage = String(localized: "OpenCode rejected the prompt.") }
             return false
         } catch {
+            chatFacade.logPromptSubmission("transport uncertain errorCode=\((error as NSError).code)", sessionID: selectedSession.id, messageID: submission.messageID)
             guard isCurrent() else { return false }
             if chatStore.applyPromptAdmission(.uncertain, messageID: submission.messageID, connectionID: connection.id) == .admitted { return true }
             restoreDraft()

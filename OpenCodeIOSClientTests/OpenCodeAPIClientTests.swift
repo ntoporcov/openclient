@@ -602,6 +602,7 @@ final class OpenCodeAPIClientTests: XCTestCase {
             XCTAssertEqual(json["id"] as? String, "msg_client")
             XCTAssertEqual(json["text"] as? String, "Hello v2")
             XCTAssertEqual(json["resume"] as? Bool, true)
+            XCTAssertNil(json["delivery"])
             XCTAssertNil(json["parts"])
             XCTAssertNil(json["model"])
             XCTAssertNil(json["agent"])
@@ -614,6 +615,33 @@ final class OpenCodeAPIClientTests: XCTestCase {
         let receipt = try await client.admitV2TextPrompt(sessionID: "ses_1", messageID: "msg_client", text: "Hello v2")
 
         XCTAssertEqual(receipt, OpenCodeV2PromptReceipt(id: "msg_client", sessionID: "ses_1", timeCreated: 1234, delivery: "steer"))
+    }
+
+    @MainActor
+    func testV2BackendForwardsExplicitDeliveryWithAttachmentsAndMentions() async throws {
+        for delivery in OpenCodePromptDelivery.allCases {
+            MockURLProtocol.requestHandler = { request in
+                XCTAssertEqual(request.url?.path, "/api/session/ses_1/prompt")
+                let body = try XCTUnwrap(Self.requestBodyData(request))
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["delivery"] as? String, delivery.rawValue)
+                XCTAssertEqual(json["id"] as? String, "msg_delivery")
+                XCTAssertEqual(json["resume"] as? Bool, true)
+                XCTAssertEqual((json["files"] as? [[String: Any]])?.first?["name"] as? String, "notes.txt")
+                XCTAssertEqual((json["agents"] as? [[String: Any]])?.first?["name"] as? String, "explore")
+                return (
+                    HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data("{\"data\":{\"id\":\"msg_delivery\",\"sessionID\":\"ses_1\",\"time\":{\"created\":1234},\"delivery\":\"\(delivery.rawValue)\"}}".utf8)
+                )
+            }
+            let adapter = OpenCodeBackendAdapter(client: makeProbeClient(), profile: .v2)
+            let result = try await adapter.submit(.init(sessionID: "ses_1", messageID: "msg_delivery", text: "ask @explore",
+                attachments: [.init(id: "a", kind: .file, filename: "notes.txt", mime: "text/plain", dataURL: "data:text/plain;base64,aGk=")],
+                agentMentions: [.init(name: "explore", content: "@explore", start: 4, end: 12)], delivery: delivery))
+            guard case let .accepted(sessionID, messageID) = result else { return XCTFail("Delivery was not admitted") }
+            XCTAssertEqual(sessionID, "ses_1")
+            XCTAssertEqual(messageID, "msg_delivery")
+        }
     }
 
     func testWaitForV2SessionUsesWaitEndpoint() async throws {

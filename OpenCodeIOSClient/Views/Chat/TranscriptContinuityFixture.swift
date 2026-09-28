@@ -176,9 +176,9 @@ struct TranscriptContinuityFixture: View {
                 } else if TranscriptContinuityDiagnostics.toolGated {
                     Button { startTool() } label: { Text(verbatim: "Tool") }
                         .accessibilityIdentifier("continuity.tool")
-                    Button { model.appCustomizationStore.setShowsToolCalls(!model.appCustomizationStore.showsToolCalls) } label: { Text(verbatim: "Tools") }
+                    Button { model.appearanceStore.setShowsToolCalls(!model.appearanceStore.showsToolCalls) } label: { Text(verbatim: "Tools") }
                         .accessibilityIdentifier("continuity.tools")
-                    Button { model.appCustomizationStore.setShowsReasoningBlocks(!model.appCustomizationStore.showsReasoningBlocks) } label: { Text(verbatim: "Reasoning") }
+                    Button { model.appearanceStore.setShowsReasoningBlocks(!model.appearanceStore.showsReasoningBlocks) } label: { Text(verbatim: "Reasoning") }
                         .accessibilityIdentifier("continuity.reasoning")
                     Button { addContent(type: "reasoning") } label: { Text(verbatim: "Reason") }
                         .accessibilityIdentifier("continuity.addReasoning")
@@ -265,8 +265,8 @@ struct TranscriptContinuityFixture: View {
                 }
             }
             if TranscriptContinuityDiagnostics.toolGated {
-                model.appCustomizationStore.setShowsToolCalls(true)
-                model.appCustomizationStore.setShowsReasoningBlocks(ProcessInfo.processInfo.environment["OPENCLIENT_THINKING_REASONING"] == "1")
+                model.appearanceStore.setShowsToolCalls(true)
+                model.appearanceStore.setShowsReasoningBlocks(ProcessInfo.processInfo.environment["OPENCLIENT_THINKING_REASONING"] == "1")
             }
             if ProcessInfo.processInfo.environment["OPENCLIENT_MATERIALIZATION_ATTACHMENT"] == "1" {
                 facade.addDraftAttachments([fixtureAttachment])

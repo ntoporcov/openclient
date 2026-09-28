@@ -199,8 +199,8 @@ final class FeatureFacadeTests: XCTestCase {
 
     func testSessionListProjectsPreviewIntoSelectedActivityCardStyle() {
         let viewModel = AppViewModel()
-        let previousStyle = viewModel.appCustomizationStore.sessionCardStyle
-        defer { viewModel.appCustomizationStore.setSessionCardStyle(previousStyle) }
+        let previousStyle = viewModel.appearanceStore.sessionCardStyle
+        defer { viewModel.appearanceStore.setSessionCardStyle(previousStyle) }
         let session = OpenCodeSession(
             id: "session-activity-card",
             title: "Detailed session",
@@ -209,7 +209,7 @@ final class FeatureFacadeTests: XCTestCase {
             projectID: "project",
             parentID: nil
         )
-        viewModel.appCustomizationStore.setSessionCardStyle(.activity)
+        viewModel.appearanceStore.setSessionCardStyle(.activity)
         viewModel.allSessions = [session]
         viewModel.sessionPreviews[session.id] = SessionPreview(text: "Latest assistant reply", date: Date())
 

@@ -235,6 +235,7 @@ struct NewSessionStartingSnapshot: Equatable {
 }
 
 struct NewSessionStartingPreview: View {
+    @Environment(\.appAccentForeground) private var appAccentForeground
     let snapshot: NewSessionStartingSnapshot
 
     @State private var hasPresentedUserBubble = false
@@ -313,12 +314,13 @@ struct NewSessionStartingPreview: View {
                 if !text.isEmpty {
                     Text(text)
                         .font(.body)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(appAccentForeground)
                         .multilineTextAlignment(.leading)
                         .lineLimit(8)
-                        .padding(.horizontal, 14)
+                        .padding(.leading, 14)
+                        .padding(.trailing, 22)
                         .padding(.vertical, 10)
-                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .background { ChatBubbleBackground() }
                 }
 
                 if snapshot.attachmentCount > 0 {

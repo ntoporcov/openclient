@@ -2,9 +2,43 @@ import SwiftUI
 
 struct ChatAppearanceSettingsView: View {
     @ObservedObject var store: AppCustomizationStore
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Form {
+            Section {
+                AccentColorPicker(store: store)
+            } header: {
+                Text("Accent Color")
+            } footer: {
+                Text("Used throughout this connection for buttons, highlights, and chat bubbles.")
+            }
+
+            Section("Chat Bubbles") {
+                Picker("Bubble Style", selection: Binding(
+                    get: { store.chatBubbleStyle },
+                    set: { store.setChatBubbleStyle($0) }
+                )) {
+                    ForEach(ChatBubbleStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("appearance.bubble-style")
+
+                HStack {
+                    Spacer(minLength: 24)
+                    Text("Make yourself at home.")
+                        .foregroundStyle(store.accentColor.foreground(in: colorScheme))
+                        .padding(.leading, 14)
+                        .padding(.trailing, 22)
+                        .padding(.vertical, 10)
+                        .background { ChatBubbleBackground() }
+                }
+                .padding(.vertical, 12)
+                .accessibilityIdentifier("appearance.bubble-preview")
+            }
+
             if OpenCodePlatformCapabilities.supportsComposerStyleChoice {
                 Section {
                     NavigationLink {
@@ -16,6 +50,29 @@ struct ChatAppearanceSettingsView: View {
                     }
                     .accessibilityIdentifier("chat.appearance.composer-style")
                 }
+            }
+
+            Section("Sessions") {
+                Picker("Card Style", selection: Binding(
+                    get: { store.sessionCardStyle },
+                    set: { store.setSessionCardStyle($0) }
+                )) {
+                    ForEach(SessionCardStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .accessibilityIdentifier("appearance.session-card-style")
+
+                Toggle("Show Last User Message", isOn: Binding(
+                    get: { store.showsActivityLastUserMessage },
+                    set: { store.setShowsActivityLastUserMessage($0) }
+                ))
+                .accessibilityIdentifier("appearance.last-user-message")
+
+                Toggle("Minimize Todos", isOn: Binding(
+                    get: { store.isTodoStripMinimized },
+                    set: { store.setTodoStripMinimized($0) }
+                ))
             }
 
             Section {
@@ -41,7 +98,48 @@ struct ChatAppearanceSettingsView: View {
             }
         }
         .navigationTitle("Appearance Settings")
+        .modifier(AppAppearanceModifier(store: store))
         .opencodeInlineNavigationTitle()
+    }
+}
+
+private struct AccentColorPicker: View {
+    @ObservedObject var store: AppCustomizationStore
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12)], spacing: 12) {
+            ForEach(AppAccentColor.allCases) { accent in
+                Button {
+                    store.setAccentColor(accent)
+                } label: {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(accent == .clear ? Color.clear : accent.color(in: colorScheme))
+                            .overlay { Circle().strokeBorder(.primary.opacity(accent == .clear ? 0.35 : 0), lineWidth: 1) }
+                            .frame(width: 24, height: 24)
+                        Text(accent.title)
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 0)
+                        Image(systemName: "checkmark")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.primary)
+                            .opacity(store.accentColor == accent ? 1 : 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 44)
+                    .background(accent.color(in: colorScheme).opacity(store.accentColor == accent ? 0.14 : 0.04),
+                                in: RoundedRectangle(cornerRadius: 12))
+                    .contentShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(accent.title))
+                .accessibilityAddTraits(store.accentColor == accent ? .isSelected : [])
+                .accessibilityIdentifier("appearance.accent-color.\(accent.rawValue)")
+            }
+        }
+        .padding(.vertical, 6)
+        .accessibilityIdentifier("appearance.accent-color")
     }
 }
 
@@ -122,6 +220,7 @@ struct ComposerStylePreview: View {
 }
 
 private struct ComposerPreviewTranscript: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     var body: some View {
         VStack(spacing: 14) {
             HStack {
@@ -131,12 +230,12 @@ private struct ComposerPreviewTranscript: View {
                     Capsule().fill(.primary.opacity(0.12)).frame(width: 86, height: 8)
                 }
                 .padding(14)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .background(appAccentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "sparkles")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(appAccentColor)
                     .frame(width: 24, height: 24)
                 VStack(alignment: .leading, spacing: 7) {
                     Capsule().fill(.primary.opacity(0.20)).frame(maxWidth: 172).frame(height: 8)
@@ -151,6 +250,7 @@ private struct ComposerPreviewTranscript: View {
 }
 
 private struct ComposerPreviewLayout: View {
+    @Environment(\.appAccentForeground) private var appAccentForeground
     let style: ComposerStyle
     let glassNamespace: Namespace.ID
 
@@ -231,9 +331,9 @@ private struct ComposerPreviewLayout: View {
     private func sendControl(size: CGFloat) -> some View {
         Image(systemName: "arrow.up")
             .font(.body.weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(appAccentForeground)
             .frame(width: size, height: size)
-            .opencodeActionGlass(clear: true, tint: Color.accentColor.opacity(0.82), size: size, in: Circle())
+            .opencodeAccentActionGlass(size: size, in: Circle())
             .opencodeToolbarGlassID("composer-preview-send", in: glassNamespace)
             .opencodeMatchedGlassTransition()
     }

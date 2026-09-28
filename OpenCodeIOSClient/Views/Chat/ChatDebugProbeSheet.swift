@@ -79,6 +79,7 @@ struct ChatDebugProbeSheet: View {
                             Task { await chatFacade.startDebugProbe() }
                         }
                         .buttonStyle(.borderedProminent)
+                        .modifier(AppAccentActionModifier())
                         .disabled(chatFacade.isRunningDebugProbe)
 
                         Button(copiedDebugLog ? LocalizedStringResource("Copied") : LocalizedStringResource("Copy Filtered")) {

@@ -231,6 +231,7 @@ struct SessionSelectionSurface: View {
 }
 
 struct SessionRow: View, Equatable {
+    @Environment(\.appAccentColor) private var appAccentColor
     enum Style: Equatable {
         case regular
         case compact
@@ -284,8 +285,8 @@ struct SessionRow: View, Equatable {
         .background {
             SessionSelectionSurface(feedback: selectionFeedback, sessionID: session.id,
                 isSelected: isSelected, cornerRadius: style == .compact ? 14 : 18,
-                selectedFill: Color.blue.opacity(0.10), normalFill: OpenCodePlatformColor.secondaryGroupedBackground,
-                selectedBorder: Color.blue.opacity(0.28), normalBorder: Color.primary.opacity(0.06),
+                selectedFill: appAccentColor.opacity(0.10), normalFill: OpenCodePlatformColor.secondaryGroupedBackground,
+                selectedBorder: appAccentColor.opacity(0.28), normalBorder: Color.primary.opacity(0.06),
                 selectedBorderWidth: 1.4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -341,7 +342,7 @@ struct SessionRow: View, Equatable {
                 }
                 if isBusy {
                     Circle()
-                        .fill(Color.blue)
+                        .fill(appAccentColor)
                         .frame(width: 7, height: 7)
                 }
                 if hasLiveActivity {
@@ -369,7 +370,7 @@ struct SessionRow: View, Equatable {
 
             if isBusy {
                 Circle()
-                    .fill(Color.blue)
+                    .fill(appAccentColor)
                     .frame(width: 8, height: 8)
             }
 

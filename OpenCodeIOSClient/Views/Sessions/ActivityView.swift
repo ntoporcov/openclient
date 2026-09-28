@@ -499,7 +499,8 @@ private struct ActivityContent: View, Equatable {
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     if !snapshot.isReadOnly {
-                        deleteButton(for: row)
+                        // Server deletion is async; a destructive swipe removes the row before the canonical snapshot updates.
+                        deleteButton(for: row, role: nil)
                         renameButton(for: row)
 #if !targetEnvironment(macCatalyst)
                         if facade.allowsLiveActivities {
@@ -548,12 +549,13 @@ private struct ActivityContent: View, Equatable {
         .tint(.blue)
     }
 
-    private func deleteButton(for row: ActivityFacade.RowSnapshot) -> some View {
-        Button(role: .destructive) {
+    private func deleteButton(for row: ActivityFacade.RowSnapshot, role: ButtonRole? = .destructive) -> some View {
+        Button(role: role) {
             Task { await facade.delete(row) }
         } label: {
             Label("Delete", systemImage: "trash")
         }
+        .tint(.red)
     }
 
     private func liveActivityButton(for row: ActivityFacade.RowSnapshot) -> some View {
@@ -629,6 +631,7 @@ private struct ActivityRecentSection: Identifiable {
 }
 
 struct ActivitySessionRow: View, Equatable {
+    @Environment(\.appAccentColor) private var appAccentColor
     let row: ActivityFacade.RowSnapshot
     let showsLastUserMessage: Bool
     var isSelected = false
@@ -676,7 +679,7 @@ struct ActivitySessionRow: View, Equatable {
             SessionSelectionSurface(feedback: selectionFeedback, sessionID: row.recent.session.id,
                 isSelected: isSelected, cornerRadius: 20,
                 selectedFill: cardBackground, normalFill: cardBackground,
-                selectedBorder: Color.accentColor.opacity(0.82), normalBorder: cardBorder,
+                selectedBorder: appAccentColor.opacity(0.82), normalBorder: cardBorder,
                 selectedBorderWidth: 2)
         }
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -807,13 +810,13 @@ struct ActivitySessionRow: View, Equatable {
 
     private var cardBackground: Color {
         if row.needsInput { return Color.orange.opacity(0.1) }
-        if row.isWorking { return Color.accentColor.opacity(0.09) }
+        if row.isWorking { return appAccentColor.opacity(0.09) }
         return OpenCodePlatformColor.secondaryGroupedBackground
     }
 
     private var cardBorder: Color {
         if row.needsInput { return Color.orange.opacity(0.24) }
-        if row.isWorking { return Color.accentColor.opacity(0.2) }
+        if row.isWorking { return appAccentColor.opacity(0.2) }
         return Color.primary.opacity(0.06)
     }
 
@@ -1119,6 +1122,7 @@ struct ActivityTailPreview: View {
 }
 
 private struct ActivityStatusPill: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let title: Text
     let isWorking: Bool
     let isHydrating: Bool
@@ -1140,12 +1144,12 @@ private struct ActivityStatusPill: View {
         .foregroundStyle(
             needsInput
                 ? Color.orange
-                : (isWorking && !isHydrating ? Color.accentColor : Color.secondary)
+                : (isWorking && !isHydrating ? appAccentColor : Color.secondary)
         )
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(
-            (needsInput ? Color.orange : (isWorking && !isHydrating ? Color.accentColor : Color.secondary)).opacity(0.1),
+            (needsInput ? Color.orange : (isWorking && !isHydrating ? appAccentColor : Color.secondary)).opacity(0.1),
             in: Capsule()
         )
     }

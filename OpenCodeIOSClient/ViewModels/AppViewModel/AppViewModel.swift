@@ -34,6 +34,20 @@ final class AppViewModel: ObservableObject {
     @Published var config = OpenCodeServerConfig()
     let connectionStore = ConnectionStore()
     let appCustomizationStore: AppCustomizationStore
+    let connectionAppearances: ConnectionAppearanceRegistry
+
+    var appearanceStore: AppCustomizationStore {
+        appearanceStore(for: backendConnection?.isClosed == false ? backendConnection : nil)
+    }
+
+    func appearanceStore(for connection: BackendConnection?) -> AppCustomizationStore {
+        if let connection {
+            let id = connection.openCodeCompatibility?.client.config.recentServerID ?? connection.descriptor.id
+            return connectionAppearances.store(for: id, connectionID: connection.id)
+        }
+        if isUsingAppleIntelligence { return connectionAppearances.store(for: "apple-intelligence") }
+        return connectionAppearances.store(for: config.recentServerID)
+    }
     let appIconStore = AppIconStore()
     let speechVoiceStore = SpeechVoiceStore()
     let deepLinkRoutingStore = OpenClientDeepLinkRoutingStore()
@@ -884,7 +898,9 @@ final class AppViewModel: ObservableObject {
         appCustomizationStore: AppCustomizationStore? = nil
     ) {
         self.backendFactory = backendFactory
-        self.appCustomizationStore = appCustomizationStore ?? AppCustomizationStore()
+        let customization = appCustomizationStore ?? AppCustomizationStore()
+        self.appCustomizationStore = customization
+        self.connectionAppearances = customization.makeConnectionAppearanceRegistry()
         self.providerUsageStore = providerUsageStore ?? ProviderUsageStore()
         self.providerUsageDisplayStore = providerUsageDisplayStore ?? ProviderUsageDisplayStore()
         self.providerUsageAccountRepository = providerUsageAccountRepository ?? Self.makeDefaultProviderUsageAccountRepository()
@@ -905,6 +921,7 @@ final class AppViewModel: ObservableObject {
         }
 
         let recentConfigs = loadRecentServerConfigs()
+        connectionAppearances.migrateSavedServers(recentConfigs.map(\.recentServerID))
         appleIntelligenceRecentWorkspaces = loadAppleIntelligenceWorkspaces()
         appleIntelligenceUserInstructions = defaultAppleIntelligenceUserInstructions
         appleIntelligenceSystemInstructions = defaultAppleIntelligenceSystemInstructions

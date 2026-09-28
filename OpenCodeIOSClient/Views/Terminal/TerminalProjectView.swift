@@ -82,6 +82,7 @@ private struct TerminalListContent: View {
                 facade.createTerminal()
             }
             .buttonStyle(.borderedProminent)
+            .modifier(AppAccentActionModifier())
             .disabled(snapshot.isCreatingTerminal)
             .accessibilityIdentifier("terminal.create.empty")
         }
@@ -244,6 +245,7 @@ struct TerminalDetailView: View {
 }
 
 private struct TerminalModifierBar: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let facade: TerminalFacade
     let snapshot: TerminalFacade.Snapshot
     @Binding var keyboardDismissalCount: Int
@@ -319,7 +321,7 @@ private struct TerminalModifierBar: View {
                 .padding(.horizontal, 13)
                 .frame(height: 38)
                 .opencodeConcentricGlassSurface(
-                    tint: isActive ? SwiftUI.Color.accentColor.opacity(0.22) : nil,
+                    tint: isActive ? appAccentColor.opacity(0.22) : nil,
                     isInteractive: true,
                     minimumCornerRadius: 19,
                     in: Capsule()

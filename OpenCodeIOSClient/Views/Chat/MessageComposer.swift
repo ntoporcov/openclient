@@ -1,4 +1,20 @@
 import SwiftUI
+
+extension OpenCodePromptDelivery {
+    var title: LocalizedStringResource {
+        switch self {
+        case .queue: "Queue"
+        case .steer: "Steer"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .queue: "text.line.last.and.arrowtriangle.forward"
+        case .steer: "steeringwheel"
+        }
+    }
+}
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -118,6 +134,9 @@ struct MessageComposerInputPolicy {
 }
 
 struct MessageComposer: View {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentIsClear) private var accentIsClear
+    @Environment(\.appAccentForeground) private var appAccentForeground
     private enum AccessoryDestination: Hashable {
         case fork
         case mcp
@@ -182,6 +201,54 @@ struct MessageComposer: View {
     var conversationInputLevel: CGFloat = 0
     var onToggleConversation: (() -> Void)?
     var prefersAssistantLayout = false
+    var streamingDelivery: OpenCodePromptDelivery?
+    var onSelectStreamingDelivery: ((OpenCodePromptDelivery) -> Void)?
+
+    private var activeStreamingDelivery: OpenCodePromptDelivery? {
+        // Slash commands have their own execution semantics.
+        isBusy && !text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/") ? streamingDelivery : nil
+    }
+
+    private var sendSymbolName: String { activeStreamingDelivery?.symbolName ?? "arrow.up" }
+    private var sendAccessibilityLabel: LocalizedStringResource { activeStreamingDelivery?.title ?? "Send" }
+
+    @ViewBuilder
+    private func sendControl<Content: View>(
+        allowsDeliveryMenu: Bool = true,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Content
+    ) -> some View {
+        if allowsDeliveryMenu, activeStreamingDelivery != nil, onSelectStreamingDelivery != nil {
+            // A primary-action menu owns both gestures: tap sends, hold opens choices.
+            // Attaching a context menu to the glass button can lose the hold gesture.
+            Menu {
+                deliveryMenu
+            } label: {
+                label()
+            } primaryAction: {
+                action()
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+        } else {
+            Button(action: action, label: label)
+        }
+    }
+
+    @ViewBuilder
+    private var deliveryMenu: some View {
+        if let delivery = activeStreamingDelivery, let onSelectStreamingDelivery {
+            Picker("Message Delivery", selection: Binding(
+                get: { delivery },
+                set: { onSelectStreamingDelivery($0) }
+            )) {
+                ForEach(OpenCodePromptDelivery.allCases) { option in
+                    Label(option.title, systemImage: option.symbolName).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+        }
+    }
 
 #if canImport(PhotosUI) && canImport(UIKit)
     private enum AttachmentImportLimits {
@@ -672,17 +739,17 @@ struct MessageComposer: View {
                 .accessibilityIdentifier("chat.input")
                 .disabled(blocksNewInput)
 
-            Button(action: showsSendAction ? onSend : onStop) {
-                Image(systemName: showsSendAction ? "arrow.up" : "stop.fill")
+            sendControl(allowsDeliveryMenu: showsSendAction, action: showsSendAction ? onSend : onStop) {
+                Image(systemName: showsSendAction ? sendSymbolName : "stop.fill")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white.opacity((showsSendAction ? canSend : canStop) ? 1 : 0.78))
+                    .foregroundStyle(appAccentForeground.opacity((showsSendAction ? canSend : canStop) ? 1 : 0.78))
                     .frame(width: 18, height: 18)
                     .frame(width: 40, height: 40)
                     .background {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [Color.accentColor.opacity(0.96), Color.accentColor.opacity(0.74)],
+                                    colors: accentIsClear ? [Color.primary.opacity(0.08), Color.primary.opacity(0.04)] : [appAccentColor.opacity(0.96), appAccentColor.opacity(0.74)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -697,7 +764,7 @@ struct MessageComposer: View {
             }
             .buttonStyle(.plain)
             .disabled(showsSendAction ? !canSend : !canStop)
-            .accessibilityLabel(showsSendAction ? LocalizedStringResource("Send") : LocalizedStringResource("Stop"))
+            .accessibilityLabel(showsSendAction ? sendAccessibilityLabel : LocalizedStringResource("Stop"))
             .accessibilityIdentifier(showsSendAction ? "chat.send" : "chat.stop")
         }
         .padding(6)
@@ -961,6 +1028,7 @@ struct MessageComposer: View {
                 .frame(width: 20, height: 20)
         }
         .composerPlusButtonStyle()
+        .tint(.primary)
         .controlSize(.small)
         .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
         .accessibilityLabel("Open composer menu")
@@ -994,15 +1062,15 @@ struct MessageComposer: View {
     }
 
     private var catalystSendActionButton: some View {
-        Button {
+        sendControl(action: {
             guard isSendActionButtonEnabled else { return }
             onSend()
-        } label: {
-            Image(systemName: "arrow.up")
+        }) {
+            Image(systemName: sendSymbolName)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(isSendActionButtonEnabled ? 1 : 0.68))
+                .foregroundStyle(appAccentForeground.opacity(isSendActionButtonEnabled ? 1 : 0.68))
                 .frame(width: 32, height: 32)
-                .opencodeActionGlass(clear: true, tint: Color.accentColor.opacity(0.82), size: 32, in: Circle())
+                .opencodeAccentActionGlass(size: 32, in: Circle())
                 .opencodeToolbarGlassID("composer-send-action", in: glassNamespace)
                 .opencodeMatchedGlassTransition()
                 .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
@@ -1011,7 +1079,7 @@ struct MessageComposer: View {
         .buttonStyle(.plain)
         .buttonBorderShape(.circle)
         .disabled(!isSendActionButtonEnabled)
-        .accessibilityLabel("Send")
+        .accessibilityLabel(sendAccessibilityLabel)
         .accessibilityIdentifier("chat.send")
     }
 
@@ -1046,9 +1114,9 @@ struct MessageComposer: View {
         } label: {
             Image(systemName: isConversationModeActive ? "xmark" : "waveform")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(canToggleConversationMode ? 1 : 0.65))
+                .foregroundStyle(appAccentForeground.opacity(canToggleConversationMode ? 1 : 0.65))
                 .frame(width: 32, height: 32)
-                .opencodeActionGlass(clear: true, tint: Color.blue.opacity(0.82), size: 32, in: Circle())
+                .opencodeAccentActionGlass(size: 32, in: Circle())
                 .opencodeToolbarGlassID("composer-conversation-action", in: glassNamespace)
                 .opencodeMatchedGlassTransition()
                 .frame(width: catalystControlHitTargetSize, height: catalystControlHitTargetSize)
@@ -1318,22 +1386,22 @@ struct MessageComposer: View {
     }
 
     private var sendActionButton: some View {
-        Button {
+        sendControl(action: {
             guard isSendActionButtonEnabled else { return }
             onSend()
-        } label: {
-            Image(systemName: "arrow.up")
+        }) {
+            Image(systemName: sendSymbolName)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(prominentActionForeground(isEnabled: isSendActionButtonEnabled))
                 .frame(width: composerActionButtonSize, height: composerActionButtonSize)
         }
-        .opencodeActionGlass(clear: true, tint: Color.accentColor.opacity(0.82), size: composerActionButtonSize, in: Circle())
+        .opencodeAccentActionGlass(size: composerActionButtonSize, in: Circle())
         .opencodeToolbarGlassID("composer-send-action", in: glassNamespace)
         .opencodeMatchedGlassTransition()
         .buttonBorderShape(.circle)
         .contentShape(Circle())
         .disabled(!isSendActionButtonEnabled)
-        .accessibilityLabel("Send")
+        .accessibilityLabel(sendAccessibilityLabel)
         .accessibilityIdentifier("chat.send")
     }
 
@@ -1370,7 +1438,7 @@ struct MessageComposer: View {
         } label: {
             Image(systemName: isConversationModeActive ? "xmark" : "waveform")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white.opacity(canToggleConversationMode ? 1 : 0.68))
+                .foregroundStyle(appAccentForeground.opacity(canToggleConversationMode ? 1 : 0.68))
                 .frame(width: composerActionButtonSize, height: composerActionButtonSize)
                 .background {
                     if conversationState == .listening {
@@ -1378,7 +1446,7 @@ struct MessageComposer: View {
                     }
                 }
         }
-        .opencodeActionGlass(clear: true, tint: Color.accentColor.opacity(0.82), size: composerActionButtonSize, in: Circle())
+        .opencodeAccentActionGlass(size: composerActionButtonSize, in: Circle())
         .opencodeToolbarGlassID("composer-conversation-action", in: glassNamespace)
         .buttonBorderShape(.circle)
         .contentShape(Circle())
@@ -1489,7 +1557,7 @@ struct MessageComposer: View {
                 height: 20 + conversationInputLevel * 14
             )
             .shadow(
-                color: Color.blue.opacity(0.32 + conversationInputLevel * 0.46),
+                color: appAccentColor.opacity(0.32 + conversationInputLevel * 0.46),
                 radius: 5 + conversationInputLevel * 12
             )
     }
@@ -1498,7 +1566,7 @@ struct MessageComposer: View {
         HStack(spacing: 10) {
             Image(systemName: conversationState == .listening ? "waveform" : "waveform.circle.fill")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.blue)
+                .foregroundStyle(appAccentColor)
                 .symbolEffect(.variableColor.iterative, isActive: conversationState == .listening)
 
             Text(conversationStatus)
@@ -1510,10 +1578,10 @@ struct MessageComposer: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(appAccentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.blue.opacity(0.14), lineWidth: 1)
+                .strokeBorder(appAccentColor.opacity(0.14), lineWidth: 1)
         }
     }
 
@@ -1525,6 +1593,7 @@ struct MessageComposer: View {
                 .frame(width: 32, height: 32)
         }
         .composerPlusButtonStyle()
+        .tint(.primary)
         .accessibilityLabel("Open composer menu")
         .accessibilityIdentifier("chat.composer.menu")
         .disabled(isConversationModeActive)
@@ -1559,7 +1628,7 @@ struct MessageComposer: View {
 
         #if os(iOS) || targetEnvironment(macCatalyst)
         if #available(iOS 26.0, *) {
-            return .white.opacity(isEnabled ? 1 : 0.68)
+            return appAccentForeground.opacity(isEnabled ? 1 : 0.68)
         }
         #endif
         return isEnabled ? .primary : .secondary

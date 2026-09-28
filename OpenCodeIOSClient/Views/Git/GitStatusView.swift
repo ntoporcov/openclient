@@ -35,6 +35,7 @@ struct GitStatusView: View {
 }
 
 private struct GitStatusContent: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let snapshot: ProjectFilesFacade.Snapshot
     let workspaceDirectories: [String]
     let workspaceDisplayName: (String?) -> String?
@@ -198,7 +199,7 @@ private struct GitStatusContent: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .listRowBackground(snapshot.selectedFilePath == file.path ? Color.blue.opacity(0.10) : Color.clear)
+                .listRowBackground(snapshot.selectedFilePath == file.path ? appAccentColor.opacity(0.10) : Color.clear)
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
             }
         }
@@ -225,7 +226,7 @@ private struct GitStatusContent: View {
                         onSelectProjectFile(row.node)
                     }
                 )
-                .listRowBackground(snapshot.selectedFilePath == row.node.absolute ? Color.blue.opacity(0.10) : Color.clear)
+                .listRowBackground(snapshot.selectedFilePath == row.node.absolute ? appAccentColor.opacity(0.10) : Color.clear)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             }
         }
@@ -387,6 +388,7 @@ private func diffModeTitle(_ mode: OpenCodeVCSDiffMode) -> LocalizedStringResour
 }
 
 private struct GitIntensityStrip: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let files: [OpenCodeVCSIntensityFile]
     let selectedPath: String?
     let onSelect: (String) -> Void
@@ -411,7 +413,7 @@ private struct GitIntensityStrip: View {
                                 .frame(width: 22, height: 22)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .stroke(selectedPath == file.path ? Color.accentColor : Color.clear, lineWidth: 2)
+                                        .stroke(selectedPath == file.path ? appAccentColor : Color.clear, lineWidth: 2)
                                 )
                         }
                         .buttonStyle(.plain)

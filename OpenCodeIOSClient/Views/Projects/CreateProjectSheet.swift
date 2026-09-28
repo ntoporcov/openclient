@@ -49,6 +49,7 @@ struct CreateProjectSheet: View {
                                 Text(snapshot.isLoading ? LocalizedStringResource("Selecting...") : LocalizedStringResource("Select"))
                             }
                             .buttonStyle(.borderedProminent)
+                            .modifier(AppAccentActionModifier())
                             .disabled(snapshot.isLoading)
                         }
                         .padding(.vertical, 4)

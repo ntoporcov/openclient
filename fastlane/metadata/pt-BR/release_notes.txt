@@ -5,5 +5,7 @@ Fique por dentro com o OC Notify.
 • Abra as notificações para voltar à sessão correspondente no OpenClient.
 • Conexões com o OpenCode v2 mais confiáveis, com correções em projetos, espaços de trabalho, sessões, ferramentas e atualizações em tempo real.
 • Acesse as Configurações da conexão diretamente pelas configurações do projeto e de Atividade, ao lado das Configurações globais.
+• A lista de projetos permanece consistente após reconectar, com o nome Raiz e um ícone de pasta para identificar a raiz do sistema de arquivos.
+• O feedback tátil ao enviar mensagens e as vibrações que simulam digitação durante as respostas em tempo real estão de volta nas conversas com o OpenCode v2.
 
 O OC Notify requer o plugin OpenClient, um endpoint HTTPS autohospedado e o app web complementar adicionado à Tela de Início. As notificações usam Web Push sem um relay hospedado pelo OpenClient.

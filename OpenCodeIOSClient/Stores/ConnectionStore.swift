@@ -284,6 +284,11 @@ final class ConnectionStore: ObservableObject {
         hasSavedServer = recentServerConfigs.isEmpty == false
     }
 
+    func streamingDelivery(for config: OpenCodeServerConfig) -> OpenCodePromptDelivery {
+        recentServerConfigs.first { $0.recentServerID == config.recentServerID }?.streamingDelivery
+            ?? config.streamingDelivery
+    }
+
     @discardableResult
     func upsertRecentServerConfig(
         _ updatedConfig: OpenCodeServerConfig,

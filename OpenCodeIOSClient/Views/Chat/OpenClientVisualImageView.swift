@@ -313,6 +313,7 @@ private struct OpenClientVisualImagePreviewOverlay: View {
                     .lineLimit(3)
                 Button("Try Again", action: onRetry)
                     .buttonStyle(.borderedProminent)
+                    .modifier(AppAccentActionModifier())
                     .controlSize(.small)
             }
             .foregroundStyle(.white)

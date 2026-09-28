@@ -61,6 +61,7 @@ struct BackendSubmission: Sendable {
     var agent: String? = nil
     var model: OpenCodeModelReference? = nil
     var variant: String? = nil
+    var delivery: OpenCodePromptDelivery? = nil
 }
 
 enum BackendAdmission: Sendable {

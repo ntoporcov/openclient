@@ -13,6 +13,7 @@ final class ConnectionFacade: ObservableObject {
         Publishers.MergeMany([
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.connectionAppearances.objectWillChange.eraseToAnyPublisher(),
             viewModel.appIconStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.commerceFacade.objectWillChange.eraseToAnyPublisher(),
             viewModel.speechVoiceStore.objectWillChange.eraseToAnyPublisher(),
@@ -80,7 +81,14 @@ final class ConnectionFacade: ObservableObject {
     var isUsingAppleIntelligence: Bool { viewModel.isUsingAppleIntelligence }
     var recentServerConfigs: [OpenCodeServerConfig] { viewModel.recentServerConfigs }
     var appIconStore: AppIconStore { viewModel.appIconStore }
-    var appCustomizationStore: AppCustomizationStore { viewModel.appCustomizationStore }
+    var appCustomizationStore: AppCustomizationStore { viewModel.appearanceStore }
+    var shellAppearanceStore: AppCustomizationStore {
+        isConnected || isLoading || isBrowsingLocalCache ? viewModel.appearanceStore : viewModel.appCustomizationStore
+    }
+    var editorAppearanceStore: AppCustomizationStore? {
+        guard case let .edit(serverID) = viewModel.connectionStore.savedServerEditorMode else { return nil }
+        return viewModel.connectionAppearances.store(for: serverID)
+    }
     var appIcons: [OpenClientAppIcon] { viewModel.appIconStore.icons }
     var selectedAppIcon: OpenClientAppIcon { viewModel.appIconStore.selectedIcon }
     var speechVoiceStore: SpeechVoiceStore { viewModel.speechVoiceStore }
@@ -88,10 +96,10 @@ final class ConnectionFacade: ObservableObject {
     var providerUsageUsesInsecureTransport: Bool {
         viewModel.backendConnection?.openCodeCompatibility?.client.config.usesInsecureHTTP ?? false
     }
-    var showsChatActivityShimmer: Bool { viewModel.appCustomizationStore.showsChatActivityShimmer }
-    var showsToolCalls: Bool { viewModel.appCustomizationStore.showsToolCalls }
-    var showsReasoningBlocks: Bool { viewModel.appCustomizationStore.showsReasoningBlocks }
-    var composerStyle: ComposerStyle { viewModel.appCustomizationStore.composerStyle }
+    var showsChatActivityShimmer: Bool { appCustomizationStore.showsChatActivityShimmer }
+    var showsToolCalls: Bool { appCustomizationStore.showsToolCalls }
+    var showsReasoningBlocks: Bool { appCustomizationStore.showsReasoningBlocks }
+    var composerStyle: ComposerStyle { appCustomizationStore.composerStyle }
     var showsFunAndGamesSection: Bool { viewModel.funAndGamesPreferences.showsSection }
     var autoConnectServerID: String? { viewModel.appCustomizationStore.autoConnectServerID }
     var autoConnectLandingDestination: AutoConnectLandingDestination {
@@ -100,6 +108,22 @@ final class ConnectionFacade: ObservableObject {
     var isBrowsingLocalCache: Bool { viewModel.backendMode == .cachedServer }
     var isOfferingCachedServerConnection: Bool { viewModel.connectionStore.isOfferingCachedServerConnection }
     var isV2Connection: Bool { viewModel.connectionStore.apiProfile == .v2 && viewModel.isConnected }
+    var streamingDelivery: OpenCodePromptDelivery {
+        guard let config = viewModel.backendConnection?.openCodeCompatibility?.client.config else { return .queue }
+        return viewModel.connectionStore.streamingDelivery(for: config)
+    }
+
+    func setStreamingDelivery(_ delivery: OpenCodePromptDelivery) {
+        guard let activeConfig = viewModel.backendConnection?.openCodeCompatibility?.client.config else { return }
+        do {
+            let configs = try OpenCodeSavedServer.persistPublicSavedServers(recentServerConfigs,
+                change: .setStreamingDelivery(serverID: activeConfig.recentServerID, delivery: delivery))
+            viewModel.connectionStore.setRecentServerConfigs(configs)
+        } catch {
+            viewModel.connectionStore.applyErrorMessage(error.localizedDescription)
+        }
+    }
+
     var v2NoticeConnectionID: UUID? {
         guard isV2Connection, !isLoading, !isShowingConnectionOverlay,
               let connection = viewModel.backendConnection, !connection.isClosed,
@@ -152,7 +176,7 @@ final class ConnectionFacade: ObservableObject {
     }
 
     func setShowsChatActivityShimmer(_ shows: Bool) {
-        viewModel.appCustomizationStore.setShowsChatActivityShimmer(shows)
+        appCustomizationStore.setShowsChatActivityShimmer(shows)
     }
 
     func isAppIconEnabled(_ icon: OpenClientAppIcon) -> Bool {
@@ -171,15 +195,15 @@ final class ConnectionFacade: ObservableObject {
     }
 
     func setShowsToolCalls(_ shows: Bool) {
-        viewModel.appCustomizationStore.setShowsToolCalls(shows)
+        appCustomizationStore.setShowsToolCalls(shows)
     }
 
     func setShowsReasoningBlocks(_ shows: Bool) {
-        viewModel.appCustomizationStore.setShowsReasoningBlocks(shows)
+        appCustomizationStore.setShowsReasoningBlocks(shows)
     }
 
     func setComposerStyle(_ style: ComposerStyle) {
-        viewModel.appCustomizationStore.setComposerStyle(style)
+        appCustomizationStore.setComposerStyle(style)
     }
 
     func setShowsFunAndGamesSection(_ shows: Bool) {

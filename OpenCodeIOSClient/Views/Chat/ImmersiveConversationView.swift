@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct ImmersiveConversationView: View {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentIsClear) private var accentIsClear
+    @Environment(\.appAccentForeground) private var appAccentForeground
     let state: ConversationModeController.State
     let inputMode: ConversationModeController.InputMode
     let inputLevel: CGFloat
@@ -233,12 +236,12 @@ struct ImmersiveConversationView: View {
         } label: {
             Text("Hold")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(isSendHeld ? .white : .primary)
+                .foregroundStyle(isSendHeld ? appAccentForeground : .primary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .opencodeActionGlass(
-            clear: true,
-            tint: isSendHeld ? Color.accentColor.opacity(0.82) : OpenCodePlatformColor.secondaryGroupedBackground.opacity(0.72),
+            clear: !accentIsClear,
+            tint: isSendHeld ? (accentIsClear ? nil : appAccentColor.opacity(0.82)) : OpenCodePlatformColor.secondaryGroupedBackground.opacity(0.72),
             size: 64,
             in: Circle()
         )

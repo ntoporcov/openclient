@@ -5,5 +5,7 @@ Resta al corrente con OC Notify.
 • Apri le notifiche per tornare alla sessione corrispondente in OpenClient.
 • Connessioni a OpenCode v2 più affidabili, con correzioni a progetti, spazi di lavoro, sessioni, strumenti e aggiornamenti in tempo reale.
 • Accedi alle Impostazioni della connessione direttamente dalle impostazioni del progetto e di Attività, accanto alle Impostazioni globali.
+• L'elenco dei progetti rimane coerente dopo la riconnessione, con il nome Radice e un'icona di cartella per identificare la radice del file system.
+• Ripristinato il feedback aptico all'invio e l'effetto di digitazione durante le risposte in streaming nelle chat con OpenCode v2.
 
 OC Notify richiede il plugin OpenClient, un endpoint HTTPS autogestito e l'app web complementare aggiunta alla schermata Home. Le notifiche usano Web Push senza un relay ospitato da OpenClient.

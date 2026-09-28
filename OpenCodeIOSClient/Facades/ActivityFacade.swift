@@ -205,7 +205,7 @@ final class ActivityFacade: ObservableObject {
             viewModel.projectStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.liveActivityStore.objectWillChange.eraseToAnyPublisher(),
-            viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.connectionAppearances.objectWillChange.eraseToAnyPublisher(),
         ])
         .receive(on: DispatchQueue.main)
         .sink { [weak self] _ in
@@ -476,11 +476,11 @@ final class ActivityFacade: ObservableObject {
     }
 
     var showsLastUserMessage: Bool {
-        viewModel.appCustomizationStore.showsActivityLastUserMessage
+        viewModel.appearanceStore.showsActivityLastUserMessage
     }
 
     func setShowsLastUserMessage(_ shows: Bool) {
-        viewModel.appCustomizationStore.setShowsActivityLastUserMessage(shows)
+        viewModel.appearanceStore.setShowsActivityLastUserMessage(shows)
         refreshSnapshot()
     }
 
@@ -710,7 +710,7 @@ final class ActivityFacade: ObservableObject {
             isLoading: !hasCompletedInitialCacheHydration
                 || ((isPreparing || viewModel.sessionListStore.isLoadingRecentProjectSessions) && sortedRows.isEmpty),
             isReadOnly: viewModel.isBrowsingLocalCache,
-            showsLastUserMessage: viewModel.appCustomizationStore.showsActivityLastUserMessage,
+            showsLastUserMessage: viewModel.appearanceStore.showsActivityLastUserMessage,
             selectedSessionID: viewModel.selectedSession?.id
         )
     }
@@ -1003,7 +1003,7 @@ final class ActivityFacade: ObservableObject {
             hiddenIDs: viewModel.hiddenProjectActionSessionIDs, liveActivityIDs: viewModel.activeLiveActivitySessionIDs,
             lifecycleRevisions: viewModel.directoryStoreRegistry.v2LifecycleSnapshot,
             selectedSessionID: viewModel.selectedSession?.id, isReadOnly: viewModel.isBrowsingLocalCache,
-            showsLastUserMessage: viewModel.appCustomizationStore.showsActivityLastUserMessage,
+            showsLastUserMessage: viewModel.appearanceStore.showsActivityLastUserMessage,
             isLoadingRecentSessions: viewModel.sessionListStore.isLoadingRecentProjectSessions)
     }
 

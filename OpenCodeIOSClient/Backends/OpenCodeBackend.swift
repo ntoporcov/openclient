@@ -190,7 +190,8 @@ final class OpenCodeBackendAdapter: BackendProjectsService, BackendSessionsServi
         do {
             if profile == .v2 {
                 let receipt = try await client.admitV2TextPrompt(sessionID: request.sessionID, messageID: request.messageID,
-                    text: request.text, attachments: request.attachments, agentMentions: request.agentMentions)
+                    text: request.text, attachments: request.attachments, agentMentions: request.agentMentions,
+                    delivery: request.delivery)
                 guard receipt.id == request.messageID, receipt.sessionID == request.sessionID else {
                     return .uncertain(sessionID: request.sessionID, messageID: request.messageID)
                 }

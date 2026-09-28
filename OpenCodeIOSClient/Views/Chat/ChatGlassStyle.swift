@@ -152,6 +152,8 @@ extension View {
 
 #if os(macOS)
 private struct OpenCodeProminentMacButtonStyle: ButtonStyle {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentIsClear) private var accentIsClear
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(10)
@@ -159,7 +161,7 @@ private struct OpenCodeProminentMacButtonStyle: ButtonStyle {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color.accentColor.opacity(0.95), Color.accentColor.opacity(0.72)],
+                            colors: accentIsClear ? [Color.primary.opacity(0.08), Color.primary.opacity(0.04)] : [appAccentColor.opacity(0.95), appAccentColor.opacity(0.72)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )

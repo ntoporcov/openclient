@@ -32,7 +32,7 @@ struct PermissionCard: View {
                         .frame(maxWidth: .infinity)
                 }
                 .controlSize(.large)
-                .tint(.blue)
+                .modifier(AppAccentActionModifier())
                 .opencodePrimaryGlassButton()
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 44)
@@ -45,7 +45,7 @@ struct PermissionCard: View {
                 }
                 .controlSize(.large)
                 .buttonStyle(.bordered)
-                .tint(.blue)
+                .tint(.primary)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 44)
 

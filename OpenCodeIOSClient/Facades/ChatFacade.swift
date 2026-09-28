@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 
 struct OpenClientChatWindowRoute: Codable, Hashable, Sendable {
     static let sceneID = "chat"
@@ -137,7 +138,9 @@ final class ChatFacade: ObservableObject {
     }
 
     let connectionStore: ConnectionStore
-    let appCustomizationStore: AppCustomizationStore
+    var appCustomizationStore: AppCustomizationStore {
+        windowContext?.appearanceStore ?? viewModel.appearanceStore
+    }
     let speechVoiceStore: SpeechVoiceStore
     let projectStore: ProjectStore
     let sessionListStore: SessionListStore
@@ -307,7 +310,6 @@ final class ChatFacade: ObservableObject {
         self.viewModel = viewModel
         self.windowContext = windowContext
         connectionStore = viewModel.connectionStore
-        appCustomizationStore = viewModel.appCustomizationStore
         speechVoiceStore = viewModel.speechVoiceStore
         projectStore = viewModel.projectStore
         sessionListStore = viewModel.sessionListStore
@@ -321,7 +323,7 @@ final class ChatFacade: ObservableObject {
         mcpFacade = windowContext?.mcpFacade ?? viewModel.mcpFacade
         Publishers.MergeMany([
             viewModel.objectWillChange.eraseToAnyPublisher(),
-            viewModel.appCustomizationStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.connectionAppearances.objectWillChange.eraseToAnyPublisher(),
             viewModel.modelConfigurationStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.chatStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.funAndGamesStore.objectWillChange.eraseToAnyPublisher(),
@@ -404,6 +406,15 @@ final class ChatFacade: ObservableObject {
     var supportsTalkLiveActivities: Bool { viewModel.liveActivityFacade.supportsLiveActivities }
 
     var isV2Connection: Bool { connectionStore.apiProfile == .v2 }
+
+    private static let submissionLogger = Logger(subsystem: "com.ntoporcov.openclient", category: "PromptSubmission")
+
+    /// Keep preflight failures observable in release builds, without recording draft contents.
+    func logPromptSubmission(_ stage: String, sessionID: String, messageID: String? = nil) {
+        let state = "stage=\(stage) session=\(sessionID) message=\(messageID ?? "none") selected=\(selectedSession?.id ?? "none") active=\(activeChatSessionID ?? "none") v2=\(isV2Connection) connected=\(connectionStore.isConnected) readOnly=\(isReadOnly) connection=\(viewModel.backendConnection?.id.uuidString ?? "none") closed=\(viewModel.backendConnection?.isClosed ?? true) generation=\(viewModel.directoryStoreRegistry.generation) windowCurrent=\(windowContext?.isCurrent ?? true) pending=\(hasPendingPromptAdmission(sessionID: sessionID)) cancelled=\(Task.isCancelled)"
+        Self.submissionLogger.notice("\(state, privacy: .public)")
+        viewModel.appendDebugLog("prompt submission \(state)")
+    }
 
     var promptConnectionID: UUID? {
         if let windowContext { return windowContext.isCurrent ? windowContext.connectionID : nil }
@@ -655,16 +666,31 @@ final class ChatFacade: ObservableObject {
         isV2Connection && isPromptAdmitted(messageID: messageID, sessionID: sessionID)
     }
 
-    func sendV2TextPrompt(_ text: String, in session: OpenCodeSession, attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = [], messageID: String? = nil) async -> Bool {
-        guard allowsV2TextPromptAdmission else { return false }
+    var defaultStreamingDelivery: OpenCodePromptDelivery {
+        guard let config = viewModel.backendConnection?.openCodeCompatibility?.client.config else { return .queue }
+        return connectionStore.streamingDelivery(for: config)
+    }
+
+    func sendV2TextPrompt(_ text: String, in session: OpenCodeSession, attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = [], messageID: String? = nil, delivery: OpenCodePromptDelivery? = nil) async -> Bool {
+        logPromptSubmission("v2 facade entered", sessionID: session.id, messageID: messageID)
+        guard allowsV2TextPromptAdmission else {
+            logPromptSubmission("v2 facade blocked: admission unavailable", sessionID: session.id, messageID: messageID)
+            return false
+        }
         let context = promptContextID
-        guard await waitForV2Configuration(sessionID: session.id) else { return false }
-        guard allowsV2TextPromptAdmission, !Task.isCancelled, promptContextID == context else { return false }
+        guard await waitForV2Configuration(sessionID: session.id) else {
+            logPromptSubmission("v2 facade blocked: configuration barrier", sessionID: session.id, messageID: messageID)
+            return false
+        }
+        guard allowsV2TextPromptAdmission, !Task.isCancelled, promptContextID == context else {
+            logPromptSubmission("v2 facade blocked: changed context or cancelled", sessionID: session.id, messageID: messageID)
+            return false
+        }
         if windowContext != nil {
             return await sendMessage(text, agentMentions: agentMentions, attachments: attachments,
-                in: session, userVisible: true, messageID: messageID)
+                in: session, userVisible: true, messageID: messageID, delivery: delivery)
         }
-        return await viewModel.sendV2TextPrompt(text, in: session, attachments: attachments, agentMentions: agentMentions, messageID: messageID)
+        return await viewModel.sendV2TextPrompt(text, in: session, attachments: attachments, agentMentions: agentMentions, messageID: messageID, delivery: delivery)
     }
 
     func isV2SessionBusy(sessionID: String) -> Bool {
@@ -856,6 +882,9 @@ final class ChatFacade: ObservableObject {
         messageID: String? = nil,
         partID: String? = nil
     ) {
+        if event == "send tapped", let sessionID {
+            logPromptSubmission("composer send tapped", sessionID: sessionID, messageID: messageID)
+        }
         viewModel.markChatBreadcrumb(
             event,
             sessionID: sessionID,
@@ -1277,29 +1306,41 @@ final class ChatFacade: ObservableObject {
         partID: String? = nil,
         appendOptimisticMessage: Bool = true,
         meterPrompt: Bool = true,
-        reservedPromptDay: String? = nil
+        reservedPromptDay: String? = nil,
+        delivery: OpenCodePromptDelivery? = nil
     ) async -> Bool {
-        guard !isReadOnly, !viewModel.funAndGamesStore.hasPendingSetup(for: session.id) else { return false }
+        logPromptSubmission("facade entered", sessionID: session.id, messageID: messageID)
+        guard !isReadOnly, !viewModel.funAndGamesStore.hasPendingSetup(for: session.id) else {
+            logPromptSubmission("blocked: read-only or pending game setup", sessionID: session.id, messageID: messageID)
+            return false
+        }
         let intent = armLiveActivityBackgroundBridge(sessionID: session.id, userVisible: userVisible)
         let connectionID = viewModel.backendConnection?.id
         let generation = viewModel.directoryStoreRegistry.generation
         if isV2Connection, await waitForV2Configuration(sessionID: session.id) == false {
+            logPromptSubmission("blocked: configuration barrier", sessionID: session.id, messageID: messageID)
             resolveLiveActivityBackgroundBridge(intent, accepted: false, sessionID: session.id)
             return false
         }
         guard connectionID == viewModel.backendConnection?.id,
               generation == viewModel.directoryStoreRegistry.generation, !Task.isCancelled else {
+            logPromptSubmission("blocked: connection changed or cancelled", sessionID: session.id, messageID: messageID)
             resolveLiveActivityBackgroundBridge(intent, accepted: false, sessionID: session.id)
             return false
         }
         if let windowContext {
-            guard windowContext.session.id == session.id else { return false }
+            guard windowContext.session.id == session.id else {
+                logPromptSubmission("blocked: window session mismatch", sessionID: session.id, messageID: messageID)
+                resolveLiveActivityBackgroundBridge(intent, accepted: false, sessionID: session.id)
+                return false
+            }
             let accepted = await submitInWindow(meterPrompt: userVisible && meterPrompt, reservedDay: reservedPromptDay) { day in
                 await self.viewModel.sendMessage(text, agentMentions: agentMentions, attachments: attachments,
                     in: session, userVisible: false, messageID: messageID, partID: partID,
-                    appendOptimisticMessage: false, meterPrompt: false, reservedPromptDay: day, windowContext: windowContext)
+                    appendOptimisticMessage: false, meterPrompt: false, reservedPromptDay: day, windowContext: windowContext, delivery: delivery)
             }
             resolveLiveActivityBackgroundBridge(intent, accepted: accepted, sessionID: session.id)
+            logPromptSubmission("window finished accepted=\(accepted)", sessionID: session.id, messageID: messageID)
             return accepted
         }
         let accepted = await viewModel.sendMessage(
@@ -1312,9 +1353,11 @@ final class ChatFacade: ObservableObject {
             partID: partID,
             appendOptimisticMessage: appendOptimisticMessage,
             meterPrompt: meterPrompt,
-            reservedPromptDay: reservedPromptDay
+            reservedPromptDay: reservedPromptDay,
+            delivery: delivery
         )
         resolveLiveActivityBackgroundBridge(intent, accepted: accepted, sessionID: session.id)
+        logPromptSubmission("facade finished accepted=\(accepted)", sessionID: session.id, messageID: messageID)
         return accepted
     }
 

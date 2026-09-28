@@ -238,6 +238,7 @@ private struct ProviderUsageDisplayListRowModifier: ViewModifier {
 }
 
 private struct ProviderUsageCompactMetricRow: View {
+    @Environment(\.appSystemAccentColor) private var appAccentColor
     let metric: OpenCodeProviderUsageDisplayMetric
 
     var body: some View {
@@ -301,7 +302,7 @@ private struct ProviderUsageCompactMetricRow: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Color.secondary.opacity(0.14)
-                    (percent > 100 ? Color.red : Color.accentColor)
+                    (percent > 100 ? Color.red : appAccentColor)
                         .frame(width: geometry.size.width * min(max(percent / 100, 0), 1))
                 }
             }
@@ -316,6 +317,7 @@ private struct ProviderUsageCompactMetricRow: View {
 }
 
 private struct ProviderUsageRingMetric: View {
+    @Environment(\.appSystemAccentColor) private var appAccentColor
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let metric: OpenCodeProviderUsageDisplayMetric
 
@@ -327,7 +329,7 @@ private struct ProviderUsageRingMetric: View {
                     Circle()
                         .trim(from: 0, to: fraction)
                         .stroke(
-                            isOverLimit ? Color.red : Color.accentColor,
+                            isOverLimit ? Color.red : appAccentColor,
                             style: StrokeStyle(lineWidth: ringWidth, lineCap: .round)
                         )
                         .rotationEffect(.degrees(-90))

@@ -35,6 +35,27 @@ final class OpenCodeSavedServerTests: XCTestCase {
 
         XCTAssertEqual(servers, [OpenCodeSavedServer(name: nil, iconName: nil, baseURL: "https://example.com", username: "nick")])
         XCTAssertEqual(servers.first?.apiPreference, .automatic)
+        XCTAssertEqual(servers.first?.streamingDelivery, .queue)
+    }
+
+    func testStreamingPreferenceUpdatePreservesCredentialsAndSurvivesRememberingActiveConnection() throws {
+        let active = OpenCodeServerConfig(name: "Delivery", baseURL: "https://delivery-preference.invalid", password: "secret")
+        let other = OpenCodeServerConfig(name: "Other", baseURL: "https://other-preference.invalid", password: "other")
+        let credentials = [active.recentServerID: active.password, other.recentServerID: other.password]
+        defaults.set(try JSONEncoder().encode([OpenCodeSavedServer(config: active), OpenCodeSavedServer(config: other)]), forKey: storageKey)
+        let updated = try OpenCodeSavedServer.persistPublicSavedServers([active, other],
+            change: .setStreamingDelivery(serverID: active.recentServerID, delivery: .steer),
+            loadPassword: { credentials[$0] }, savePassword: { _, _ in XCTFail("Preferences must not rewrite credentials") },
+            deletePassword: { _ in XCTFail("Preferences must not remove credentials") })
+        let store = ConnectionStore(recentServerConfigs: updated)
+        XCTAssertEqual(store.streamingDelivery(for: active), .steer)
+        XCTAssertEqual(store.streamingDelivery(for: other), .queue)
+        XCTAssertEqual(updated.first?.password, "secret")
+
+        let remembered = try OpenCodeSavedServer.persistPublicSavedServers(updated,
+            change: .save(active, replacingServerID: nil), loadPassword: { credentials[$0] },
+            savePassword: { _, _ in XCTFail("Remembering must not rewrite credentials") })
+        XCTAssertEqual(remembered.first?.streamingDelivery, .steer)
     }
 
     func testSavedServerPreservesIconWhenDecoded() throws {
@@ -91,6 +112,20 @@ final class OpenCodeSavedServerTests: XCTestCase {
         let config = try JSONDecoder().decode(OpenCodeServerConfig.self, from: data)
 
         XCTAssertEqual(config.apiPreference, .automatic)
+        XCTAssertEqual(config.streamingDelivery, .queue)
+    }
+
+    func testStreamingDeliverySurvivesPublicMetadataAndCredentialHydration() throws {
+        for delivery in OpenCodePromptDelivery.allCases {
+            let config = OpenCodeServerConfig(baseURL: "https://delivery.example.com", password: "secret",
+                                              streamingDelivery: delivery)
+            let data = try JSONEncoder().encode(OpenCodeSavedServer(config: config.publicConnectionConfig))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertNil(json["password"])
+            let saved = try JSONDecoder().decode(OpenCodeSavedServer.self, from: data)
+            XCTAssertEqual(saved.serverConfig(password: "secret").streamingDelivery, delivery)
+            XCTAssertEqual(saved.recentServerID, config.recentServerID)
+        }
     }
 
     func testSavingExplicitPreferenceNormalizesWithoutChangingServerIdentityAndPassword() throws {

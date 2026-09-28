@@ -267,6 +267,7 @@ private struct ProviderUsageSnapshotView: View {
 }
 
 private struct ProviderUsageMetricRow: View {
+    @Environment(\.appSystemAccentColor) private var appAccentColor
     let metric: ProviderUsageMetric
 
     var body: some View {
@@ -290,7 +291,7 @@ private struct ProviderUsageMetricRow: View {
 
             if let percent = metric.percentUsed, !metric.isUnlimited {
                 ProgressView(value: min(max(percent / 100, 0), 1))
-                    .tint(percent > 100 ? .red : .accentColor)
+                    .tint(percent > 100 ? .red : appAccentColor)
             }
 
             HStack {

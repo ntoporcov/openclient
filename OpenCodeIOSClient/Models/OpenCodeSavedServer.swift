@@ -6,19 +6,22 @@ struct OpenCodeSavedServer: Equatable, Codable, Sendable {
     var baseURL: String
     var username: String
     var apiPreference: OpenCodeAPIPreference
+    var streamingDelivery: OpenCodePromptDelivery
 
     init(
         name: String? = nil,
         iconName: String? = nil,
         baseURL: String,
         username: String,
-        apiPreference: OpenCodeAPIPreference = .automatic
+        apiPreference: OpenCodeAPIPreference = .automatic,
+        streamingDelivery: OpenCodePromptDelivery = .queue
     ) {
         self.name = name
         self.iconName = iconName
         self.baseURL = baseURL
         self.username = username
         self.apiPreference = apiPreference
+        self.streamingDelivery = streamingDelivery
     }
 
     init(config: OpenCodeServerConfig) {
@@ -27,6 +30,7 @@ struct OpenCodeSavedServer: Equatable, Codable, Sendable {
         self.baseURL = config.baseURL
         self.username = config.username
         self.apiPreference = config.apiPreference
+        self.streamingDelivery = config.streamingDelivery
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -35,6 +39,7 @@ struct OpenCodeSavedServer: Equatable, Codable, Sendable {
         case baseURL
         case username
         case apiPreference
+        case streamingDelivery
     }
 
     init(from decoder: Decoder) throws {
@@ -44,6 +49,7 @@ struct OpenCodeSavedServer: Equatable, Codable, Sendable {
         baseURL = try container.decode(String.self, forKey: .baseURL)
         username = try container.decode(String.self, forKey: .username)
         apiPreference = try container.decodeIfPresent(OpenCodeAPIPreference.self, forKey: .apiPreference) ?? .automatic
+        streamingDelivery = try container.decodeIfPresent(OpenCodePromptDelivery.self, forKey: .streamingDelivery) ?? .queue
     }
 
     // Used by both app launch and headless Shortcuts, before credentials are hydrated.
@@ -102,6 +108,7 @@ struct OpenCodeSavedServer: Equatable, Codable, Sendable {
     enum Change {
         case save(OpenCodeServerConfig, replacingServerID: String?)
         case remove(String)
+        case setStreamingDelivery(serverID: String, delivery: OpenCodePromptDelivery)
     }
 
     enum PersistenceError: LocalizedError {
@@ -146,9 +153,20 @@ struct OpenCodeSavedServer: Equatable, Codable, Sendable {
                 }
                 credentialToSave = (id, password)
             }
+            var saved = Self(config: config.publicConnectionConfig)
+            // Reconnecting remembers transport metadata captured before in-app settings
+            // changed. Preserve the current preference unless the server was explicitly edited.
+            if originalID == nil, let existing = updated.first(where: { $0.recentServerID == id }) {
+                saved.streamingDelivery = existing.streamingDelivery
+            }
             updated.removeAll { $0.recentServerID == id || $0.recentServerID == originalID }
-            updated.insert(Self(config: config.publicConnectionConfig), at: 0)
+            updated.insert(saved, at: 0)
             removedID = originalID == id ? nil : originalID
+        case let .setStreamingDelivery(serverID, delivery):
+            if let index = updated.firstIndex(where: { $0.recentServerID == serverID }) {
+                updated[index].streamingDelivery = delivery
+            }
+            removedID = nil
         case let .remove(id):
             updated.removeAll { $0.recentServerID == id }
             removedID = id
@@ -185,7 +203,8 @@ struct OpenCodeSavedServer: Equatable, Codable, Sendable {
             baseURL: baseURL,
             username: username,
             password: password,
-            apiPreference: apiPreference
+            apiPreference: apiPreference,
+            streamingDelivery: streamingDelivery
         )
     }
 }

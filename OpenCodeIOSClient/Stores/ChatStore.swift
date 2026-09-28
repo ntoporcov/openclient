@@ -37,6 +37,9 @@ final class ChatStore: ObservableObject {
         var submittedAt: Date = .distantPast
         // Presentation anchors include prior local submissions, never admission evidence.
         var precedingMessageIDs: [String] = []
+        var delivery: OpenCodePromptDelivery?
+        var hasEnteredTimeline = false
+        var isAwaitingDelivery: Bool { delivery != nil && !hasEnteredTimeline }
         var id: String { message.id }
         var text: String { message.parts.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n") }
 
@@ -97,7 +100,8 @@ final class ChatStore: ObservableObject {
                 submittedAt: presentation?.submittedAt ?? .now,
                 precedingMessageIDs: presentation?.precedingMessageIDs ??
                     ((cachedMessagesBySessionID[request.sessionID] ?? messages.filter { $0.info.sessionID == request.sessionID }).map(\.id)
-                         + recoveryInputs(sessionID: request.sessionID).map(\.id)))
+                         + recoveryInputs(sessionID: request.sessionID).map(\.id)),
+                delivery: request.delivery ?? presentation?.delivery)
             stagedSubmissionPresentations[request.messageID] = nil
             if let cached = cachedMessagesBySessionID[request.sessionID] {
                 cacheMessages(cached, forSessionID: request.sessionID)
@@ -185,13 +189,14 @@ final class ChatStore: ObservableObject {
     /// Captures UI position before async preparation, without reserving or proving admission.
     func stageSubmissionPresentation(_ message: OpenCodeMessageEnvelope, sessionID: String,
                                      canonical: [OpenCodeMessageEnvelope], attachments: [OpenCodeComposerAttachment],
-                                     agentMentions: [OpenCodeAgentMention], submittedAt: Date = .now) {
+                                     agentMentions: [OpenCodeAgentMention], submittedAt: Date = .now,
+                                     delivery: OpenCodePromptDelivery? = nil) {
         guard submissionRecoveries[message.id] == nil, stagedSubmissionPresentations[message.id] == nil,
               canonicalSubmissionSessions[message.id] != sessionID else { return }
         stagedSubmissionPresentations[message.id] = SubmissionRecovery(sessionID: sessionID, message: message,
             phase: .submitting, attachments: attachments, agentMentions: agentMentions,
             submittedAt: submittedAt,
-            precedingMessageIDs: canonical.map(\.id) + recoveryInputs(sessionID: sessionID).map(\.id))
+            precedingMessageIDs: canonical.map(\.id) + recoveryInputs(sessionID: sessionID).map(\.id), delivery: delivery)
     }
 
     func discardStagedSubmissionPresentation(messageID: String) {
@@ -421,7 +426,8 @@ final class ChatStore: ObservableObject {
     }
 
     func beginV2Prompt(_ message: OpenCodeMessageEnvelope, sessionID: String,
-                       attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = []) -> Bool {
+                       attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = [],
+                       delivery: OpenCodePromptDelivery? = nil) -> Bool {
         guard message.info.sessionID == sessionID, !v2PromptInFlightSessionIDs.contains(sessionID),
                submissionRecoveries[message.id] == nil, canonicalSubmissionSessions[message.id] != sessionID else { return false }
         let presentation = stagedSubmissionPresentations[message.id]
@@ -429,7 +435,7 @@ final class ChatStore: ObservableObject {
             attachments: attachments, agentMentions: agentMentions, submittedAt: presentation?.submittedAt ?? .now,
             precedingMessageIDs: presentation?.precedingMessageIDs ??
                 ((cachedMessagesBySessionID[sessionID] ?? messages.filter { $0.info.sessionID == sessionID }).map(\.id)
-                     + recoveryInputs(sessionID: sessionID).map(\.id)))
+                     + recoveryInputs(sessionID: sessionID).map(\.id)), delivery: delivery ?? presentation?.delivery)
         stagedSubmissionPresentations[message.id] = nil
         return true
     }
@@ -1022,6 +1028,7 @@ final class ChatStore: ObservableObject {
         if let connectionID = submissionConnectionID { confirmPromptAdmission(from: message, connectionID: connectionID) }
         if var admitted = input, admitted.sessionID == sessionID {
             admitted.phase = .admitted
+            admitted.hasEnteredTimeline = true
             admitted.pendingStatusUnknown = false
             submissionRecoveries[message.id] = admitted
             stagedSubmissionPresentations[message.id] = nil

@@ -238,6 +238,7 @@ struct ConnectionView: View {
                     Button("Remove", role: .destructive) {
                         facade.removeRecentServer(serverConfig)
                     }
+                    .tint(.red)
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                 .listRowBackground(Color.clear)
@@ -291,14 +292,6 @@ struct RootConfigurationsView: View {
                     LabeledContent("App Icon", value: facade.selectedAppIcon.displayName)
                 }
                 .accessibilityIdentifier("configurations.app-icon")
-
-                NavigationLink {
-                    ChatAppearanceSettingsView(store: facade.appCustomizationStore)
-                } label: {
-                    Label("Chat Appearance", systemImage: "text.bubble")
-                        .foregroundStyle(.primary)
-                }
-                .accessibilityIdentifier("configurations.chat-appearance")
             } header: {
                 Text("Appearance")
             }
@@ -452,6 +445,7 @@ private struct AppIconSelectionView: View {
 }
 
 private struct AppIconThumbnail: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let icon: OpenClientAppIcon
 
     var body: some View {
@@ -479,11 +473,11 @@ private struct AppIconThumbnail: View {
     private var fallback: some View {
         Text(String(icon.displayName.prefix(1)))
             .font(.title2.weight(.bold))
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(appAccentColor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 LinearGradient(
-                    colors: [Color.accentColor.opacity(0.22), Color.accentColor.opacity(0.08)],
+                    colors: [appAccentColor.opacity(0.22), appAccentColor.opacity(0.08)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -535,6 +529,7 @@ private struct ServerConnectionEditorView: View {
 }
 
 struct ConnectingServerView: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let config: OpenCodeServerConfig
     let phase: OpenClientConnectionPhase
     let cancel: () -> Void
@@ -625,7 +620,7 @@ struct ConnectingServerView: View {
         VStack(spacing: 14) {
             Image(systemName: config.displayIconName)
                 .font(.system(size: 46, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(appAccentColor)
                 .symbolEffect(.pulse, options: .repeating, value: isAnimating)
 
             VStack(spacing: 6) {
@@ -685,6 +680,7 @@ struct ConnectingServerView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .modifier(AppAccentActionModifier())
             .controlSize(.large)
 
             if isTakingLongerThanUsual {
@@ -752,6 +748,7 @@ private struct CachedConnectionRecoveryView: View {
             VStack(spacing: 12) {
                 Button("Try Again", action: retry)
                     .buttonStyle(.borderedProminent)
+                    .modifier(AppAccentActionModifier())
                     .accessibilityIdentifier("connection.recovery.retry")
 
                 Button("Browse Downloaded Chats", action: browseDownloadedData)
@@ -793,6 +790,7 @@ private struct DebugEntitlementSection: View {
 #endif
 
 private struct ServerConnectionSections: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     private struct ConnectionIconOption: Identifiable {
         let symbolName: String
         let title: LocalizedStringResource
@@ -893,6 +891,17 @@ private struct ServerConnectionSections: View {
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
 
+            if let appearance = facade.editorAppearanceStore {
+                Section("Appearance") {
+                    NavigationLink {
+                        ChatAppearanceSettingsView(store: appearance)
+                    } label: {
+                        Label("Appearance Settings", systemImage: "paintbrush")
+                    }
+                    .accessibilityIdentifier("connection.appearance")
+                }
+            }
+
             Section {
                 Button(facade.isLoading ? String(localized: "Connecting...") : String(localized: "Connect to OpenCode")) {
                     facade.startConnectionFromEditor()
@@ -917,16 +926,16 @@ private struct ServerConnectionSections: View {
             VStack(spacing: 8) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(isSelected ? Color.accentColor.opacity(0.16) : OpenCodePlatformColor.secondaryGroupedBackground)
+                        .fill(isSelected ? appAccentColor.opacity(0.16) : OpenCodePlatformColor.secondaryGroupedBackground)
 
                     Image(systemName: option.symbolName)
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                        .foregroundStyle(isSelected ? appAccentColor : .primary)
                 }
                 .frame(height: 54)
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(isSelected ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: isSelected ? 1.5 : 1)
+                        .stroke(isSelected ? appAccentColor : Color.primary.opacity(0.08), lineWidth: isSelected ? 1.5 : 1)
                 }
 
                 Text(option.title)
@@ -1052,6 +1061,7 @@ private struct LatestUpdatesNavigationRow: View {
 }
 
 private struct RecentServerCard: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let serverConfig: OpenCodeServerConfig
 
     var body: some View {
@@ -1060,7 +1070,7 @@ private struct RecentServerCard: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [Color.accentColor.opacity(0.22), Color.accentColor.opacity(0.08)],
+                            colors: [appAccentColor.opacity(0.22), appAccentColor.opacity(0.08)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -1068,7 +1078,7 @@ private struct RecentServerCard: View {
 
                 Image(systemName: serverConfig.displayIconName)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(appAccentColor)
             }
             .frame(width: 48, height: 48)
 

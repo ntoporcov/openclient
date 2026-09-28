@@ -283,9 +283,9 @@ enum OpenClientReleaseNotesCatalog {
             summary: "OC Notify brings Web Push to OpenClient, with no hosted OpenClient relay between your OpenCode host and your iPhone.",
             features: [
                 OpenClientReleaseNotes.Feature(
-                    title: "OpenCode v2, steadier",
-                    detail: "Fixes across projects, sessions, tools, and live updates make connecting to OpenCode v2 more reliable.",
-                    systemImage: "arrow.triangle.branch"
+                    title: "Let’s celebrate v2!",
+                    detail: "OpenCode v2 has officially gone stable—a milestone worth celebrating! We’re strengthening OpenClient’s connection to v2 and getting ready to embrace its new features, starting with steering.",
+                    systemImage: "party.popper.fill"
                 ),
             ],
             hero: .webPush,

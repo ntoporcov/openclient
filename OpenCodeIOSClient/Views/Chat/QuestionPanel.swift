@@ -300,6 +300,7 @@ struct QuestionOptionButton: View {
 }
 
 struct QuestionPageIndicator: View {
+    @Environment(\.appSystemAccentColor) private var appAccentColor
     let count: Int
     let selectedIndex: Int
     let onSelect: (Int) -> Void
@@ -311,7 +312,7 @@ struct QuestionPageIndicator: View {
                     onSelect(index)
                 } label: {
                     Capsule()
-                        .fill(index == selectedIndex ? Color.accentColor : Color.secondary.opacity(0.35))
+                        .fill(index == selectedIndex ? appAccentColor : Color.secondary.opacity(0.35))
                         .frame(width: index == selectedIndex ? 18 : 6, height: 6)
                         .contentShape(Rectangle().inset(by: -8))
                 }
@@ -349,7 +350,7 @@ private struct QuestionGroupActions: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .controlSize(.large)
-            .tint(.blue)
+            .modifier(AppAccentActionModifier())
             .opencodePrimaryGlassButton()
             .frame(maxWidth: .infinity)
             .frame(height: 52)

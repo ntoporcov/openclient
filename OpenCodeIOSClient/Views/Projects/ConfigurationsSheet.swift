@@ -40,6 +40,13 @@ struct ConfigurationsView: View {
                         Label("Global Settings", systemImage: "gearshape")
                     }
                     .accessibilityIdentifier("configurations.global-settings")
+
+                    NavigationLink {
+                        ChatAppearanceSettingsView(store: connection.appCustomizationStore)
+                    } label: {
+                        Label("Appearance Settings", systemImage: "paintbrush")
+                    }
+                    .accessibilityIdentifier("configurations.connection-appearance")
                 }
 
                 Section {
@@ -74,6 +81,24 @@ struct ConfigurationsView: View {
                     Text("New Session Defaults")
                 } footer: {
                     Text("Used when starting a new session on this server. Changes made in a chat only affect that session.")
+                }
+
+                if viewModel.isV2Connection {
+                    Section {
+                        Picker("During Streaming", selection: Binding(
+                            get: { connection.streamingDelivery },
+                            set: { connection.setStreamingDelivery($0) }
+                        )) {
+                            ForEach(OpenCodePromptDelivery.allCases) { delivery in
+                                Label(delivery.title, systemImage: delivery.symbolName).tag(delivery)
+                            }
+                        }
+                        .accessibilityIdentifier("connection.streamingDelivery")
+                    } header: {
+                        Text("Message Delivery")
+                    } footer: {
+                        Text("On OpenCode v2, Queue waits until the current turn finishes. Steer guides the current turn at the next step. Hold the send button to change the next message’s behavior.")
+                    }
                 }
 
                 Section("Providers") {
@@ -338,6 +363,7 @@ struct ProviderConfigurationRow: View {
 }
 
 struct ProviderLogo: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     enum Style {
         case tile
         case plain
@@ -390,7 +416,7 @@ struct ProviderLogo: View {
     }
 
     private var brand: ProviderLogoBrand {
-        ProviderLogoBrand(providerID: providerID)
+        ProviderLogoBrand(providerID: providerID, accentColor: appAccentColor)
     }
 }
 
@@ -400,7 +426,7 @@ private struct ProviderLogoBrand {
     let shadow: Color
     let usesLightStroke: Bool
 
-    init(providerID: String) {
+    init(providerID: String, accentColor: Color) {
         switch providerID {
         case "openai":
             background = Color(red: 0.05, green: 0.06, blue: 0.055)
@@ -488,8 +514,8 @@ private struct ProviderLogoBrand {
             shadow = background
             usesLightStroke = false
         default:
-            background = Color.accentColor.opacity(0.16)
-            foreground = Color.accentColor
+            background = accentColor.opacity(0.16)
+            foreground = accentColor
             shadow = .clear
             usesLightStroke = false
         }

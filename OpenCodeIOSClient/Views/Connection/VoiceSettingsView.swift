@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct VoiceSettingsView: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     @ObservedObject var store: SpeechVoiceStore
 
     var body: some View {
@@ -81,7 +82,7 @@ struct VoiceSettingsView: View {
                 }
             } label: {
                 Image(systemName: isPreviewing ? "stop.fill" : "play.fill")
-                    .foregroundStyle(isPreviewing ? Color.accentColor : Color.primary)
+                    .foregroundStyle(isPreviewing ? appAccentColor : Color.primary)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }

@@ -5,6 +5,55 @@ import Combine
 
 @MainActor
 final class SubmissionTranscriptPresentationTests: XCTestCase {
+    func testPendingDeliveryTracksTranscriptTailUntilCanonicalPickupClearsCaption() throws {
+        for delivery in OpenCodePromptDelivery.allCases {
+            let store = ChatStore()
+            let local = message("pending")
+            let before = message("tool1", role: "assistant")
+            store.stageSubmissionPresentation(local, sessionID: "session", canonical: [before],
+                attachments: [], agentMentions: [], delivery: delivery)
+            XCTAssertEqual(SubmissionTranscriptPresentation.messages(canonical: [before], recoveries: store.recoveryInputs(sessionID: "session")), [before, local])
+            XCTAssertTrue(store.beginV2Prompt(local, sessionID: "session", delivery: delivery))
+            XCTAssertTrue(store.confirmSubmissionAdmission(messageID: local.id, sessionID: "session"))
+            var canonical = [before]
+            for id in ["tool2", "tool3", "final"] {
+                canonical.append(message(id, role: "assistant"))
+                let inputs = store.recoveryInputs(sessionID: "session")
+                XCTAssertEqual(inputs.filter(\.isAwaitingDelivery).map(\.id), [local.id])
+                XCTAssertEqual(SubmissionTranscriptPresentation.messages(canonical: canonical, recoveries: inputs), canonical + [local])
+                let input = try XCTUnwrap(inputs.first)
+                XCTAssertTrue(SubmissionTranscriptPresentation.showsStatus(input: input, now: input.submittedAt))
+            }
+            // Delivery establishes position even before all canonical parts arrive.
+            XCTAssertTrue(store.confirmCanonicalSubmission(local.info))
+            let inputs = store.recoveryInputs(sessionID: "session")
+            XCTAssertTrue(inputs.filter(\.isAwaitingDelivery).isEmpty)
+            XCTAssertFalse(SubmissionTranscriptPresentation.showsStatus(input: try XCTUnwrap(inputs.first), now: .now))
+            let answer = message("answer", role: "assistant")
+            let partial = OpenCodeMessageEnvelope(info: local.info, parts: [])
+            XCTAssertEqual(SubmissionTranscriptPresentation.messages(canonical: canonical + [partial, answer], recoveries: inputs), canonical + [local, answer])
+            XCTAssertEqual(SubmissionTranscriptPresentation.messages(canonical: canonical + [local, answer], recoveries: inputs), canonical + [local, answer])
+            store.retireSubmissionPresentations(in: canonical + [local, answer], sessionID: "session")
+            XCTAssertTrue(store.recoveryInputs(sessionID: "session").isEmpty)
+        }
+    }
+
+    func testQueuedIntentSurvivesUncertainAdmissionAndReconnectUntilDelivery() throws {
+        let store = ChatStore()
+        store.selectSubmissionOwner("queue-owner", connectionID: UUID())
+        XCTAssertTrue(store.beginV2Prompt(message("queued"), sessionID: "session", delivery: .queue))
+        store.markSubmissionUncertain(messageID: "queued", sessionID: "session")
+        store.selectSubmissionOwner("another-owner", connectionID: UUID())
+        store.selectSubmissionOwner("queue-owner", connectionID: UUID())
+        store.applyV2InboxAdmissionIDs(["queued"], sessionID: "session")
+        let input = try XCTUnwrap(store.recoveryInputs(sessionID: "session").first)
+        XCTAssertEqual(input.phase, .admitted)
+        XCTAssertTrue(input.isAwaitingDelivery)
+        XCTAssertEqual(SubmissionTranscriptPresentation.messages(canonical: [message("still-running", role: "assistant")], recoveries: [input]).map(\.id), ["still-running", "queued"])
+        store.rollbackV2Prompt(messageID: "queued", sessionID: "session")
+        XCTAssertTrue(store.recoveryInputs(sessionID: "session").isEmpty)
+    }
+
     private func message(_ id: String, role: String = "user") -> OpenCodeMessageEnvelope {
         .local(role: role, text: id, messageID: id, sessionID: "session")
     }

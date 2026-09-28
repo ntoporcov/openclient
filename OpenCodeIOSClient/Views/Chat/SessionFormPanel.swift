@@ -99,7 +99,7 @@ private struct SessionFormCard: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .controlSize(.large)
-                    .tint(.blue)
+                    .modifier(AppAccentActionModifier())
                     .opencodePrimaryGlassButton()
                     .frame(height: 52)
                     .disabled(!allowsActions || state.phase != .ready || !store.canSubmit(form))

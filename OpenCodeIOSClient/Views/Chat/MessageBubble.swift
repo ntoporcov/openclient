@@ -192,14 +192,6 @@ struct MessageBubble: View {
         (effectiveMessage.info.role ?? "").lowercased() == "user"
     }
 
-    private var bubbleColor: Color {
-        isUser ? .blue : .clear
-    }
-
-    private var bubbleShape: MessageBubbleShape {
-        MessageBubbleShape(isOutgoing: isUser, cornerRadius: isUser ? 22 : 18)
-    }
-
     private var userBubbleMaximumWidth: CGFloat {
         #if targetEnvironment(macCatalyst)
         520
@@ -818,7 +810,9 @@ struct MessageBubble: View {
             .padding(.trailing, isUser ? 22 : 14)
             .padding(.vertical, 10)
             .background {
-                bubbleShape.fill(bubbleColor)
+                if isUser {
+                    ChatBubbleBackground()
+                }
             }
             .frame(maxWidth: userBubbleMaximumWidth, alignment: .trailing)
     }
@@ -1401,7 +1395,7 @@ private struct ContextSummary {
     var lists = 0
 }
 
-private struct MessageBubbleShape: Shape {
+struct MessageBubbleShape: Shape {
     let isOutgoing: Bool
     let cornerRadius: CGFloat
 

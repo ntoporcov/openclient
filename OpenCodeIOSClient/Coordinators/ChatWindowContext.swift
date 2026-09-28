@@ -78,6 +78,7 @@ final class ChatWindowContext: ObservableObject {
     }
 
     var contextID: String { "\(connectionID)|\(registryGeneration)|\(id)|\(navigationRevision)" }
+    var appearanceStore: AppCustomizationStore { model.appearanceStore(for: connection) }
 
     func saveDraft() {
         drafts[session.id] = (composer.draftMessage, composer.draftAgentMentions, composer.draftAttachments)

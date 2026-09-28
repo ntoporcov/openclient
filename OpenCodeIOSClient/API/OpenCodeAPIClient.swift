@@ -309,6 +309,7 @@ private struct OpenCodeV2PromptRequest: Encodable, Sendable {
     let id: String
     let text: String
     let resume: Bool
+    let delivery: OpenCodePromptDelivery?
     let files: [File]?
     let agents: [Agent]?
 }
@@ -1295,12 +1296,12 @@ struct OpenCodeAPIClient: Sendable {
         return OpenCodeV2MessagePage(messages: messages, olderCursor: olderCursor)
     }
 
-    func admitV2TextPrompt(sessionID: String, messageID: String, text: String, attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = [], resume: Bool = true) async throws -> OpenCodeV2PromptReceipt {
+    func admitV2TextPrompt(sessionID: String, messageID: String, text: String, attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = [], resume: Bool = true, delivery: OpenCodePromptDelivery? = nil) async throws -> OpenCodeV2PromptReceipt {
         let response: OpenCodeV2PromptResponse = try await send(
             path: "/api/session/\(sessionID)/prompt",
             method: "POST",
             body: OpenCodeV2PromptRequest(
-                id: messageID, text: text, resume: resume,
+                id: messageID, text: text, resume: resume, delivery: delivery,
                 files: attachments.isEmpty ? nil : attachments.map { .init(uri: $0.dataURL, name: $0.filename) },
                 agents: agentMentions.isEmpty ? nil : agentMentions.map {
                     .init(name: $0.name, mention: .init(start: $0.start, end: $0.end, text: $0.content))

@@ -820,7 +820,7 @@ private extension ChatTranscriptRow {
         case .bottomAnchor:
             return id
         case let .displayItem(item, recovery, recoveryStatusVisible, entry):
-            return item.renderSignature + (recovery.map { ":\($0.phase):\($0.pendingStatusUnknown):\($0.submittedAt.timeIntervalSinceReferenceDate):\(recoveryStatusVisible)" } ?? ":canonical") + ":entry:\(entry.reserves):\(entry.animates)"
+            return item.renderSignature + (recovery.map { ":\($0.phase):\($0.pendingStatusUnknown):\($0.delivery?.rawValue ?? "default"):\($0.hasEnteredTimeline):\($0.submittedAt.timeIntervalSinceReferenceDate):\(recoveryStatusVisible)" } ?? ":canonical") + ":entry:\(entry.reserves):\(entry.animates)"
         }
     }
 }
@@ -1713,6 +1713,7 @@ private struct ChatFocusedActionsModifier: ViewModifier {
 }
 
 private struct OpenClientSessionSwitcherOverlay: View {
+    @Environment(\.appAccentColor) private var appAccentColor
     let presentation: OpenClientSessionSwitcherPresentation
 
     var body: some View {
@@ -1723,7 +1724,7 @@ private struct OpenClientSessionSwitcherOverlay: View {
                         let isSelected = session.id == presentation.selectedSessionID
                         HStack(spacing: 10) {
                             Image(systemName: "bubble.left.and.bubble.right.fill")
-                                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                                .foregroundStyle(isSelected ? appAccentColor : .secondary)
                             Text(session.displayTitle(fallback: String(localized: "Session")))
                                 .font(.subheadline.weight(isSelected ? .semibold : .regular))
                                 .lineLimit(2)
@@ -1731,7 +1732,7 @@ private struct OpenClientSessionSwitcherOverlay: View {
                         }
                         .padding(10)
                         .frame(minHeight: 44)
-                        .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear,
+                        .background(isSelected ? appAccentColor.opacity(0.14) : Color.clear,
                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .id(session.id)
                     }
@@ -2121,9 +2122,11 @@ private struct EquatableMessageComposerHost: View, Equatable {
     var conversationState: ConversationModeController.State = .inactive
     var conversationInputLevel: CGFloat = 0
     var onToggleConversation: (() -> Void)?
+    var streamingDelivery: OpenCodePromptDelivery?
+    var onSelectStreamingDelivery: ((OpenCodePromptDelivery) -> Void)?
 
     nonisolated static func == (lhs: EquatableMessageComposerHost, rhs: EquatableMessageComposerHost) -> Bool {
-        lhs.snapshot == rhs.snapshot
+        lhs.snapshot == rhs.snapshot && lhs.streamingDelivery == rhs.streamingDelivery
     }
 
     var body: some View {
@@ -2176,7 +2179,9 @@ private struct EquatableMessageComposerHost: View, Equatable {
             conversationState: conversationState,
             conversationInputLevel: conversationInputLevel,
             onToggleConversation: onToggleConversation,
-            prefersAssistantLayout: snapshot.prefersAssistantLayout
+            prefersAssistantLayout: snapshot.prefersAssistantLayout,
+            streamingDelivery: streamingDelivery,
+            onSelectStreamingDelivery: onSelectStreamingDelivery
         )
     }
 }
@@ -2225,6 +2230,8 @@ struct TaskSessionSheetContent: View {
 }
 
 struct ChatView: View {
+    @Environment(\.appAccentColor) private var appAccentColor
+    @Environment(\.appAccentForeground) private var appAccentForeground
     @Environment(\.scenePhase) private var scenePhase
 #if os(iOS)
     @Environment(\.openWindow) private var openWindow
@@ -3274,7 +3281,7 @@ struct ChatView: View {
     @discardableResult
     private func clearConfirmedV2RetryDraftIfUnchanged(verifiedMessageID: String? = nil) -> Bool {
         guard let retry = v2RetryDraft,
-               chatFacade.activeChatSessionID == sessionID,
+                chatFacade.selectedSession?.id == sessionID,
                (chatFacade.isPromptAdmitted(messageID: retry.messageID, sessionID: retry.sessionID) || verifiedMessageID == retry.messageID),
               retry.canClear(admittedMessageID: retry.messageID, sessionID: sessionID,
                   contextID: chatFacade.v2DraftContextID, revision: v2DraftRevision,
@@ -3287,6 +3294,7 @@ struct ChatView: View {
     }
 
     private func sendV2Prompt() {
+        chatFacade.logPromptSubmission("v2 composer tapped attemptPending=\(v2DraftAttemptID != nil) retryPending=\(v2RetryDraft != nil)", sessionID: sessionID)
         if clearConfirmedV2RetryDraftIfUnchanged() { return }
         guard v2DraftAttemptID == nil else { return }
         if let retry = v2RetryDraft,
@@ -3313,6 +3321,8 @@ struct ChatView: View {
         let mentions = trimmed.mentions
         guard !prompt.isEmpty || !attachments.isEmpty, !chatFacade.hasPendingPromptAdmission(sessionID: sessionID) else { return }
         let command = chatFacade.slashCommandInput(from: prompt)
+        let delivery = command == nil && chatFacade.isV2SessionBusy(sessionID: sessionID)
+            ? composerStore.streamingDelivery(default: chatFacade.defaultStreamingDelivery) : nil
         if attachments.isEmpty,
            chatFacade.shouldOpenForkSheet(forSlashInput: prompt) || command.map({ chatFacade.isForkClientCommand($0.command) }) == true {
             clearComposerDraft()
@@ -3326,13 +3336,18 @@ struct ChatView: View {
         let messageID = OpenCodeIdentifier.message()
         if !(attachments.isEmpty && command.map({ chatFacade.isCompactClientCommand($0.command) }) == true) {
             OpenCodeHaptics.impact(.strong)
-            thinkingEntryGate.begin(messageID: messageID, contextID: thinkingEntryContextID,
-                alreadyVisible: timedChatDisplaySnapshot.snapshot.showsThinking)
-            preparingOutgoingMessageID = messageID
+            if delivery == nil {
+                thinkingEntryGate.begin(messageID: messageID, contextID: thinkingEntryContextID,
+                    alreadyVisible: timedChatDisplaySnapshot.snapshot.showsThinking)
+                preparingOutgoingMessageID = messageID
+            }
             chatStore.stageSubmissionPresentation(.local(role: "user", text: prompt, agentMentions: mentions,
                 attachments: attachments, messageID: messageID, sessionID: session.id), sessionID: session.id,
-                canonical: transcriptSuffix(chatSourceMessageCount), attachments: attachments, agentMentions: mentions)
-            scheduleOutgoingEntryAnimation(messageID: messageID)
+                canonical: transcriptSuffix(chatSourceMessageCount), attachments: attachments, agentMentions: mentions,
+                delivery: delivery)
+            if delivery == nil {
+                scheduleOutgoingEntryAnimation(messageID: messageID)
+            }
             requestBottomReadjustment()
         }
         // Keep the draft through preflight and transport. A rejected/cancelled send
@@ -3346,8 +3361,13 @@ struct ChatView: View {
                 chatStore.discardStagedSubmissionPresentation(messageID: messageID)
                 if v2DraftAttemptID == messageID { v2DraftAttemptID = nil }
             }
+            // Transcript appearance is a rendering hint, not navigation ownership.
+            // A disappearance callback can clear it while this composer remains selected.
             guard !Task.isCancelled, chatFacade.v2DraftContextID == contextID,
-                  chatFacade.activeChatSessionID == session.id else { return }
+                   chatFacade.selectedSession?.id == session.id else {
+                chatFacade.logPromptSubmission("v2 composer blocked: navigation changed or cancelled", sessionID: session.id, messageID: messageID)
+                return
+            }
             let accepted: Bool
             let tracksAdmission: Bool
             if let command, attachments.isEmpty, chatFacade.isCompactClientCommand(command.command) {
@@ -3361,9 +3381,9 @@ struct ChatView: View {
             } else {
                 tracksAdmission = true
                 accepted = await chatFacade.sendV2TextPrompt(prompt, in: session, attachments: attachments,
-                    agentMentions: mentions, messageID: messageID)
+                    agentMentions: mentions, messageID: messageID, delivery: delivery)
             }
-            guard chatFacade.activeChatSessionID == session.id,
+            guard chatFacade.selectedSession?.id == session.id,
                    chatFacade.v2DraftContextID == contextID, v2DraftRevision == requestRevision,
                    composerStore.resetToken == requestResetToken,
                    composerDraftStore.text == originalText, composerDraftStore.agentMentions == originalMentions,
@@ -3570,7 +3590,10 @@ struct ChatView: View {
             onShowContextMetrics: { showingContextMetrics = true },
             conversationState: snapshot.conversationState,
             conversationInputLevel: snapshot.conversationInputLevel,
-            onToggleConversation: conversationAction
+            onToggleConversation: conversationAction,
+            streamingDelivery: chatFacade.isV2Connection && chatFacade.isV2SessionBusy(sessionID: sessionID)
+                ? composerStore.streamingDelivery(default: chatFacade.defaultStreamingDelivery) : nil,
+            onSelectStreamingDelivery: { composerStore.selectStreamingDelivery($0) }
         )
 
         return composer
@@ -4366,18 +4389,23 @@ struct ChatView: View {
             ))
         }
         let recoveries = Dictionary(uniqueKeysWithValues: chatFacade.recoveryInputs(sessionID: sessionID).map { ($0.id, $0) })
-        rows.append(contentsOf: displaySnapshot.items.map { item in
+        var pendingRows: [ChatTranscriptRow] = []
+        for item in displaySnapshot.items {
             if case let .message(message) = item {
-                return .displayItem(item, recovery: recoveries[message.id], recoveryStatusVisible: visibleRecoveryStatusIDs.contains(message.id),
+                let row = ChatTranscriptRow.displayItem(item, recovery: recoveries[message.id], recoveryStatusVisible: visibleRecoveryStatusIDs.contains(message.id),
                     entry: outgoingEntry(for: message.id))
+                if recoveries[message.id]?.isAwaitingDelivery == true { pendingRows.append(row) }
+                else { rows.append(row) }
+            } else {
+                rows.append(.displayItem(item, recovery: nil, recoveryStatusVisible: false))
             }
-            return .displayItem(item, recovery: nil, recoveryStatusVisible: false)
-        })
+        }
         rows.append(.thinking(
             isVisible: displaySnapshot.showsThinking,
             toolName: displaySnapshot.thinkingToolName,
             height: displaySnapshot.tailHeight
         ))
+        rows.append(contentsOf: pendingRows)
         rows.append(.bottomAnchor)
         return rows
     }
@@ -4424,7 +4452,7 @@ struct ChatView: View {
                     }
                 }
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(appAccentColor)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
@@ -4450,16 +4478,18 @@ struct ChatView: View {
 
             Text(ChatPreviousUserContextPolicy.displayText(for: message))
                 .font(.subheadline)
-                .foregroundStyle(.white)
+                .foregroundStyle(appAccentForeground)
                 .lineLimit(4)
                 .multilineTextAlignment(.leading)
-                .padding(.horizontal, 14)
+                .padding(.leading, 14)
+                .padding(.trailing, 22)
                 .padding(.vertical, 10)
-                .background(Color.blue, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .background { ChatBubbleBackground() }
                 .accessibilityIdentifier("chat.previousPrompt")
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(EdgeInsets(top: 12, leading: 60, bottom: 2, trailing: 16))
+        .modifier(AppAppearanceModifier(store: appCustomizationStore))
     }
 
     @ViewBuilder
@@ -4599,6 +4629,7 @@ struct ChatView: View {
         }
         .equatable()
         .transition(.identity)
+        .modifier(AppAppearanceModifier(store: appCustomizationStore))
         .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
     }
 
@@ -4983,7 +5014,7 @@ struct ChatView: View {
 
     private var thinkingPendingMessageID: String? {
         var pendingID = pendingOutgoingSend?.messageID ?? chatFacade.recoveryInputs(sessionID: sessionID)
-            .last(where: { $0.phase == .submitting })?.id
+            .last(where: { $0.phase == .submitting && !$0.isAwaitingDelivery })?.id
         if let id = pendingID, let phase = chatFacade.promptAdmissionPhase(messageID: id, sessionID: sessionID),
            phase == .cancelled || phase == .rejected || phase == .uncertain { pendingID = nil }
         return pendingID
@@ -4991,15 +5022,20 @@ struct ChatView: View {
 
     private func shouldShowThinking(in messages: [OpenCodeMessageEnvelope]) -> Bool {
         guard !thinkingEntryGate.blocksThinking(in: thinkingEntryContextID) else { return false }
-        return ChatThinkingPresentation.shouldShow(messages: messages, pendingMessageID: thinkingPendingMessageID,
+        return ChatThinkingPresentation.shouldShow(messages: messagesExcludingPendingDelivery(messages), pendingMessageID: thinkingPendingMessageID,
             isBusy: isSessionBusy, showsToolCalls: appCustomizationStore.showsToolCalls,
             showsReasoningBlocks: appCustomizationStore.showsReasoningBlocks && !isFunAndGamesSession(sessionID),
             runningToolName: activeRunningToolName(in: messages))
     }
 
     private func activeRunningToolName(in messages: [OpenCodeMessageEnvelope]) -> String? {
-        ChatThinkingPresentation.summaryToolName(messages: messages, pendingMessageID: thinkingPendingMessageID,
+        ChatThinkingPresentation.summaryToolName(messages: messagesExcludingPendingDelivery(messages), pendingMessageID: thinkingPendingMessageID,
             isBusy: isSessionBusy, showsToolCalls: appCustomizationStore.showsToolCalls)
+    }
+
+    private func messagesExcludingPendingDelivery(_ messages: [OpenCodeMessageEnvelope]) -> [OpenCodeMessageEnvelope] {
+        let pendingIDs = Set(chatFacade.recoveryInputs(sessionID: sessionID).filter(\.isAwaitingDelivery).map(\.id))
+        return pendingIDs.isEmpty ? messages : messages.filter { !pendingIDs.contains($0.id) }
     }
 
     private func isStreamingMessage(_ message: OpenCodeMessageEnvelope) -> Bool {

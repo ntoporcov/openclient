@@ -5,6 +5,21 @@ import XCTest
 
 @MainActor
 final class ComposerKeyboardTests: XCTestCase {
+    func testDeliveryOverrideIsScopedToDraftAndDoesNotChangeConnectionDefault() {
+        let store = ComposerStore(draftMessage: "Correction")
+        XCTAssertEqual(store.streamingDelivery(default: .queue), .queue)
+        store.selectStreamingDelivery(.steer)
+        XCTAssertEqual(store.streamingDelivery(default: .queue), .steer)
+        // Text edits and unsuccessful sends retain the chosen intent.
+        store.draftMessage = "Updated correction"
+        XCTAssertEqual(store.streamingDelivery(default: .queue), .steer)
+        store.resetToken = UUID()
+        XCTAssertEqual(store.streamingDelivery(default: .queue), .queue)
+        store.selectStreamingDelivery(.queue)
+        store.restoreDraft(forKey: "other-session")
+        XCTAssertEqual(store.streamingDelivery(default: .steer), .steer)
+    }
+
     func testSuggestionArrowsAndTabArePriorityCommandsOnlyWhileMenuIsOpenAndCopiesKeepFocus() throws {
         let editor = makeEditor()
         let window = try showEditor(editor)

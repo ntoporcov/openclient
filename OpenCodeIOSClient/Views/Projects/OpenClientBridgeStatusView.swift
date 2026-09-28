@@ -40,6 +40,7 @@ struct OpenClientBridgeStatusView: View {
                             )
                         }
                         .buttonStyle(.borderedProminent)
+                        .modifier(AppAccentActionModifier())
                         .accessibilityIdentifier("projects.bridge.force-connect")
 
                         NavigationLink {
@@ -129,6 +130,7 @@ private struct OpenClientNotificationSetupSection: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(bridge.isStartingNotificationConfiguration)
+                .modifier(AppAccentActionModifier())
                 .accessibilityIdentifier("projects.bridge.notifications.configure-ai")
             }
 
@@ -164,6 +166,7 @@ private struct OpenClientNotificationSetupSection: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("projects.bridge.notifications.setup")
+                .modifier(AppAccentActionModifier())
             }
 
             if case .requesting = snapshot.notificationSetupPhase {
@@ -201,6 +204,7 @@ private struct OpenClientNotificationSetupResult: View {
             }
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("projects.bridge.notifications.open")
+            .modifier(AppAccentActionModifier())
 
             Button("Generate New Code", action: generate)
                 .accessibilityIdentifier("projects.bridge.notifications.generate")
