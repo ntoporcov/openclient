@@ -160,15 +160,32 @@ final class DirectoryStoreTests: XCTestCase {
         XCTAssertTrue(store.syncState.questionsBySessionID.isEmpty)
     }
 
-    func testV2ReconnectQueuesEveryKnownDirectoryAndBackgroundTimeline() {
+    func testV2ReconnectQueuesOpenAndRunningChatsWithoutBackfillingIdleHistory() {
         let registry = DirectoryStoreRegistry(activeDirectory: "/tmp/active")
-        registry.activeStore.insertV2Session(session(id: "ses_active", directory: "/tmp/active"))
-        registry.store(for: "/tmp/background").insertV2Session(session(id: "ses_background", directory: "/tmp/background"))
+        let selected = session(id: "ses_active", directory: "/tmp/active")
+        registry.activeStore.insertV2Session(selected)
+        registry.activeStore.selectedSession = selected
+        let background = registry.store(for: "/tmp/background")
+        background.sessions = (0..<1_000).map { session(id: "idle-\($0)", directory: "/tmp/background") }
+        background.selectedSession = background.sessions.first
+        for session in background.sessions {
+            background.syncState.messagesBySessionID[session.id] = []
+            background.sessionStatuses[session.id] = "idle"
+        }
+        background.applySessionStatus("busy", forSessionID: "ses_background")
+        registry.requestV2Reconciliation(sessionID: "explicit-event")
         registry.requestV2Reconciliation(reconnect: true)
         let work = registry.takeV2Reconciliation()
         XCTAssertTrue(work.reconnect)
-        XCTAssertEqual(work.sessionIDs, ["ses_active", "ses_background"])
+        XCTAssertEqual(work.sessionIDs, ["ses_active", "ses_background", "explicit-event"])
         XCTAssertTrue(registry.takeV2Reconciliation().sessionIDs.isEmpty)
+    }
+
+    func testTakingPendingSessionsPreservesAConcurrentReconnectRequest() {
+        let registry = DirectoryStoreRegistry()
+        registry.requestV2Reconciliation(sessionID: "pending", reconnect: true)
+        XCTAssertEqual(registry.takeV2PendingSessionIDs(), ["pending"])
+        XCTAssertTrue(registry.takeV2Reconciliation().reconnect)
     }
 
     func testV2UnknownSessionDeletionInvalidatesInFlightDiscovery() throws {

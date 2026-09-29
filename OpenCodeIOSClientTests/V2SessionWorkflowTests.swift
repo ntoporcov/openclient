@@ -81,6 +81,61 @@ final class V2SessionWorkflowTests: XCTestCase {
         }
     }
 
+    func testReconnectDoesNotReadIdleHistoryAndReconcilesOpenActiveAndPendingChatsOnce() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let ids = (0..<200).map { "idle-\($0)" } + ["selected", "running", "resolved", "window"]
+        model.directoryStore.sessions = ids.map { Self.session(id: $0, directory: "/repo") }
+        model.directoryStore.selectedSession = Self.session(id: "selected", directory: "/repo")
+        model.windowSessionInterests[UUID()] = "window"
+        model.directoryStore.syncState.permissionsBySessionID["resolved"] = [
+            .init(id: "old", sessionID: "resolved", permission: "shell", patterns: [], always: nil, metadata: nil, tool: nil)
+        ]
+        var transcriptReads: [String] = []
+        var sessionReads: [String] = []
+        let permission = #"{"id":"pending","sessionID":"attention","action":"shell","resources":["*"]}"#
+        func info(_ id: String) -> String {
+            #"{"id":"\#(id)","projectID":"global","location":{"directory":"/repo"},"time":{"created":1,"updated":1}}"#
+        }
+        V2SessionWorkflowURLProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            switch path {
+            case "/api/location": return (200, #"{"directory":"/repo","project":{"id":"global","directory":"/","canonical":"/"}}"#)
+            case "/api/project": return (200, #"[{"id":"global","canonical":"/","time":{"created":1,"updated":1},"sandboxes":[]}]"#)
+            case "/api/session": return (200, #"{"data":[\#(ids.map(info).joined(separator: ","))],"cursor":{}}"#)
+            case "/api/session/active": return (200, #"{"data":{"running":{"type":"running"}}}"#)
+            case "/api/permission/request": return (200, #"{"data":[\#(permission)]}"#)
+            case "/api/form": return (200, #"{"location":{"directory":"/repo"},"data":[]}"#)
+            default: break
+            }
+            let components = path.split(separator: "/").map(String.init)
+            guard components.count >= 3, components[0] == "api", components[1] == "session" else { return (404, "{}") }
+            let id = components[2]
+            if components.count == 3 {
+                sessionReads.append(id)
+                return (200, #"{"data":\#(info(id))}"#)
+            }
+            switch components.last {
+            case "message":
+                transcriptReads.append(id)
+                return (200, Self.page("message-\(id)"))
+            case "permission": return (200, #"{"data":[\#(id == "attention" ? permission : "")]}"#)
+            case "form": return (200, #"{"data":[]}"#)
+            default: return (404, "{}")
+            }
+        }
+        model.directoryStoreRegistry.requestV2Reconciliation(reconnect: true)
+        model.scheduleV2TimelineReconciliation(immediate: true)
+        await model.v2TimelineReconcileTask?.value
+
+        let expected = ["selected", "attention", "resolved", "running", "window"]
+        XCTAssertEqual(transcriptReads, expected, "Visible chat first; no idle-history scan or duplicate pass")
+        XCTAssertEqual(sessionReads, expected)
+        XCTAssertTrue(model.directoryStoreRegistry.v2PendingSessionIDs.isEmpty)
+        XCTAssertNil(model.directoryStore.syncState.permissionsBySessionID["resolved"])
+        XCTAssertEqual(model.directoryStoreRegistry.ownerStore(forSessionID: "attention")?.syncState.permissionsBySessionID["attention"]?.map(\.id), ["pending"])
+    }
+
     func testCommittedRootTranscriptReachesExistingGlobalOwnerWindowsBeforeBridgeRetirement() async throws {
         for viaHTTP in [true, false] {
             let model = makeModel()
@@ -1084,6 +1139,64 @@ final class V2SessionWorkflowTests: XCTestCase {
         model.composerStore.draftsByChatKey = [:]
         model.directoryStoreRegistry.activate("/repo")
         return model
+    }
+
+    func testSelectingV2ChatPresentsTranscriptWhileStatusesAreStillPending() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        let statusStarted = expectation(description: "status request started")
+        let presented = expectation(description: "transcript presented before status response")
+        var releaseStatus: CheckedContinuation<Void, Never>?
+        var statusFinished = false
+        let observation = model.chatStore.$preparedSessionID.dropFirst().sink { id in
+            if id == session.id {
+                XCTAssertFalse(statusFinished)
+                presented.fulfill()
+            }
+        }
+        V2SessionWorkflowURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/api/session/active":
+                await withCheckedContinuation { releaseStatus = $0; statusStarted.fulfill() }
+                statusFinished = true
+                return (200, #"{"data":{}}"#)
+            case "/api/session/ses_v2/message":
+                let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
+                XCTAssertEqual(query?.first { $0.name == "limit" }?.value, "20")
+                return (200, Self.page("msg_first"))
+            default:
+                return (200, #"{"data":[]}"#)
+            }
+        }
+        let selection = Task { await model.selectSession(session) }
+        await fulfillment(of: [statusStarted, presented], timeout: 3)
+        releaseStatus?.resume()
+        await selection.value
+        XCTAssertEqual(model.messages.map(\.id), ["msg_first"])
+        withExtendedLifetime(observation) {}
+    }
+
+    func testRecentV2SelectionPreservesWorkspaceStateOnlyWithinSameWorkspace() {
+        for change in ["none", "directory", "workspace"] {
+            let model = makeModel()
+            defer { model.stopEventStream() }
+            model.selectedDirectory = "/repo"
+            model.directoryStore.syncState.todosBySessionID["first"] = [
+                .init(content: "First chat only", status: "pending", priority: "high")
+            ]
+            _ = model.beginSessionNavigation(Self.session(id: "first", directory: "/repo"))
+            XCTAssertEqual(model.sessionInteractionStore.todos.count, 1)
+            model.mcpStore.isReady = true
+            let generation = model.sessionNavigationGeneration
+            let next = OpenCodeSession(id: "next", title: nil, workspaceID: change == "workspace" ? "other-workspace" : nil,
+                directory: change == "directory" ? "/other" : "/repo", projectID: nil, parentID: nil)
+            model.prepareRecentProjectSessionSelection(.init(session: next, projectTitle: "Project", preview: nil, isBusy: false))
+            XCTAssertEqual(model.selectedSession?.id, next.id)
+            XCTAssertEqual(model.mcpStore.isReady, change == "none")
+            XCTAssertTrue(model.sessionInteractionStore.todos.isEmpty)
+            XCTAssertEqual(model.sessionNavigationGeneration, generation + (change == "none" ? 1 : 2))
+        }
     }
 
     private static func page(_ id: String, cursor: String? = nil) -> String {

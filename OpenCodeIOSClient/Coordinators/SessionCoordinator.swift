@@ -2,6 +2,26 @@ import Foundation
 
 @MainActor
 final class SessionCoordinator {
+    /// Open a cold chat with a small page; keep a warm chat's existing window where possible.
+    /// V2 pages may contain only non-displayable records, so follow their cursors until
+    /// there is a transcript to present or the server confirms the end of history.
+    func initialV2Transcript(
+        cachedMessageCount: Int,
+        loadPage: (String?, Int) async throws -> BackendTranscriptPage
+    ) async throws -> BackendTranscriptPage {
+        let limit = min(200, max(20, cachedMessageCount))
+        var cursor: String?
+        var visited = Set<String>()
+        while true {
+            try Task.checkCancellation()
+            let page = try await loadPage(cursor, limit)
+            try Task.checkCancellation()
+            guard page.messages.isEmpty, let next = page.olderCursor else { return page }
+            guard visited.insert(next).inserted else { throw OpenCodeV2TransportError.invalidTimelineRecord }
+            cursor = next
+        }
+    }
+
     struct DirectoryReloadResult {
         let bootstrap: OpenCodeDirectoryBootstrap
         let statuses: [String: String]

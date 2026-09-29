@@ -417,6 +417,11 @@ extension AppViewModel {
 
     func scheduleV2TimelineReconciliation(immediate: Bool = false) {
         guard connectionStore.apiProfile == .v2 else { return }
+        if directoryStoreRegistry.v2NeedsReconnectHydration {
+            for sessionID in windowSessionInterests.values {
+                directoryStoreRegistry.requestV2Reconciliation(sessionID: sessionID)
+            }
+        }
         if directoryStoreRegistry.v2PendingSessionIDs.isEmpty,
            let sessionID = selectedSession?.id {
             directoryStoreRegistry.requestV2Reconciliation(sessionID: sessionID)
@@ -440,8 +445,21 @@ extension AppViewModel {
             while !Task.isCancelled, self.directoryStoreRegistry.generation == registryGeneration {
                 self.isV2TimelineReconcilePending = false
                 let request = self.directoryStoreRegistry.takeV2Reconciliation()
-                if request.reconnect { await self.hydrateV2ReconnectState() }
-                for sessionID in request.sessionIDs.sorted() {
+                var sessionIDs = request.sessionIDs
+                if request.reconnect {
+                    await self.hydrateV2ReconnectState()
+                    guard !Task.isCancelled, self.directoryStoreRegistry.generation == registryGeneration,
+                          self.v2TimelineReconcileGeneration == generation else { return }
+                    // Discovery and live events can queue the same open session while
+                    // bootstrap is suspended. Reconcile the union once, not in two passes.
+                    sessionIDs.formUnion(self.directoryStoreRegistry.takeV2PendingSessionIDs())
+                }
+                let selectedID = self.selectedSession?.id
+                let orderedIDs = sessionIDs.sorted {
+                    if ($0 == selectedID) != ($1 == selectedID) { return $0 == selectedID }
+                    return $0 < $1
+                }
+                for sessionID in orderedIDs {
                     guard !Task.isCancelled, self.directoryStoreRegistry.generation == registryGeneration else { return }
                     await self.reconcileV2KnownSession(sessionID: sessionID)
                 }
@@ -484,6 +502,9 @@ extension AppViewModel {
             let directory = DirectoryStoreRegistry.directory(forKey: key)
             let snapshot = directoryStoreRegistry.v2LifecycleSnapshot
             let sessionsBeforeRequest = store.sessions
+            // Directory inventories discover pending actions without N per-session reads.
+            async let permissions = try? client.listV2PendingPermissions(directory: directory)
+            async let forms = try? client.listV2PendingForms(directory: directory)
             do {
                 let projectID = key == DirectoryStoreRegistry.globalKey ? "global" : store.sessions.first?.projectID ?? "global"
                 let page = try await client.listV2Sessions(projectID: projectID, directory: directory, roots: false)
@@ -492,11 +513,17 @@ extension AppViewModel {
                 store.applyV2DiscoveredSessions(unchanged, ifUnchangedSince: sessionsBeforeRequest)
                 for session in unchanged {
                     guard isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation else { return }
-                    directoryStoreRegistry.requestV2Reconciliation(sessionID: session.id)
                     await funAndGamesFacade.reconcileSetup(for: session.id)
                 }
             } catch {
                 if !Task.isCancelled { appendDebugLog("v2 directory reconciliation failed: \(error.localizedDescription)") }
+            }
+            let (pendingPermissions, pendingForms) = await (permissions, forms)
+            guard !Task.isCancelled, isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation else { return }
+            let pendingIDs = Set(pendingPermissions?.map(\.sessionID) ?? [])
+                .union(pendingForms?.map(\.sessionID) ?? [])
+            for id in pendingIDs where id != "global" {
+                directoryStoreRegistry.requestV2Reconciliation(sessionID: id)
             }
         }
         let stores = directoryStoreRegistry.allStores.map { ($0, $0.statusRevision) }
@@ -507,10 +534,12 @@ extension AppViewModel {
             for (store, revision) in stores {
                 store.applyV2ActiveStatuses(statuses, requestedAtRevision: revision)
             }
-            for id in statuses.keys where directoryStoreRegistry.ownerStore(forSessionID: id) == nil
+            for (id, status) in statuses where status != "idle"
                 && !directoryStoreRegistry.isV2SessionDeleted(id)
                 && directoryStoreRegistry.v2LifecycleRevision(sessionID: id) == (lifecycleSnapshot[id] ?? 0) {
-                directoryStoreRegistry.store(for: nil).applySessionStatus(statuses[id] ?? "busy", forSessionID: id)
+                if directoryStoreRegistry.ownerStore(forSessionID: id) == nil {
+                    directoryStoreRegistry.store(for: nil).applySessionStatus(status, forSessionID: id)
+                }
                 directoryStoreRegistry.requestV2Reconciliation(sessionID: id)
             }
         } catch {

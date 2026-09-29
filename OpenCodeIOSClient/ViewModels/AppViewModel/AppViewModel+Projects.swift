@@ -937,9 +937,13 @@ extension AppViewModel {
 
     func prepareRecentProjectSessionSelection(_ recent: RecentProjectSession) {
         let navigation = projectCoordinator.recentSessionNavigationResult(for: recent.session, projects: projects)
-        projects = navigation.projects
-        currentProject = navigation.currentProject
-        prepareDirectorySelection(navigation.routeDirectory)
+        let staysInV2Workspace = connectionStore.apiProfile == .v2
+            && selectedSession != nil
+            && directoryStoreRegistry.activeKey == DirectoryStoreRegistry.key(for: navigation.routeDirectory)
+            && selectedSession?.workspaceID == recent.session.workspaceID
+        if projects != navigation.projects { projects = navigation.projects }
+        if currentProject != navigation.currentProject { currentProject = navigation.currentProject }
+        if !staysInV2Workspace { prepareDirectorySelection(navigation.routeDirectory) }
         if connectionStore.apiProfile == .v2 {
             _ = beginSessionNavigation(recent.session)
         } else {

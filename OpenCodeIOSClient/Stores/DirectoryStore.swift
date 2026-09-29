@@ -131,18 +131,25 @@ final class DirectoryStoreRegistry: ObservableObject {
         if let sessionID, !isV2SessionDeleted(sessionID) { v2PendingSessionIDs.insert(sessionID) }
         v2NeedsReconnectHydration = v2NeedsReconnectHydration || reconnect
         if reconnect {
+            // A session list is not a request to hydrate every historical transcript.
+            // Closed idle chats are reconciled when opened; reconnect recovers live work.
+            if let selected = activeStore.selectedSession { v2PendingSessionIDs.insert(selected.id) }
             for store in storesByKey.values {
-                v2PendingSessionIDs.formUnion(store.sessions.map(\.id))
-                v2PendingSessionIDs.formUnion(store.syncState.messagesBySessionID.keys)
-                v2PendingSessionIDs.formUnion(store.sessionStatuses.keys)
-                if let selected = store.selectedSession { v2PendingSessionIDs.insert(selected.id) }
+                v2PendingSessionIDs.formUnion(store.sessionStatuses.filter { $0.value != "idle" }.keys)
+                v2PendingSessionIDs.formUnion(store.syncState.permissionsBySessionID.keys)
+                v2PendingSessionIDs.formUnion(store.sessionFormStore.forms.keys.map(\.sessionID))
             }
         }
     }
 
-    func takeV2Reconciliation() -> (sessionIDs: Set<String>, reconnect: Bool) {
-        let result = (v2PendingSessionIDs.subtracting(v2DeletedSessionIDs), v2NeedsReconnectHydration)
+    func takeV2PendingSessionIDs() -> Set<String> {
+        let result = v2PendingSessionIDs.subtracting(v2DeletedSessionIDs)
         v2PendingSessionIDs.removeAll()
+        return result
+    }
+
+    func takeV2Reconciliation() -> (sessionIDs: Set<String>, reconnect: Bool) {
+        let result = (takeV2PendingSessionIDs(), v2NeedsReconnectHydration)
         v2NeedsReconnectHydration = false
         return result
     }
@@ -666,8 +673,7 @@ final class DirectoryStore: ObservableObject {
 
     func applyV2Messages(_ messages: [OpenCodeMessageEnvelope], forSessionID sessionID: String) {
         var nextState = syncStore.state
-        nextState.replaceMessagesPreservingOrder(messages, forSessionID: sessionID)
-        guard nextState != syncStore.state else { return }
+        guard nextState.replaceMessagesPreservingOrder(messages, forSessionID: sessionID) else { return }
         syncStore.state = nextState
     }
 
