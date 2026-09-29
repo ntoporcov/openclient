@@ -689,7 +689,8 @@ final class ActivityFacade: ObservableObject {
     }
 
     private func makeSnapshot() -> Snapshot {
-        let rows = recentCandidates().map(makeRow)
+        let owners = viewModel.directoryStoreRegistry.ownerStoresBySessionID()
+        let rows = recentCandidates().map { makeRow($0, owner: owners[$0.session.id]) }
         let sessionIDs = Set(rows.map { $0.recent.session.id })
         cachedPreviews = cachedPreviews.filter { sessionIDs.contains($0.key.sessionID) }
         cachedInteractionCounts = cachedInteractionCounts.filter { sessionIDs.contains($0.key.sessionID) }
@@ -715,8 +716,7 @@ final class ActivityFacade: ObservableObject {
         )
     }
 
-    private func makeRow(_ candidate: RecentProjectSession) -> RowSnapshot {
-        let owner = viewModel.directoryStoreRegistry.ownerStore(forSessionID: candidate.session.id)
+    private func makeRow(_ candidate: RecentProjectSession, owner: DirectoryStore?) -> RowSnapshot {
         let storedSession = owner?.sessions.first { $0.id == candidate.session.id }
             ?? (owner?.selectedSession?.id == candidate.session.id ? owner?.selectedSession : nil)
         let session = session(storedSession ?? candidate.session, preservingAttributionFrom: candidate.session)

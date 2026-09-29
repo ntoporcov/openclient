@@ -125,6 +125,10 @@ actor OpenCodeManagedEventBatcher {
         self.onEvent = onEvent
     }
 
+    var queueStats: (count: Int, capacity: Int) {
+        (queue.count, queue.capacity)
+    }
+
     func enqueue(_ event: OpenCodeManagedEvent) {
         guard !isStopped else { return }
         let directory = event.directory
@@ -152,8 +156,17 @@ actor OpenCodeManagedEventBatcher {
 
         while !queue.isEmpty {
             let count = min(queue.count, Self.maxEventsPerFlush)
-            let events = Array(queue.prefix(count))
-            queue.removeFirst(count)
+            // Keep suspended deliveries from retaining the queue's high-water allocation.
+            var events: [QueuedEvent] = []
+            events.reserveCapacity(count)
+            for index in 0..<count {
+                events.append(queue[index])
+            }
+            if count == queue.count {
+                queue.removeAll(keepingCapacity: false)
+            } else {
+                queue.removeFirst(count)
+            }
             rebuildCoalescedIndexes()
 
             for item in events {

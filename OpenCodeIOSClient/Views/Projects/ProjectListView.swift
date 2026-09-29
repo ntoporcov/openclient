@@ -693,230 +693,6 @@ private struct InlineSubtitleSelectTrigger: View {
     }
 }
 
-private struct ProjectNewChatModelItem: Identifiable, Equatable {
-    let providerID: String
-    let modelID: String
-    let name: String
-
-    var id: String { "\(providerID):\(modelID)" }
-    var reference: OpenCodeModelReference { OpenCodeModelReference(providerID: providerID, modelID: modelID) }
-}
-
-private struct ProjectNewChatModelSection: Identifiable, Equatable {
-    let id: String
-    let name: String
-    let models: [ProjectNewChatModelItem]
-}
-
-private struct ProjectNewChatModelPicker: View {
-    let sections: [ProjectNewChatModelSection]
-    let selectedReference: OpenCodeModelReference?
-    let onSelect: (OpenCodeModelReference?) -> Void
-    @State private var searchText = ""
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if normalizedSearchText.isEmpty {
-                    ProjectNewChatModelProviderList(sections: sections)
-                } else {
-                    ProjectNewChatModelSearchResults(
-                        sections: filteredSections,
-                        selectedReference: selectedReference,
-                        onSelect: onSelect
-                    )
-                }
-            }
-                .navigationTitle("Models")
-                .navigationBarTitleDisplayMode(.inline)
-                .searchable(
-                    text: $searchText,
-                    placement: .toolbar,
-                    prompt: "Search models"
-                )
-                .navigationDestination(for: String.self) { providerID in
-                    if let section = sections.first(where: { $0.id == providerID }) {
-                        ProjectNewChatProviderModels(
-                            section: section,
-                            selectedReference: selectedReference,
-                            onSelect: onSelect
-                        )
-                    }
-                }
-        }
-        .frame(width: 320, height: 320)
-        .accessibilityIdentifier("projects.newChat.model.popover")
-    }
-
-    private var normalizedSearchText: String {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var filteredSections: [ProjectNewChatModelSection] {
-        let query = normalizedSearchText
-        guard !query.isEmpty else { return sections }
-        return sections.compactMap { section in
-            let models = section.models.filter {
-                $0.name.localizedCaseInsensitiveContains(query)
-                    || $0.modelID.localizedCaseInsensitiveContains(query)
-            }
-            guard !models.isEmpty else { return nil }
-            return ProjectNewChatModelSection(id: section.id, name: section.name, models: models)
-        }
-    }
-}
-
-private struct ProjectNewChatModelProviderList: View {
-    let sections: [ProjectNewChatModelSection]
-
-    var body: some View {
-        List {
-            Section("Providers") {
-                ForEach(sections) { section in
-                    NavigationLink(value: section.id) {
-                        HStack(spacing: 10) {
-                            ProviderIcon(providerID: section.id, size: 22)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(section.name)
-                                    .foregroundStyle(.primary)
-                                Text(section.id)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .accessibilityIdentifier("projects.newChat.model.provider.\(section.id)")
-                }
-
-                if sections.isEmpty {
-                    ContentUnavailableView("No Models", systemImage: "magnifyingglass")
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .opencodeSoftScrollEdgeEffect()
-    }
-}
-
-private struct ProjectNewChatModelSearchResults: View {
-    let sections: [ProjectNewChatModelSection]
-    let selectedReference: OpenCodeModelReference?
-    let onSelect: (OpenCodeModelReference?) -> Void
-
-    var body: some View {
-        List {
-            ForEach(sections) { section in
-                Section {
-                    ForEach(section.models) { model in
-                        ProjectNewChatModelOptionButton(
-                            title: model.name,
-                            providerID: section.id,
-                            providerName: section.name,
-                            identifier: "projects.newChat.model.\(model.id)",
-                            isSelected: selectedReference == model.reference
-                        ) {
-                            onSelect(model.reference)
-                        }
-                    }
-                }
-            }
-
-            if sections.isEmpty {
-                ContentUnavailableView("No Models", systemImage: "magnifyingglass")
-            }
-        }
-        .listStyle(.insetGrouped)
-        .opencodeSoftScrollEdgeEffect()
-    }
-}
-
-private struct ProjectNewChatProviderModels: View {
-    let section: ProjectNewChatModelSection
-    let selectedReference: OpenCodeModelReference?
-    let onSelect: (OpenCodeModelReference?) -> Void
-    @State private var searchText = ""
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(filteredModels) { model in
-                    ProjectNewChatModelOptionButton(
-                        title: model.name,
-                        identifier: "projects.newChat.model.\(model.id)",
-                        isSelected: selectedReference == model.reference
-                    ) {
-                        onSelect(model.reference)
-                    }
-                }
-            } header: {
-                HStack(spacing: 8) {
-                    ProviderIcon(providerID: section.id, size: 18)
-                    Text(section.name)
-                }
-            }
-
-            if filteredModels.isEmpty {
-                ContentUnavailableView("No Models", systemImage: "magnifyingglass")
-            }
-        }
-        .listStyle(.insetGrouped)
-        .opencodeSoftScrollEdgeEffect()
-        .navigationTitle(section.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .searchable(
-            text: $searchText,
-            placement: UIDevice.current.userInterfaceIdiom == .pad
-                ? .navigationBarDrawer(displayMode: .always)
-                : .toolbar,
-            prompt: "Search models"
-        )
-        .accessibilityIdentifier("projects.newChat.model.provider.\(section.id).content")
-    }
-
-    private var filteredModels: [ProjectNewChatModelItem] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return section.models }
-        return section.models.filter {
-            $0.name.localizedCaseInsensitiveContains(query)
-                || $0.modelID.localizedCaseInsensitiveContains(query)
-        }
-    }
-}
-
-private struct ProjectNewChatModelOptionButton: View {
-    let title: String
-    var providerID: String?
-    var providerName: String?
-    let identifier: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                if let providerID {
-                    ProviderIcon(providerID: providerID, size: 20)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .foregroundStyle(.primary)
-                    if let providerName {
-                        Text(providerName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                Image(systemName: "checkmark")
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.clear)
-            }
-            .contentShape(Rectangle())
-        }
-        .accessibilityIdentifier(identifier)
-        .accessibilityLabel(title)
-    }
-}
-
 private enum ProjectNewChatQuickPicker: Equatable {
     case workspace
     case agent
@@ -1440,9 +1216,10 @@ struct ProjectNewChatSheet: View, Equatable {
             .accessibilityValue(modelTitle)
             .accessibilityIdentifier("projects.newChat.model")
             .popover(isPresented: $isModelPickerPresented) {
-                ProjectNewChatModelPicker(
+                ModelPickerPopover(
                     sections: modelPickerSourceSections,
                     selectedReference: selectedModelReference,
+                    accessibilityIdentifierPrefix: "projects.newChat.model",
                     onSelect: { reference in
                         selectedModelReference = reference
                         syncReasoningSelection()
@@ -1631,13 +1408,13 @@ struct ProjectNewChatSheet: View, Equatable {
         ].joined(separator: "|")
     }
 
-    private var modelPickerSourceSections: [ProjectNewChatModelSection] {
+    private var modelPickerSourceSections: [ModelPickerSection] {
         viewModel.sortedProviders.compactMap { provider in
             let models = viewModel.visibleModels(for: provider).map { model in
-                ProjectNewChatModelItem(providerID: provider.id, modelID: model.id, name: model.name)
+                ModelPickerItem(providerID: provider.id, modelID: model.id, name: model.name)
             }
             guard !models.isEmpty else { return nil }
-            return ProjectNewChatModelSection(id: provider.id, name: provider.name, models: models)
+            return ModelPickerSection(id: provider.id, name: provider.name, models: models)
         }
     }
 

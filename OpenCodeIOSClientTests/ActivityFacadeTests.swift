@@ -986,7 +986,10 @@ final class ActivityFacadeTests: XCTestCase {
     }
 
     func testSelectedSimpleRowPrefersCanonicalTranscriptOverStaleCachedPreview() async throws {
-        let viewModel = AppViewModel()
+        let suiteName = "ActivityFacadeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let viewModel = AppViewModel(appCustomizationStore: AppCustomizationStore(defaults: defaults))
         let project = makeProject(id: "preview-project", directory: "/tmp/preview-project")
         let session = makeSession(id: "preview-session", title: "Preview", directory: project.worktree,
             projectID: project.id, updated: 1_000)

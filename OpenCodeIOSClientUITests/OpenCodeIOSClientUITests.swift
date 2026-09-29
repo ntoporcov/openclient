@@ -598,9 +598,9 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         }
 
         XCTAssertFalse(app.buttons["projects.newChat.model.default"].exists)
-        let search = app.searchFields["Search models"]
+        let search = app.searchFields["projects.newChat.model.search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
-        search.tap()
+        // Opening the popover must focus search without an extra click.
         search.typeText("Sonnet")
 
         let option = app.buttons["Claude Sonnet 4.5"]
@@ -617,11 +617,21 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         XCTAssertTrue(anthropic.waitForExistence(timeout: 10))
         anthropic.tap()
 
-        let providerSearch = app.searchFields["Search models"]
+        let providerSearch = app.searchFields["projects.newChat.model.search"]
         XCTAssertTrue(providerSearch.waitForExistence(timeout: 10))
-        providerSearch.tap()
         providerSearch.typeText("GPT-5.4")
         XCTAssertTrue(app.staticTexts["No Models"].waitForExistence(timeout: 10))
+
+        // Use the actual SwiftUI Back action rather than mutating its UIKit navigation stack.
+        let back = app.navigationBars.buttons["Models"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        back.tap()
+        let restoredSearch = app.searchFields["projects.newChat.model.search"]
+        XCTAssertTrue(restoredSearch.waitForExistence(timeout: 10))
+        restoredSearch.typeText("Sonnet")
+        XCTAssertTrue(option.waitForExistence(timeout: 10))
+        option.tap()
+        XCTAssertTrue(waitForAccessibilityValue(of: modelTrigger, equalTo: "Claude Sonnet 4.5"))
     }
 
     @MainActor
@@ -704,7 +714,9 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["screenshot.scene.chat"].waitForExistence(timeout: 10))
-        let modelTrigger = app.buttons["chat.toolbar.model"]
+        let modelTrigger = app.buttons.matching(NSPredicate(
+            format: "identifier IN %@", ["chat.toolbar.model", "chat.composer.model"]
+        )).firstMatch
         XCTAssertTrue(modelTrigger.waitForExistence(timeout: 10))
 
         modelTrigger.tap()
@@ -718,7 +730,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         XCTAssertTrue(model.waitForExistence(timeout: 10))
         model.tap()
         XCTAssertTrue(
-            waitForAccessibilityValue(of: modelTrigger, equalTo: "Claude Sonnet 4.5, Default"),
+            waitForAccessibilityValue(of: modelTrigger, equalTo: "Anthropic, Claude Sonnet 4.5, Default"),
             "Expected selecting Claude to update the chat model"
         )
 
@@ -730,7 +742,7 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         XCTAssertTrue(reasoning.waitForExistence(timeout: 10))
         reasoning.tap()
         XCTAssertTrue(
-            waitForAccessibilityValue(of: modelTrigger, equalTo: "Claude Sonnet 4.5, Balanced"),
+            waitForAccessibilityValue(of: modelTrigger, equalTo: "Anthropic, Claude Sonnet 4.5, Balanced"),
             "Expected selecting Balanced to update the reasoning level"
         )
     }

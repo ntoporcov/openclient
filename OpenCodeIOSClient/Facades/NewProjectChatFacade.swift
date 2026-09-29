@@ -109,7 +109,7 @@ final class NewProjectChatFacade: ObservableObject {
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
 
-        Publishers.MergeMany([
+        let publishers: [AnyPublisher<Void, Never>] = [
             viewModel.projectStore.$projects.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.projectStore.$currentProject.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.projectStore.$worktreeInventories.dropFirst().map { _ in () }.eraseToAnyPublisher(),
@@ -129,7 +129,8 @@ final class NewProjectChatFacade: ObservableObject {
             viewModel.modelConfigurationStore.$modelVisibilityPreferences.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.modelConfigurationStore.$defaultModelsByProviderID.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             viewModel.modelConfigurationStore.$newSessionDefaults.dropFirst().map { _ in () }.eraseToAnyPublisher(),
-        ])
+        ]
+        Publishers.MergeMany(publishers)
         .sink { [weak self] _ in self?.objectWillChange.send() }
         .store(in: &observations)
 
