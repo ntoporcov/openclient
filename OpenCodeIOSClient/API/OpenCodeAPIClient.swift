@@ -1322,6 +1322,20 @@ struct OpenCodeAPIClient: Sendable {
         try await sendNoContent(path: "\(prefix)/\(sessionID)/wait", method: "POST")
     }
 
+    func generateV2SideQuestion(sessionID: String, prompt: String) async throws -> String {
+        struct Request: Encodable { let prompt: String }
+        struct Response: Decodable {
+            struct Answer: Decodable { let text: String }
+            let data: Answer
+        }
+        let response: Response = try await send(
+            path: "/api/session/\(sessionID)/generate",
+            method: "POST",
+            body: Request(prompt: prompt)
+        )
+        return response.data.text
+    }
+
     func interruptV2Session(sessionID: String) async throws {
         try await sendNoContent(path: "/api/session/\(sessionID)/interrupt", method: "POST")
     }

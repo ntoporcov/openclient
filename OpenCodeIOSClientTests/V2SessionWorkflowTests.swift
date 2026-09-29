@@ -17,6 +17,68 @@ final class V2SessionWorkflowTests: XCTestCase {
         UserDefaults.standard.set(originalDraftData, forKey: OpenClientStorageKey.messageDraftsByChat)
     }
 
+    func testSideQuestionUsesGenerateWhileIdleOrBusyWithoutMutatingChatOrDraft() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let session = Self.session(id: "ses_side", directory: "/repo")
+        _ = model.beginSessionNavigation(session)
+        model.directoryStore.insertV2Session(session)
+        let connection = try model.requireBackendConnection()
+        let window = ChatWindowContext(model: model, connection: connection, session: session, owner: model.directoryStore)
+        defer { window.close() }
+        XCTAssertTrue(window.isCurrent)
+        let facades = [model.chatFacade, ChatFacade(viewModel: model, windowContext: window)]
+        var calls = 0
+        V2SessionWorkflowURLProtocol.handler = { request in
+            calls += 1
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/ses_side/generate")
+            XCTAssertNil(request.url?.query)
+            let body = try JSONSerialization.jsonObject(with: Self.body(request)) as? [String: String]
+            XCTAssertEqual(body, ["prompt": "Why did the test fail?"])
+            return (200, #"{"data":{"text":"An explanation, not a new turn"}}"#)
+        }
+        for facade in facades {
+            facade.composerStore.draftMessage = "Keep my main draft"
+            for busy in [false, true] {
+                model.directoryStore.sessionStatuses[session.id] = busy ? "busy" : "idle"
+                XCTAssertTrue(facade.canAskSideQuestion)
+                XCTAssertTrue(facade.commands(forSessionID: session.id, canFork: false).contains { $0.name == "btw" && $0.source == "client" })
+                let messages = facade.presentationMessages
+                let presentation = try XCTUnwrap(facade.makeSideQuestion(prompt: "Why did the test fail?", submitsImmediately: true))
+                XCTAssertTrue(presentation.store.isGenerating)
+                await presentation.coordinator.answer(store: presentation.store)
+                XCTAssertEqual(presentation.store.answer, "An explanation, not a new turn")
+                XCTAssertEqual(facade.composerStore.draftMessage, "")
+                XCTAssertEqual(facade.presentationMessages, messages)
+                XCTAssertTrue(facade.recoveryInputs(sessionID: session.id).isEmpty)
+                XCTAssertEqual(model.directoryStore.sessionStatuses[session.id], busy ? "busy" : "idle")
+            }
+        }
+        XCTAssertEqual(calls, 4, "Side questions must only call generate, never prompt, command, or interrupt")
+        let empty = try XCTUnwrap(model.chatFacade.makeSideQuestion(prompt: " \n", submitsImmediately: true))
+        XCTAssertFalse(empty.store.isGenerating, "An empty side question opens the editor without a request")
+    }
+
+    func testSideQuestionCannotStartAfterSessionNavigation() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        _ = model.beginSessionNavigation(Self.session(id: "ses_first", directory: "/repo"))
+        let presentation = try XCTUnwrap(model.chatFacade.makeSideQuestion(prompt: "Old context"))
+        _ = model.beginSessionNavigation(Self.session(id: "ses_second", directory: "/repo"))
+        V2SessionWorkflowURLProtocol.handler = { _ in
+            XCTFail("A stale sheet must not send against the old or new session")
+            return (500, "")
+        }
+        presentation.store.ask()
+        await presentation.coordinator.answer(store: presentation.store)
+        XCTAssertNil(presentation.store.answer)
+        XCTAssertFalse(presentation.store.isGenerating)
+        model.connectionStore.beginConnecting()
+        XCTAssertFalse(model.chatFacade.canAskSideQuestion)
+        XCTAssertNil(model.chatFacade.makeSideQuestion(prompt: "Disconnected"))
+    }
+
     func testV2StreamHapticsFollowVisibleAnswerDeltasAndThrottle() throws {
         let model = makeModel()
         defer { model.stopEventStream() }

@@ -97,7 +97,7 @@ struct ConfigurationsView: View {
                     } header: {
                         Text("Message Delivery")
                     } footer: {
-                        Text("On OpenCode v2, Queue waits until the current turn finishes. Steer guides the current turn at the next step. Hold the send button to change the next message’s behavior.")
+                        Text("On OpenCode v2, Queue waits until the current turn finishes. Steer guides the current turn at the next step. Hold the send button for more submit options.")
                     }
                 }
 

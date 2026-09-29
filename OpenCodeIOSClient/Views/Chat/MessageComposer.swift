@@ -202,7 +202,12 @@ struct MessageComposer: View {
     var onToggleConversation: (() -> Void)?
     var prefersAssistantLayout = false
     var streamingDelivery: OpenCodePromptDelivery?
-    var onSelectStreamingDelivery: ((OpenCodePromptDelivery) -> Void)?
+    var onSendWithDelivery: ((OpenCodePromptDelivery) -> Void)?
+    var onSideQuestion: ((Bool) -> Void)?
+    var actionContextID = ""
+    @State private var isSubmitFanExpanded = false
+    @State private var submitFanDragLocation: CGPoint?
+    @State private var submitFanReleaseID = 0
 
     private var activeStreamingDelivery: OpenCodePromptDelivery? {
         // Slash commands have their own execution semantics.
@@ -215,39 +220,59 @@ struct MessageComposer: View {
     @ViewBuilder
     private func sendControl<Content: View>(
         allowsDeliveryMenu: Bool = true,
+        sourceSize: CGFloat = 44,
         action: @escaping () -> Void,
         @ViewBuilder label: () -> Content
     ) -> some View {
-        if allowsDeliveryMenu, activeStreamingDelivery != nil, onSelectStreamingDelivery != nil {
-            // A primary-action menu owns both gestures: tap sends, hold opens choices.
-            // Attaching a context menu to the glass button can lose the hold gesture.
-            Menu {
-                deliveryMenu
-            } label: {
-                label()
-            } primaryAction: {
+        if allowsDeliveryMenu, onSideQuestion != nil || (activeStreamingDelivery != nil && onSendWithDelivery != nil) {
+            Button {
+                guard !isSubmitFanExpanded else { return }
                 action()
+            } label: { label() }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.35)
+                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+                    .onChanged { value in
+                        guard case .second(true, let drag) = value else { return }
+                        expandSubmitFan()
+                        submitFanDragLocation = drag?.location
+                    }
+                    .onEnded { value in
+                        guard case .second(true, let drag) = value, isSubmitFanExpanded else { return }
+                        submitFanDragLocation = drag?.location
+                        submitFanReleaseID += 1
+                    }
+            )
+            .accessibilityAction(named: Text("Show Submit Options"), expandSubmitFan)
+            .accessibilityHint("Touch and hold for submit options")
+            .anchorPreference(key: ComposerSubmitFanPreference.self, value: .bounds) { bounds in
+                guard isSubmitFanExpanded else { return nil }
+                var actions: [ComposerSubmitAction] = activeStreamingDelivery != nil && onSendWithDelivery != nil
+                    ? [.queue, .steer] : [.submit]
+                if onSideQuestion != nil { actions.append(.sideQuestion) }
+                return ComposerSubmitFanAnchor(bounds: bounds, sourceSize: sourceSize, sourceSymbol: sendSymbolName, actions: actions,
+                    dragLocation: submitFanDragLocation, releaseID: submitFanReleaseID,
+                    dismiss: { isSubmitFanExpanded = false },
+                    perform: { option in
+                        switch option {
+                        case .submit: action()
+                        case .queue: onSendWithDelivery?(.queue)
+                        case .steer: onSendWithDelivery?(.steer)
+                        case .sideQuestion: onSideQuestion?(true)
+                        }
+                    })
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
         } else {
             Button(action: action, label: label)
         }
     }
 
-    @ViewBuilder
-    private var deliveryMenu: some View {
-        if let delivery = activeStreamingDelivery, let onSelectStreamingDelivery {
-            Picker("Message Delivery", selection: Binding(
-                get: { delivery },
-                set: { onSelectStreamingDelivery($0) }
-            )) {
-                ForEach(OpenCodePromptDelivery.allCases) { option in
-                    Label(option.title, systemImage: option.symbolName).tag(option)
-                }
-            }
-            .pickerStyle(.inline)
-        }
+    private func expandSubmitFan() {
+        guard canSend, !isSubmitFanExpanded else { return }
+        isAccessoryMenuOpen = false
+        submitFanDragLocation = nil
+        OpenCodeHaptics.impact(.soft)
+        isSubmitFanExpanded = true
     }
 
 #if canImport(PhotosUI) && canImport(UIKit)
@@ -506,7 +531,7 @@ struct MessageComposer: View {
     }
 
     private var canInsertCommandShortcut: Bool {
-        allowsTextTools && text.isEmpty && attachmentCount == 0 && !isBusy && !commands.isEmpty
+        allowsTextTools && text.isEmpty && attachmentCount == 0 && (!isBusy || onSideQuestion != nil) && !commands.isEmpty
     }
 
     private var canInsertAgentMentionShortcut: Bool {
@@ -528,7 +553,8 @@ struct MessageComposer: View {
 
     private var filteredCommands: [OpenCodeCommand] {
         guard let query = slashQuery else { return [] }
-        return ComposerSuggestionSelection.rankedCommands(commands, query: query)
+        let available = isBusy ? commands.filter { $0.source == "client" && $0.name == "btw" } : commands
+        return ComposerSuggestionSelection.rankedCommands(available, query: query)
     }
 
     private var agentMentionQuery: String? {
@@ -557,7 +583,7 @@ struct MessageComposer: View {
     }
 
     private var showsCommandPicker: Bool {
-        allowsTextTools && slashQuery != nil && !isBusy
+        allowsTextTools && slashQuery != nil && (!isBusy || !filteredCommands.isEmpty)
     }
 
     private var suggestionContext: ComposerSuggestionSelection.Context? {
@@ -596,12 +622,14 @@ struct MessageComposer: View {
                 suggestionSelection.synchronize(to: context)
             }
             .onChange(of: draftStore.text) { _, _ in
+                isSubmitFanExpanded = false
                 reconcileAgentMentions()
                 if !text.isEmpty {
                     isAccessoryMenuOpen = false
                 }
             }
             .onChange(of: isBusy) { _, busy in
+                isSubmitFanExpanded = false
                 if busy {
                     isAccessoryMenuOpen = false
                     #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
@@ -611,10 +639,16 @@ struct MessageComposer: View {
             }
             .onChange(of: isAccessoryMenuOpen) { _, isOpen in
                 if isOpen {
+                    isSubmitFanExpanded = false
                     accessoryPopoverHeight = isComposerActionsScreenshotScene ? expandedAccessorySheetDetentHeight : 315
                     accessoryNavigationPath = []
                 }
             }
+            .modifier(ComposerSubmitFanLifecycle(
+                isExpanded: $isSubmitFanExpanded, blocksNewInput: blocksNewInput,
+                contextID: actionContextID, hasSideQuestion: onSideQuestion != nil,
+                showsSendButton: showsSendActionButton
+            ))
 #if canImport(AVFoundation) && canImport(Speech) && canImport(UIKit)
             .messageComposerSpeechRecognition(
                 recognizer: dictationController,
@@ -739,7 +773,7 @@ struct MessageComposer: View {
                 .accessibilityIdentifier("chat.input")
                 .disabled(blocksNewInput)
 
-            sendControl(allowsDeliveryMenu: showsSendAction, action: showsSendAction ? onSend : onStop) {
+            sendControl(allowsDeliveryMenu: showsSendAction, sourceSize: 40, action: showsSendAction ? onSend : onStop) {
                 Image(systemName: showsSendAction ? sendSymbolName : "stop.fill")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(appAccentForeground.opacity((showsSendAction ? canSend : canStop) ? 1 : 0.78))
@@ -766,6 +800,8 @@ struct MessageComposer: View {
             .disabled(showsSendAction ? !canSend : !canStop)
             .accessibilityLabel(showsSendAction ? sendAccessibilityLabel : LocalizedStringResource("Stop"))
             .accessibilityIdentifier(showsSendAction ? "chat.send" : "chat.stop")
+            .opacity(isSubmitFanExpanded ? 0 : 1)
+            .accessibilityHidden(isSubmitFanExpanded)
         }
         .padding(6)
         .background(
@@ -1062,7 +1098,7 @@ struct MessageComposer: View {
     }
 
     private var catalystSendActionButton: some View {
-        sendControl(action: {
+        sendControl(sourceSize: 32, action: {
             guard isSendActionButtonEnabled else { return }
             onSend()
         }) {
@@ -1081,6 +1117,8 @@ struct MessageComposer: View {
         .disabled(!isSendActionButtonEnabled)
         .accessibilityLabel(sendAccessibilityLabel)
         .accessibilityIdentifier("chat.send")
+        .opacity(isSubmitFanExpanded ? 0 : 1)
+        .accessibilityHidden(isSubmitFanExpanded)
     }
 
     private var catalystMicActionButton: some View {
@@ -1386,7 +1424,7 @@ struct MessageComposer: View {
     }
 
     private var sendActionButton: some View {
-        sendControl(action: {
+        sendControl(sourceSize: composerActionButtonSize, action: {
             guard isSendActionButtonEnabled else { return }
             onSend()
         }) {
@@ -1403,6 +1441,8 @@ struct MessageComposer: View {
         .disabled(!isSendActionButtonEnabled)
         .accessibilityLabel(sendAccessibilityLabel)
         .accessibilityIdentifier("chat.send")
+        .opacity(isSubmitFanExpanded ? 0 : 1)
+        .accessibilityHidden(isSubmitFanExpanded)
     }
 
     private var micActionButton: some View {
@@ -1723,6 +1763,21 @@ struct MessageComposer: View {
                     }
 
                     if allowsSessionTools {
+                        if let onSideQuestion {
+                            AccessoryMenuAction(
+                                title: "Side Question",
+                                subtitle: "Ask without changing history",
+                                systemImage: SideQuestionAppearance.symbolName,
+                                tint: .indigo,
+                                isDisabled: false,
+                                accessibilityIdentifier: "chat.composer.sideQuestion",
+                                action: {
+                                    isAccessoryMenuOpen = false
+                                    onSideQuestion(false)
+                                }
+                            )
+                        }
+
                         AccessoryMenuAction(
                             title: "MCP",
                             subtitle: "Toggle servers",
@@ -2950,6 +3005,10 @@ private struct CommandPicker: View {
                                     onSelect(command)
                                 } label: {
                                     HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                        if command.source == "client", command.name == "btw" {
+                                            Image(systemName: SideQuestionAppearance.symbolName)
+                                                .foregroundStyle(.secondary)
+                                        }
                                         HStack(spacing: 1) {
                                             Text("/")
                                                 .foregroundStyle(.secondary.opacity(0.7))

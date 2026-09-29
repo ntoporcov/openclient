@@ -24,6 +24,19 @@ struct OpenClientChatWindowRoute: Codable, Hashable, Sendable {
 }
 
 enum OpenClientChatCommands {
+    static let sideQuestion = OpenCodeCommand(
+        name: "btw",
+        description: String(localized: "Ask a side question without changing the conversation"),
+        agent: nil, model: nil, source: "client", template: "", subtask: false, hints: []
+    )
+
+    static func sideQuestionPrompt(from text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+        guard parts.first?.lowercased() == "/btw" else { return nil }
+        return parts.count > 1 ? String(parts[1]) : ""
+    }
+
     static let fork = OpenCodeCommand(
         name: "fork",
         description: String(localized: "Create a new session from a previous message"),
@@ -671,6 +684,40 @@ final class ChatFacade: ObservableObject {
         return connectionStore.streamingDelivery(for: config)
     }
 
+    var canAskSideQuestion: Bool {
+        allowsV2TextPromptAdmission && selectedSession != nil
+            && viewModel.backendConnection?.isClosed == false
+            && viewModel.backendConnection?.openCodeCompatibility?.profile == .v2
+    }
+
+    func makeSideQuestion(prompt: String, submitsImmediately: Bool = false) -> SideQuestionPresentation? {
+        guard canAskSideQuestion, let session = selectedSession,
+              let connection = viewModel.backendConnection,
+              let client = connection.openCodeCompatibility?.client else { return nil }
+        let contextID = promptContextID
+        let store = SideQuestionStore(prompt: prompt)
+        let draft = composerStore.draftMessage
+        let draftReset = composerStore.resetToken
+        if submitsImmediately { store.ask() }
+        return SideQuestionPresentation(store: store, coordinator: .init(generate: { [weak self] prompt in
+            guard let self, self.canAskSideQuestion, self.promptContextID == contextID,
+                  self.viewModel.isCurrentBackendConnection(connection),
+                  await self.waitForV2Configuration(sessionID: session.id) else { throw BackendError.disconnected }
+            guard self.canAskSideQuestion, self.promptContextID == contextID,
+                  self.viewModel.isCurrentBackendConnection(connection) else { throw BackendError.disconnected }
+            try Task.checkCancellation()
+            if self.composerStore.resetToken == draftReset, self.composerStore.draftMessage == draft {
+                self.saveMessageDraft("", agentMentions: [], forSessionID: session.id)
+                self.clearDraftAttachments()
+                self.resetComposer()
+            }
+            let answer = try await client.generateV2SideQuestion(sessionID: session.id, prompt: prompt)
+            guard self.canAskSideQuestion, self.promptContextID == contextID,
+                  self.viewModel.isCurrentBackendConnection(connection) else { throw CancellationError() }
+            return answer
+        }))
+    }
+
     func sendV2TextPrompt(_ text: String, in session: OpenCodeSession, attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = [], messageID: String? = nil, delivery: OpenCodePromptDelivery? = nil) async -> Bool {
         logPromptSubmission("v2 facade entered", sessionID: session.id, messageID: messageID)
         guard allowsV2TextPromptAdmission else {
@@ -841,6 +888,10 @@ final class ChatFacade: ObservableObject {
         }
         if viewModel.compatibilityClient(for: .fork) != nil, store.selectedSession != nil, canFork, !result.contains(where: { $0.name == "fork" }) {
             result.append(OpenClientChatCommands.fork)
+        }
+        if canAskSideQuestion {
+            result.removeAll { $0.name == "btw" }
+            result.append(OpenClientChatCommands.sideQuestion)
         }
         return result
     }

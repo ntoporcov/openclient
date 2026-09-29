@@ -1624,6 +1624,7 @@ private struct MessageComposerSnapshot: Equatable {
     let attachmentCount: Int
     let isBusy: Bool
     let canFork: Bool
+    let canAskSideQuestion: Bool
     let forkSignature: String
     let mcpSignature: String
     let pinnedCommandSignature: String
@@ -2123,7 +2124,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
     var conversationInputLevel: CGFloat = 0
     var onToggleConversation: (() -> Void)?
     var streamingDelivery: OpenCodePromptDelivery?
-    var onSelectStreamingDelivery: ((OpenCodePromptDelivery) -> Void)?
+    var onSendWithDelivery: ((OpenCodePromptDelivery) -> Void)?
+    var onSideQuestion: ((Bool) -> Void)?
 
     nonisolated static func == (lhs: EquatableMessageComposerHost, rhs: EquatableMessageComposerHost) -> Bool {
         lhs.snapshot == rhs.snapshot && lhs.streamingDelivery == rhs.streamingDelivery
@@ -2181,7 +2183,9 @@ private struct EquatableMessageComposerHost: View, Equatable {
             onToggleConversation: onToggleConversation,
             prefersAssistantLayout: snapshot.prefersAssistantLayout,
             streamingDelivery: streamingDelivery,
-            onSelectStreamingDelivery: onSelectStreamingDelivery
+            onSendWithDelivery: onSendWithDelivery,
+            onSideQuestion: onSideQuestion,
+            actionContextID: actionSignature
         )
     }
 }
@@ -2320,6 +2324,7 @@ struct ChatView: View {
     @State private var questionCustomAnswers: [String: String] = [:]
     @State private var taskStore = ChatViewTaskStore()
     @State private var composerDraftStore = MessageComposerDraftStore()
+    @State private var sideQuestion: SideQuestionPresentation?
     @State private var v2DraftRevision: UInt = 0
     @State private var v2DraftAttemptID: String?
     @State private var v2RetryDraft: OpenCodeV2RetryDraft?
@@ -2742,6 +2747,7 @@ struct ChatView: View {
 
     private var chatPresentationContent: some View {
         chatTranscriptContent
+        .composerSubmitActionFan()
         .navigationTitle("")
         .opencodeInlineNavigationTitle()
         .preference(
@@ -2889,6 +2895,19 @@ struct ChatView: View {
                 ForkSessionSheet(chatFacade: chatFacade)
             }
             .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $sideQuestion) { presentation in
+            SideQuestionSheet(store: presentation.store, coordinator: presentation.coordinator)
+        }
+        .onChange(of: chatFacade.promptContextID) { _, _ in
+            sideQuestion?.store.cancel()
+            sideQuestion = nil
+        }
+        .onChange(of: chatFacade.canAskSideQuestion) { _, available in
+            if !available {
+                sideQuestion?.store.cancel()
+                sideQuestion = nil
+            }
         }
         .overlay {
             if composerAccessoryExpansion.isExpanded {
@@ -3293,7 +3312,12 @@ struct ChatView: View {
         return true
     }
 
-    private func sendV2Prompt() {
+    private func sendV2Prompt(deliveryOverride: OpenCodePromptDelivery? = nil) {
+        if chatFacade.canAskSideQuestion,
+           let prompt = OpenClientChatCommands.sideQuestionPrompt(from: composerDraftStore.text) {
+            presentSideQuestion(prompt: prompt, submitsImmediately: true)
+            return
+        }
         chatFacade.logPromptSubmission("v2 composer tapped attemptPending=\(v2DraftAttemptID != nil) retryPending=\(v2RetryDraft != nil)", sessionID: sessionID)
         if clearConfirmedV2RetryDraftIfUnchanged() { return }
         guard v2DraftAttemptID == nil else { return }
@@ -3322,7 +3346,7 @@ struct ChatView: View {
         guard !prompt.isEmpty || !attachments.isEmpty, !chatFacade.hasPendingPromptAdmission(sessionID: sessionID) else { return }
         let command = chatFacade.slashCommandInput(from: prompt)
         let delivery = command == nil && chatFacade.isV2SessionBusy(sessionID: sessionID)
-            ? composerStore.streamingDelivery(default: chatFacade.defaultStreamingDelivery) : nil
+            ? (deliveryOverride ?? composerStore.streamingDelivery(default: chatFacade.defaultStreamingDelivery)) : nil
         if attachments.isEmpty,
            chatFacade.shouldOpenForkSheet(forSlashInput: prompt) || command.map({ chatFacade.isForkClientCommand($0.command) }) == true {
             clearComposerDraft()
@@ -3449,6 +3473,7 @@ struct ChatView: View {
             attachmentCount: composerSnapshot.attachmentCount,
             isBusy: composerSnapshot.isBusy,
             canFork: composerSnapshot.canFork,
+            canAskSideQuestion: chatFacade.canAskSideQuestion,
             forkSignature: composerSnapshot.forkSignature,
             mcpSignature: composerSnapshot.mcpSignature,
             pinnedCommandSignature: pinnedCommandSignature,
@@ -3521,6 +3546,10 @@ struct ChatView: View {
                 }
             },
             onSelectCommand: { command in
+                if command.source == "client", command.name == "btw" {
+                    presentSideQuestion(prompt: OpenClientChatCommands.sideQuestionPrompt(from: composerDraftStore.text) ?? "")
+                    return
+                }
                 guard !chatFacade.hasPendingPromptAdmission(sessionID: sessionID) else { return }
                 chatFacade.flushBufferedTranscript(reason: "command action")
                 if chatFacade.isForkClientCommand(command) {
@@ -3593,7 +3622,11 @@ struct ChatView: View {
             onToggleConversation: conversationAction,
             streamingDelivery: chatFacade.isV2Connection && chatFacade.isV2SessionBusy(sessionID: sessionID)
                 ? composerStore.streamingDelivery(default: chatFacade.defaultStreamingDelivery) : nil,
-            onSelectStreamingDelivery: { composerStore.selectStreamingDelivery($0) }
+            onSendWithDelivery: { sendV2Prompt(deliveryOverride: $0) },
+            onSideQuestion: snapshot.canAskSideQuestion ? { submitsImmediately in
+                presentSideQuestion(prompt: OpenClientChatCommands.sideQuestionPrompt(from: composerDraftStore.text) ?? composerDraftStore.text,
+                    submitsImmediately: submitsImmediately)
+            } : nil
         )
 
         return composer
@@ -3602,6 +3635,15 @@ struct ChatView: View {
             .padding(.top, 8)
             .padding(.bottom, activeComposerBottomPadding)
             .background(.clear)
+    }
+
+    private func presentSideQuestion(prompt: String, submitsImmediately: Bool = false) {
+        taskStore.composerDraftPersistenceTask?.cancel()
+        chatFacade.saveMessageDraft(composerDraftStore.text, agentMentions: composerDraftStore.agentMentions, forSessionID: sessionID)
+        guard let presentation = chatFacade.makeSideQuestion(prompt: prompt, submitsImmediately: submitsImmediately) else { return }
+        isComposerMenuOpen = false
+        isComposerInputFocused = false
+        sideQuestion = presentation
     }
 
     private func toggleConversationMode() {
@@ -3650,11 +3692,9 @@ struct ChatView: View {
     }
 
     private var activeComposerBottomPadding: CGFloat {
-        #if targetEnvironment(macCatalyst)
+        // Sheet presentation can clear focus while UIKit keeps/restores the
+        // keyboard. Keep the gap stable through that handoff.
         8
-        #else
-        isComposerInputFocused ? 8 : 0
-        #endif
     }
 
     private func presentBrowser() {

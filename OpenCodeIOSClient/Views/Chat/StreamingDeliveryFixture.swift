@@ -3,11 +3,17 @@ import SwiftUI
 
 /// Exercises the real composer with a permanently busy session and no transport.
 struct StreamingDeliveryFixture: View {
-    @StateObject private var draft = MessageComposerDraftStore(text: "Keep this streaming draft")
+    @StateObject private var draft = MessageComposerDraftStore(
+        text: ProcessInfo.processInfo.environment["OPENCLIENT_SIDE_QUESTION_DRAFT"] ?? "Keep this streaming draft"
+    )
     @State private var accessoryOpen = false
     @State private var delivery: OpenCodePromptDelivery = .queue
     @State private var submissions: [String] = []
+    @State private var stopCount = 0
+    @State private var sideQuestion: SideQuestionPresentation?
     @Namespace private var glassNamespace
+
+    private var isBusy: Bool { ProcessInfo.processInfo.environment["OPENCLIENT_DELIVERY_IDLE"] != "1" }
 
     var body: some View {
         VStack {
@@ -16,27 +22,54 @@ struct StreamingDeliveryFixture: View {
             Text(verbatim: submissions.isEmpty ? "No submissions" : submissions.joined(separator: "|"))
                 .accessibilityIdentifier("streaming.fixture.submissions")
                 .accessibilityValue(Text(verbatim: String(submissions.count)))
+            Text(verbatim: "Stops: \(stopCount)")
+                .accessibilityIdentifier("streaming.fixture.stops")
+                .accessibilityValue(Text(verbatim: String(stopCount)))
             Spacer()
             MessageComposer(
                 draftStore: draft,
                 isAccessoryMenuOpen: $accessoryOpen,
-                commands: [], mentionableAgents: [], pinnedCommands: [], pinnedCommandNames: [],
-                attachmentCount: 0, isBusy: true, canFork: false, forkableMessages: [],
+                commands: [OpenClientChatCommands.sideQuestion], mentionableAgents: [], pinnedCommands: [], pinnedCommandNames: [],
+                attachmentCount: 0, isBusy: isBusy, canFork: false, forkableMessages: [],
                 mcpServers: [], connectedMCPServerCount: 0, isLoadingMCP: false,
                 togglingMCPServerNames: [], mcpErrorMessage: nil,
                 onFocusChange: { _ in }, onTextChange: { _ in }, onAgentMentionsChange: { _ in },
                 onHeightChange: { _ in },
-                onSend: { submissions.append("\(delivery.rawValue):\(draft.text)") },
-                onStop: {}, onSelectCommand: { _ in }, onPinCommand: { _ in },
+                onSend: {
+                    if OpenClientChatCommands.sideQuestionPrompt(from: draft.text) != nil { presentSideQuestion(submitsImmediately: true) }
+                    else { submissions.append("\(delivery.rawValue):\(draft.text)") }
+                },
+                onStop: { stopCount += 1 }, onSelectCommand: { _ in presentSideQuestion() }, onPinCommand: { _ in },
                 onUnpinCommand: { _ in }, onCompact: {}, onForkMessage: { _ in },
                 onLoadMCP: {}, onToggleMCP: { _ in }, onAddAttachments: { _ in },
                 onOpenBrowser: nil, glassNamespace: glassNamespace,
                 prefersAssistantLayout: ProcessInfo.processInfo.environment["OPENCLIENT_STREAMING_ASSISTANT"] == "1",
-                streamingDelivery: delivery,
-                onSelectStreamingDelivery: { delivery = $0 }
+                streamingDelivery: isBusy ? delivery : nil,
+                onSendWithDelivery: { submissions.append("\($0.rawValue):\(draft.text)") },
+                onSideQuestion: { presentSideQuestion(submitsImmediately: $0) }
             )
         }
         .padding()
+        .composerSubmitActionFan()
+        .sheet(item: $sideQuestion) { presentation in
+            SideQuestionSheet(store: presentation.store, coordinator: presentation.coordinator)
+        }
+    }
+
+    private func presentSideQuestion(submitsImmediately: Bool = false) {
+        accessoryOpen = false
+        let store = SideQuestionStore(prompt: OpenClientChatCommands.sideQuestionPrompt(from: draft.text) ?? draft.text)
+        if submitsImmediately { store.ask() }
+        sideQuestion = SideQuestionPresentation(
+            store: store,
+            coordinator: .init(generate: { _ in
+                draft.text = ""
+                if ProcessInfo.processInfo.environment["OPENCLIENT_SIDE_QUESTION_LOADING"] == "1" {
+                    try await Task.sleep(for: .seconds(6))
+                }
+                return "A temporary side answer."
+            })
+        )
     }
 }
 
@@ -93,10 +126,11 @@ struct QueuedSubmissionLifecycleFixture: View {
                 onCompact: {}, onForkMessage: { _ in }, onLoadMCP: {}, onToggleMCP: { _ in },
                 onAddAttachments: { _ in }, onOpenBrowser: nil, glassNamespace: glassNamespace,
                 prefersAssistantLayout: true, streamingDelivery: delivery,
-                onSelectStreamingDelivery: { _ in }
+                onSendWithDelivery: { _ in queue() }
             )
         }
         .padding()
+        .composerSubmitActionFan()
         .onAppear {
             if store.messages.isEmpty { store.appendMessage(assistantMessage("tool1")) }
         }
