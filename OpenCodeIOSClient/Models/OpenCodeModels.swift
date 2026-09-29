@@ -478,15 +478,12 @@ struct OpenCodeDirectorySyncState: Equatable, Sendable {
         }
     }
 
-    mutating func replaceMessagesPreservingOrder(_ envelopes: [OpenCodeMessageEnvelope], forSessionID sessionID: String) {
-        let previousMessageIDs = messagesBySessionID[sessionID]?.map(\.id) ?? []
-        for messageID in previousMessageIDs {
-            partsByMessageID[messageID] = nil
-        }
-        messagesBySessionID[sessionID] = []
-
+    @discardableResult
+    mutating func replaceMessagesPreservingOrder(_ envelopes: [OpenCodeMessageEnvelope], forSessionID sessionID: String) -> Bool {
+        let previousMessageIDs = Set(messagesBySessionID[sessionID]?.map(\.id) ?? [])
         var ordered: [OpenCodeMessageEnvelope] = []
         var indexByID: [String: Int] = [:]
+        ordered.reserveCapacity(envelopes.count)
         for envelope in envelopes {
             if let index = indexByID[envelope.id] {
                 ordered[index] = envelope
@@ -495,9 +492,33 @@ struct OpenCodeDirectorySyncState: Equatable, Sendable {
                 ordered.append(envelope)
             }
         }
-        for envelope in ordered {
-            appendMessageEnvelope(envelope, forSessionID: sessionID)
+        // V2 order is canonical: first occurrence sets position, last supplies content.
+        // Build the array once rather than searching/copying a growing array per message.
+        var changed = false
+        let messages = ordered.map(\.info)
+        if messagesBySessionID[sessionID] != messages {
+            messagesBySessionID[sessionID] = messages
+            changed = true
         }
+        for messageID in previousMessageIDs where indexByID[messageID] == nil {
+            if partsByMessageID[messageID] != nil {
+                partsByMessageID[messageID] = nil
+                changed = true
+            }
+        }
+        for envelope in ordered {
+            let parts = envelope.parts.filter { !Self.skippedPartTypes.contains($0.type) }
+            if parts.isEmpty {
+                if previousMessageIDs.contains(envelope.id), partsByMessageID[envelope.id] != nil {
+                    partsByMessageID[envelope.id] = nil
+                    changed = true
+                }
+            } else if partsByMessageID[envelope.id] != parts {
+                partsByMessageID[envelope.id] = parts
+                changed = true
+            }
+        }
+        return changed
     }
 
     mutating func appendMessageEnvelope(_ envelope: OpenCodeMessageEnvelope, forSessionID sessionID: String) {

@@ -83,6 +83,11 @@ extension AppViewModel {
             selectedSession = session
             resetLocalCacheChatHydration(sessionID: session.id)
             chatStore.beginV2TranscriptHydration(sessionID: session.id)
+            sessionInteractionStore.applySelectedSession(
+                sessionID: session.id,
+                sessions: directoryStore.sessions,
+                syncState: directoryStore.syncState
+            )
             projectFilesStore.selectedVCSFile = nil
             streamDirectory = nil
             restoreMessageDraft(for: session)
@@ -409,8 +414,16 @@ extension AppViewModel {
                     return chatStore.preparedSessionID == session.id && !chatStore.isHydratingV2Transcript(sessionID: session.id)
                 }
                 let revision = chatStore.v2StreamRevision(sessionID: session.id)
-                let page = try await connection.chat.transcript(sessionID: session.id,
-                    scope: .init(projectID: session.projectID, directory: session.directory, workspaceID: session.workspaceID), cursor: nil, limit: 200)
+                let page = try await sessionCoordinator.initialV2Transcript(
+                    cachedMessageCount: chatStore.cachedMessagesBySessionID[session.id]?.count ?? 0
+                ) { cursor, limit in
+                    guard isCurrent(), self.chatStore.isCurrentV2CanonicalRead(requestID, sessionID: session.id) else {
+                        throw CancellationError()
+                    }
+                    return try await connection.chat.transcript(sessionID: session.id,
+                        scope: .init(projectID: session.projectID, directory: session.directory, workspaceID: session.workspaceID),
+                        cursor: cursor, limit: limit)
+                }
                 guard isCurrent() else { return false }
                 guard chatStore.isCurrentV2CanonicalRead(requestID, sessionID: session.id) else {
                     return chatStore.preparedSessionID == session.id && !chatStore.isHydratingV2Transcript(sessionID: session.id)
@@ -1479,12 +1492,11 @@ extension AppViewModel {
                       isSessionNavigationCurrent(sessionID: session.id, generation: generation, directoryKey: key) else { return }
             }
             do {
-                try await reloadSessionStatuses()
-                guard directoryStoreRegistry.generation == registryGeneration,
-                      isSessionNavigationCurrent(sessionID: session.id, generation: generation, directoryKey: key) else { return }
+                async let statuses: Void = reloadSessionStatuses()
                 if await hydrateV2Transcript(for: session, navigationGeneration: generation, expectedDirectoryKey: key) {
                     await hydrateV2Interactions(for: session)
                 }
+                try await statuses
             } catch {
                 guard directoryStoreRegistry.generation == registryGeneration,
                       isSessionNavigationCurrent(sessionID: session.id, generation: generation, directoryKey: key) else { return }

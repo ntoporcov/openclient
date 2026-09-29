@@ -249,6 +249,38 @@ final class SessionListFacade: ObservableObject {
     private var presentationMetadata: [ObjectIdentifier: DirectoryPresentationMetadata] = [:]
     private(set) var snapshotBuildCount = 0
 
+    private struct CacheScope: Equatable {
+        let connectionID: UUID?
+        let cacheNamespace: String?
+        let registryGeneration: Int
+        let directoryKey: String
+    }
+
+    private struct PreviewKey: Hashable {
+        let ownerID: ObjectIdentifier
+        let sessionID: String
+        let role: String
+    }
+
+    private struct CachedPreview {
+        let messageID: String
+        let textParts: [String]
+        let text: String?
+    }
+
+    private struct CachedForms {
+        let sessions: [OpenCodeSession]
+        let forms: [BackendFormKey: BackendForm]
+        var results: [String: [BackendForm]] = [:]
+    }
+
+    private var cacheScope: CacheScope?
+    private var cachedPreviews: [PreviewKey: CachedPreview] = [:]
+    private var cachedSummaryPreviews: [PreviewKey: (message: OpenCodeMessageEnvelope, preview: SessionPreview)] = [:]
+    private var cachedForms: [ObjectIdentifier: CachedForms] = [:]
+    private var usedPreviewKeys: Set<PreviewKey> = []
+    private var usedFormSessionIDs: [ObjectIdentifier: Set<String>] = [:]
+
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
         snapshot = makeSnapshot()
@@ -291,8 +323,31 @@ final class SessionListFacade: ObservableObject {
         liveActivityBackgroundBridge = bridge
     }
 
-    private func makeSnapshot() -> Snapshot {
+    func makeSnapshot() -> Snapshot {
         snapshotBuildCount += 1
+        let scope = CacheScope(connectionID: viewModel.backendConnection?.id,
+            cacheNamespace: viewModel.localCacheNamespace,
+            registryGeneration: viewModel.directoryStoreRegistry.generation,
+            directoryKey: viewModel.directoryStoreRegistry.activeKey)
+        if cacheScope != scope {
+            cachedPreviews = [:]
+            cachedSummaryPreviews = [:]
+            cachedForms = [:]
+            cacheScope = scope
+        }
+        usedPreviewKeys = []
+        usedFormSessionIDs = [:]
+        defer {
+            // Retain only inputs/results used by the current rows, never old transcripts or owners.
+            cachedPreviews = cachedPreviews.filter { usedPreviewKeys.contains($0.key) }
+            cachedSummaryPreviews = cachedSummaryPreviews.filter { usedPreviewKeys.contains($0.key) }
+            cachedForms = cachedForms.filter { usedFormSessionIDs[$0.key] != nil }
+            for (ownerID, cached) in cachedForms {
+                cachedForms[ownerID]?.results = cached.results.filter {
+                    usedFormSessionIDs[ownerID]?.contains($0.key) == true
+                }
+            }
+        }
         var sessions: [OpenCodeSession] = []
         var sessionIndexByID: [String: Int] = [:]
         for session in viewModel.sessions {
@@ -738,15 +793,37 @@ final class SessionListFacade: ObservableObject {
         let preview = viewModel.sessionPreviews[session.id]
         let prefersCanonicalPreview = viewModel.selectedSession?.id == session.id
         let messages = showsActivity || preview == nil || prefersCanonicalPreview
-            ? (owner?.syncState.messageEnvelopes(forSessionID: session.id) ?? []).filter { $0.info.sessionID == session.id }
+            ? owner?.syncState.messagesBySessionID[session.id] ?? []
             : []
+        // Preserve canonical preview priority while materializing only the final relevant envelope.
+        var rowPreview = preview
+        if !messages.isEmpty {
+            let latest = messages.last { message in
+                message.sessionID == session.id && (owner?.syncState.partsByMessageID[message.id]?.contains {
+                    $0.text?.contains(where: { !$0.isWhitespace }) == true
+                } ?? false)
+            } ?? messages.last { $0.sessionID == session.id }
+            if let latest, let owner {
+                let message = OpenCodeMessageEnvelope(info: latest, parts: owner.syncState.partsByMessageID[latest.id] ?? [])
+                let key = PreviewKey(ownerID: ObjectIdentifier(owner), sessionID: session.id, role: "summary")
+                usedPreviewKeys.insert(key)
+                if let cached = cachedSummaryPreviews[key], cached.message == message {
+                    rowPreview = cached.preview
+                } else {
+                    let summary = viewModel.buildSessionPreview(from: [message])
+                    cachedSummaryPreviews[key] = (message: message, preview: summary)
+                    rowPreview = summary
+                }
+            }
+        }
+        let lastMessage = showsActivity ? messages.last { $0.sessionID == session.id } : nil
+        let lastPart = lastMessage.flatMap { owner?.syncState.partsByMessageID[$0.id]?.last }
         let status = owner?.sessionStatuses[session.id] ?? owner?.syncState.sessionStatusesBySessionID[session.id]
             ?? viewModel.sessionStatuses[session.id]
         let isWorking = status.map { $0 != "idle" } ?? false
         let todos = owner?.syncState.todosBySessionID[session.id] ?? []
         let permissionCount = owner?.syncState.permissionsBySessionID[session.id]?.count ?? 0
-        let forms = SessionInteractionStore.forms(forSessionTreeRootID: session.id,
-            sessions: owner?.sessions ?? [], forms: owner.map { Array($0.sessionFormStore.forms.values) } ?? [])
+        let forms = sessionTreeForms(sessionID: session.id, owner: owner)
         let formKeys = Set(forms.map(\.key))
         let questionCount = (owner?.syncState.questionsBySessionID[session.id]?.filter {
             !formKeys.contains(.init(sessionID: $0.sessionID, formID: $0.id))
@@ -758,7 +835,7 @@ final class SessionListFacade: ObservableObject {
             showsPinnedBadge: showsPinnedBadge,
             workspaceOverline: workspaceOverline,
             style: .regular,
-            preview: messages.isEmpty ? preview : viewModel.buildSessionPreview(from: messages),
+            preview: rowPreview,
             isBusy: isBusy,
             hasLiveActivity: viewModel.isLiveActivityActive(for: session),
             hasDraft: viewModel.hasMessageDraft(for: session),
@@ -775,9 +852,9 @@ final class SessionListFacade: ObservableObject {
                 permissionCount: permissionCount,
                 questionCount: questionCount
             ),
-            latestUserText: showsActivity ? activityLatestText(in: messages, role: "user") : nil,
-            latestAssistantText: showsActivity ? activityLatestText(in: messages, role: "assistant") ?? viewModel.sessionPreviews[session.id]?.text : nil,
-            runningTools: showsActivity ? activityRunningToolSnapshots(in: messages) : [],
+            latestUserText: showsActivity ? activityLatestText(in: messages, owner: owner, sessionID: session.id, role: "user") : nil,
+            latestAssistantText: showsActivity ? activityLatestText(in: messages, owner: owner, sessionID: session.id, role: "assistant") ?? preview?.text : nil,
+            runningTools: showsActivity ? activityRunningToolSnapshots(part: lastPart, messageID: lastMessage?.id) : [],
             updatedAt: (session.time?.updated ?? session.time?.created).map { Date(timeIntervalSince1970: $0 / 1_000) }
                 ?? viewModel.sessionPreviews[session.id]?.date,
             pendingInteractionCount: permissionCount + questionCount,
@@ -796,15 +873,43 @@ final class SessionListFacade: ObservableObject {
         return title.isEmpty ? project.id : title
     }
 
-    private func activityLatestText(in messages: [OpenCodeMessageEnvelope], role: String) -> String? {
-        for message in messages.reversed() where message.info.role?.lowercased() == role {
-            let textParts = message.parts.filter { $0.type == "text" }.compactMap(\.text)
-            let fallbackParts = message.parts.filter { $0.type == "reasoning" }.compactMap(\.text)
-            if let text = opencodePreviewText((textParts.isEmpty ? fallbackParts : textParts).joined(separator: " "), limit: nil) {
-                return text
+    private func activityLatestText(in messages: [OpenCodeMessage], owner: DirectoryStore?, sessionID: String, role: String) -> String? {
+        guard let owner else { return nil }
+        let key = PreviewKey(ownerID: ObjectIdentifier(owner), sessionID: sessionID, role: role)
+        for message in messages.reversed() where message.sessionID == sessionID && message.role?.lowercased() == role {
+            let parts = owner.syncState.partsByMessageID[message.id] ?? []
+            var textParts = parts.filter { $0.type == "text" }.compactMap(\.text)
+            if textParts.isEmpty { textParts = parts.filter { $0.type == "reasoning" }.compactMap(\.text) }
+            guard !textParts.isEmpty else { continue }
+            usedPreviewKeys.insert(key)
+            if let cached = cachedPreviews[key], cached.messageID == message.id, cached.textParts == textParts {
+                if let text = cached.text { return text }
+                continue
             }
+            let text = opencodePreviewText(textParts.joined(separator: " "), limit: nil)
+            cachedPreviews[key] = CachedPreview(messageID: message.id, textParts: textParts, text: text)
+            if let text { return text }
         }
         return nil
+    }
+
+    private func sessionTreeForms(sessionID: String, owner: DirectoryStore?) -> [BackendForm] {
+        guard let owner else { return [] }
+        let ownerID = ObjectIdentifier(owner)
+        if usedFormSessionIDs[ownerID] == nil {
+            let sessions = owner.sessions
+            let forms = owner.sessionFormStore.forms
+            if cachedForms[ownerID]?.sessions != sessions || cachedForms[ownerID]?.forms != forms {
+                cachedForms[ownerID] = CachedForms(sessions: sessions, forms: forms)
+            }
+        }
+        usedFormSessionIDs[ownerID, default: []].insert(sessionID)
+        if let result = cachedForms[ownerID]?.results[sessionID] { return result }
+        let forms = owner.sessionFormStore.forms
+        let result = forms.isEmpty ? [] : SessionInteractionStore.forms(forSessionTreeRootID: sessionID,
+            sessions: owner.sessions, forms: Array(forms.values))
+        cachedForms[ownerID]?.results[sessionID] = result
+        return result
     }
 
     private func activityStatusTitle(status: String?, permissionCount: Int, questionCount: Int) -> String {
@@ -817,12 +922,11 @@ final class SessionListFacade: ObservableObject {
         }
     }
 
-    private func activityRunningToolSnapshots(in messages: [OpenCodeMessageEnvelope]) -> [ActivityFacade.ToolSnapshot] {
-        guard let message = messages.last,
-              let part = message.parts.last,
+    private func activityRunningToolSnapshots(part: OpenCodePart?, messageID: String?) -> [ActivityFacade.ToolSnapshot] {
+        guard let part,
               let tool = part.tool,
               ["running", "pending", "in_progress"].contains(part.state?.status?.lowercased() ?? "") else { return [] }
-        let id = part.id ?? part.callID ?? "\(message.id):\(tool)"
+        let id = part.id ?? part.callID ?? "\(messageID ?? ""):\(tool)"
         let title = activityToolTitle(part: part, tool: tool)
         let input = part.state?.input
         var detail: String? = input?.command

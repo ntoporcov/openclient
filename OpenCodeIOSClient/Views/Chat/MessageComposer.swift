@@ -284,6 +284,7 @@ struct MessageComposer: View {
 #endif
 
     @State private var suggestionSelection = ComposerSuggestionSelection()
+    @State private var isModelPickerPresented = false
     @State private var accessoryPopoverHeight: CGFloat = 315
     @State private var accessoryNavigationPath: [AccessoryDestination] = []
     @Namespace private var accessoryGlassNamespace
@@ -951,14 +952,10 @@ struct MessageComposer: View {
 #if targetEnvironment(macCatalyst)
         HStack(spacing: 4) {
             assistantAgentSelector
-            if !modelTitle.isEmpty, onSelectModel != nil {
-                StablePickerMenu(
-                    elements: modelMenuElements,
-                    accessibilityLabel: String(localized: "Model"),
-                    accessibilityValue: [modelProviderName, modelTitle].compactMap { $0 }.joined(separator: ", "),
-                    accessibilityIdentifier: "chat.composer.model",
-                    onSelect: selectModel
-                ) {
+            if !modelTitle.isEmpty, let onSelectModel {
+                Button {
+                    isModelPickerPresented = true
+                } label: {
                     catalystSelectorLabel(
                         title: modelTitle,
                         systemImage: nil,
@@ -967,7 +964,22 @@ struct MessageComposer: View {
                         usesGlassCapsule: false
                     )
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Model")
+                .accessibilityValue([modelProviderName, modelTitle].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityIdentifier("chat.composer.model")
                 .help(Text(verbatim: modelProviderName ?? modelTitle))
+                .popover(isPresented: $isModelPickerPresented) {
+                    ModelPickerPopover(
+                        sections: modelPickerSections,
+                        selectedReference: modelReference,
+                        accessibilityIdentifierPrefix: "chat.composer.model"
+                    ) { reference in
+                        onSelectModel(reference)
+                        isModelPickerPresented = false
+                    }
+                    .presentationCompactAdaptation(.popover)
+                }
                 .transaction { transaction in
                     transaction.animation = nil
                 }
@@ -990,7 +1002,8 @@ struct MessageComposer: View {
                     catalystSelectorLabel(
                         title: reasoningTitle,
                         systemImage: "brain.head.profile",
-                        glassID: "composer-reasoning-selector"
+                        glassID: "composer-reasoning-selector",
+                        usesGlassCapsule: false
                     )
                 }
                 .transaction { transaction in
@@ -1232,25 +1245,13 @@ struct MessageComposer: View {
         }
     }
 
-    private var modelMenuElements: [StablePickerMenuElement] {
-        [StablePickerMenuElement.submenu(
-            id: "models",
-            title: String(localized: "Model"),
-            children: providerGroups.map { provider in
-                .submenu(
-                    id: "provider:\(provider.id)",
-                    title: provider.name,
-                    children: provider.models.map { model in
-                        .action(
-                            id: "model:\(provider.id):\(model.id)",
-                            title: model.name,
-                            systemImage: nil,
-                            isSelected: modelReference == OpenCodeModelReference(providerID: provider.id, modelID: model.id)
-                        )
-                    }
-                )
-            }
-        )]
+    private var modelPickerSections: [ModelPickerSection] {
+        providerGroups.compactMap { provider in
+            guard !provider.models.isEmpty else { return nil }
+            return ModelPickerSection(id: provider.id, name: provider.name, models: provider.models.map { model in
+                ModelPickerItem(providerID: provider.id, modelID: model.id, name: model.name)
+            })
+        }
     }
 
     private var reasoningMenuElements: [StablePickerMenuElement] {
@@ -1275,17 +1276,6 @@ struct MessageComposer: View {
         )]
     }
 
-    private func selectModel(_ actionID: String) {
-        guard let onSelectModel else { return }
-        for provider in providerGroups {
-            if let model = provider.models.first(where: {
-                "model:\(provider.id):\($0.id)" == actionID
-            }) {
-                onSelectModel(OpenCodeModelReference(providerID: provider.id, modelID: model.id))
-                return
-            }
-        }
-    }
     #endif
 
     private func startDictation() {

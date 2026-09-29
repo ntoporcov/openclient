@@ -67,6 +67,7 @@ private final class ActivityPreloadChatBackend: BackendChatService {
 
     var requests: [Request] = []
     var gatedSessionID: String?
+    var foregroundSessionID: String?
     var onSuspension: (() -> Void)?
     var onReturn: (() -> Void)?
     var transcriptFailuresRemaining = 0
@@ -78,7 +79,7 @@ private final class ActivityPreloadChatBackend: BackendChatService {
             transcriptFailuresRemaining -= 1
             throw URLError(.timedOut)
         }
-        let foreground = limit == 200
+        let foreground = foregroundSessionID == sessionID
         let page = BackendTranscriptPage(messages: [
             .local(role: "user", text: "Prompt for \(sessionID)", messageID: "z-user-\(sessionID)", sessionID: sessionID),
             .local(role: "assistant", text: "\(foreground ? "Foreground" : "Preloaded") \(sessionID)",
@@ -340,6 +341,7 @@ final class ActivityFacadeTests: XCTestCase {
             XCTAssertEqual(viewModel.selectedSession?.id, target.id)
             XCTAssertTrue(viewModel.chatStore.isHydratingV2Transcript(sessionID: target.id))
             if completesForeground {
+                chat.foregroundSessionID = target.id
                 let hydrated = await viewModel.hydrateV2Transcript(for: target,
                     navigationGeneration: viewModel.sessionNavigationGeneration,
                     expectedDirectoryKey: DirectoryStoreRegistry.key(for: target.directory))
@@ -364,7 +366,7 @@ final class ActivityFacadeTests: XCTestCase {
             XCTAssertEqual(viewModel.chatStore.v2TranscriptStates[target.id], transcriptState)
             XCTAssertEqual(viewModel.chatStore.isHydratingV2Transcript(sessionID: target.id), !completesForeground)
             XCTAssertEqual(viewModel.isLoadingSelectedSession, !completesForeground)
-            XCTAssertEqual(chat.requests.map(\.limit), completesForeground ? [20, 200] : [20])
+            XCTAssertEqual(chat.requests.map(\.limit), completesForeground ? [20, 20] : [20])
             if completesForeground {
                 XCTAssertEqual(viewModel.sessionPreviews[target.id]?.text, "Foreground \(target.id)")
                 XCTAssertEqual(viewModel.chatStore.v2TranscriptStates[target.id]?.olderCursor, "foreground-older")
@@ -986,7 +988,10 @@ final class ActivityFacadeTests: XCTestCase {
     }
 
     func testSelectedSimpleRowPrefersCanonicalTranscriptOverStaleCachedPreview() async throws {
-        let viewModel = AppViewModel()
+        let suiteName = "ActivityFacadeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let viewModel = AppViewModel(appCustomizationStore: AppCustomizationStore(defaults: defaults))
         let project = makeProject(id: "preview-project", directory: "/tmp/preview-project")
         let session = makeSession(id: "preview-session", title: "Preview", directory: project.worktree,
             projectID: project.id, updated: 1_000)

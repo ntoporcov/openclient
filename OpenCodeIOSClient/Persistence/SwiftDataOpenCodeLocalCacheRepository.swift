@@ -297,13 +297,22 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
     ) async throws {
         guard writtenAt > (clearedAtByNamespace[serverID] ?? .distantPast) else { return }
         let key = OpenCodeLocalCacheKey.make([serverID, sessionID])
+        let record = try chatRecord(forKey: key)
+        if let record {
+            let latestWrittenAt = max(record.messagesWrittenAt, latestMessagesWrittenAtByKey[key] ?? .distantPast)
+            guard writtenAt >= latestWrittenAt,
+                  record.deletedAt.map({ writtenAt > $0 }) ?? true else { return }
+        }
+        // Reuse this decode for both V2 page merging and the unchanged-write check.
+        let existingMessages = record?.messagesPayload.flatMap {
+            try? decode([OpenCodeMessageEnvelope].self, from: $0)
+        }
         var messages = messages
         if OpenCodeLocalCacheIdentity.isV2(serverID) {
             // A bounded HTTP page is not a deletion manifest for unloaded history.
             // Merge canonical IDs; oldest entries may be evicted for capacity,
             // but hydration never claims complete or validated v2 history.
-            let existingPayload = try chatRecord(forKey: key)?.messagesPayload
-            let existing = existingPayload.flatMap { try? decode([OpenCodeMessageEnvelope].self, from: $0) } ?? []
+            let existing = existingMessages ?? []
             let incomingIDs = Set(messages.map(\.info.id))
             let merged: [OpenCodeMessageEnvelope]
             switch coverage {
@@ -336,20 +345,17 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
             ).envelopes
             messages = Array(messages.suffix(2_000))
         }
-        let payload = try encode(messages)
-        if let record = try chatRecord(forKey: key) {
-            let latestWrittenAt = max(record.messagesWrittenAt, latestMessagesWrittenAtByKey[key] ?? .distantPast)
-            guard writtenAt >= latestWrittenAt,
-                  record.deletedAt.map({ writtenAt > $0 }) ?? true else { return }
+        if let record {
             if record.serverID == serverID,
                record.sessionID == sessionID,
-               record.messagesPayload.flatMap({ try? decode([OpenCodeMessageEnvelope].self, from: $0) }) == messages,
+               existingMessages == messages,
                record.deletedAt == nil {
                 latestMessagesWrittenAtByKey[key] = writtenAt
                 record.messagesWrittenAt = writtenAt
                 try modelContext.save()
                 return
             }
+            let payload = try encode(messages)
             record.serverID = serverID
             record.sessionID = sessionID
             record.messagesPayload = payload
@@ -362,7 +368,7 @@ actor SwiftDataOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
                     key: key,
                     serverID: serverID,
                     sessionID: sessionID,
-                    messagesPayload: payload,
+                    messagesPayload: try encode(messages),
                     messagesRefreshedAt: refreshedAt,
                     messagesWrittenAt: writtenAt
                 )
