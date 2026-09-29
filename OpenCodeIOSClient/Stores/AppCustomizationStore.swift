@@ -82,6 +82,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
     var accentColor: AppAccentColor
     var showsChatActivityShimmer: Bool
     var showsToolCalls: Bool
+    var groupsToolCalls: Bool
     var showsReasoningBlocks: Bool
     var showsActivityLastUserMessage: Bool
     var isTodoStripMinimized: Bool
@@ -103,6 +104,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         accentColor: AppAccentColor = .blue,
         showsChatActivityShimmer: Bool = true,
         showsToolCalls: Bool = true,
+        groupsToolCalls: Bool = true,
         showsReasoningBlocks: Bool = true,
         showsActivityLastUserMessage: Bool = true,
         isTodoStripMinimized: Bool = false,
@@ -115,6 +117,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         self.accentColor = accentColor
         self.showsChatActivityShimmer = showsChatActivityShimmer
         self.showsToolCalls = showsToolCalls
+        self.groupsToolCalls = groupsToolCalls
         self.showsReasoningBlocks = showsReasoningBlocks
         self.showsActivityLastUserMessage = showsActivityLastUserMessage
         self.isTodoStripMinimized = isTodoStripMinimized
@@ -129,6 +132,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         case accentColor
         case showsChatActivityShimmer
         case showsToolCalls
+        case groupsToolCalls
         case showsReasoningBlocks
         case showsActivityLastUserMessage
         case isTodoStripMinimized
@@ -146,6 +150,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         accentColor = storedAccent == "gray" ? .clear : storedAccent.flatMap(AppAccentColor.init(rawValue:)) ?? .blue
         showsChatActivityShimmer = try container.decodeIfPresent(Bool.self, forKey: .showsChatActivityShimmer) ?? true
         showsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .showsToolCalls) ?? true
+        groupsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .groupsToolCalls) ?? true
         showsReasoningBlocks = try container.decodeIfPresent(Bool.self, forKey: .showsReasoningBlocks) ?? true
         showsActivityLastUserMessage = try container.decodeIfPresent(Bool.self, forKey: .showsActivityLastUserMessage) ?? true
         isTodoStripMinimized = try container.decodeIfPresent(Bool.self, forKey: .isTodoStripMinimized) ?? false
@@ -198,6 +203,14 @@ final class AppCustomizationStore: ObservableObject {
 
     var showsToolCalls: Bool {
         preferences.showsToolCalls
+    }
+
+    var groupsToolCalls: Bool { preferences.groupsToolCalls }
+
+    func setGroupsToolCalls(_ groups: Bool) {
+        guard preferences.groupsToolCalls != groups else { return }
+        preferences.groupsToolCalls = groups
+        persist()
     }
 
     var showsReasoningBlocks: Bool {

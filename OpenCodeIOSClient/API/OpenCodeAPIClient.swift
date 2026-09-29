@@ -637,7 +637,8 @@ private struct OpenCodeV2TimelineRecord: Decodable, Sendable {
                 ?? value.object("model")?.string("id")
                 ?? value.object("location")?.string("directory")
             guard let text else { return nil }
-            let part = textPart(id: "\(id):v2:text:0", messageID: id, sessionID: sessionID, type: type, text: text, synthetic: true)
+            let part = textPart(id: "\(id):v2:text:0", messageID: id, sessionID: sessionID, type: type, text: text,
+                                synthetic: true, contextTitle: value.string("description"))
             return envelope(
                 id: id,
                 role: "assistant",
@@ -782,7 +783,8 @@ private struct OpenCodeV2TimelineRecord: Decodable, Sendable {
         type: String,
         text: String,
         time: OpenCodePartTime? = nil,
-        synthetic: Bool? = nil
+        synthetic: Bool? = nil,
+        contextTitle: String? = nil
     ) -> OpenCodePart {
         OpenCodePart(
             id: id,
@@ -791,6 +793,7 @@ private struct OpenCodeV2TimelineRecord: Decodable, Sendable {
             type: type,
             mime: nil,
             filename: nil,
+            name: contextTitle,
             url: nil,
             reason: type == "reasoning" ? "reasoning" : nil,
             tool: nil,

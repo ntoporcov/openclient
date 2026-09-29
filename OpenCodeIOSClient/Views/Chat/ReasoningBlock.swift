@@ -3,12 +3,13 @@ import SwiftUI
 struct TimelineContextBlock: View {
     let kind: OpenCodeTimelineContextType
     let text: String
+    var contextTitle: String? = nil
     @State private var isExpanded = false
 
     private var title: LocalizedStringResource {
         switch kind {
         case .synthetic: "Context"
-        case .system: "System"
+        case .system: "Context updated"
         case .skill: "Skill"
         case .agentSwitched: "Agent changed"
         case .modelSwitched: "Model changed"
@@ -28,31 +29,47 @@ struct TimelineContextBlock: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: isExpanded ? 10 : 0) {
-            Button { isExpanded.toggle() } label: {
+        Button { isExpanded = true } label: {
+            HStack(spacing: 10) {
+                Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
                 HStack(spacing: 8) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.tertiary)
-                    Label { Text(title) } icon: { Image(systemName: icon) }
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                    Image(systemName: icon)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.caption.weight(.semibold))
+                        Text(verbatim: contextTitle ?? String(text.prefix(120)).components(separatedBy: .newlines).first ?? text)
+                            .font(.caption2)
+                            .lineLimit(1)
+                    }
+                    Image(systemName: "chevron.right").font(.caption2)
                 }
-                .contentShape(Rectangle())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.thinMaterial, in: Capsule())
+                .overlay { Capsule().stroke(Color.secondary.opacity(0.14), lineWidth: 1) }
+                .layoutPriority(1)
+                Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(isExpanded ? Text("Expanded") : Text("Collapsed"))
-            .accessibilityIdentifier("chat.context.\(kind.rawValue)")
-
-            if isExpanded {
-                MarkdownMessageText(text: text, isUser: false, style: .reasoning)
-                    .padding(.top, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("chat.context.\(kind.rawValue)")
+        .sheet(isPresented: $isExpanded) {
+            NavigationStack {
+                ScrollView {
+                    MarkdownMessageText(text: text, isUser: false, style: .standard)
+                        .textSelection(.enabled)
+                        .padding(20)
+                }
+                .navigationTitle(Text(title))
+                .opencodeInlineNavigationTitle()
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { isExpanded = false }
+                    }
+                }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

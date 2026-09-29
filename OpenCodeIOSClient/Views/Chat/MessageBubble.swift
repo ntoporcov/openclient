@@ -93,6 +93,21 @@ enum MessageBubbleMessageVisibilityPolicy {
     }
 }
 
+enum MessageBubbleToolGroupingPolicy {
+    static func groups(parts: [OpenCodePart], visibleIndices: [Int], enabled: Bool) -> [[Int]] {
+        var result: [[Int]] = []
+        for index in visibleIndices {
+            if enabled, OpenCodeToolActivityPolicy.isToolCall(parts[index]),
+               let previous = result.last?.last, OpenCodeToolActivityPolicy.isToolCall(parts[previous]) {
+                result[result.count - 1].append(index)
+            } else {
+                result.append([index])
+            }
+        }
+        return result
+    }
+}
+
 enum MessageBubbleDisplayIdentity {
     static func partID(index: Int, part: OpenCodePart) -> String {
         if let id = part.id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
@@ -135,6 +150,7 @@ struct MessageBubble: View {
     let isStreamingMessage: Bool
     let animatesStreamingText: Bool
     let showsToolCalls: Bool
+    var groupsToolCalls: Bool = true
     let hidesReasoningBlocks: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
@@ -206,6 +222,7 @@ struct MessageBubble: View {
             messageID: effectiveMessage.id,
             isUser: isUser,
             showsToolCalls: showsToolCalls,
+            groupsToolCalls: groupsToolCalls,
             hidesReasoningBlocks: hidesReasoningBlocks,
             parts: parts.map(displayEntryCachePartKey(for:))
         )
@@ -580,7 +597,7 @@ struct MessageBubble: View {
         retainedVisualHTMLPartIDs: Set<String>
     ) -> some View {
         if let kind = part.timelineContextType, let text = renderableText(for: part) {
-            TimelineContextBlock(kind: kind, text: text)
+            TimelineContextBlock(kind: kind, text: text, contextTitle: part.name)
         } else if hidesReasoningBlocks, textStyle(for: part) == .reasoning {
             EmptyView()
         } else if let attachment = attachment(for: part) {
@@ -756,12 +773,15 @@ struct MessageBubble: View {
 
     private func contextGroupView(_ group: ContextGroup, isActiveRevealPart: Bool) -> some View {
         let isExpanded = expandedContextGroupIDs.contains(group.id)
-        let summary = contextSummary(for: group.parts)
-        let running = isStreamingMessage || group.parts.contains { isRunning($0.part) }
-        let title: ActivityText = running
-            ? .localized(LocalizedStringResource("Exploring"))
-            : .localized(LocalizedStringResource("Explored"))
-        let subtitle = contextSummaryText(summary)
+        let running = group.parts.contains { isRunning($0.part) }
+        let count = group.parts.count
+        let title: ActivityText = count == 1 ? .localized("1 tool call") : .localized("\(count) tool calls")
+        var names: [String] = []
+        for item in group.parts {
+            let name = toolName(for: item.part)
+            if !names.contains(name) { names.append(name) }
+        }
+        let subtitle: ActivityText = .verbatim(names.joined(separator: ", "))
 
         return VStack(alignment: .leading, spacing: MessageBubbleSpacing.part) {
             Button {
@@ -783,18 +803,13 @@ struct MessageBubble: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("chat.tools.group.\(group.id)")
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: MessageBubbleSpacing.part) {
                     ForEach(group.parts, id: \.id) { indexed in
-                        if let style = activityStyle(for: indexed.part) {
-                            Button {
-                                handleActivityTap(for: indexed.part)
-                            } label: {
-                                ActivityRow(style: style, compact: true)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                        partView(indexed.part, index: indexed.index, isActiveRevealPart: false,
+                                 retainedVisualHTMLPartIDs: retainedVisualHTMLPartIDs)
                     }
                 }
             .padding(.leading, 8)
@@ -937,6 +952,7 @@ struct MessageBubble: View {
             return true
         case let .part(indexed):
             let part = indexed.part
+            if part.timelineContextType != nil { return true }
             if attachment(for: part) != nil { return true }
             if OpenClientVisualImageActivity(part: part) != nil { return true }
             if OpenClientVisualVideoActivity(part: part) != nil { return true }
@@ -974,37 +990,19 @@ struct MessageBubble: View {
     }
 
     private func makeDisplayEntryPlan(from parts: [OpenCodePart]) -> [MessageBubbleDisplayEntryPlan] {
-        var result: [MessageBubbleDisplayEntryPlan] = []
-        var contextIndices: [Int] = []
-
-        func flushContextParts() {
-            guard !contextIndices.isEmpty else { return }
-            let firstIndex = contextIndices[0]
-            let id = MessageBubbleDisplayIdentity.contextID(
-                messageID: effectiveMessage.id,
-                firstIndex: firstIndex,
-                firstPart: parts[firstIndex]
-            )
-            result.append(.context(id: id, indices: contextIndices))
-            contextIndices.removeAll(keepingCapacity: true)
+        let visible = parts.indices.filter { index in
+            (!isUser || MessageBubbleUserPartPolicy.shouldDisplay(parts[index], at: index, in: parts))
+                && shouldIncludePartInDisplayPlan(parts[index])
         }
-
-        for (index, part) in parts.enumerated() {
-            if isUser, !MessageBubbleUserPartPolicy.shouldDisplay(part, at: index, in: parts) {
-                continue
+        return MessageBubbleToolGroupingPolicy.groups(parts: parts, visibleIndices: visible,
+            enabled: groupsToolCalls && !isUser).compactMap { indices in
+            guard let first = indices.first else { return nil }
+            if shouldGroupInContext(parts[first]) {
+                return .context(id: MessageBubbleDisplayIdentity.contextID(messageID: effectiveMessage.id,
+                    firstIndex: first, firstPart: parts[first]), indices: indices)
             }
-            guard shouldIncludePartInDisplayPlan(part) else { continue }
-
-            if shouldGroupInContext(part) {
-                contextIndices.append(index)
-            } else {
-                flushContextParts()
-                result.append(.part(index: index))
-            }
+            return .part(index: first)
         }
-
-        flushContextParts()
-        return result
     }
 
     private func shouldIncludePartInDisplayPlan(_ part: OpenCodePart) -> Bool {
@@ -1064,7 +1062,7 @@ struct MessageBubble: View {
     }
 
     private func shouldGroupInContext(_ part: OpenCodePart) -> Bool {
-        !isUser && renderableText(for: part) == nil && contextGroupTools.contains(toolName(for: part))
+        groupsToolCalls && !isUser && OpenCodeToolActivityPolicy.isToolCall(part)
     }
 
     private func handleActivityTap(for part: OpenCodePart) {
@@ -1460,6 +1458,7 @@ private struct MessageBubbleDisplayEntryCacheKey: Equatable {
     let messageID: String
     let isUser: Bool
     let showsToolCalls: Bool
+    let groupsToolCalls: Bool
     let hidesReasoningBlocks: Bool
     let parts: [PartKey]
 }

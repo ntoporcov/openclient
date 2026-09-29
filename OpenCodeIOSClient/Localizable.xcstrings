@@ -1,6 +1,10 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Group Tool Calls" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Raggruppa chiamate agli strumenti" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Agrupar chamadas de ferramentas" } } } },
+    "1 tool call" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "1 chiamata a uno strumento" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "1 chamada de ferramenta" } } } },
+    "%lld tool calls" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "%lld chiamate agli strumenti" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "%lld chamadas de ferramentas" } } } },
+    "Context updated" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Contesto aggiornato" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Contexto atualizado" } } } },
     "Show Submit Options" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Mostra opzioni di invio" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Mostrar opções de envio" } } } },
     "Dismiss Submit Options" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Chiudi opzioni di invio" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Fechar opções de envio" } } } },
     "Touch and hold for submit options" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Tieni premuto per le opzioni di invio" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Toque e segure para ver as opções de envio" } } } },

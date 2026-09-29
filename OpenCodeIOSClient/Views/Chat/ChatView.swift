@@ -1645,6 +1645,7 @@ private struct MessageBubbleSnapshot: Equatable {
     let isStreamingMessage: Bool
     let animatesStreamingText: Bool
     let showsToolCalls: Bool
+    let groupsToolCalls: Bool
     let hidesReasoningBlocks: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
@@ -1954,6 +1955,7 @@ private struct EquatableMessageBubbleHost: View, Equatable {
             isStreamingMessage: snapshot.isStreamingMessage,
             animatesStreamingText: snapshot.animatesStreamingText,
             showsToolCalls: snapshot.showsToolCalls,
+            groupsToolCalls: snapshot.groupsToolCalls,
             hidesReasoningBlocks: snapshot.hidesReasoningBlocks,
             reserveEntryFromComposer: snapshot.reserveEntryFromComposer,
             animateEntryFromComposer: snapshot.animateEntryFromComposer,
@@ -4690,6 +4692,7 @@ struct ChatView: View {
             isStreamingMessage: isStreaming,
             animatesStreamingText: shouldAnimateStreamingText,
             showsToolCalls: appCustomizationStore.showsToolCalls,
+            groupsToolCalls: appCustomizationStore.groupsToolCalls,
             hidesReasoningBlocks: !appCustomizationStore.showsReasoningBlocks || isFunAndGamesSession(sessionID),
             reserveEntryFromComposer: entry.reserves,
             animateEntryFromComposer: entry.animates,
@@ -5395,7 +5398,7 @@ struct ChatView: View {
         let activity = expandedEarlierActivityMessageIDs.sorted().joined(separator: "|")
         let tools = appCustomizationStore.showsToolCalls
         let reasoningBlocks = appCustomizationStore.showsReasoningBlocks
-        return "reasoning:\(reasoning)#context:\(context)#activity:\(activity)#tools:\(tools)#reasoningBlocks:\(reasoningBlocks)"
+        return "reasoning:\(reasoning)#context:\(context)#activity:\(activity)#tools:\(tools)#reasoningBlocks:\(reasoningBlocks)#groupTools:\(appCustomizationStore.groupsToolCalls)"
     }
 
     private func pruneExpandedReasoningParts() {

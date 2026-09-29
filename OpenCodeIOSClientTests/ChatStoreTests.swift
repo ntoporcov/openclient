@@ -1187,6 +1187,35 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertTrue(MessageBubbleMessageVisibilityPolicy.shouldDisplay(mixed, showsToolCalls: false, showsReasoningBlocks: false))
     }
 
+    func testToolGroupingRespectsEveryVisibilityCombinationAndContextBoundaries() {
+        func part(_ id: String, _ type: String, tool: String? = nil) -> OpenCodePart {
+            OpenCodePart(id: id, messageID: "msg_1", sessionID: "ses_1", type: type,
+                mime: nil, filename: nil, url: nil, reason: nil, tool: tool, callID: tool == nil ? nil : id,
+                state: nil, text: tool == nil ? "Context or answer" : nil, synthetic: type == "system")
+        }
+        let parts = [part("a", "tool", tool: "read"), part("b", "tool", tool: "shell"),
+                     part("c", "reasoning"), part("d", "tool", tool: "patch"),
+                     part("e", "system"), part("f", "tool", tool: "grep"), part("g", "text")]
+        for tools in [false, true] {
+            for reasoning in [false, true] {
+                let visible = parts.indices.filter {
+                    MessageBubblePartVisibilityPolicy.shouldDisplay(parts[$0], showsToolCalls: tools, showsReasoningBlocks: reasoning)
+                }
+                for enabled in [false, true] {
+                    let groups = MessageBubbleToolGroupingPolicy.groups(parts: parts, visibleIndices: visible, enabled: enabled)
+                    XCTAssertEqual(groups.flatMap { $0 }, visible, "Grouping must preserve visible content and order")
+                    XCTAssertTrue(groups.contains([4]), "Context events must remain separate")
+                    XCTAssertTrue(groups.contains([6]), "Answer text must remain separate")
+                    if !enabled || !tools { XCTAssertTrue(groups.allSatisfy { $0.count == 1 }) }
+                    if enabled && tools {
+                        XCTAssertEqual(groups.first, reasoning ? [0, 1] : [0, 1, 3])
+                        XCTAssertTrue(groups.contains([5]), "Never group across a context event")
+                    }
+                }
+            }
+        }
+    }
+
     func testToolActivityPolicyRecognizesLegacyToolsAndSelectsLatestRunningTool() {
         let sessionID = "ses_1"
         let completed = OpenCodePart(

@@ -88,6 +88,12 @@ struct ChatAppearanceSettingsView: View {
                 ))
                 .accessibilityIdentifier("configurations.show-tool-calls")
 
+                Toggle("Group Tool Calls", isOn: Binding(
+                    get: { store.groupsToolCalls },
+                    set: { store.setGroupsToolCalls($0) }
+                ))
+                .accessibilityIdentifier("configurations.group-tool-calls")
+
                 Toggle("Show Reasoning Blocks", isOn: Binding(
                     get: { store.showsReasoningBlocks },
                     set: { store.setShowsReasoningBlocks($0) }

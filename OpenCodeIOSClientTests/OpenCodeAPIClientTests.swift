@@ -418,13 +418,22 @@ final class OpenCodeAPIClientTests: XCTestCase {
     func testV2ContextRecordsRetainTypesForCardsInHistoryAndSingleMessageHydration() async throws {
         let client = makeProbeClient()
         for kind in OpenCodeTimelineContextType.allCases {
-            let record: [String: Any] = [
+            var record: [String: Any] = [
                 "id": "msg_context", "type": kind.rawValue,
                 "text": "Instructions from: /repo/AGENTS.md\n# Context", "time": ["created": 1000]
             ]
+            if kind == .modelSwitched {
+                record.removeValue(forKey: "text")
+                record["model"] = ["providerID": "openai", "id": "gpt-6"]
+            }
+            if kind == .system {
+                record["text"] = "Today's date is now: Tue Sep 29 2026"
+                record["description"] = "Date context"
+            }
+            let contextRecord = record
             MockURLProtocol.requestHandler = { request in
                 let isSingle = request.url?.lastPathComponent == "msg_context"
-                let payload: Any = isSingle ? record as Any : [record] as Any
+                let payload: Any = isSingle ? contextRecord as Any : [contextRecord] as Any
                 let data = try JSONSerialization.data(withJSONObject: ["data": payload])
                 return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"])!, data)
@@ -435,6 +444,11 @@ final class OpenCodeAPIClientTests: XCTestCase {
             let part = try XCTUnwrap(single.parts.first)
             XCTAssertEqual(part.type, kind.rawValue)
             XCTAssertEqual(part.timelineContextType, kind)
+            if kind == .modelSwitched { XCTAssertEqual(part.text, "gpt-6") }
+            if kind == .system {
+                XCTAssertEqual(part.name, "Date context")
+                XCTAssertEqual(part.text, "Today's date is now: Tue Sep 29 2026")
+            }
             XCTAssertTrue(part.synthetic == true)
             XCTAssertFalse(OpenCodeToolActivityPolicy.isToolCall(part))
             XCTAssertTrue(MessageBubbleMessageVisibilityPolicy.shouldDisplay(single,

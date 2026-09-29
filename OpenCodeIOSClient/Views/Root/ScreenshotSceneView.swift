@@ -78,7 +78,9 @@ struct ScreenshotSceneView: View {
             }
         case .chat:
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            if ProcessInfo.processInfo.environment["OPENCLIENT_QUEUE_LIFECYCLE_FIXTURE"] == "1" {
+            if ProcessInfo.processInfo.environment["OPENCLIENT_TOOL_GROUPING_FIXTURE"] == "1" {
+                ToolGroupingFixture()
+            } else if ProcessInfo.processInfo.environment["OPENCLIENT_QUEUE_LIFECYCLE_FIXTURE"] == "1" {
                 QueuedSubmissionLifecycleFixture()
             } else if ProcessInfo.processInfo.environment["OPENCLIENT_STREAMING_DELIVERY_FIXTURE"] == "1" {
                 StreamingDeliveryFixture()

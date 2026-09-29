@@ -21,6 +21,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         let store = AppCustomizationStore(defaults: defaults)
         XCTAssertTrue(store.showsChatActivityShimmer)
         XCTAssertTrue(store.showsToolCalls)
+        XCTAssertTrue(store.groupsToolCalls)
         XCTAssertTrue(store.showsReasoningBlocks)
         XCTAssertTrue(store.showsActivityLastUserMessage)
         XCTAssertFalse(store.isTodoStripMinimized)
@@ -31,6 +32,7 @@ final class AppCustomizationStoreTests: XCTestCase {
 
         store.setShowsChatActivityShimmer(false)
         store.setShowsToolCalls(false)
+        store.setGroupsToolCalls(false)
         store.setShowsReasoningBlocks(false)
         store.setShowsActivityLastUserMessage(false)
         store.setTodoStripMinimized(true)
@@ -42,6 +44,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         let restored = AppCustomizationStore(defaults: defaults)
         XCTAssertFalse(restored.showsChatActivityShimmer)
         XCTAssertFalse(restored.showsToolCalls)
+        XCTAssertFalse(restored.groupsToolCalls)
         XCTAssertFalse(restored.showsReasoningBlocks)
         XCTAssertFalse(restored.showsActivityLastUserMessage)
         XCTAssertTrue(restored.isTodoStripMinimized)
@@ -67,6 +70,7 @@ final class AppCustomizationStoreTests: XCTestCase {
 
         XCTAssertFalse(store.showsChatActivityShimmer)
         XCTAssertTrue(store.showsToolCalls)
+        XCTAssertTrue(store.groupsToolCalls)
         XCTAssertTrue(store.showsReasoningBlocks)
         XCTAssertTrue(store.showsActivityLastUserMessage)
         XCTAssertFalse(store.isTodoStripMinimized)
