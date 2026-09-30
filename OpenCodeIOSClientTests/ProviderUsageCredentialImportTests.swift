@@ -272,7 +272,7 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
         v2 = .init(backend: v2.backend, connectionLifetimeID: v2.connectionLifetimeID, apiProfile: .v2, scope: v2.scope)
         await box.set(v2)
         await assertImportFails(deterministicImporter(transport: transport, box: box),
-                                candidate: candidate(context: v2, provider: .openRouter), expected: .unsupportedProfile)
+                                candidate: candidate(context: v2, provider: .openRouter), expected: .unsupportedSource)
     }
 
     func testLifetimeProfileAndScopeSwitchDuringOperationDropResultAndDeleteExactPTY() async {
@@ -287,6 +287,52 @@ final class ProviderUsageCredentialImportTests: XCTestCase {
             await assertImportFails(deterministicImporter(transport: transport, box: box),
                                     candidate: candidate(context: original, provider: .openRouter), expected: .contextChanged)
             let snapshot = await transport.snapshot()
+            XCTAssertEqual(snapshot.deleted, ["pty_import"])
+        }
+    }
+
+    func testV2SelectionBindsTheExactCredentialAndRenewalAction() throws {
+        let original = context()
+        let v2 = ProviderUsageDiscoveryContext(backend: original.backend, connectionLifetimeID: original.connectionLifetimeID,
+                                               apiProfile: .v2, scope: original.scope)
+        func setup(_ id: String) -> ProviderUsageSetupCandidate {
+            .init(id: UUID(), provider: .codex, discoveryContext: v2,
+                  sourceIdentity: .v2Credential(integrationID: "openai", credentialID: id),
+                  sourceKind: .openCodeAuth, credentialKind: .oauthAccessToken, replacingAccountID: nil)
+        }
+        let first = try ProviderUsageCredentialImportProtocol.Selection(candidate: setup("cred_first"))
+        let second = try ProviderUsageCredentialImportProtocol.Selection(candidate: setup("cred_second"))
+        XCTAssertEqual(first.source, "v2-opencode-credential-v1:cred_first")
+        XCTAssertNotEqual(first.source, second.source)
+        let renewal = try ProviderUsageCredentialImportProtocol.Selection(
+            candidate: setup("cred_first"), action: .renew,
+            expectedAccountID: "account", currentAccessToken: "old-access")
+        XCTAssertEqual(renewal.source, "v2-opencode-credential-renew-v1:cred_first")
+        XCTAssertThrowsError(try ProviderUsageCredentialImportProtocol.Selection(candidate: setup("cred_bad|frame")))
+        XCTAssertThrowsError(try ProviderUsageCredentialImportProtocol.Selection(candidate: setup("")))
+    }
+
+    func testV2ImportAndRenewalCompleteAuthenticatedHandshakeAndCleanup() async throws {
+        let original = context()
+        let v2 = ProviderUsageDiscoveryContext(backend: original.backend, connectionLifetimeID: original.connectionLifetimeID,
+                                               apiProfile: .v2, scope: original.scope)
+        let setup = ProviderUsageSetupCandidate(
+            id: UUID(), provider: .codex, discoveryContext: v2,
+            sourceIdentity: .v2Credential(integrationID: "openai", credentialID: "cred_selected"),
+            sourceKind: .openCodeAuth, credentialKind: .oauthAccessToken, replacingAccountID: nil)
+        for renew in [false, true] {
+            let transport = SyntheticImportTransport(mode: .success)
+            let importer = deterministicImporter(transport: transport, box: ImportContextBox(v2))
+            if renew {
+                let result = try await importer.renewCredential(for: setup, expectedAccountID: "synthetic-account", currentAccessToken: "current-access")
+                XCTAssertEqual(result.secret.value, "synthetic-access")
+            } else {
+                let result = try await importer.importCredential(for: setup)
+                XCTAssertEqual(result.secret.value, "synthetic-access")
+                XCTAssertEqual(result.candidate.sourceCredentialID, "cred_selected")
+            }
+            let snapshot = await transport.snapshot()
+            XCTAssertTrue(snapshot.authenticatedStart)
             XCTAssertEqual(snapshot.deleted, ["pty_import"])
         }
     }
@@ -680,11 +726,13 @@ private actor SyntheticImportTransport: ProviderUsagePTYTransport {
         let provider = env["OCPI_PROVIDER"]!
         let source = env["OCPI_SOURCE"]!
         let credentialKind: ProviderUsageCredentialKind = provider == "openai" ? .oauthAccessToken : .apiKey
+        let v2ID = source.hasPrefix("v2-") ? source.split(separator: ":").last.map(String.init) : nil
         let candidate = ProviderUsageSetupCandidate(
             id: UUID(), provider: provider == "openai" ? .codex : .openRouter,
             discoveryContext: .init(backend: .init(id: "server", name: "", version: ""), connectionLifetimeID: UUID(),
-                                    apiProfile: .legacy, scope: .init()),
-            sourceIdentity: .legacyProvider(providerID: provider), sourceKind: .openCodeAuth,
+                                    apiProfile: v2ID == nil ? .legacy : .v2, scope: .init()),
+            sourceIdentity: v2ID.map { .v2Credential(integrationID: provider, credentialID: $0) }
+                ?? .legacyProvider(providerID: provider), sourceKind: .openCodeAuth,
             credentialKind: credentialKind, replacingAccountID: nil
         )
         let action: ProviderUsageCredentialImportProtocol.Selection.Action = source.contains("renew") ? .renew : .read

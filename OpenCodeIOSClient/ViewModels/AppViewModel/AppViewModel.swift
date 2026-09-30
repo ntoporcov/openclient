@@ -1127,7 +1127,8 @@ final class AppViewModel: ObservableObject {
     }
 
     func commands(canFork: Bool) -> [OpenCodeCommand] {
-        if let backendConnection, !backendConnection.capabilities.contains(.commands) { return [] }
+        if let backendConnection, !backendConnection.capabilities.contains(.commands),
+           backendConnection.openCodeCompatibility?.profile != .v2 { return [] }
         var result = directoryCommands
         if selectedSession != nil, !result.contains(where: { $0.name == "compact" }) {
             result.append(OpenClientChatCommands.compact)

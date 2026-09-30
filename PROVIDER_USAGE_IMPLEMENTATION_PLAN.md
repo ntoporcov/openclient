@@ -4,6 +4,16 @@ Status: implementation and focused signed-simulator verification complete; norma
 Prepared: 2026-09-12.
 Audience: the next implementation agent, including 5.6 Sol.
 
+### V2 Checkpoint: 2026-09-30
+
+- V2 connection `method` now enables compatible OpenAI OAuth and OpenRouter key accounts; older/unknown credential methods remain unavailable.
+- The encrypted importer supports V2 PTY create/connect/delete and exact, read-only SQLite credential selection. Persisted V2 credential IDs isolate multiple accounts on the same server.
+- V2 renewal remains server-owned: OpenClient can adopt a newer access token for the same selected credential/account, but does not rotate refresh tokens or write the server database.
+- Verified against the local OpenCode 2.0.18 connection: discovery, encrypted PTY import, Codex usage HTTP 200, and exact temporary-PTY cleanup. No credentials are printed or written by the acceptance script.
+- `node scripts/test-provider-usage-import.mjs` exercises encrypted import, account/provider isolation, bounded reads, newer-token adoption, stale/mismatched-token rejection, and read-only database behavior with synthetic fixtures.
+- Opt-in live check: `node scripts/test-provider-usage-import.mjs --live-v2 <path-to-v2-cli>`.
+- Added Swift regressions for discovery, protocol binding, persistence/rotation, multi-account replacement, production composition, and V2 PTY request routing. All 181 focused tests pass on each iOS 27.0 destination: iPhone 18 Pro Max and iPad Pro 13-inch (M5), with no failures or skips (362 test runs). Result bundle: `usage-v2-simulator-validation.xcresult` in the approved temporary OpenCode directory. The fresh device build was installed and launched on the configured iPhone.
+
 ### Implementation Checkpoint: 2026-09-13
 
 Completed in the production/UI slice:

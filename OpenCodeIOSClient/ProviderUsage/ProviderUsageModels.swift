@@ -166,6 +166,7 @@ struct ProviderUsageAccount: Codable, Identifiable, Hashable, Sendable {
     let apiProfile: ProviderUsageAPIProfile
     let sourceKind: ProviderUsageCredentialSourceKind
     let sourceScope: ProviderUsageSourceScope?
+    let sourceCredentialID: String?
     let credentialKind: ProviderUsageCredentialKind
     let providerAccountID: String?
     let credentialReference: UUID
@@ -183,6 +184,7 @@ struct ProviderUsageAccount: Codable, Identifiable, Hashable, Sendable {
         apiProfile: ProviderUsageAPIProfile,
         sourceKind: ProviderUsageCredentialSourceKind,
         sourceScope: ProviderUsageSourceScope? = nil,
+        sourceCredentialID: String? = nil,
         credentialKind: ProviderUsageCredentialKind,
         providerAccountID: String? = nil,
         credentialReference: UUID,
@@ -199,6 +201,7 @@ struct ProviderUsageAccount: Codable, Identifiable, Hashable, Sendable {
         self.apiProfile = apiProfile
         self.sourceKind = sourceKind
         self.sourceScope = sourceScope
+        self.sourceCredentialID = sourceCredentialID
         self.credentialKind = credentialKind
         self.providerAccountID = providerAccountID
         self.credentialReference = credentialReference
@@ -237,6 +240,20 @@ struct ProviderUsageSetupCandidate: Identifiable, Hashable, Sendable {
 
     var sourceConnectionID: String { discoveryContext.backend.id }
     var apiProfile: ProviderUsageAPIProfile { discoveryContext.apiProfile }
+
+    var sourceCredentialID: String? {
+        guard case .v2Credential(_, let id) = sourceIdentity else { return nil }
+        return id
+    }
+
+    var supportsSourceRenewal: Bool {
+        guard provider == .codex, sourceKind == .openCodeAuth, credentialKind == .oauthAccessToken else { return false }
+        switch (apiProfile, sourceIdentity) {
+        case (.legacy, .legacyProvider(providerID: "openai")),
+             (.v2, .v2Credential(integrationID: "openai", credentialID: _)): return true
+        default: return false
+        }
+    }
 }
 
 enum ProviderUsageDiscoveryReadiness: Hashable, Sendable {
@@ -267,6 +284,7 @@ struct ProviderUsageLegacyProviderState: Hashable, Sendable {
 struct ProviderUsageV2CredentialConnection: Hashable, Sendable {
     let id: String
     let label: String
+    var method: String? = nil
 }
 
 struct ProviderUsageV2IntegrationDescriptor: Hashable, Sendable {

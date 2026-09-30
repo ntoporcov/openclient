@@ -312,6 +312,8 @@ private struct OpenCodeV2PromptRequest: Encodable, Sendable {
     let delivery: OpenCodePromptDelivery?
     let files: [File]?
     let agents: [Agent]?
+    struct Skill: Encodable, Sendable { let id: String }
+    var skills: [Skill]? = nil
 }
 
 private struct OpenCodeV2PromptResponse: Decodable, Sendable {
@@ -639,11 +641,19 @@ private struct OpenCodeV2TimelineRecord: Decodable, Sendable {
             guard let text else { return nil }
             let part = textPart(id: "\(id):v2:text:0", messageID: id, sessionID: sessionID, type: type, text: text,
                                 synthetic: true, contextTitle: value.string("description"))
+            let model = value.object("model")
+            let modelReference: OpenCodeMessageModelReference?
+            if type == "model-switched", let providerID = model?.string("providerID"), let modelID = model?.string("id") {
+                modelReference = .init(providerID: providerID, modelID: modelID, variant: model?.string("variant"))
+            } else {
+                modelReference = nil
+            }
             return envelope(
                 id: id,
                 role: "assistant",
                 sessionID: sessionID,
                 created: created,
+                model: modelReference,
                 parts: [part]
             )
         default:
@@ -761,6 +771,7 @@ private struct OpenCodeV2TimelineRecord: Decodable, Sendable {
         sessionID: String,
         created: Double?,
         completed: Double? = nil,
+        model: OpenCodeMessageModelReference? = nil,
         parts: [OpenCodePart]
     ) -> OpenCodeMessageEnvelope {
         OpenCodeMessageEnvelope(
@@ -770,7 +781,7 @@ private struct OpenCodeV2TimelineRecord: Decodable, Sendable {
                 sessionID: sessionID,
                 time: OpenCodeMessageTime(created: created, completed: completed),
                 agent: nil,
-                model: nil
+                model: model
             ),
             parts: parts
         )
@@ -1001,7 +1012,7 @@ struct OpenCodeAPIClient: Sendable {
         }
     }
 
-    func sendV2Command(sessionID: String, command: String, arguments: String = "", attachments: [OpenCodeComposerAttachment] = []) async throws {
+    func sendV2Command(sessionID: String, command: String, arguments: String = "", attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = []) async throws {
         if v2Contract == .preview17155 {
             let messageID = OpenCodeIdentifier.message()
             let receipt = try await admitV2Command(sessionID: sessionID, messageID: messageID, command: command,
@@ -1013,11 +1024,15 @@ struct OpenCodeAPIClient: Sendable {
             let name: String
             let text: String
             let files: [OpenCodeV2PromptRequest.File]?
+            let agents: [OpenCodeV2PromptRequest.Agent]?
         }
         try await sendNoContent(
             path: "/api/session/\(sessionID)/command", method: "POST",
             body: Command(name: command, text: arguments,
-                files: attachments.isEmpty ? nil : attachments.map { .init(uri: $0.dataURL, name: $0.filename) })
+                files: attachments.isEmpty ? nil : attachments.map { .init(uri: $0.dataURL, name: $0.filename) },
+                agents: agentMentions.isEmpty ? nil : agentMentions.map {
+                    .init(name: $0.name, mention: .init(start: $0.start, end: $0.end, text: $0.content))
+                })
         )
     }
 
@@ -1058,6 +1073,22 @@ struct OpenCodeAPIClient: Sendable {
     func listV2Commands(directory: String? = nil, workspaceID: String? = nil) async throws -> [OpenCodeCommand] {
         let response: OpenCodeV2DataResponse<[OpenCodeV2Command]> = try await send(path: "/api/command", method: "GET", queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID))
         return response.data.map { $0.normalized() }
+    }
+
+    func listV2ComposerCommands(directory: String? = nil, workspaceID: String? = nil) async throws -> [OpenCodeCommand] {
+        struct Skill: Decodable { let id: String; let description: String?; let content: String? }
+        async let commands = listV2Commands(directory: directory, workspaceID: workspaceID)
+        async let skills: OpenCodeV2DataResponse<[Skill]> = send(path: "/api/skill", method: "GET",
+            queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID))
+        let (loadedCommands, loadedSkills) = try await (commands, skills)
+        var names = Set(loadedCommands.map(\.name) + ["btw", "compact", "fork"])
+        return loadedCommands + loadedSkills.data.map { skill in
+            var name = skill.id
+            while names.contains(name) { name = "skill:" + name }
+            names.insert(name)
+            return OpenCodeCommand(name: name, description: skill.description, agent: nil, model: nil,
+                source: "skill", template: skill.content ?? "", subtask: nil, hints: [], skillID: skill.id)
+        }
     }
 
     func listV2Agents(directory: String? = nil, workspaceID: String? = nil) async throws -> [OpenCodeAgent] {
@@ -1299,7 +1330,7 @@ struct OpenCodeAPIClient: Sendable {
         return OpenCodeV2MessagePage(messages: messages, olderCursor: olderCursor)
     }
 
-    func admitV2TextPrompt(sessionID: String, messageID: String, text: String, attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = [], resume: Bool = true, delivery: OpenCodePromptDelivery? = nil) async throws -> OpenCodeV2PromptReceipt {
+    func admitV2TextPrompt(sessionID: String, messageID: String, text: String, attachments: [OpenCodeComposerAttachment] = [], agentMentions: [OpenCodeAgentMention] = [], resume: Bool = true, delivery: OpenCodePromptDelivery? = nil, skillIDs: [String] = []) async throws -> OpenCodeV2PromptReceipt {
         let response: OpenCodeV2PromptResponse = try await send(
             path: "/api/session/\(sessionID)/prompt",
             method: "POST",
@@ -1308,7 +1339,7 @@ struct OpenCodeAPIClient: Sendable {
                 files: attachments.isEmpty ? nil : attachments.map { .init(uri: $0.dataURL, name: $0.filename) },
                 agents: agentMentions.isEmpty ? nil : agentMentions.map {
                     .init(name: $0.name, mention: .init(start: $0.start, end: $0.end, text: $0.content))
-                }
+                }, skills: skillIDs.isEmpty ? nil : skillIDs.map { .init(id: $0) }
             )
         )
         guard let created = response.data.created else { throw OpenCodeAPIError.invalidResponse }

@@ -307,18 +307,18 @@ private struct ComposerSubmitFanLayout {
 
     func position(for action: ComposerSubmitAction) -> CGPoint {
         let index = actions.firstIndex(of: action) ?? 0
-        // Lay out circle centers on one arc around Send. Constrain the radius
-        // as a whole rather than clamping points and distorting the circle.
+        // A taller ellipse gives centered captions room between neighboring
+        // options. Scale both axes together to preserve the arc in tight layouts.
         let inwardSpace = isRTL ? availableSize.width - origin.x : origin.x
-        let preferredRadius: CGFloat = actions.count == 3 ? 124 : 88
-        let radius = max(0, min(preferredRadius, inwardSpace - 142, origin.y - 26))
-        // Equal angular spacing gives the streaming actions equal separation.
-        // The radius also keeps leading captions clear of neighboring circles.
-        let angles: [CGFloat] = actions.count == 3 ? [10, 45, 80] : [20, 90]
+        let horizontalRadius: CGFloat = actions.count == 3 ? 124 : 88
+        let verticalRadius: CGFloat = actions.count == 3 ? 160 : 112
+        let scale = max(0, min(1, (inwardSpace - 142) / horizontalRadius, (origin.y - 26) / verticalRadius))
+        let angles: [CGFloat] = actions.count == 3 ? [10, 39, 80] : [20, 90]
         let angle = angles[min(index, angles.count - 1)] * .pi / 180
+        let inwardAdjustment: CGFloat = actions.count == 3 && index == 1 ? 12 : 0
         return CGPoint(
-            x: origin.x + (isRTL ? 1 : -1) * radius * cos(angle),
-            y: origin.y - radius * sin(angle)
+            x: origin.x + (isRTL ? 1 : -1) * (horizontalRadius * cos(angle) - inwardAdjustment) * scale,
+            y: origin.y - verticalRadius * scale * sin(angle)
         )
     }
 }
@@ -334,7 +334,7 @@ private struct ComposerSubmitFanOption: View {
 
     var body: some View {
         Button(action: perform) {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 Text(action.title)
                     .font(.caption.weight(.semibold))
                     .multilineTextAlignment(.center)

@@ -678,6 +678,31 @@ final class ProviderUsagePersistenceTests: XCTestCase {
             from: JSONSerialization.data(withJSONObject: object)
         )
         XCTAssertNil(legacy.sourceRenewalApprovedAt)
+        XCTAssertNil(legacy.sourceCredentialID)
+    }
+
+    func testV2SourceCredentialIdentitySurvivesSaveReloadAndRotation() async throws {
+        let original = Self.renewalCandidate()
+        let context = ProviderUsageDiscoveryContext(
+            backend: original.discoveryContext.backend, connectionLifetimeID: original.discoveryContext.connectionLifetimeID,
+            apiProfile: .v2, scope: original.discoveryContext.scope)
+        let review = ProviderUsageCredentialReview(
+            candidate: .init(id: UUID(), provider: .codex, discoveryContext: context,
+                             sourceIdentity: .v2Credential(integrationID: "openai", credentialID: "cred_selected"),
+                             sourceKind: .openCodeAuth, credentialKind: .oauthAccessToken, replacingAccountID: nil),
+            secret: .init(value: "access-only"), providerAccountID: "account", credentialExpiresAt: .now)
+        let repository = TransactionalProviderUsageAccountRepository(
+            credentials: ProviderUsageCredentialMemoryFake(), metadata: ProviderUsageMetadataFake())
+        let saved = try await repository.save(review: review).account
+        XCTAssertEqual(saved.sourceCredentialID, "cred_selected")
+        XCTAssertNotNil(saved.sourceRenewalApprovedAt)
+        let decoded = try JSONDecoder().decode(ProviderUsageAccount.self, from: JSONEncoder().encode(saved))
+        XCTAssertEqual(decoded, saved)
+        let rotated = try await repository.rotateCredential(
+            accountID: saved.id, credentialRevision: saved.credentialRevision, secret: .init(value: "new-access"),
+            expiresAt: .now.addingTimeInterval(3600), providerAccountID: "account").account
+        XCTAssertEqual(rotated.sourceCredentialID, "cred_selected")
+        XCTAssertEqual(rotated.sourceRenewalApprovedAt, saved.sourceRenewalApprovedAt)
     }
 
     func testExactRemovalAndDeleteFailureDoesNotRemoveMetadata() async throws {

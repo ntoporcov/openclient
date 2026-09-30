@@ -161,7 +161,7 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
     func testCurrentCatalogDescribesOpenCodeV2Release() {
         let release = OpenClientReleaseNotesCatalog.releases.first { $0.version == "1.0.20" }
 
-        XCTAssertEqual(release?.title, "Ahead of what’s next")
+        XCTAssertEqual(release?.title, "Welcome to v2")
         XCTAssertEqual(release?.hero, .openCodeV2)
         XCTAssertEqual(release?.featureSectionTitle, "Little things that move work forward")
         XCTAssertFalse(release?.showsSetup == true)
@@ -181,13 +181,13 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         XCTAssertFalse(release.showsSetup)
         XCTAssertEqual(
             OpenClientReleaseNotesCatalog.releases.map(\.version),
-            ["1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.19", "1.0.20", "1.0.21", "1.0.22"]
+            ["1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.19", "1.0.20", "1.0.21", "1.0.22", "1.0.23"]
         )
-        XCTAssertEqual(Set(OpenClientReleaseNotesCatalog.releases.map(\.version)).count, 8)
+        XCTAssertEqual(Set(OpenClientReleaseNotesCatalog.releases.map(\.version)).count, 9)
     }
 
-    func testCurrentCatalogEndsWithPrivateWebPushRelease() throws {
-        let release = try XCTUnwrap(OpenClientReleaseNotesCatalog.releases.last)
+    func testCatalogPreservesPrivateWebPushRelease() throws {
+        let release = try XCTUnwrap(OpenClientReleaseNotesCatalog.releases.first { $0.version == "1.0.22" })
 
         XCTAssertEqual(release.version, "1.0.22")
         XCTAssertEqual(release.title, "Private push, straight to you")

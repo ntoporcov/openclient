@@ -183,11 +183,7 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
         let date = now()
         let credentialReference = makeUUID()
         let approvesSourceRenewal: Bool
-        if review.candidate.provider == .codex,
-           review.candidate.apiProfile == .legacy,
-           review.candidate.sourceKind == .openCodeAuth,
-           review.candidate.credentialKind == .oauthAccessToken,
-           case .legacyProvider(providerID: "openai") = review.candidate.sourceIdentity,
+        if review.candidate.supportsSourceRenewal,
            !(review.providerAccountID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
             approvesSourceRenewal = true
         } else {
@@ -200,6 +196,7 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
             apiProfile: review.candidate.apiProfile,
             sourceKind: review.candidate.sourceKind,
             sourceScope: ProviderUsageSourceScope(review.candidate.discoveryContext.scope),
+            sourceCredentialID: review.candidate.sourceCredentialID,
             credentialKind: review.candidate.credentialKind,
             providerAccountID: review.providerAccountID,
             credentialReference: credentialReference,
@@ -266,6 +263,7 @@ actor TransactionalProviderUsageAccountRepository: ProviderUsageAccountRepositor
             apiProfile: previous.apiProfile,
             sourceKind: previous.sourceKind,
             sourceScope: previous.sourceScope,
+            sourceCredentialID: previous.sourceCredentialID,
             credentialKind: previous.credentialKind,
             providerAccountID: previous.providerAccountID,
             credentialReference: reference,

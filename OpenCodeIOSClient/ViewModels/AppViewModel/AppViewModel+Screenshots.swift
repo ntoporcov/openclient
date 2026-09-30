@@ -234,6 +234,8 @@ extension AppViewModel {
 
     private static func screenshotSessions() -> AppViewModel {
         let viewModel = baseConnectedScreenshotViewModel(selectedSession: nil)
+        viewModel.connectionStore.applySuccessfulServerConnection(version: "1", healthy: true)
+        _ = try? viewModel.requireBackendConnection()
         viewModel.appearanceStore.setSessionCardStyle(.simple)
         viewModel.pinnedSessionIDsByScope = [viewModel.currentPinScopeKey: [OpenClientScreenshotData.releaseSession.id]]
         return viewModel

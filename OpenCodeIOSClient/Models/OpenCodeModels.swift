@@ -1493,6 +1493,8 @@ struct OpenCodeCommand: Codable, Identifiable, Hashable, Sendable {
     let template: String
     let subtask: Bool?
     let hints: [String]
+    /// V2 skills are presented alongside slash commands, but submitted as skill attachments.
+    var skillID: String? = nil
 
     var id: String { name }
 }
@@ -1507,6 +1509,7 @@ extension OpenCodeCommand {
         case template
         case subtask
         case hints
+        case skillID
     }
 
     // opencode returns `template: {}` (an object) for MCP-sourced commands. Decode it
@@ -1521,6 +1524,7 @@ extension OpenCodeCommand {
         template = (try? container.decode(String.self, forKey: .template)) ?? ""
         subtask = try container.decodeIfPresent(Bool.self, forKey: .subtask)
         hints = try container.decodeIfPresent([String].self, forKey: .hints) ?? []
+        skillID = try container.decodeIfPresent(String.self, forKey: .skillID)
     }
 }
 

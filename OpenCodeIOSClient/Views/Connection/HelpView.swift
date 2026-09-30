@@ -10,15 +10,21 @@ import AppKit
 #endif
 
 struct HelpView: View {
+    let connection: ConnectionFacade
+    let bridge: OpenClientBridgeFacade?
     private let articles: [HelpArticle]
 
     @Namespace private var articleTransition
     @State private var selectedArticleID: String?
 
     init(
+        connection: ConnectionFacade,
+        bridge: OpenClientBridgeFacade? = nil,
         articles: [HelpArticle] = HelpArticle.mockArticles,
         initiallySelectedArticleID: String? = nil
     ) {
+        self.connection = connection
+        self.bridge = bridge
         self.articles = articles
         _selectedArticleID = State(initialValue: initiallySelectedArticleID)
     }
@@ -35,6 +41,17 @@ struct HelpView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 28) {
                     helpIntro
+
+                    NavigationLink {
+                        OpenClientAnnouncementsView(connection: connection, bridge: bridge)
+                    } label: {
+                        Label("Announcements", systemImage: "megaphone")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(20)
+                            .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 20))
+                    }
+                    .accessibilityIdentifier("help.announcements")
 
                     LazyVStack(spacing: 24) {
                         ForEach(articles) { article in

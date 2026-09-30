@@ -42,7 +42,7 @@ struct ConfigurationsView: View {
                     .accessibilityIdentifier("configurations.global-settings")
 
                     NavigationLink {
-                        ChatAppearanceSettingsView(store: connection.appCustomizationStore)
+                        ChatAppearanceSettingsView(store: connection.appCustomizationStore, isV2Connection: connection.isV2Connection)
                     } label: {
                         Label("Appearance Settings", systemImage: "paintbrush")
                     }

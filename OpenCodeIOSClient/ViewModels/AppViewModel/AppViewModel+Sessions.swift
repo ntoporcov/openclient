@@ -581,7 +581,8 @@ extension AppViewModel {
         messageID requestedMessageID: String? = nil,
         reservedPromptDay: String? = nil,
         windowContext: ChatWindowContext? = nil,
-        delivery: OpenCodePromptDelivery? = nil
+        delivery: OpenCodePromptDelivery? = nil,
+        skillIDs: [String] = []
     ) async -> Bool {
         let trace = { [self] (stage: String) in
             chatFacade.logPromptSubmission(stage, sessionID: session.id, messageID: requestedMessageID)
@@ -674,7 +675,7 @@ extension AppViewModel {
             chatFacade.logPromptSubmission("v2 transport submit", sessionID: session.id, messageID: messageID)
             let admission = try await connection.chat.submit(.init(sessionID: session.id, messageID: messageID, text: prompt,
                 scope: .init(projectID: session.projectID, directory: session.directory, workspaceID: session.workspaceID),
-                attachments: attachments, agentMentions: agentMentions, delivery: delivery))
+                attachments: attachments, agentMentions: agentMentions, delivery: delivery, skillIDs: skillIDs))
             switch admission {
             case let .accepted(sessionID, admittedID) where sessionID == session.id && admittedID == messageID:
                 break
@@ -729,12 +730,13 @@ extension AppViewModel {
                 await reconcileV2TimelineFromEvent(sessionID: session.id)
             } catch {
                 guard isCurrent(), !Task.isCancelled else { return }
+                // This is a completion observer, not the prompt receipt. Suspension
+                // can interrupt its long-lived request after admission succeeded.
+                // Let canonical reconciliation recover without reporting a send error
+                // or replacing a newer user-action error in the composer.
+                appendDebugLog("v2 completion wait interrupted; scheduling reconciliation: \(error.localizedDescription)")
                 directoryStoreRegistry.requestV2Reconciliation(sessionID: session.id)
                 scheduleV2TimelineReconciliation()
-                if isVisible() {
-                    connectionStore.applyPromptError(String(localized: "Prompt was admitted, but the timeline could not be reconciled yet."),
-                        connectionID: connection.id, sessionID: session.id, messageID: messageID)
-                }
             }
         }
         return true

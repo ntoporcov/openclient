@@ -62,6 +62,7 @@ struct BackendSubmission: Sendable {
     var model: OpenCodeModelReference? = nil
     var variant: String? = nil
     var delivery: OpenCodePromptDelivery? = nil
+    var skillIDs: [String] = []
 }
 
 enum BackendAdmission: Sendable {

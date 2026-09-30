@@ -151,6 +151,17 @@ final class ProviderUsageDiscoveryTests: XCTestCase {
         XCTAssertTrue(result.candidates.isEmpty)
     }
 
+    func testV2DecodesCredentialMethodsAndOnlyEnablesCompatibleAccounts() throws {
+        let payload = Data(#"[{"id":"openai","name":"OpenAI","methods":[],"connections":[{"type":"credential","id":"cred_oauth","label":"Account","method":"oauth"},{"type":"credential","id":"cred_key","label":"Account","method":"key"},{"type":"credential","id":"cred_old","label":"Older server"}]},{"id":"openrouter","name":"OpenRouter","methods":[],"connections":[{"type":"credential","id":"cred_router","label":"Account","method":"key"},{"type":"credential","id":"cred_future","label":"Future","method":"future"}]}]"#.utf8)
+        let store = V2ProviderStore()
+        store.integrations = try JSONDecoder().decode([OpenCodeV2Integration].self, from: payload)
+        store.isReady = true
+        let result = discover(.v2, v2: ProviderUsageDiscovery.v2State(from: store))
+        XCTAssertEqual(result.candidates.count, 5)
+        XCTAssertEqual(result.candidates.map(\.availability.isSelectable), [true, false, false, true, false])
+        XCTAssertEqual(result.candidates.map(\.expectedCredentialKind), [.oauthAccessToken, nil, nil, .apiKey, nil])
+    }
+
     func testCandidateIdentityIsDeterministicAndConnectionLifetimeIsSeparate() throws {
         let firstContext = context(profile: .legacy, lifetime: uuid("11111111-1111-1111-1111-111111111111"))
         let reconnectedContext = context(profile: .legacy, lifetime: uuid("22222222-2222-2222-2222-222222222222"))

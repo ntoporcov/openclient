@@ -5,6 +5,26 @@ import Combine
 
 @MainActor
 final class SubmissionTranscriptPresentationTests: XCTestCase {
+    func testGroupingKeepsProgressVisibleThroughoutBusyTurn() {
+        let user = OpenCodeMessageEnvelope.local(role: "user", text: "Work", messageID: "user", sessionID: "s", partID: "u")
+        var assistant = OpenCodeMessageEnvelope.local(role: "assistant", text: "Working", messageID: "assistant", sessionID: "s", partID: "a")
+        for tools in [false, true] {
+            for reasoning in [false, true] {
+                XCTAssertTrue(ChatThinkingPresentation.shouldShow(messages: [user, assistant], pendingMessageID: nil,
+                    isBusy: true, showsToolCalls: tools, showsReasoningBlocks: reasoning, runningToolName: nil, groupsToolCalls: true))
+                XCTAssertFalse(ChatThinkingPresentation.shouldShow(messages: [user, assistant], pendingMessageID: nil,
+                    isBusy: false, showsToolCalls: tools, showsReasoningBlocks: reasoning, runningToolName: nil, groupsToolCalls: true))
+            }
+        }
+        assistant.parts = [OpenCodePart(id: "tool", messageID: "assistant", sessionID: "s", type: "tool",
+            mime: nil, filename: nil, url: nil, reason: nil, tool: "shell", callID: "call",
+            state: .init(status: "running", title: nil, error: nil, input: nil, output: nil, metadata: nil), text: nil)]
+        XCTAssertEqual(ChatThinkingPresentation.summaryToolName(messages: [user, assistant], pendingMessageID: nil,
+            isBusy: true, showsToolCalls: true, groupsToolCalls: true), "shell")
+        XCTAssertNil(ChatThinkingPresentation.summaryToolName(messages: [user, assistant], pendingMessageID: nil,
+            isBusy: false, showsToolCalls: true, groupsToolCalls: true))
+    }
+
     func testPendingDeliveryTracksTranscriptTailUntilCanonicalPickupClearsCaption() throws {
         for delivery in OpenCodePromptDelivery.allCases {
             let store = ChatStore()

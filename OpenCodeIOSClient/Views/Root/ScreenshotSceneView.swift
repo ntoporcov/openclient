@@ -26,6 +26,7 @@ struct ScreenshotSceneView: View {
     }
 
     private func requestLandscapeForiPadScreenshots() {
+        guard ProcessInfo.processInfo.environment["OPENCLIENT_GALLERY"] != "1" else { return }
         guard UIDevice.current.userInterfaceIdiom == .pad else { return }
 
         if #available(iOS 16.0, *) {
@@ -78,7 +79,9 @@ struct ScreenshotSceneView: View {
             }
         case .chat:
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            if ProcessInfo.processInfo.environment["OPENCLIENT_TOOL_GROUPING_FIXTURE"] == "1" {
+            if ProcessInfo.processInfo.environment["OPENCLIENT_CHAT_CONTROLS_PREVIEW"] == "1" {
+                WhatsNewChatControlsFixture()
+            } else if ProcessInfo.processInfo.environment["OPENCLIENT_TOOL_GROUPING_FIXTURE"] == "1" {
                 ToolGroupingFixture()
             } else if ProcessInfo.processInfo.environment["OPENCLIENT_QUEUE_LIFECYCLE_FIXTURE"] == "1" {
                 QueuedSubmissionLifecycleFixture()

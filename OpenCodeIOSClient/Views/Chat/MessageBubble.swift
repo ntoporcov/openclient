@@ -97,8 +97,8 @@ enum MessageBubbleToolGroupingPolicy {
     static func groups(parts: [OpenCodePart], visibleIndices: [Int], enabled: Bool) -> [[Int]] {
         var result: [[Int]] = []
         for index in visibleIndices {
-            if enabled, OpenCodeToolActivityPolicy.isToolCall(parts[index]),
-               let previous = result.last?.last, OpenCodeToolActivityPolicy.isToolCall(parts[previous]) {
+            if enabled, TranscriptActivityGrouping.isActivity(parts[index]),
+               let previous = result.last?.last, TranscriptActivityGrouping.isActivity(parts[previous]) {
                 result[result.count - 1].append(index)
             } else {
                 result.append([index])
@@ -150,7 +150,8 @@ struct MessageBubble: View {
     let isStreamingMessage: Bool
     let animatesStreamingText: Bool
     let showsToolCalls: Bool
-    var groupsToolCalls: Bool = true
+    var groupsToolCalls: Bool = false
+    var contextModelsByMessageID: [String: OpenCodeMessageModelReference] = [:]
     let hidesReasoningBlocks: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
@@ -597,7 +598,9 @@ struct MessageBubble: View {
         retainedVisualHTMLPartIDs: Set<String>
     ) -> some View {
         if let kind = part.timelineContextType, let text = renderableText(for: part) {
-            TimelineContextBlock(kind: kind, text: text, contextTitle: part.name)
+            TimelineContextBlock(kind: kind, text: text,
+                                 model: contextModelsByMessageID[part.messageID ?? effectiveMessage.id] ?? effectiveMessage.info.model,
+                                 contextDescription: part.name)
         } else if hidesReasoningBlocks, textStyle(for: part) == .reasoning {
             EmptyView()
         } else if let attachment = attachment(for: part) {
@@ -774,14 +777,9 @@ struct MessageBubble: View {
     private func contextGroupView(_ group: ContextGroup, isActiveRevealPart: Bool) -> some View {
         let isExpanded = expandedContextGroupIDs.contains(group.id)
         let running = group.parts.contains { isRunning($0.part) }
-        let count = group.parts.count
-        let title: ActivityText = count == 1 ? .localized("1 tool call") : .localized("\(count) tool calls")
-        var names: [String] = []
-        for item in group.parts {
-            let name = toolName(for: item.part)
-            if !names.contains(name) { names.append(name) }
-        }
-        let subtitle: ActivityText = .verbatim(names.joined(separator: ", "))
+        let summary = ToolGroupSummary(parts: group.parts.map(\.part))
+        let title: ActivityText = .verbatim(summary.title)
+        let subtitle: ActivityText? = summary.caption.isEmpty ? nil : .verbatim(summary.caption)
 
         return VStack(alignment: .leading, spacing: MessageBubbleSpacing.part) {
             Button {
@@ -789,7 +787,7 @@ struct MessageBubble: View {
                     onToggleContextGroup(group.id)
                 }
             } label: {
-                ContextToolGroupCard(
+                ContextToolGroupHeader(
                     style: ActivityStyle(
                         title: title,
                         subtitle: subtitle,
@@ -799,7 +797,8 @@ struct MessageBubble: View {
                         showsDisclosure: true,
                         shimmerTitle: false
                     ),
-                    expanded: isExpanded
+                    expanded: isExpanded,
+                    toolCallCount: summary.toolCallCount
                 )
             }
             .buttonStyle(.plain)
@@ -997,7 +996,7 @@ struct MessageBubble: View {
         return MessageBubbleToolGroupingPolicy.groups(parts: parts, visibleIndices: visible,
             enabled: groupsToolCalls && !isUser).compactMap { indices in
             guard let first = indices.first else { return nil }
-            if shouldGroupInContext(parts[first]) {
+            if indices.contains(where: { shouldGroupInContext(parts[$0]) }) {
                 return .context(id: MessageBubbleDisplayIdentity.contextID(messageID: effectiveMessage.id,
                     firstIndex: first, firstPart: parts[first]), indices: indices)
             }
@@ -1062,7 +1061,7 @@ struct MessageBubble: View {
     }
 
     private func shouldGroupInContext(_ part: OpenCodePart) -> Bool {
-        groupsToolCalls && !isUser && OpenCodeToolActivityPolicy.isToolCall(part)
+        groupsToolCalls && !isUser && TranscriptActivityGrouping.isActivity(part)
     }
 
     private func handleActivityTap(for part: OpenCodePart) {
@@ -1681,42 +1680,38 @@ enum OpenCodeActivityTint {
     }
 }
 
-private struct ContextToolGroupCard: View {
+struct ContextToolGroupHeader: View {
     let style: ActivityStyle
     let expanded: Bool
+    var toolCallCount: Int = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ActivityRow(
-            style: ActivityStyle(
-                title: style.title,
-                subtitle: style.subtitle,
-                icon: style.icon,
-                tint: style.tint,
-                isRunning: style.isRunning,
-                showsDisclosure: false,
-                shimmerTitle: style.shimmerTitle
-            ),
-            trailingAccessoryInset: 14
-        )
-        .overlay(alignment: .trailing) {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                style.title.text
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+                if let subtitle = style.subtitle {
+                    subtitle.text
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(toolCallCount > 0 && !reduceMotion
+                            ? .numericText(value: Double(toolCallCount)) : .identity)
+                        .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: toolCallCount)
+                }
+            }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             Image(systemName: expanded ? "chevron.down" : "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
-                .padding(.trailing, 12)
         }
-        .background {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(OpenCodePlatformColor.secondaryGroupedBackground.opacity(0.55))
-                    .offset(x: 6, y: 8)
-
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(OpenCodePlatformColor.secondaryGroupedBackground.opacity(0.8))
-                    .offset(x: 3, y: 4)
-            }
-        }
-        .padding(.trailing, 6)
-        .padding(.bottom, 0)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 }
 

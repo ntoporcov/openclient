@@ -5,6 +5,7 @@ struct ToolGroupingFixture: View {
     @State private var tools = true
     @State private var reasoning = true
     @State private var grouping = true
+    @State private var contexts = true
     @State private var expanded: Set<String> = []
     @State private var images = OpenClientImageLoadingStore()
     @State private var videos = OpenClientVideoPlaybackStore()
@@ -12,6 +13,7 @@ struct ToolGroupingFixture: View {
     var body: some View {
         NavigationStack {
             VStack {
+                if ProcessInfo.processInfo.environment["OPENCLIENT_GALLERY"] != "1" {
                 HStack {
                     Button { tools.toggle() } label: { Text(verbatim: "Tools") }
                         .accessibilityIdentifier("grouping.tools")
@@ -19,8 +21,15 @@ struct ToolGroupingFixture: View {
                         .accessibilityIdentifier("grouping.reasoning")
                     Button { grouping.toggle() } label: { Text(verbatim: "Grouping") }
                         .accessibilityIdentifier("grouping.grouping")
+                    Button { contexts.toggle() } label: { Text(verbatim: "Context") }
+                        .accessibilityIdentifier("grouping.context")
+                }
                 }
                 ScrollView {
+                    ForEach(grouping ? TranscriptActivityGrouping.slices(messages) : messages.map {
+                        TranscriptActivitySlice(source: $0, parts: $0.parts, isActivity: false)
+                    }) { slice in
+                    let message = slice.message
                     MessageBubble(message: message, detailedMessage: nil, currentSessionID: "ses_fixture",
                         isStreamingMessage: false, animatesStreamingText: false,
                         showsToolCalls: tools, groupsToolCalls: grouping, hidesReasoningBlocks: !reasoning,
@@ -33,8 +42,19 @@ struct ToolGroupingFixture: View {
                         }, onShowEarlierActivity: {}, onOpenVisualHTML: { _ in }, imageContent: nil,
                         imageLoadingStore: images, videoStreams: nil, videoPlaybackStore: videos)
                         .padding()
+                    }
                 }
             }
+            .navigationTitle(ProcessInfo.processInfo.environment["OPENCLIENT_GALLERY"] == "1" ? Text(verbatim: "Polish the experience") : Text(verbatim: ""))
+            .opencodeInlineNavigationTitle()
+        }
+    }
+
+    private var messages: [OpenCodeMessageEnvelope] {
+        message.parts.enumerated().map { index, part in
+            var source = OpenCodeMessageEnvelope.local(role: "assistant", text: "", messageID: "msg_\(index)", sessionID: "ses_fixture", partID: "initial")
+            source.parts = [part]
+            return TranscriptActivityGrouping.filteringContext(source, showsContextChanges: contexts)
         }
     }
 

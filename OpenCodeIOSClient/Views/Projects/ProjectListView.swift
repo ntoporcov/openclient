@@ -20,6 +20,7 @@ struct ProjectListView: View {
     @State private var projectForImagePicker: OpenCodeProject?
     @State private var isShowingBridgeStatus = false
     @State private var isEditingProjects = false
+    @State private var isShowingAnnouncements = false
 
     init(
         facade: ProjectFacade,
@@ -243,7 +244,18 @@ struct ProjectListView: View {
                 .tint(.red)
                 .accessibilityIdentifier("projects.disconnect")
                 .listRowInsets(projectListRowInsets)
+
+                Button {
+                    isShowingAnnouncements = true
+                } label: {
+                    Label("Announcements", systemImage: "megaphone")
+                }
+                .accessibilityIdentifier("projects.announcements")
+                .listRowInsets(projectListRowInsets)
             }
+        }
+        .navigationDestination(isPresented: $isShowingAnnouncements) {
+            OpenClientAnnouncementsView(connection: connection, bridge: bridge)
         }
         .listStyle(.sidebar)
         .environment(\.editMode, projectEditMode)

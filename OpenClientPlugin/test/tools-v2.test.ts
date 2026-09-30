@@ -1,8 +1,39 @@
 import { describe, expect, test } from "bun:test"
 import type { Plugin } from "@opencode/plugin"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { registerV2Tools } from "../src/tools-v2.js"
 
 describe("v2 OpenClient tools", () => {
+  test("image execution is direct and retains the native renderer payload", async () => {
+    const registered: Array<Record<string, unknown>> = []
+    const payload = { schemaVersion: 1, resourceID: "image-resource", title: "Gallery" }
+    const bridge = { validateExecution: () => ({ displayName: "iPhone" }) }
+    const images = { createResource: async () => payload }
+    await registerV2Tools(fakeContext(registered), bridge as never, {} as never, images as never)
+    // Nested Code Mode calls persist input/status without this result metadata.
+    expect(registered[1]?.options).toMatchObject({ codemode: false })
+    const execute = registered[1]?.execute as (input: unknown, context: unknown) => Promise<unknown>
+    const directory = await mkdtemp(join(tmpdir(), "openclient-v2-image-"))
+    const filePath = join(directory, "gallery.png")
+    await writeFile(filePath, "mock image; resource manager is stubbed")
+    try {
+      const result = await execute({
+        client_id: "client", tool_id: "openclient_visual_image",
+        arguments: { schemaVersion: 1, filePath, title: "Gallery" },
+      }, {
+        sessionID: "session", messageID: "message", agent: "agent", id: "call",
+        signal: new AbortController().signal, progress: async () => {},
+      })
+      expect(result).toMatchObject({
+        metadata: { renderer: "openclient.image.v1", toolID: "openclient_visual_image", payload },
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   test("registers legacy schemas and the execution permission gate", async () => {
     const registered: Array<Record<string, unknown>> = []
     const context = fakeContext(registered)
@@ -13,7 +44,7 @@ describe("v2 OpenClient tools", () => {
       "openclient_get_tool_list",
       "openclient_execute_tool",
     ])
-    expect(registered[1]?.options).toEqual({ permission: "openclient_execute_tool" })
+    expect(registered[1]?.options).toEqual({ permission: "openclient_execute_tool", codemode: false })
     expect(registered[0]?.output).toEqual({ type: "string" })
     expect(registered[1]?.output).toEqual({ type: "string" })
 

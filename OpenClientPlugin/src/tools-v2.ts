@@ -38,7 +38,9 @@ export async function registerV2Tools(
       description: legacy.openclient_execute_tool.description,
       input: toolSchema(legacy.openclient_execute_tool.args),
       output: { type: "string" },
-      options: { permission: executionPermission },
+      // Code Mode persists nested call input/status but drops result metadata.
+      // Native visual cards need renderer + payload on the actual transcript tool.
+      options: { permission: executionPermission, codemode: false },
       execute: (input, context) => executeLegacy(
         legacy.openclient_execute_tool,
         input,

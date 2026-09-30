@@ -3,6 +3,19 @@ import XCTest
 
 @MainActor
 final class AppCustomizationStoreTests: XCTestCase {
+    func testAnnouncementChoicesPersistWithoutResettingExistingOptIn() throws {
+        let name = "AnnouncementPreferences.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = AppCustomizationStore(defaults: defaults)
+        XCTAssertTrue(store.groupsToolCalls)
+        XCTAssertNil(store.preferredStreamingDelivery)
+        store.setGroupsToolCalls(true)
+        store.setPreferredStreamingDelivery(.steer)
+        let restored = AppCustomizationStore(defaults: defaults)
+        XCTAssertTrue(restored.groupsToolCalls)
+        XCTAssertEqual(restored.preferredStreamingDelivery, .steer)
+    }
     func testComposerStylesUseLocalizedLabels() {
         XCTAssertEqual(ComposerStyle.allCases, [.messenger, .assistant])
         XCTAssertEqual(ComposerStyle.allCases.map { String(localized: $0.title) }, ["Messenger", "Assistant"])
@@ -22,6 +35,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         XCTAssertTrue(store.showsChatActivityShimmer)
         XCTAssertTrue(store.showsToolCalls)
         XCTAssertTrue(store.groupsToolCalls)
+        XCTAssertTrue(store.showsContextChanges)
         XCTAssertTrue(store.showsReasoningBlocks)
         XCTAssertTrue(store.showsActivityLastUserMessage)
         XCTAssertFalse(store.isTodoStripMinimized)
@@ -33,6 +47,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         store.setShowsChatActivityShimmer(false)
         store.setShowsToolCalls(false)
         store.setGroupsToolCalls(false)
+        store.setShowsContextChanges(false)
         store.setShowsReasoningBlocks(false)
         store.setShowsActivityLastUserMessage(false)
         store.setTodoStripMinimized(true)
@@ -45,6 +60,7 @@ final class AppCustomizationStoreTests: XCTestCase {
         XCTAssertFalse(restored.showsChatActivityShimmer)
         XCTAssertFalse(restored.showsToolCalls)
         XCTAssertFalse(restored.groupsToolCalls)
+        XCTAssertFalse(restored.showsContextChanges)
         XCTAssertFalse(restored.showsReasoningBlocks)
         XCTAssertFalse(restored.showsActivityLastUserMessage)
         XCTAssertTrue(restored.isTodoStripMinimized)

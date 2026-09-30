@@ -444,7 +444,11 @@ final class OpenCodeAPIClientTests: XCTestCase {
             let part = try XCTUnwrap(single.parts.first)
             XCTAssertEqual(part.type, kind.rawValue)
             XCTAssertEqual(part.timelineContextType, kind)
-            if kind == .modelSwitched { XCTAssertEqual(part.text, "gpt-6") }
+            if kind == .modelSwitched {
+                XCTAssertEqual(part.text, "gpt-6")
+                XCTAssertEqual(single.info.model?.providerID, "openai")
+                XCTAssertEqual(single.info.model?.modelID, "gpt-6")
+            }
             if kind == .system {
                 XCTAssertEqual(part.name, "Date context")
                 XCTAssertEqual(part.text, "Today's date is now: Tue Sep 29 2026")

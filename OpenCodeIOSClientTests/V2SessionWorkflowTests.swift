@@ -782,6 +782,41 @@ final class V2SessionWorkflowTests: XCTestCase {
         XCTAssertTrue(model.chatStore.isV2PromptInFlight(sessionID: session.id))
     }
 
+    func testInterruptedCompletionWaitReconcilesWithoutComposerErrorOrResending() async {
+        for existingError in [nil, "A newer action failed"] as [String?] {
+            let model = makeModel()
+            let session = Self.session(id: "ses_v2", directory: "/repo")
+            _ = model.beginSessionNavigation(session)
+            let reconciled = expectation(description: "Interrupted completion schedules reconciliation")
+            var posts = 0
+            V2SessionWorkflowURLProtocol.handler = { request in
+                switch request.url?.path {
+                case "/api/session/ses_v2/prompt":
+                    posts += 1
+                    return (200, #"{"data":{"id":"msg_first","sessionID":"ses_v2","time":{"created":1},"type":"user","payload":{},"delivery":"queue"}}"#)
+                case "/api/experimental/session/ses_v2/wait":
+                    model.errorMessage = existingError
+                    throw URLError(.networkConnectionLost)
+                case "/api/session/ses_v2":
+                    XCTAssertEqual(model.errorMessage, existingError)
+                    reconciled.fulfill()
+                    return (503, #"{"message":"Reconnecting"}"#)
+                default:
+                    XCTFail("Unexpected request: \(request.url?.path ?? "nil")")
+                    throw URLError(.unsupportedURL)
+                }
+            }
+            let accepted = await model.sendV2TextPrompt("first", in: session, meterPrompt: false, messageID: "msg_first")
+            await fulfillment(of: [reconciled], timeout: 2)
+            XCTAssertTrue(accepted)
+            XCTAssertEqual(posts, 1)
+            XCTAssertEqual(model.errorMessage, existingError)
+            XCTAssertEqual(model.chatStore.submissionRecoveries["msg_first"]?.phase, .admitted)
+            XCTAssertFalse(model.chatStore.isV2PromptInFlight(sessionID: session.id))
+            model.disconnect()
+        }
+    }
+
     func testLateInboxReadCannotConfirmAdmissionInNewServerGeneration() async {
         let model = makeModel()
         let session = Self.session(id: "ses_v2", directory: "/repo")
@@ -1201,6 +1236,94 @@ final class V2SessionWorkflowTests: XCTestCase {
         model.composerStore.draftsByChatKey = [:]
         model.directoryStoreRegistry.activate("/repo")
         return model
+    }
+
+    func testV2ComposerDiscoversCommandsAndSkillsInWorkspaceWithoutEnablingAutomation() async throws {
+        let model = makeModel()
+        defer { model.disconnect() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        _ = model.beginSessionNavigation(session)
+        V2SessionWorkflowURLProtocol.handler = { request in
+            let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            XCTAssertTrue(query.contains { $0.name == "location[directory]" && $0.value == "/repo" })
+            switch request.url?.path {
+            case "/api/command":
+                return (200, #"{"data":[{"name":"review","description":"Review changes"}]}"#)
+            case "/api/skill":
+                return (200, #"{"data":[{"id":"review","name":"Review skill","description":"Skill review"},{"id":"install-iphone","name":"Install iPhone"}]}"#)
+            default:
+                XCTFail("Unexpected request")
+                throw URLError(.unsupportedURL)
+            }
+        }
+        let client = try XCTUnwrap(model.backendConnection?.openCodeCompatibility?.client)
+        let commands = try await client.listV2ComposerCommands(directory: "/repo")
+        XCTAssertEqual(commands.map(\.name), ["review", "skill:review", "install-iphone"])
+        XCTAssertEqual(commands.last?.skillID, "install-iphone")
+        model.directoryCommands = commands
+        XCTAssertTrue(model.chatFacade.commands(forSessionID: session.id, canFork: false).contains { $0.name == "install-iphone" })
+        XCTAssertNotNil(model.chatFacade.slashCommandInput(from: "/install-iphone"))
+        XCTAssertNil(model.backendConnection?.commands)
+    }
+
+    func testV2ComposerCallbackUses204ContractAndRebasesAgentMentions() async throws {
+        let model = makeModel()
+        defer { model.disconnect() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        _ = model.beginSessionNavigation(session)
+        let command = OpenCodeCommand(name: "review", description: nil, agent: nil, model: nil,
+            source: nil, template: "", subtask: nil, hints: [])
+        var posts = 0
+        V2SessionWorkflowURLProtocol.handler = { request in
+            if request.url?.path == "/api/session/ses_v2/command" {
+                posts += 1
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.body(request)) as? [String: Any])
+                XCTAssertEqual(body["name"] as? String, "review")
+                XCTAssertEqual(body["text"] as? String, "@general check")
+                XCTAssertNil(body["id"])
+                let agents = try XCTUnwrap(body["agents"] as? [[String: Any]])
+                let mention = try XCTUnwrap(agents.first?["mention"] as? [String: Any])
+                XCTAssertEqual(mention["start"] as? Int, 0)
+                XCTAssertEqual(mention["end"] as? Int, 8)
+                return (204, "")
+            }
+            return (503, #"{"message":"Reconciliation pending"}"#)
+        }
+        let accepted = await model.chatFacade.sendCommand(command, sessionID: session.id, userVisible: true,
+            arguments: "@general check", agentMentions: [.init(name: "general", content: "@general", start: 8, end: 16)])
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(posts, 1)
+        XCTAssertFalse(model.chatFacade.hasPendingPromptAdmission(sessionID: session.id))
+        XCTAssertNil(model.errorMessage)
+    }
+
+    func testV2ComposerSkillUsesDurablePromptWithSkillAttachment() async throws {
+        let model = makeModel()
+        defer { model.disconnect() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        _ = model.beginSessionNavigation(session)
+        let skill = OpenCodeCommand(name: "install-iphone", description: nil, agent: nil, model: nil,
+            source: "skill", template: "", subtask: nil, hints: [], skillID: "install-iphone")
+        var posted = false
+        V2SessionWorkflowURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/api/session/ses_v2/prompt":
+                posted = true
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.body(request)) as? [String: Any])
+                XCTAssertEqual(body["skills"] as? [[String: String]], [["id": "install-iphone"]])
+                XCTAssertEqual(body["text"] as? String, "/install-iphone debug")
+                return (200, #"{"data":{"id":"msg_skill","sessionID":"ses_v2","time":{"created":1},"type":"user","payload":{},"delivery":"queue"}}"#)
+            case "/api/experimental/session/ses_v2/wait": return (204, "")
+            case "/api/session/ses_v2/message": return (200, Self.page("msg_skill"))
+            default:
+                XCTFail("Unexpected request: \(request.url?.path ?? "nil")")
+                throw URLError(.unsupportedURL)
+            }
+        }
+        let accepted = await model.chatFacade.sendCommand(skill, sessionID: session.id, userVisible: true,
+            arguments: "debug", messageID: "msg_skill")
+        XCTAssertTrue(accepted)
+        XCTAssertTrue(posted)
     }
 
     func testSelectingV2ChatPresentsTranscriptWhileStatusesAreStillPending() async throws {

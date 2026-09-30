@@ -99,7 +99,7 @@ struct V2ConfigurationCoordinator {
         guard let context = store.context, context.isCurrent(), !store.isBusy, store.attempt == nil,
               store.integrations.contains(where: { integration in
                   integration.id == integrationID && integration.connections.contains {
-                      if case .credential(let id, _) = $0 { return id == credentialID }
+                      if case .credential(let id, _, _) = $0 { return id == credentialID }
                       return false
                   }
               }) else { return }

@@ -633,7 +633,7 @@ final class ProviderUsageFacadeTests: XCTestCase {
         XCTAssertTrue(model.providerUsageStore === model.providerUsageFacade.store)
     }
 
-    func testProductionImporterCompositionFailsClosedForThirdPartyV2AndMissingTerminal() {
+    func testProductionImporterCompositionRejectsThirdPartyMismatchedSourceAndMissingTerminal() {
         let thirdPartyServices = HomeTestBackend()
         let thirdParty = BackendConnection(
             descriptor: .init(id: "injected", name: "Synthetic", version: "1"),
@@ -660,6 +660,45 @@ final class ProviderUsageFacadeTests: XCTestCase {
             events: legacy.events
         )
         assertImporterRejected(connection: noTerminal, profile: .legacy)
+    }
+
+    func testProductionImporterCompositionAcceptsExactV2Credential() throws {
+        let connection = Self.openCodeConnection(profile: .v2)
+        let context = ProviderUsageDiscoveryContext(backend: connection.descriptor, connectionLifetimeID: connection.id,
+                                                   apiProfile: .v2, scope: .init())
+        let candidate = ProviderUsageSetupCandidate(
+            id: UUID(), provider: .codex, discoveryContext: context,
+            sourceIdentity: .v2Credential(integrationID: "openai", credentialID: "cred_selected"),
+            sourceKind: .openCodeAuth, credentialKind: .oauthAccessToken, replacingAccountID: nil)
+        XCTAssertNoThrow(try OpenCodeProviderUsageComposition.makeImporter(
+            candidate: candidate, allowsInsecureHTTP: false, currentContext: { context }, connection: connection))
+    }
+
+    func testV2AccountsWithIdenticalLabelsOnlyReplaceTheExactCredential() throws {
+        let connection = Self.openCodeConnection(profile: .v2)
+        let context = ProviderUsageDiscoveryContext(backend: connection.descriptor, connectionLifetimeID: connection.id,
+                                                   apiProfile: .v2, scope: .init())
+        let account = ProviderUsageAccount(
+            id: UUID(), provider: .openRouter, sourceConnectionID: context.backend.id, apiProfile: .v2,
+            sourceKind: .openCodeAuth, sourceCredentialID: "cred_first", credentialKind: .apiKey,
+            credentialReference: UUID(), credentialRevision: 1, createdAt: .now, updatedAt: .now)
+        let store = ProviderUsageStore()
+        store.replaceAccounts([account])
+        let facade = ProviderUsageFacade(
+            store: store, accounts: FacadeProviderUsageAccountRepository(), providerClient: FacadeProviderUsageFetching(),
+            contextProvider: { context }, legacyStateProvider: { .init(readiness: .notHydrated, connectedProviders: []) },
+            v2StateProvider: { .init(readiness: .ready, integrations: [
+                .init(id: "openrouter", label: "OpenRouter", credentialConnections: [
+                    .init(id: "cred_first", label: "Account", method: "key"),
+                    .init(id: "cred_second", label: "Account", method: "key")])
+            ]) }, importerFactory: { _, _, _ in throw ProviderUsageCredentialImportError.unsupportedSource })
+        facade.synchronizeDiscovery()
+        XCTAssertEqual(store.candidates.count, 2)
+        XCTAssertTrue(facade.hasTrackedAccount(for: store.candidates[0]))
+        XCTAssertFalse(facade.hasTrackedAccount(for: store.candidates[1]))
+        XCTAssertTrue(facade.beginSetup(from: store.candidates[1]))
+        guard case .selected(let setup) = store.setupPhase else { return XCTFail("Expected setup") }
+        XCTAssertNil(setup.replacingAccountID)
     }
 
     private func assertImporterRejected(connection: BackendConnection, profile: ProviderUsageAPIProfile) {

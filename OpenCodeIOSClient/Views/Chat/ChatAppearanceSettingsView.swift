@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatAppearanceSettingsView: View {
     @ObservedObject var store: AppCustomizationStore
+    var isV2Connection = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -99,6 +100,14 @@ struct ChatAppearanceSettingsView: View {
                     set: { store.setShowsReasoningBlocks($0) }
                 ))
                 .accessibilityIdentifier("configurations.show-reasoning-blocks")
+
+                if isV2Connection {
+                    Toggle("Show Context Changes", isOn: Binding(
+                        get: { store.showsContextChanges },
+                        set: { store.setShowsContextChanges($0) }
+                    ))
+                    .accessibilityIdentifier("configurations.show-context-changes")
+                }
             } footer: {
                 Text("Shows an animated highlight at the top of a chat while the AI is active.")
             }
@@ -109,7 +118,7 @@ struct ChatAppearanceSettingsView: View {
     }
 }
 
-private struct AccentColorPicker: View {
+struct AccentColorPicker: View {
     @ObservedObject var store: AppCustomizationStore
     @Environment(\.colorScheme) private var colorScheme
 
@@ -145,6 +154,7 @@ private struct AccentColorPicker: View {
             }
         }
         .padding(.vertical, 6)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("appearance.accent-color")
     }
 }

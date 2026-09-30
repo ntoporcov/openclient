@@ -76,17 +76,18 @@ enum OpenCodeV2IntegrationMethod: Decodable, Equatable, Identifiable, Sendable {
 }
 
 enum OpenCodeV2IntegrationConnection: Decodable, Equatable, Identifiable, Sendable {
-    case credential(id: String, label: String)
+    case credential(id: String, label: String, method: String? = nil)
     case env(name: String)
     case unsupported(type: String)
 
-    private enum CodingKeys: String, CodingKey { case type, id, label, name }
+    private enum CodingKeys: String, CodingKey { case type, id, label, name, method }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let type = try c.decode(String.self, forKey: .type)
         switch type {
-        case "credential": self = .credential(id: try c.decode(String.self, forKey: .id), label: try c.decode(String.self, forKey: .label))
+        case "credential": self = .credential(id: try c.decode(String.self, forKey: .id), label: try c.decode(String.self, forKey: .label),
+                                              method: try c.decodeIfPresent(String.self, forKey: .method))
         case "env": self = .env(name: try c.decode(String.self, forKey: .name))
         default: self = .unsupported(type: type)
         }
@@ -94,7 +95,7 @@ enum OpenCodeV2IntegrationConnection: Decodable, Equatable, Identifiable, Sendab
 
     var id: String {
         switch self {
-        case .credential(let id, _): return id
+        case .credential(let id, _, _): return id
         case .env(let name): return "env:\(name)"
         case .unsupported(let type): return "unsupported:\(type)"
         }
@@ -115,7 +116,7 @@ extension OpenCodeV2IntegrationMethod {
 
 extension OpenCodeV2IntegrationConnection {
     var removableCredentialID: String? {
-        if case .credential(let id, _) = self { return id }
+        if case .credential(let id, _, _) = self { return id }
         return nil
     }
 }

@@ -2965,6 +2965,7 @@ private struct CommandPicker: View {
     let onSelect: (OpenCodeCommand) -> Void
     let onPin: (OpenCodeCommand) -> Void
     let onUnpin: (OpenCodeCommand) -> Void
+    @State private var detailCommand: OpenCodeCommand?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2995,10 +2996,6 @@ private struct CommandPicker: View {
                                     onSelect(command)
                                 } label: {
                                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                        if command.source == "client", command.name == "btw" {
-                                            Image(systemName: SideQuestionAppearance.symbolName)
-                                                .foregroundStyle(.secondary)
-                                        }
                                         HStack(spacing: 1) {
                                             Text("/")
                                                 .foregroundStyle(.secondary.opacity(0.7))
@@ -3006,6 +3003,9 @@ private struct CommandPicker: View {
                                                 .foregroundStyle(.primary)
                                         }
                                         .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .layoutPriority(1)
 
                                         if let description = command.description, !description.isEmpty {
                                             Text(description)
@@ -3026,21 +3026,10 @@ private struct CommandPicker: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
-                                .contextMenu {
-                                    if pinnedCommandNames.contains(command.name) {
-                                        Button {
-                                            onUnpin(command)
-                                        } label: {
-                                            Label("Unpin", systemImage: "pin.slash")
-                                        }
-                                    } else {
-                                        Button {
-                                            onPin(command)
-                                        } label: {
-                                            Label("Pin", systemImage: "pin")
-                                        }
-                                    }
-                                }
+                                .modifier(CommandRowPressFeedback {
+                                    OpenCodeHaptics.impact(.soft)
+                                    detailCommand = command
+                                })
                                 .id(command.name)
                                 .accessibilityAddTraits(command.name == selectedCommandName ? .isSelected : [])
                                 .accessibilityIdentifier("chat.command.\(command.name)")
@@ -3063,6 +3052,67 @@ private struct CommandPicker: View {
             }
         }
         .opencodeGlassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .sheet(item: $detailCommand) { command in
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(verbatim: "/" + command.name)
+                            .font(.title2.bold())
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let description = command.description, !description.isEmpty {
+                            Text(verbatim: description).foregroundStyle(.secondary)
+                        }
+                        if !command.template.isEmpty {
+                            Text(verbatim: command.template)
+                                .font(.body.monospaced())
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                }
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { detailCommand = nil }
+                    }
+                    ToolbarItem(placement: .bottomBar) {
+                        if pinnedCommandNames.contains(command.name) {
+                            Button { onUnpin(command) } label: { Label("Unpin", systemImage: "pin.slash") }
+                        } else {
+                            Button { onPin(command) } label: { Label("Pin", systemImage: "pin") }
+                        }
+                    }
+                    ToolbarItem(placement: .bottomBar) {
+                        ShareLink(item: (["/" + command.name, command.description ?? "", command.template]
+                            .filter { !$0.isEmpty }.joined(separator: "\n\n")))
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+private struct CommandRowPressFeedback: ViewModifier {
+    let onLongPress: () -> Void
+    @GestureState private var isPressed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.primary.opacity(isPressed ? 0.14 : 0))
+            }
+            .scaleEffect(isPressed && !reduceMotion ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.1), value: isPressed)
+            .highPriorityGesture(
+                LongPressGesture()
+                    .updating($isPressed) { value, state, _ in state = value }
+                    .onEnded { _ in onLongPress() }
+            )
     }
 }
 

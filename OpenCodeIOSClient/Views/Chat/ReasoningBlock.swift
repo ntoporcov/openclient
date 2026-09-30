@@ -1,15 +1,32 @@
 import SwiftUI
 
+enum TimelineContextLabel {
+    static func filePath(text: String, description: String?) -> String? {
+        for value in [description, text].compactMap({ $0 }) {
+            let line = value.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines).first ?? ""
+            for prefix in ["Instructions from: ", "Loaded file: ", "Loaded "] where line.hasPrefix(prefix) {
+                let path = String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !path.isEmpty else { continue }
+                if path.hasPrefix("/") || path.hasPrefix("~/") || path.hasPrefix("./") || path.hasPrefix("../")
+                    || (!path.contains(" ") && !(path as NSString).pathExtension.isEmpty) {
+                    return path
+                }
+            }
+        }
+        return nil
+    }
+}
+
 struct TimelineContextBlock: View {
     let kind: OpenCodeTimelineContextType
     let text: String
-    var contextTitle: String? = nil
+    var model: OpenCodeMessageModelReference? = nil
+    var contextDescription: String? = nil
     @State private var isExpanded = false
 
     private var title: LocalizedStringResource {
         switch kind {
-        case .synthetic: "Context"
-        case .system: "Context updated"
+        case .synthetic, .system: "Context"
         case .skill: "Skill"
         case .agentSwitched: "Agent changed"
         case .modelSwitched: "Model changed"
@@ -28,28 +45,35 @@ struct TimelineContextBlock: View {
         }
     }
 
+    private var tint: Color {
+        switch kind {
+        case .synthetic: .purple
+        case .system: .indigo
+        case .skill: .teal
+        case .agentSwitched: .orange
+        case .modelSwitched: .blue
+        case .locationSwitched: .green
+        }
+    }
+
+    private var cardTitle: ActivityText {
+        if kind == .modelSwitched { return .verbatim(model?.modelID ?? text) }
+        if (kind == .synthetic || kind == .system),
+           let path = TimelineContextLabel.filePath(text: text, description: contextDescription) {
+            return .verbatim(path)
+        }
+        return .localized(title)
+    }
+
     var body: some View {
         Button { isExpanded = true } label: {
-            HStack(spacing: 10) {
-                Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
-                HStack(spacing: 8) {
-                    Image(systemName: icon)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title).font(.caption.weight(.semibold))
-                        Text(verbatim: contextTitle ?? String(text.prefix(120)).components(separatedBy: .newlines).first ?? text)
-                            .font(.caption2)
-                            .lineLimit(1)
-                    }
-                    Image(systemName: "chevron.right").font(.caption2)
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.thinMaterial, in: Capsule())
-                .overlay { Capsule().stroke(Color.secondary.opacity(0.14), lineWidth: 1) }
-                .layoutPriority(1)
-                Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
-            }
+            ActivityRow(
+                style: ActivityStyle(title: cardTitle, subtitle: nil, icon: icon, tint: tint,
+                                     isRunning: false, showsDisclosure: true, shimmerTitle: false),
+                providerID: kind == .modelSwitched ? model?.providerID : nil,
+                titleLineLimit: 1,
+                titleTruncationMode: .head
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

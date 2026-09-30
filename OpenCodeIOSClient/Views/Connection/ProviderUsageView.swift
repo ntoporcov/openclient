@@ -477,6 +477,12 @@ private struct ProviderUsageReadConsentView: View {
                 .foregroundStyle(.secondary)
         }
 
+        if candidate.provider == .codex, candidate.apiProfile == .v2 {
+            Text("OpenCode v2 manages token renewal. When needed, OpenClient can read a newer access token for this same account from the connected server. The refresh token stays on the server.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+
         if usesInsecureTransport {
             Toggle("Allow insecure transfer for this attempt", isOn: $allowsInsecureTransport)
             Label(

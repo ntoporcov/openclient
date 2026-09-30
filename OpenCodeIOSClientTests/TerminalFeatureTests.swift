@@ -202,7 +202,7 @@ final class TerminalFeatureTests: XCTestCase {
     func testCredentialImportLegacyPTYTransportAllowsStableGlobalScope() async throws {
         let client = makeClient()
         defer { client.session.invalidateAndCancel() }
-        let transport = try OpenCodeCredentialImportLegacyPTYTransport(client: client)
+        let transport = try OpenCodeCredentialImportPTYTransport(client: client)
         let (requests, continuation) = AsyncStream<TerminalPendingRequest>.makeStream()
         TerminalURLProtocol.handler = { continuation.yield($0) }
         var iterator = requests.makeAsyncIterator()
@@ -255,6 +255,39 @@ final class TerminalFeatureTests: XCTestCase {
         let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
         XCTAssertEqual(query, ["cursor": "0"])
         XCTAssertNil(request.value(forHTTPHeaderField: "x-opencode-directory"))
+    }
+
+    func testCredentialImportV2TransportPreservesHelperEnvironmentAndGlobalScope() async throws {
+        let client = makeClient()
+        defer { client.session.invalidateAndCancel() }
+        let transport = try OpenCodeCredentialImportPTYTransport(client: client, profile: .v2)
+        let (requests, continuation) = AsyncStream<TerminalPendingRequest>.makeStream()
+        TerminalURLProtocol.handler = { continuation.yield($0) }
+        var iterator = requests.makeAsyncIterator()
+        let calls = Task {
+            defer { continuation.finish() }
+            let created = try await transport.create(
+                request: .init(args: ProviderUsageCredentialImportHelper.arguments, title: "Credential import",
+                               env: ["OCPI_PSK": "synthetic-psk"]), scope: .init())
+            _ = try await transport.delete(id: created.id, scope: .init())
+        }
+        let nextCreate = await iterator.next()
+        let create = try XCTUnwrap(nextCreate)
+        XCTAssertEqual(create.request.url?.path, "/api/pty")
+        XCTAssertNil(URLComponents(url: try XCTUnwrap(create.request.url), resolvingAgainstBaseURL: false)?.query)
+        let body = try requestBody(create.request)
+        XCTAssertEqual(body["env"] as? [String: String], ["OCPI_PSK": "synthetic-psk"])
+        XCTAssertEqual(body["args"] as? [String], ProviderUsageCredentialImportHelper.arguments)
+        create.respond(Self.wrapped(Self.ptyJSON))
+        let nextDelete = await iterator.next()
+        let delete = try XCTUnwrap(nextDelete)
+        XCTAssertEqual(delete.request.url?.path, "/api/pty/pty_1")
+        XCTAssertNil(URLComponents(url: try XCTUnwrap(delete.request.url), resolvingAgainstBaseURL: false)?.query)
+        delete.respond("", status: 204)
+        try await calls.value
+        let socket = try client.v2PTYConnectRequest(id: "pty_1", directory: nil, cursor: 0)
+        XCTAssertEqual(URLComponents(url: try XCTUnwrap(socket.url), resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "cursor", value: "0")])
     }
 
     @MainActor

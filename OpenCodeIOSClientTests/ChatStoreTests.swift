@@ -1204,16 +1204,112 @@ final class ChatStoreTests: XCTestCase {
                 for enabled in [false, true] {
                     let groups = MessageBubbleToolGroupingPolicy.groups(parts: parts, visibleIndices: visible, enabled: enabled)
                     XCTAssertEqual(groups.flatMap { $0 }, visible, "Grouping must preserve visible content and order")
-                    XCTAssertTrue(groups.contains([4]), "Context events must remain separate")
+                    XCTAssertTrue(groups.flatMap { $0 }.contains(4), "Context stays available with tools hidden")
                     XCTAssertTrue(groups.contains([6]), "Answer text must remain separate")
-                    if !enabled || !tools { XCTAssertTrue(groups.allSatisfy { $0.count == 1 }) }
-                    if enabled && tools {
-                        XCTAssertEqual(groups.first, reasoning ? [0, 1] : [0, 1, 3])
-                        XCTAssertTrue(groups.contains([5]), "Never group across a context event")
+                    if !enabled { XCTAssertTrue(groups.allSatisfy { $0.count == 1 }) }
+                    if enabled {
+                        XCTAssertEqual(groups.first, visible.filter { $0 != 6 }, "Context and reasoning join tool activity")
                     }
                 }
             }
         }
+    }
+
+    func testTranscriptActivityGroupingCrossesMessagesButPreservesTextAndUserBoundaries() {
+        func message(_ id: String, _ type: String, role: String = "assistant") -> OpenCodeMessageEnvelope {
+            var result = OpenCodeMessageEnvelope.local(role: role, text: "", messageID: id, sessionID: "ses_1", partID: id)
+            result.parts = [OpenCodePart(id: "part_\(id)", messageID: id, sessionID: "ses_1", type: type,
+                mime: nil, filename: nil, url: nil, reason: nil, tool: type == "tool" ? "shell" : nil,
+                callID: nil, state: nil, text: type == "tool" ? nil : "Text", synthetic: type == "system")]
+            return result
+        }
+        let originals = [message("a", "tool"), message("b", "reasoning"), message("c", "tool"),
+                         message("d", "text"), message("e", "tool"), message("f", "text", role: "user"),
+                         message("g", "tool"), message("h", "system"), message("i", "tool")]
+        let slices = TranscriptActivityGrouping.slices(originals)
+        XCTAssertEqual(slices.map(\.sourceMessageIDs), [["a", "b", "c"], ["d"], ["e"], ["f"], ["g", "h", "i"]])
+        XCTAssertEqual(slices.map { $0.parts.compactMap(\.messageID) }, [["a", "b", "c"], ["d"], ["e"], ["f"], ["g", "h", "i"]])
+        XCTAssertEqual(slices.flatMap(\.parts), originals.flatMap(\.parts))
+        let appended = TranscriptActivityGrouping.slices(originals + [message("j", "tool")])
+        XCTAssertEqual(slices.map(\.id), appended.map(\.id), "Appending live tool activity must retain row identity")
+        XCTAssertEqual(appended.last?.parts.count, 4)
+    }
+
+    func testReasoningOnlyActivityGroupsAndUngroupedOrder() {
+        let part = OpenCodePart(id: "r", messageID: "m", sessionID: "s", type: "reasoning",
+            mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil, text: "Thinking")
+        XCTAssertEqual(MessageBubbleToolGroupingPolicy.groups(parts: [part, part], visibleIndices: [0, 1], enabled: true), [[0, 1]])
+        XCTAssertEqual(MessageBubbleToolGroupingPolicy.groups(parts: [part, part], visibleIndices: [0, 1], enabled: false), [[0], [1]])
+        XCTAssertFalse(ToolGroupSummary(parts: [part]).title.isEmpty)
+    }
+
+    func testGroupedWindowCountsRowsRatherThanToolMessages() {
+        let rows = (0..<30).map { ($0 * 10)...($0 * 10 + 9) }
+        let first = GroupedTranscriptWindowing.select(totalCount: 300, requestedCount: 12, batchSize: 12, rowRanges: rows)
+        XCTAssertEqual(first.messageCount, 120)
+        XCTAssertEqual(first.hiddenRowCount, 18)
+        XCTAssertEqual(first.nextMessageCount, 240)
+        let next = GroupedTranscriptWindowing.select(totalCount: 300, requestedCount: first.nextMessageCount, batchSize: 12, rowRanges: rows)
+        XCTAssertEqual(next.messageCount, 240)
+        XCTAssertEqual(next.hiddenRowCount, 6)
+        XCTAssertEqual(next.nextMessageCount, 300)
+    }
+
+    func testGroupedWindowCompletesActivitySharingBoundaryMessageWithAnswer() {
+        let selection = GroupedTranscriptWindowing.select(totalCount: 100, requestedCount: 1, batchSize: 1,
+            rowRanges: [0...0, 1...19, 20...99, 99...99])
+        XCTAssertEqual(selection.messageCount, 80, "Selecting the answer must not truncate its activity group")
+        XCTAssertEqual(selection.hiddenRowCount, 2)
+        XCTAssertEqual(selection.nextMessageCount, 99)
+    }
+
+    func testGroupedWindowSkipsInvisibleHistoryAndCompletesOverlappingGroups() {
+        let selection = GroupedTranscriptWindowing.select(totalCount: 50, requestedCount: 1, batchSize: 1,
+            rowRanges: [3...20, 20...40, 40...49, 49...49])
+        XCTAssertEqual(selection.messageCount, 47)
+        XCTAssertEqual(selection.hiddenRowCount, 0)
+        let empty = GroupedTranscriptWindowing.select(totalCount: 50, requestedCount: 12, batchSize: 12, rowRanges: [])
+        XCTAssertEqual(empty.messageCount, 50)
+        XCTAssertEqual(empty.hiddenRowCount, 0)
+    }
+
+    func testContextLabelRecognizesLoadedFilesWithoutExposingOtherContext() {
+        XCTAssertEqual(TimelineContextLabel.filePath(text: "Instructions from: /repo/AGENTS.md\nInstructions", description: nil), "/repo/AGENTS.md")
+        XCTAssertEqual(TimelineContextLabel.filePath(text: "Contents", description: "Loaded AGENTS.md"), "AGENTS.md")
+        XCTAssertEqual(TimelineContextLabel.filePath(text: "Loaded file: /repo/My Folder/notes.md", description: nil), "/repo/My Folder/notes.md")
+        XCTAssertNil(TimelineContextLabel.filePath(text: "See shell result /tmp/output.txt", description: nil))
+        XCTAssertNil(TimelineContextLabel.filePath(text: "Today's date: Tue Sep 29 2026", description: nil))
+    }
+
+    func testContextVisibilityPreservesOtherPartsAndCanonicalMessage() {
+        var message = OpenCodeMessageEnvelope.local(role: "assistant", text: "Answer", messageID: "m", sessionID: "s", partID: "answer")
+        let context = OpenCodePart(id: "context", messageID: "m", sessionID: "s", type: "system",
+            mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil, text: "Context", synthetic: true)
+        message.parts.insert(context, at: 0)
+        let hidden = TranscriptActivityGrouping.filteringContext(message, showsContextChanges: false)
+        XCTAssertEqual(hidden.parts.map(\.id), ["answer"])
+        XCTAssertEqual(message.parts.count, 2)
+        XCTAssertEqual(TranscriptActivityGrouping.filteringContext(message, showsContextChanges: true), message)
+    }
+
+    func testToolGroupCaptionsOmitUnknownDetailsAndRawCommands() throws {
+        func tool(_ name: String, input: [String: String]) throws -> OpenCodePart {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "type": "tool", "tool": name,
+                "state": ["status": "completed", "title": "Raw fallback title", "input": input]
+            ])
+            return try JSONDecoder().decode(OpenCodePart.self, from: data)
+        }
+        let unknown = try tool("custom_tool", input: ["description": "Internal details", "command": "secret command"])
+        let shell = try tool("shell", input: ["command": "LANG=en_US.UTF-8\nxcodebuild -quiet"])
+        XCTAssertEqual(ToolGroupSummary(parts: [unknown]).caption, String(localized: "1 tool call"))
+        XCTAssertEqual(ToolGroupSummary(parts: [shell]).caption, String(localized: "1 tool call"))
+        let described = try tool("shell", input: ["description": "Build the app", "command": "xcodebuild -quiet"])
+        XCTAssertTrue(ToolGroupSummary(parts: [described]).caption.hasSuffix("Build the app"))
+        let file = try tool("read", input: ["filePath": "/long/path/README.md"])
+        XCTAssertTrue(ToolGroupSummary(parts: [file]).caption.hasSuffix("README.md"))
+        let multiline = try tool("shell", input: ["description": "First line\nSecond line"])
+        XCTAssertEqual(ToolGroupSummary(parts: [multiline]).caption, String(localized: "1 tool call"))
     }
 
     func testToolActivityPolicyRecognizesLegacyToolsAndSelectsLatestRunningTool() {

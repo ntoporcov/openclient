@@ -125,10 +125,20 @@ struct ActivityRow: View {
     var compact: Bool = false
     var trailingAccessoryInset: CGFloat = 0
     var reservesSubtitleSpace = false
+    var subtitleLineLimit: Int? = nil
+    var providerID: String? = nil
+    var titleLineLimit: Int = 3
+    var titleTruncationMode: Text.TruncationMode = .tail
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: style.icon)
+            Group {
+                if let providerID {
+                    ProviderIcon(providerID: providerID, size: compact ? 13 : 14)
+                } else {
+                    Image(systemName: style.icon)
+                }
+            }
                 .font(.system(size: compact ? 13 : 14, weight: .semibold))
                 .foregroundStyle(style.tint)
                 .frame(width: compact ? 24 : 28, height: compact ? 24 : 28)
@@ -137,14 +147,15 @@ struct ActivityRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 ShimmeringText(text: style.title, active: style.shimmerTitle)
                     .font(.subheadline.weight(.medium))
-                    .lineLimit(3)
+                    .lineLimit(titleLineLimit)
+                    .truncationMode(titleTruncationMode)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle = style.subtitle {
                     subtitle.text
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(nil)
+                        .lineLimit(subtitleLineLimit)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if reservesSubtitleSpace {

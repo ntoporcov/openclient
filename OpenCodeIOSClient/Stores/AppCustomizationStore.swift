@@ -84,6 +84,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
     var showsToolCalls: Bool
     var groupsToolCalls: Bool
     var showsReasoningBlocks: Bool
+    var showsContextChanges: Bool
+    var preferredStreamingDelivery: OpenCodePromptDelivery?
     var showsActivityLastUserMessage: Bool
     var isTodoStripMinimized: Bool
     var sessionCardStyle: SessionCardStyle
@@ -106,6 +108,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
         showsToolCalls: Bool = true,
         groupsToolCalls: Bool = true,
         showsReasoningBlocks: Bool = true,
+        showsContextChanges: Bool = true,
+        preferredStreamingDelivery: OpenCodePromptDelivery? = nil,
         showsActivityLastUserMessage: Bool = true,
         isTodoStripMinimized: Bool = false,
         sessionCardStyle: SessionCardStyle = .simple,
@@ -119,6 +123,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
         self.showsToolCalls = showsToolCalls
         self.groupsToolCalls = groupsToolCalls
         self.showsReasoningBlocks = showsReasoningBlocks
+        self.showsContextChanges = showsContextChanges
+        self.preferredStreamingDelivery = preferredStreamingDelivery
         self.showsActivityLastUserMessage = showsActivityLastUserMessage
         self.isTodoStripMinimized = isTodoStripMinimized
         self.sessionCardStyle = sessionCardStyle
@@ -134,6 +140,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
         case showsToolCalls
         case groupsToolCalls
         case showsReasoningBlocks
+        case showsContextChanges
+        case preferredStreamingDelivery
         case showsActivityLastUserMessage
         case isTodoStripMinimized
         case sessionCardStyle
@@ -152,6 +160,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
         showsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .showsToolCalls) ?? true
         groupsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .groupsToolCalls) ?? true
         showsReasoningBlocks = try container.decodeIfPresent(Bool.self, forKey: .showsReasoningBlocks) ?? true
+        showsContextChanges = try container.decodeIfPresent(Bool.self, forKey: .showsContextChanges) ?? true
+        preferredStreamingDelivery = try container.decodeIfPresent(OpenCodePromptDelivery.self, forKey: .preferredStreamingDelivery)
         showsActivityLastUserMessage = try container.decodeIfPresent(Bool.self, forKey: .showsActivityLastUserMessage) ?? true
         isTodoStripMinimized = try container.decodeIfPresent(Bool.self, forKey: .isTodoStripMinimized) ?? false
         sessionCardStyle = try container.decodeIfPresent(String.self, forKey: .sessionCardStyle)
@@ -206,6 +216,20 @@ final class AppCustomizationStore: ObservableObject {
     }
 
     var groupsToolCalls: Bool { preferences.groupsToolCalls }
+    var showsContextChanges: Bool { preferences.showsContextChanges }
+    var preferredStreamingDelivery: OpenCodePromptDelivery? { preferences.preferredStreamingDelivery }
+
+    func setPreferredStreamingDelivery(_ delivery: OpenCodePromptDelivery) {
+        guard preferences.preferredStreamingDelivery != delivery else { return }
+        preferences.preferredStreamingDelivery = delivery
+        persist()
+    }
+
+    func setShowsContextChanges(_ shows: Bool) {
+        guard preferences.showsContextChanges != shows else { return }
+        preferences.showsContextChanges = shows
+        persist()
+    }
 
     func setGroupsToolCalls(_ groups: Bool) {
         guard preferences.groupsToolCalls != groups else { return }

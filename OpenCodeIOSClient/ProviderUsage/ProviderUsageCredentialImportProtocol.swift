@@ -99,9 +99,22 @@ enum ProviderUsageCredentialImportProtocol {
             expectedAccountID: String? = nil,
             currentAccessToken: String? = nil
         ) throws {
-            guard candidate.apiProfile == .legacy,
-                  candidate.sourceKind == .openCodeAuth,
-                  case let .legacyProvider(providerID) = candidate.sourceIdentity else {
+            guard candidate.sourceKind == .openCodeAuth else {
+                throw ProviderUsageCredentialImportError.unsupportedSource
+            }
+            let providerID: String
+            let sourcePrefix: String
+            switch (candidate.apiProfile, candidate.sourceIdentity) {
+            case (.legacy, .legacyProvider(let id)):
+                providerID = id
+                sourcePrefix = action == .read ? "legacy-opencode-auth-v1" : "legacy-opencode-auth-renew-v1"
+            case (.v2, .v2Credential(let id, let credentialID)):
+                guard credentialID.range(of: "^[A-Za-z0-9_-]{1,200}$", options: .regularExpression) != nil else {
+                    throw ProviderUsageCredentialImportError.unsupportedSource
+                }
+                providerID = id
+                sourcePrefix = (action == .read ? "v2-opencode-credential-v1:" : "v2-opencode-credential-renew-v1:") + credentialID
+            default:
                 throw ProviderUsageCredentialImportError.unsupportedSource
             }
             switch (candidate.provider, candidate.credentialKind, providerID) {
@@ -126,7 +139,7 @@ enum ProviderUsageCredentialImportProtocol {
                 expectedAccountBinding = "-"
                 currentAccessBinding = "-"
             }
-            source = action == .read ? "legacy-opencode-auth-v1" : "legacy-opencode-auth-renew-v1"
+            source = sourcePrefix
             credentialKind = candidate.credentialKind
             self.action = action
         }
@@ -293,6 +306,7 @@ enum ProviderUsageCredentialImportHelper {
 const c=require('node:crypto'),fs=require('node:fs'),path=require('node:path');
 const M='OCPI',V='1',MAX=1048576,OUT=16384;
 const op=process.env.OCPI_OPERATION_ID,provider=process.env.OCPI_PROVIDER,source=process.env.OCPI_SOURCE;
+const v2=/^v2-opencode-credential(-renew)?-v1:([A-Za-z0-9_-]{1,200})$/.exec(source||'');
 const expected=process.env.OCPI_EXPECTED_ACCOUNT_BINDING,currentAccess=process.env.OCPI_CURRENT_ACCESS_BINDING;
 const client=Buffer.from(process.env.OCPI_CLIENT_PUBLIC_KEY||'','base64'),psk=Buffer.from(process.env.OCPI_PSK||'','base64');
 const b64=x=>Buffer.from(x).toString('base64'),rawPublic=k=>k.export({type:'spki',format:'der'}).subarray(-32);
@@ -300,12 +314,12 @@ const spki=x=>Buffer.concat([Buffer.from('302a300506032b656e032100','hex'),x]);
 const sha=x=>c.createHash('sha256').update(x).digest('hex');
 const fail=code=>{process.stdout.write('OCPI|1|ERROR|'+code+'\n');process.exit(2)};
 if(provider!=='openai'&&provider!=='openrouter')fail('INVALID_PROVIDER');
-if(source!=='legacy-opencode-auth-v1'&&source!=='legacy-opencode-auth-renew-v1')fail('INVALID_SOURCE');
+if(!v2&&source!=='legacy-opencode-auth-v1'&&source!=='legacy-opencode-auth-renew-v1')fail('INVALID_SOURCE');
 if(client.length!==32)fail('INVALID_CLIENT_KEY');
 if(psk.length!==32)fail('INVALID_PSK');
 if(!fs.promises||typeof fs.promises.open!=='function'||typeof fs.promises.rename!=='function'||typeof fs.promises.mkdir!=='function'||typeof fs.promises.rmdir!=='function'||typeof fs.constants.O_NOFOLLOW!=='number'||typeof c.hkdfSync!=='function')fail('UNSUPPORTED_RUNTIME');
 if(source==='legacy-opencode-auth-renew-v1'&&(typeof fetch!=='function'||typeof URLSearchParams!=='function'||typeof AbortSignal==='undefined'||typeof AbortSignal.timeout!=='function'))fail('UNSUPPORTED_RUNTIME');
-if(source==='legacy-opencode-auth-renew-v1'&&(!/^[0-9a-f]{64}$/.test(expected||'')||!/^[0-9a-f]{64}$/.test(currentAccess||'')))fail('INVALID_SOURCE');
+if((source==='legacy-opencode-auth-renew-v1'||v2?.[1])&&(!/^[0-9a-f]{64}$/.test(expected||'')||!/^[0-9a-f]{64}$/.test(currentAccess||'')))fail('INVALID_SOURCE');
 const pair=c.generateKeyPairSync('x25519'),server=rawPublic(pair.publicKey);
 const transcript=[M,V,op,provider,source,expected,currentAccess,b64(client),b64(server)].join('|');
 const auth=c.createHmac('sha256',psk).update(transcript+'|READY|0').digest();
@@ -333,7 +347,37 @@ function sealResult(payload){if(finished)return;finished=true;clearTimeout(timer
   const accountId=jwtAccount(tokens.id_token)||jwtAccount(tokens.access_token)||sourceAccount;if(!accountId||sha(accountId)!==expected)throw coded('ACCOUNT_MISMATCH');const refreshed={access:tokens.access_token,refresh:typeof tokens.refresh_token==='string'&&tokens.refresh_token.length?tokens.refresh_token:entry.refresh,expires:Date.now()+(tokens.expires_in??3600)*1000,accountId};
   for(let attempt=0;attempt<3;attempt++){const latest=await readAuth(file),currentEntry=latest.root[provider];if(!currentEntry||Array.isArray(currentEntry)||typeof currentEntry!=='object')throw coded('SOURCE_REFRESH_MALFORMED');const currentAccount=accountOf(currentEntry);if(!currentAccount||sha(currentAccount)!==expected)throw coded('ACCOUNT_MISMATCH');if(currentEntry.access!==entry.access||currentEntry.refresh!==entry.refresh)return currentResult(currentEntry);const merged={...latest.root,[provider]:{...currentEntry,...refreshed}},temp=path.join(path.dirname(file),'.auth.json.ocpi-'+op+'-'+process.pid+'-'+attempt);let handle;try{handle=await fs.promises.open(temp,'wx',0o600);await handle.writeFile(JSON.stringify(merged,null,2)+'\n',{encoding:'utf8'});await handle.sync();await handle.chmod(0o600);await handle.close();handle=null;const verified=await readAuth(file);if(!verified.bytes.equals(latest.bytes)){await fs.promises.unlink(temp);continue}await fs.promises.rename(temp,file)}catch(e){try{await handle?.close()}catch{}try{await fs.promises.unlink(temp)}catch{}if(e.code==='SOURCE_CHANGED')throw e;throw coded('SOURCE_REFRESH_WRITE_FAILED')}try{const dir=await fs.promises.open(path.dirname(file),'r');try{await dir.sync()}finally{await dir.close()}}catch{}return {ok:true,credential:refreshed.access,accountID:accountId,expires:refreshed.expires}}throw coded('SOURCE_CHANGED')}
  async function selectedResult(){if(process.env.OPENCODE_AUTH_CONTENT)throw coded('UNSUPPORTED_SOURCE');const base=process.env.XDG_DATA_HOME||(process.env.HOME?path.join(process.env.HOME,'.local','share'):null);if(!base)throw coded('SOURCE_MISSING');const file=path.join(base,'opencode','auth.json');let release;try{if(source==='legacy-opencode-auth-renew-v1')release=await acquireLock(file);const original=await readAuth(file),entry=original.root[provider];if(entry===undefined)throw coded('ENTRY_MISSING');if(Array.isArray(entry))throw coded(entry.length>1?'MULTIPLE_ENTRIES':'UNSUPPORTED_ENTRY');if(!entry||typeof entry!=='object')throw coded('UNSUPPORTED_ENTRY');if(source==='legacy-opencode-auth-renew-v1')return await renew(file,entry);if(provider==='openai'&&entry.type==='oauth'&&typeof entry.access==='string'&&entry.access.length)return {ok:true,credential:entry.access,accountID:typeof entry.accountId==='string'?entry.accountId:null,expires:Number.isFinite(entry.expires)?entry.expires:null};if(provider==='openrouter'&&entry.type==='api'&&typeof entry.key==='string'&&entry.key.length)return {ok:true,credential:entry.key};throw coded('UNSUPPORTED_ENTRY')}finally{if(release)await release()}}
- function result(){selectedResult().then(sealResult).catch(e=>{const allowed=['UNSUPPORTED_SOURCE','SOURCE_MISSING','SOURCE_TOO_LARGE','MALFORMED_SOURCE','ENTRY_MISSING','MULTIPLE_ENTRIES','UNSUPPORTED_ENTRY','SOURCE_REFRESH_NETWORK','SOURCE_REFRESH_REJECTED','SOURCE_REFRESH_MALFORMED','SOURCE_REFRESH_WRITE_FAILED','SOURCE_CHANGED','ACCOUNT_MISMATCH'];sealResult({ok:false,error:allowed.includes(e.code)?e.code:'SOURCE_REFRESH_WRITE_FAILED'})})}
+ // V2 credentials live in SQLite, not auth.json. Read exactly the selected row, never
+ // write the server database or rotate its refresh token behind the server's back.
+ async function selectedV2Result(){
+  const base=process.env.XDG_DATA_HOME||(process.env.HOME?path.join(process.env.HOME,'.local','share'):null);
+  if(!base||process.env.OPENCODE_DB===':memory:')throw coded('UNSUPPORTED_SOURCE');
+  const file=path.resolve(base,'opencode',process.env.OPENCODE_DB||'opencode.db');
+  let stat;try{stat=await fs.promises.lstat(file)}catch{throw coded('SOURCE_MISSING')}
+  if(!stat.isFile()||stat.isSymbolicLink())throw coded('MALFORMED_SOURCE');
+  let DatabaseSync;try{({DatabaseSync}=require('node:sqlite'))}catch{throw coded('UNSUPPORTED_RUNTIME')}
+  let db,row;try{
+   db=new DatabaseSync(file,{readOnly:true,enableExtensions:false});
+   const size=db.prepare('SELECT length(CAST(value AS BLOB)) AS size FROM credential WHERE id = ? AND integration_id = ?').get(v2[2],provider);
+   if(!size)throw coded('ENTRY_MISSING');
+   if(size.size>MAX)throw coded('SOURCE_TOO_LARGE');
+   row=db.prepare('SELECT value FROM credential WHERE id = ? AND integration_id = ? AND length(CAST(value AS BLOB)) <= ?').get(v2[2],provider,MAX);
+   if(!row)throw coded('SOURCE_CHANGED');
+  }catch(e){if(['ENTRY_MISSING','SOURCE_TOO_LARGE','SOURCE_CHANGED'].includes(e.code))throw e;throw coded('MALFORMED_SOURCE')}
+  finally{try{db?.close()}catch{}}
+  let entry;try{entry=JSON.parse(row.value)}catch{throw coded('MALFORMED_SOURCE')}
+  if(!entry||Array.isArray(entry)||typeof entry!=='object')throw coded('UNSUPPORTED_ENTRY');
+  if(provider==='openrouter'&&entry.type==='key'&&typeof entry.key==='string'&&entry.key.length&&!v2[1])return {ok:true,credential:entry.key};
+  if(provider!=='openai'||entry.type!=='oauth'||typeof entry.access!=='string'||!entry.access.length||!Number.isFinite(entry.expires)||entry.expires<0)throw coded('UNSUPPORTED_ENTRY');
+  const accountID=(typeof entry.metadata?.accountID==='string'&&entry.metadata.accountID.trim())||jwtAccount(entry.access);
+  if(typeof accountID!=='string'||!accountID.length)throw coded('ACCOUNT_MISMATCH');
+  if(v2[1]){
+   if(sha(accountID)!==expected)throw coded('ACCOUNT_MISMATCH');
+   if(entry.expires<=Date.now()||sha(entry.access)===currentAccess)throw coded('SOURCE_REFRESH_REJECTED');
+  }
+  return {ok:true,credential:entry.access,accountID,expires:entry.expires};
+ }
+ function result(){(v2?selectedV2Result():selectedResult()).then(sealResult).catch(e=>{const allowed=['UNSUPPORTED_SOURCE','UNSUPPORTED_RUNTIME','SOURCE_MISSING','SOURCE_TOO_LARGE','MALFORMED_SOURCE','ENTRY_MISSING','MULTIPLE_ENTRIES','UNSUPPORTED_ENTRY','SOURCE_REFRESH_NETWORK','SOURCE_REFRESH_REJECTED','SOURCE_REFRESH_MALFORMED','SOURCE_REFRESH_WRITE_FAILED','SOURCE_CHANGED','ACCOUNT_MISMATCH'];sealResult({ok:false,error:allowed.includes(e.code)?e.code:'SOURCE_REFRESH_WRITE_FAILED'})})}
 process.stdin.on('data',x=>{input+=x;if(input.length>32768)fail('INVALID_FRAME');let i;while((i=input.indexOf('\n'))>=0){let line=input.slice(0,i).replace(/\r$/,'');input=input.slice(i+1);if(!line.startsWith('OCPI|'))continue;if(started)fail('REPLAY');started=true;clearTimeout(timer);openStart(line);result()}});
 """#
 

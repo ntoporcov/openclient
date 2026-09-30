@@ -1,6 +1,69 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Commands and skills in v2" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Comandi e abilità in v2" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Comandos e habilidades no v2" } }
+      }
+    },
+    "Type / to find and run your OpenCode v2 commands and skills, including those configured for your project." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Digita / per trovare ed eseguire i comandi e le abilità di OpenCode v2, inclusi quelli configurati per il tuo progetto." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Digite / para encontrar e executar seus comandos e habilidades do OpenCode v2, incluindo os configurados para seu projeto." } }
+      }
+    },
+    "OpenCode v2 manages token renewal. When needed, OpenClient can read a newer access token for this same account from the connected server. The refresh token stays on the server." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "OpenCode v2 gestisce il rinnovo dei token. Quando necessario, OpenClient può leggere un token di accesso più recente per lo stesso account dal server connesso. Il token di aggiornamento rimane sul server." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "O OpenCode v2 gerencia a renovação dos tokens. Quando necessário, o OpenClient pode ler um token de acesso mais recente para a mesma conta no servidor conectado. O token de renovação permanece no servidor." } }
+      }
+    },
+    "Announcements" : {
+      "comment" : "Link and title for the archive of app release announcement sheets.",
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Annunci" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Anúncios" } }
+      }
+    },
+    "Version %@" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Versione %@" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Versão %@" } }
+      }
+    },
+    "Your chat, your way" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "La tua chat, a modo tuo" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Seu chat, do seu jeito" } } } },
+    "Queue the next step, steer the current one, or ask a quick side question. Make the chat feel like yours." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Metti in coda il prossimo passo, reindirizza quello attuale o fai una domanda a parte. Personalizza la tua chat." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Coloque o próximo passo na fila, redirecione o atual ou faça uma pergunta à parte. Deixe o chat com a sua cara." } } } },
+    "You can change these choices later in Settings. Queue, Steer, and Side Question require OpenCode v2." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Puoi cambiare queste scelte nelle impostazioni. Coda, Reindirizza e Domanda a parte richiedono OpenCode v2." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Você pode alterar essas escolhas nos ajustes. Fila, Redirecionar e Pergunta à parte exigem OpenCode v2." } } } },
+    "Keep the conversation moving" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Fai proseguire la conversazione" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Mantenha a conversa em movimento" } } } },
+    "Choose what Send does while the assistant is working." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Scegli cosa fa Invio mentre l’assistente lavora." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Escolha o que Enviar faz enquanto o assistente trabalha." } } } },
+    "While streaming" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Durante lo streaming" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Durante o streaming" } } } },
+    "Queue saves your message for the next turn." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Coda conserva il messaggio per il prossimo turno." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Fila guarda sua mensagem para o próximo turno." } } } },
+    "Steer redirects the assistant during its current turn." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Reindirizza cambia la direzione dell’assistente durante il turno attuale." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Redirecionar muda a direção do assistente durante o turno atual." } } } },
+    "Add a dark mode, too." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Aggiungi anche una modalità scura." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Adicione um modo escuro também." } } } },
+    "Queued for the next turn" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "In coda per il prossimo turno" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Na fila para o próximo turno" } } } },
+    "Steering the current turn" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Reindirizzamento del turno attuale" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Redirecionando o turno atual" } } } },
+    "Try Send" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Prova Invio" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Experimentar Enviar" } } } },
+    "Hold Send to choose Queue, Steer, or Side Question for a single message." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Tieni premuto Invio per scegliere Coda, Reindirizza o Domanda a parte per un singolo messaggio." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Segure Enviar para escolher Fila, Redirecionar ou Pergunta à parte para uma mensagem." } } } },
+    "Ask a quick question without adding it to the conversation or interrupting the work." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Fai una domanda veloce senza aggiungerla alla conversazione o interrompere il lavoro." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Faça uma pergunta rápida sem adicioná-la à conversa nem interromper o trabalho." } } } },
+    "Try a side question" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Prova una domanda a parte" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Experimentar uma pergunta à parte" } } } },
+    "What is steering?" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Cos’è il reindirizzamento?" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "O que é redirecionamento?" } } } },
+    "Steering lets you give the assistant a new direction while it is still working. Queuing saves your message for the next turn instead." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Il reindirizzamento ti permette di dare una nuova direzione all’assistente mentre lavora. La coda conserva invece il messaggio per il prossimo turno." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Redirecionar permite dar uma nova direção ao assistente enquanto ele trabalha. A fila guarda sua mensagem para o próximo turno." } } } },
+    "A calmer transcript" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Una chat più ordinata" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Uma conversa mais organizada" } } } },
+    "Combine tools, reasoning, and context between replies into an expandable summary." : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Riunisci strumenti, ragionamento e contesto tra le risposte in un riepilogo espandibile." } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Agrupe ferramentas, raciocínio e contexto entre respostas em um resumo expansível." } } } },
+    "Make it yours" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Personalizzala" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Deixe do seu jeito" } } } },
+    "Show Context Changes" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Mostra modifiche al contesto" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Mostrar alterações de contexto" } } } },
+    "Running commands" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Esecuzione di comandi" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Executando comandos" } } } },
+    "Ran commands" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Comandi eseguiti" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Comandos executados" } } } },
+    "Reading files" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Lettura dei file" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Lendo arquivos" } } } },
+    "Read files" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "File letti" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Arquivos lidos" } } } },
+    "Searched" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Ricerca eseguita" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Pesquisa realizada" } } } },
+    "Editing files" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Modifica dei file" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Editando arquivos" } } } },
+    "Edited files" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "File modificati" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Arquivos editados" } } } },
+    "Fetching pages" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Recupero delle pagine" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Buscando páginas" } } } },
+    "Fetched pages" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Pagine recuperate" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Páginas obtidas" } } } },
+    "Using tools" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Utilizzo degli strumenti" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Usando ferramentas" } } } },
+    "Used tools" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Strumenti utilizzati" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Ferramentas usadas" } } } },
     "Group Tool Calls" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "Raggruppa chiamate agli strumenti" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Agrupar chamadas de ferramentas" } } } },
     "1 tool call" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "1 chiamata a uno strumento" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "1 chamada de ferramenta" } } } },
     "%lld tool calls" : { "localizations" : { "it" : { "stringUnit" : { "state" : "translated", "value" : "%lld chiamate agli strumenti" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "%lld chamadas de ferramentas" } } } },

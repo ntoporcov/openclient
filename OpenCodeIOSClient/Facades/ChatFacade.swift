@@ -166,6 +166,7 @@ final class ChatFacade: ObservableObject {
     let chatPresentationStore: ChatPresentationStore
     let mcpFacade: MCPFacade
     let foregroundChatRefreshCoordinator = ForegroundChatRefreshCoordinator()
+    private var v2CommandCallbacks: Set<String> = []
     let windowContext: ChatWindowContext?
 
     var selectedSession: OpenCodeSession? {
@@ -680,6 +681,7 @@ final class ChatFacade: ObservableObject {
     }
 
     var defaultStreamingDelivery: OpenCodePromptDelivery {
+        if let preferred = appCustomizationStore.preferredStreamingDelivery { return preferred }
         guard let config = viewModel.backendConnection?.openCodeCompatibility?.client.config else { return .queue }
         return connectionStore.streamingDelivery(for: config)
     }
@@ -881,7 +883,9 @@ final class ChatFacade: ObservableObject {
         let hasService = connection?.isClosed == false && connection?.commands != nil
         let allowsLegacyFallback = connection?.openCodeCompatibility?.profile == .legacy
             || (connection == nil && viewModel.backendFactory == nil && connectionStore.apiProfile != .v2 && viewModel.config.apiPreference == .legacy)
-        var result = hasService || (allowsLegacyFallback && viewModel.compatibilityClient(for: .commands) != nil)
+        let hasV2ComposerCommands = connection?.isClosed == false && connection?.openCodeCompatibility?.profile == .v2
+            && connection?.openCodeCompatibility?.client.v2Contract == .release
+        var result = hasService || hasV2ComposerCommands || (allowsLegacyFallback && viewModel.compatibilityClient(for: .commands) != nil)
             ? store.commands.filter { $0.source != "client" } : []
         if viewModel.compatibilityClient(for: .compaction) != nil, store.selectedSession != nil, !result.contains(where: { $0.name == "compact" }) {
             result.append(OpenClientChatCommands.compact)
@@ -1152,6 +1156,14 @@ final class ChatFacade: ObservableObject {
         let submittedMentions = agentMentions ?? composerStore.draftAgentMentions
         if isV2Connection, await waitForV2Configuration(sessionID: sessionID) == false { return false }
         guard !isReadOnly, !Task.isCancelled, promptContextID == context else { return false }
+        if isV2Connection, command.source != "client",
+           let connection = viewModel.backendConnection, connection.commands == nil,
+           let compatibility = connection.openCodeCompatibility, compatibility.client.v2Contract == .release {
+            return await sendV2ComposerCommand(command, arguments: arguments, attachments: submittedAttachments,
+                mentions: submittedMentions, sessionID: sessionID, messageID: messageID,
+                meterPrompt: userVisible && meterPrompt, reservedPromptDay: reservedPromptDay,
+                connection: connection, client: compatibility.client)
+        }
         if let windowContext {
             guard windowContext.session.id == sessionID else { return false }
             if isCompactClientCommand(command) {
@@ -1178,6 +1190,50 @@ final class ChatFacade: ObservableObject {
         )
         resolveLiveActivityBackgroundBridge(intent, accepted: accepted, sessionID: sessionID)
         return accepted
+    }
+
+    private func sendV2ComposerCommand(
+        _ command: OpenCodeCommand, arguments: String, attachments: [OpenCodeComposerAttachment],
+        mentions: [OpenCodeAgentMention], sessionID: String, messageID: String?, meterPrompt: Bool,
+        reservedPromptDay: String?, connection: BackendConnection, client: OpenCodeAPIClient
+    ) async -> Bool {
+        guard let session = selectedSession, session.id == sessionID,
+              viewModel.isCurrentBackendConnection(connection), !hasPendingPromptAdmission(sessionID: sessionID) else { return false }
+        if let skillID = command.skillID {
+            let text = "/\(command.name)" + (arguments.isEmpty ? "" : " " + arguments)
+            return await viewModel.sendV2TextPrompt(text, in: session, attachments: attachments,
+                agentMentions: OpenCodeAgentMention.reconciled(mentions, in: text), meterPrompt: meterPrompt,
+                messageID: messageID, reservedPromptDay: reservedPromptDay, windowContext: windowContext,
+                skillIDs: [skillID])
+        }
+        // Release V2 commands are callbacks (204), not caller-ID prompt receipts.
+        // Keep them out of durable-admission tracking and automated action evaluation.
+        let root = viewModel.chatFacade
+        let key = "\(connection.id):\(sessionID)"
+        guard root.v2CommandCallbacks.insert(key).inserted else { return false }
+        defer { root.v2CommandCallbacks.remove(key) }
+        let context = promptContextID
+        guard reservedPromptDay != nil || !meterPrompt || reserveUserPromptIfAllowed() else { return false }
+        let chargedDay = reservedPromptDay ?? (meterPrompt && !viewModel.hasProUnlock ? viewModel.usageMeter.promptDay : nil)
+        do {
+            // Mentions arrived relative to the complete slash input; rebase them
+            // onto the argument text actually sent to the command callback.
+            try await client.sendV2Command(sessionID: sessionID, command: command.name, arguments: arguments,
+                attachments: attachments, agentMentions: OpenCodeAgentMention.reconciled(mentions, in: arguments))
+            if viewModel.isCurrentBackendConnection(connection) {
+                viewModel.directoryStoreRegistry.requestV2Reconciliation(sessionID: sessionID)
+                viewModel.scheduleV2TimelineReconciliation()
+            }
+            return true
+        } catch {
+            if case let OpenCodeAPIError.httpError(status, _) = error, (400..<500).contains(status), status != 408 {
+                refundReservedPrompt(on: chargedDay)
+            }
+            guard viewModel.isCurrentBackendConnection(connection), promptContextID == context else { return false }
+            if let windowContext { windowContext.errorMessage = error.localizedDescription }
+            else { connectionStore.applyErrorMessage(error.localizedDescription) }
+            return false
+        }
     }
 
     func loadMCPStatusIfNeeded() async {

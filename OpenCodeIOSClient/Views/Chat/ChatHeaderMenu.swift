@@ -115,7 +115,7 @@ private struct ChatHeaderPopover: View {
                 }
                 Section {
                     NavigationLink {
-                        ChatAppearanceSettingsView(store: facade.appCustomizationStore)
+                        ChatAppearanceSettingsView(store: facade.appCustomizationStore, isV2Connection: facade.isV2Connection)
                     } label: {
                         Label("Appearance Settings", systemImage: "paintbrush")
                             .foregroundStyle(.primary)

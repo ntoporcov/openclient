@@ -98,7 +98,7 @@ private struct V2IntegrationDetailView: View {
                     Section("Credentials") {
                         ForEach(integration.connections) { connection in
                             switch connection {
-                            case .credential(_, let label):
+                            case .credential(_, let label, _):
                                 LabeledContent {
                                     Button("Remove", role: .destructive) { removingCredentialID = connection.removableCredentialID }
                                         .disabled(store.isBusy || store.attempt != nil)

@@ -18,20 +18,26 @@ protocol ProviderUsagePTYTransport: Sendable {
     func delete(id: String, scope: BackendScope) async throws -> ProviderUsagePTYDeleteResult
 }
 
-actor OpenCodeCredentialImportLegacyPTYTransport: ProviderUsagePTYTransport {
+actor OpenCodeCredentialImportPTYTransport: ProviderUsagePTYTransport {
     nonisolated let serverURL: URL
     private let client: OpenCodeAPIClient
     private let connection: OpenCodePTYConnection
+    private let profile: ProviderUsageAPIProfile
 
-    init(client: OpenCodeAPIClient, connection: OpenCodePTYConnection = OpenCodePTYConnection()) throws {
+    init(client: OpenCodeAPIClient, profile: ProviderUsageAPIProfile = .legacy,
+         connection: OpenCodePTYConnection = OpenCodePTYConnection()) throws {
         guard let url = client.config.sanitizedBaseURL else { throw OpenCodeAPIError.invalidURL }
         serverURL = url
         self.client = client
         self.connection = connection
+        self.profile = profile
     }
 
     func create(request: OpenCodePTYCreateRequest, scope: BackendScope) async throws -> OpenCodePTY {
-        try await client.createPTY(
+        if profile == .v2 {
+            return try await client.createV2PTY(request: request, directory: scope.directory, workspaceID: scope.workspaceID)
+        }
+        return try await client.createPTY(
             request: request,
             directory: scope.directory,
             workspaceID: scope.workspaceID
@@ -42,9 +48,12 @@ actor OpenCodeCredentialImportLegacyPTYTransport: ProviderUsagePTYTransport {
         id: String, scope: BackendScope,
         receive: @escaping @Sendable (OpenCodePTYSocketEvent) async -> Bool
     ) async throws {
-        let request = try client.ptyConnectRequest(
-            id: id, directory: scope.directory, workspaceID: scope.workspaceID, cursor: 0
-        )
+        let request: URLRequest
+        if profile == .v2 {
+            request = try client.v2PTYConnectRequest(id: id, directory: scope.directory, workspaceID: scope.workspaceID, cursor: 0)
+        } else {
+            request = try client.ptyConnectRequest(id: id, directory: scope.directory, workspaceID: scope.workspaceID, cursor: 0)
+        }
         let stop = ProviderUsagePTYStopRequest()
         do {
             try await connection.run(request: request, initialCursor: 0) { [connection] event in
@@ -64,7 +73,11 @@ actor OpenCodeCredentialImportLegacyPTYTransport: ProviderUsagePTYTransport {
 
     func delete(id: String, scope: BackendScope) async throws -> ProviderUsagePTYDeleteResult {
         do {
-            try await client.deletePTY(id: id, directory: scope.directory, workspaceID: scope.workspaceID)
+            if profile == .v2 {
+                try await client.deleteV2PTY(id: id, directory: scope.directory, workspaceID: scope.workspaceID)
+            } else {
+                try await client.deletePTY(id: id, directory: scope.directory, workspaceID: scope.workspaceID)
+            }
             return .deleted
         } catch let OpenCodeAPIError.httpError(status, _) where status == 404 {
             return .alreadyMissing
@@ -403,7 +416,6 @@ actor PTYProviderUsageCredentialImporter: ProviderUsageCredentialImporter {
         expectedAccountID: String? = nil,
         currentAccessToken: String? = nil
     ) async throws -> ProviderUsageCredentialReview {
-        guard candidate.apiProfile == .legacy else { throw ProviderUsageCredentialImportError.unsupportedProfile }
         try validateTransport()
         guard await currentContext() == candidate.discoveryContext else {
             throw ProviderUsageCredentialImportError.contextChanged

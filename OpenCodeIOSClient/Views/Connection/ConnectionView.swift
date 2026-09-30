@@ -94,7 +94,7 @@ struct ConnectionSheetView: View {
         case .configurations:
             RootConfigurationsView(facade: facade)
         case .help:
-            HelpView()
+            HelpView(connection: facade, bridge: bridge)
         }
     }
 

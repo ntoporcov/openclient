@@ -332,7 +332,11 @@ extension AppViewModel {
                   effectiveSelectedDirectory == directory else { return false }
             var commands: [OpenCodeCommand] = []
             var commandsAreAuthoritative = false
-            if let service = connection.commands {
+            if connection.commands == nil, let compatibility = connection.openCodeCompatibility, compatibility.profile == .v2,
+               compatibility.client.v2Contract == .release {
+                commands = try await compatibility.client.listV2ComposerCommands(directory: commandScope.directory, workspaceID: commandScope.workspaceID)
+                commandsAreAuthoritative = true
+            } else if let service = connection.commands {
                 commands = try await service.listCommands(scope: commandScope)
                 commandsAreAuthoritative = true
             } else if let compatibility = try? connection.requireOpenCodeClient(for: .commands) {

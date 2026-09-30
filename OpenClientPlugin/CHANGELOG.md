@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Keep OpenClient tool execution outside V2 Code Mode so native visual renderer
+  metadata is preserved in the transcript. Nested Code Mode calls only retain
+  input/status, causing successfully prepared images and other visuals to disappear.
+
 ## 0.4.0
 
 - Add OpenCode V2 native tool registration, cancellation, session location handling,

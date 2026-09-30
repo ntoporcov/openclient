@@ -14,9 +14,41 @@ struct StreamingDeliveryFixture: View {
     @Namespace private var glassNamespace
 
     private var isBusy: Bool { ProcessInfo.processInfo.environment["OPENCLIENT_DELIVERY_IDLE"] != "1" }
+    private var isGallery: Bool { ProcessInfo.processInfo.environment["OPENCLIENT_GALLERY"] == "1" }
 
     var body: some View {
+        if isGallery {
+            NavigationStack {
+                content
+                    .navigationTitle(Text(verbatim: "Build something great"))
+                    .opencodeInlineNavigationTitle()
+            }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack {
+            if isGallery {
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack {
+                        Spacer(minLength: 40)
+                        Text(verbatim: "Help me polish the app for launch.")
+                            .padding(14)
+                            .background { ChatBubbleBackground() }
+                    }
+                    Text(verbatim: "I’ll review the interface, refine the details, and check the result on iPhone and iPad.")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ActivityRow(style: .init(title: .localized("Read files"), subtitle: .verbatim("ChatView.swift"),
+                        icon: "doc.text", tint: .blue, isRunning: false, showsDisclosure: true, shimmerTitle: false))
+                    ActivityRow(style: .init(title: .localized("Editing files"), subtitle: .verbatim("Appearance.swift"),
+                        icon: "pencil", tint: .orange, isRunning: true, showsDisclosure: true, shimmerTitle: false))
+                    Label("Thinking", systemImage: "sparkles").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(.top, 24)
+                .frame(maxWidth: 720)
+            } else {
             Text(verbatim: "Streaming delivery fixture")
                 .accessibilityIdentifier("screenshot.scene.streaming-delivery")
             Text(verbatim: submissions.isEmpty ? "No submissions" : submissions.joined(separator: "|"))
@@ -25,6 +57,7 @@ struct StreamingDeliveryFixture: View {
             Text(verbatim: "Stops: \(stopCount)")
                 .accessibilityIdentifier("streaming.fixture.stops")
                 .accessibilityValue(Text(verbatim: String(stopCount)))
+            }
             Spacer()
             MessageComposer(
                 draftStore: draft,
@@ -67,7 +100,9 @@ struct StreamingDeliveryFixture: View {
                 if ProcessInfo.processInfo.environment["OPENCLIENT_SIDE_QUESTION_LOADING"] == "1" {
                     try await Task.sleep(for: .seconds(6))
                 }
-                return "A temporary side answer."
+                return isGallery
+                    ? "Queuing saves your message for the next turn. Steering gives the assistant a new direction while it is still working.\n\nUse Queue for the next task. Use Steer to refine the task already in progress."
+                    : "A temporary side answer."
             })
         )
     }

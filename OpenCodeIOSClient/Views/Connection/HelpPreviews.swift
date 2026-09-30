@@ -1,13 +1,15 @@
 import SwiftUI
 
+#if DEBUG
 #Preview("Help Feed") {
     NavigationStack {
-        HelpView()
+        HelpView(connection: AppViewModel.preview(isConnected: false).connectionFacade)
     }
 }
 
 #Preview("Expanded Article") {
     NavigationStack {
-        HelpView(initiallySelectedArticleID: "what-is-opencode")
+        HelpView(connection: AppViewModel.preview(isConnected: false).connectionFacade, initiallySelectedArticleID: "what-is-opencode")
     }
 }
+#endif

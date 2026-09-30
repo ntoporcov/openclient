@@ -217,12 +217,30 @@ platform :ios do
     metadata_path = metadata_path_for_upload(repo_root)
     app_version = File.read(File.join(repo_root, "project.yml"))[/^\s+MARKETING_VERSION:\s*(\S+)\s*$/, 1]
     UI.user_error!("Could not read MARKETING_VERSION from project.yml") if app_version.nil?
+    skip_gallery = ENV["FASTLANE_SKIP_SCREENSHOTS"] == "1"
+    gallery_upload = File.join(repo_root, "build", "app-store-gallery")
+    unless skip_gallery
+      # Keep contact sheets and raw captures out of the App Store screenshot set.
+      sh("swift #{File.join(repo_root, 'scripts', 'render-app-store-gallery.swift').shellescape}")
+      gallery_source = File.join(repo_root, "fastlane", "gallery", "en-US")
+      slides = %w[iPhone iPad].flat_map do |device|
+        images = Dir.glob(File.join(gallery_source, "#{device}-[0-9][0-9]-*.png")).sort
+        UI.user_error!("Expected 10 #{device} gallery slides, found #{images.length}") unless images.length == 10
+        images
+      end
+      FileUtils.rm_rf(gallery_upload)
+      locale_output = File.join(gallery_upload, "en-US")
+      FileUtils.mkdir_p(locale_output)
+      FileUtils.cp(slides, locale_output)
+    end
     deliver(
       api_key: api_key,
       app_version: app_version,
       force: true,
       skip_binary_upload: true,
-      skip_screenshots: ENV["FASTLANE_SKIP_SCREENSHOTS"] == "1",
+      skip_screenshots: skip_gallery,
+      screenshots_path: gallery_upload,
+      overwrite_screenshots: true,
       precheck_include_in_app_purchases: false,
       metadata_path: metadata_path
     )

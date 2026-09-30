@@ -335,12 +335,16 @@ final class ProviderUsageFacade {
     private func trackedAccount(for candidate: ProviderUsageDiscoveryCandidate) -> ProviderUsageAccount? {
         guard case .available(let sourceKind, let credentialKind) = candidate.availability else { return nil }
         return store.accounts
-            .filter {
-                $0.provider == candidate.provider
-                    && $0.sourceConnectionID == candidate.context.backend.id
-                    && $0.apiProfile == candidate.context.apiProfile
-                    && $0.sourceKind == sourceKind
-                    && $0.credentialKind == credentialKind
+            .filter { account in
+                account.provider == candidate.provider
+                    && account.sourceConnectionID == candidate.context.backend.id
+                    && account.apiProfile == candidate.context.apiProfile
+                    && account.sourceKind == sourceKind
+                    && account.credentialKind == credentialKind
+                    && (candidate.context.apiProfile != .v2 || {
+                        guard case .v2Credential(_, let id) = candidate.id.source else { return false }
+                        return account.sourceCredentialID == id
+                    }())
             }
             .max { $0.updatedAt < $1.updatedAt }
     }
@@ -352,7 +356,6 @@ final class ProviderUsageFacade {
               let account = store.accounts.first(where: { $0.id == accountID }),
               account.provider == .codex,
               account.sourceKind == .openCodeAuth,
-              account.apiProfile == .legacy,
               account.sourceRenewalApprovedAt != nil,
               let providerAccountID = account.providerAccountID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !providerAccountID.isEmpty,
@@ -361,11 +364,18 @@ final class ProviderUsageFacade {
               context.backend.id == account.sourceConnectionID,
               context.apiProfile == account.apiProfile,
               sourceScope.matches(context.scope) else { return nil }
+        let sourceIdentity: ProviderUsageCandidateSourceIdentity
+        switch account.apiProfile {
+        case .legacy: sourceIdentity = .legacyProvider(providerID: "openai")
+        case .v2:
+            guard let id = account.sourceCredentialID else { return nil }
+            sourceIdentity = .v2Credential(integrationID: "openai", credentialID: id)
+        }
         let candidate = ProviderUsageSetupCandidate(
             id: UUID(),
             provider: .codex,
             discoveryContext: context,
-            sourceIdentity: .legacyProvider(providerID: "openai"),
+            sourceIdentity: sourceIdentity,
             sourceKind: .openCodeAuth,
             credentialKind: .oauthAccessToken,
             replacingAccountID: account.id
@@ -409,11 +419,12 @@ enum OpenCodeProviderUsageComposition {
               connection.descriptor == candidate.discoveryContext.backend,
               connection.capabilities.contains(.terminal),
               let adapter = connection.openCodeCompatibility,
-              adapter.profile == .legacy,
-              candidate.apiProfile == .legacy else {
+              (adapter.profile == .legacy && candidate.apiProfile == .legacy
+                || adapter.profile == .v2 && candidate.apiProfile == .v2) else {
             throw ProviderUsageCredentialImportError.contextChanged
         }
-        let transport = try OpenCodeCredentialImportLegacyPTYTransport(client: adapter.client)
+        _ = try ProviderUsageCredentialImportProtocol.Selection(candidate: candidate)
+        let transport = try OpenCodeCredentialImportPTYTransport(client: adapter.client, profile: candidate.apiProfile)
         return PTYProviderUsageCredentialImporter(
             transport: transport,
             currentContext: currentContext,

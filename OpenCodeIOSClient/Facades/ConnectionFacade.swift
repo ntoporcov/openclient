@@ -109,11 +109,13 @@ final class ConnectionFacade: ObservableObject {
     var isOfferingCachedServerConnection: Bool { viewModel.connectionStore.isOfferingCachedServerConnection }
     var isV2Connection: Bool { viewModel.connectionStore.apiProfile == .v2 && viewModel.isConnected }
     var streamingDelivery: OpenCodePromptDelivery {
+        if let preferred = appCustomizationStore.preferredStreamingDelivery { return preferred }
         guard let config = viewModel.backendConnection?.openCodeCompatibility?.client.config else { return .queue }
         return viewModel.connectionStore.streamingDelivery(for: config)
     }
 
     func setStreamingDelivery(_ delivery: OpenCodePromptDelivery) {
+        appCustomizationStore.setPreferredStreamingDelivery(delivery)
         guard let activeConfig = viewModel.backendConnection?.openCodeCompatibility?.client.config else { return }
         do {
             let configs = try OpenCodeSavedServer.persistPublicSavedServers(recentServerConfigs,

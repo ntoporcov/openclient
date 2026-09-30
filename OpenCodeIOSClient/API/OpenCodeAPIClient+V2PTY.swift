@@ -15,10 +15,14 @@ extension OpenCodeAPIClient {
     }
 
     func createV2PTY(title: String? = nil, directory: String, workspaceID: String? = nil) async throws -> OpenCodePTY {
+        try await createV2PTY(request: OpenCodePTYCreateRequest(title: title), directory: directory, workspaceID: workspaceID)
+    }
+
+    func createV2PTY(request: OpenCodePTYCreateRequest, directory: String?, workspaceID: String? = nil) async throws -> OpenCodePTY {
         let response: OpenCodeV2PTYResponse<OpenCodePTY> = try await send(
             path: "/api/pty", method: "POST",
             queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID),
-            body: OpenCodePTYCreateRequest(title: title)
+            body: request
         )
         return response.data
     }
@@ -43,7 +47,7 @@ extension OpenCodeAPIClient {
         return response.data
     }
 
-    func deleteV2PTY(id: String, directory: String, workspaceID: String? = nil) async throws {
+    func deleteV2PTY(id: String, directory: String?, workspaceID: String? = nil) async throws {
         try await sendNoContent(
             path: "/api/pty/\(id)", method: "DELETE",
             queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID),
@@ -52,7 +56,7 @@ extension OpenCodeAPIClient {
     }
 
     func v2PTYConnectRequest(
-        id: String, directory: String, workspaceID: String? = nil, cursor: Int
+        id: String, directory: String?, workspaceID: String? = nil, cursor: Int
     ) throws -> URLRequest {
         var request = try makeRequest(
             path: "/api/pty/\(id)/connect", method: "GET",

@@ -41,13 +41,20 @@ enum ProviderUsageDiscovery {
                         integrationID: integration.id,
                         credentialID: credential.id
                     )
+                    let kind: ProviderUsageCredentialKind?
+                    switch (usageProvider, credential.method) {
+                    case (.codex, "oauth"): kind = .oauthAccessToken
+                    case (.openRouter, "key"): kind = .apiKey
+                    default: kind = nil
+                    }
                     return ProviderUsageDiscoveryCandidate(
                         id: identity(context: context, source: source),
                         provider: usageProvider,
-                        expectedCredentialKind: nil,
+                        expectedCredentialKind: kind,
                         context: context,
                         sourceLabel: credential.label,
-                        availability: .unavailable(.v2CredentialKindUnknown)
+                        availability: kind.map { .available(sourceKind: .openCodeAuth, credentialKind: $0) }
+                            ?? .unavailable(.v2CredentialKindUnknown)
                     )
                 }
             }
@@ -81,8 +88,8 @@ enum ProviderUsageDiscovery {
                     id: integration.id,
                     label: integration.name,
                     credentialConnections: integration.connections.compactMap { connection in
-                        guard case .credential(let id, let label) = connection else { return nil }
-                        return .init(id: id, label: label)
+                        guard case .credential(let id, let label, let method) = connection else { return nil }
+                        return .init(id: id, label: label, method: method)
                     }
                 )
             }

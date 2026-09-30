@@ -14,7 +14,11 @@ struct OpenClientWhatsNewView: View {
         NavigationStack {
             ScrollView {
                 Group {
-                    if release.hero == .personalControl {
+                    if release.hero == .conversationControl {
+                        OpenClientWhatsNewChatControls(release: release, delivery: Binding(
+                            get: { connection.streamingDelivery }, set: { connection.setStreamingDelivery($0) }),
+                                                      store: connection.appCustomizationStore)
+                    } else if release.hero == .personalControl {
                         OpenClientWhatsNewPersonalControlContent(
                             release: release,
                             connection: connection
@@ -799,7 +803,7 @@ private struct OpenClientWhatsNewHero: View {
                         OpenClientWhatsNewTalkMark()
                     case .openCodeV2:
                         OpenClientWhatsNewV2Mark()
-                    case .personalControl:
+                    case .personalControl, .conversationControl:
                         Image(systemName: "slider.horizontal.3")
                             .font(.title2.weight(.bold))
                             .foregroundStyle(.white)

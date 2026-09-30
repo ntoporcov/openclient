@@ -755,6 +755,7 @@ private struct LargeMessageChunkDisplayItem: Identifiable {
 }
 
 private enum ChatDisplayItem: Identifiable {
+    case activitySlice(TranscriptActivitySlice)
     case message(OpenCodeMessageEnvelope)
     case responseCaption(AssistantResponseTurn)
     case largeMessageChunk(LargeMessageChunkDisplayItem)
@@ -762,8 +763,20 @@ private enum ChatDisplayItem: Identifiable {
     case findPlaceReveal(FindPlaceGameCity)
     case findBugSolved
 
+    var windowSourceMessageIDs: [String] {
+        switch self {
+        case let .activitySlice(slice): return slice.sourceMessageIDs
+        case let .message(message): return [message.id]
+        case let .largeMessageChunk(item): return [item.message.id]
+        case let .compaction(item): return [item.boundaryMessage.id] + (item.summaryMessage.map { [$0.id] } ?? [])
+        // Captions decorate responses; game reveals decorate the transcript tail.
+        case .responseCaption, .findPlaceReveal, .findBugSolved: return []
+        }
+    }
+
     var id: String {
         switch self {
+        case let .activitySlice(slice): return slice.id
         case let .responseCaption(turn):
             return "response-caption-\(turn.id)"
         case let .message(message):
@@ -885,8 +898,9 @@ struct ChatThinkingEntryGate {
 
 enum ChatThinkingPresentation {
     static func shouldShow(messages: [OpenCodeMessageEnvelope], pendingMessageID: String?, isBusy: Bool,
-                           showsToolCalls: Bool, showsReasoningBlocks: Bool, runningToolName: String?) -> Bool {
+                           showsToolCalls: Bool, showsReasoningBlocks: Bool, runningToolName: String?, groupsToolCalls: Bool = false) -> Bool {
         guard pendingMessageID != nil || isBusy else { return false }
+        if groupsToolCalls && isBusy { return true }
         let userIndex = pendingMessageID.flatMap { id in messages.lastIndex { $0.id == id } }
             ?? messages.lastIndex { $0.info.role?.lowercased() == "user" }
         // An outgoing request can start before its local row or any server message is available.
@@ -902,8 +916,8 @@ enum ChatThinkingPresentation {
     }
 
     static func summaryToolName(messages: [OpenCodeMessageEnvelope], pendingMessageID: String?,
-                                isBusy: Bool, showsToolCalls: Bool) -> String? {
-        guard isBusy, !showsToolCalls else { return nil }
+                                isBusy: Bool, showsToolCalls: Bool, groupsToolCalls: Bool = false) -> String? {
+        guard isBusy, !showsToolCalls || groupsToolCalls else { return nil }
         // The previous canonical tail can still be running before the new local user row is projected.
         if let pendingMessageID, !messages.contains(where: { $0.id == pendingMessageID }) { return nil }
         guard let message = messages.last,
@@ -925,6 +939,7 @@ enum ChatTranscriptTailSpacing {
 private extension ChatDisplayItem {
     var renderSignature: String {
         switch self {
+        case let .activitySlice(slice): return slice.id + slice.message.renderSignature
         case let .responseCaption(turn):
             return "\(id):\(turn.hashValue)"
         case let .message(message):
@@ -1148,6 +1163,7 @@ private final class ChatDisplayItemCache {
 private extension ChatDisplayItem {
     func refreshedMessages(using messagesByID: [String: OpenCodeMessageEnvelope]) -> ChatDisplayItem {
         switch self {
+        case .activitySlice: return self // Slices are rebuilt after canonical cache refresh.
         case .responseCaption:
             return self
         case let .message(message):
@@ -1646,6 +1662,7 @@ private struct MessageBubbleSnapshot: Equatable {
     let animatesStreamingText: Bool
     let showsToolCalls: Bool
     let groupsToolCalls: Bool
+    let contextModelsByMessageID: [String: OpenCodeMessageModelReference]
     let hidesReasoningBlocks: Bool
     let reserveEntryFromComposer: Bool
     let animateEntryFromComposer: Bool
@@ -1956,6 +1973,7 @@ private struct EquatableMessageBubbleHost: View, Equatable {
             animatesStreamingText: snapshot.animatesStreamingText,
             showsToolCalls: snapshot.showsToolCalls,
             groupsToolCalls: snapshot.groupsToolCalls,
+            contextModelsByMessageID: snapshot.contextModelsByMessageID,
             hidesReasoningBlocks: snapshot.hidesReasoningBlocks,
             reserveEntryFromComposer: snapshot.reserveEntryFromComposer,
             animateEntryFromComposer: snapshot.animateEntryFromComposer,
@@ -4123,18 +4141,39 @@ struct ChatView: View {
         let recoveries = chatFacade.recoveryInputs(sessionID: sessionID)
         let projected = recoveries.isEmpty ? nil : SubmissionTranscriptPresentation.messages(
             canonical: transcriptSuffix(chatSourceMessageCount), recoveries: recoveries)
-        let window = OpenCodeChatTranscriptWindowing.window(
-            totalCount: projected?.count ?? chatSourceMessageCount,
-            requestedCount: projected.map {
-                ChatTranscriptContinuity.requestedCount(messages: $0, additional: additionalLeadingMessageCount,
-                    initial: initialMessageWindowSize, fallback: fallbackMessageWindowSize)
-            } ?? transcriptRequestedMessageCount,
-            batchSize: olderMessageWindowSize,
-            loadSuffix: { count in projected.map { Array($0.suffix(count)) } ?? transcriptSuffix(count) },
-            containsMessageID: transcriptContainsMessage,
-            hasDisplayableMessage: hasDisplayableTranscriptContent
-        ) { messages in
-            !displayedChatItems(for: messages).isEmpty || shouldShowThinking(in: messages)
+        let window: OpenCodeChatTranscriptWindow
+        if appCustomizationStore.groupsToolCalls {
+            let allMessages = projected ?? transcriptSuffix(chatSourceMessageCount)
+            let indices = Dictionary(uniqueKeysWithValues: allMessages.enumerated().map { ($0.element.id, $0.offset) })
+            let ranges = displayedChatItems(for: allMessages).compactMap { item -> ClosedRange<Int>? in
+                if case let .activitySlice(slice) = item, !shouldDisplayMessageRow(slice.message) { return nil }
+                let sources = item.windowSourceMessageIDs.compactMap { indices[$0] }
+                guard let first = sources.min(), let last = sources.max() else { return nil }
+                return first...last
+            }
+            let selection = GroupedTranscriptWindowing.select(
+                totalCount: allMessages.count,
+                requestedCount: projected.map {
+                    ChatTranscriptContinuity.requestedCount(messages: $0, additional: additionalLeadingMessageCount,
+                        initial: initialMessageWindowSize, fallback: fallbackMessageWindowSize)
+                } ?? transcriptRequestedMessageCount,
+                batchSize: olderMessageWindowSize, rowRanges: ranges)
+            window = OpenCodeChatTranscriptWindow(messages: Array(allMessages.suffix(selection.messageCount)),
+                hiddenMessageCount: selection.hiddenRowCount, nextRequestedMessageCount: selection.nextMessageCount)
+        } else {
+            window = OpenCodeChatTranscriptWindowing.window(
+                totalCount: projected?.count ?? chatSourceMessageCount,
+                requestedCount: projected.map {
+                    ChatTranscriptContinuity.requestedCount(messages: $0, additional: additionalLeadingMessageCount,
+                        initial: initialMessageWindowSize, fallback: fallbackMessageWindowSize)
+                } ?? transcriptRequestedMessageCount,
+                batchSize: olderMessageWindowSize,
+                loadSuffix: { count in projected.map { Array($0.suffix(count)) } ?? transcriptSuffix(count) },
+                containsMessageID: transcriptContainsMessage,
+                hasDisplayableMessage: hasDisplayableTranscriptContent
+            ) { messages in
+                !displayedChatItems(for: messages).isEmpty || shouldShowThinking(in: messages)
+            }
         }
         let messages = window.messages
         let items = displayedChatItems(for: messages)
@@ -4236,6 +4275,7 @@ struct ChatView: View {
     }
 
     private func displayedChatItems(for messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
+        let messages = messages.map { TranscriptActivityGrouping.filteringContext($0, showsContextChanges: showsContextChanges) }
         var messagesByID: [String: OpenCodeMessageEnvelope] = [:]
         for message in messages {
             messagesByID[message.id] = message
@@ -4253,10 +4293,11 @@ struct ChatView: View {
         let items = chatDisplayItemCache.items(for: key, messagesByID: messagesByID) {
             makeDisplayItems(from: messages)
         }
-        return appendingResponseCaptions(to: items, messages: messages)
+        return groupTranscriptActivity(appendingResponseCaptions(to: items, messages: messages))
     }
 
     private func timedDisplayedChatItems(for messages: [OpenCodeMessageEnvelope]) -> (items: [ChatDisplayItem], diagnostics: String) {
+        let messages = messages.map { TranscriptActivityGrouping.filteringContext($0, showsContextChanges: showsContextChanges) }
         let (messagesByID, dictionaryMS) = chatMeasureMS {
             var messagesByID: [String: OpenCodeMessageEnvelope] = [:]
             for message in messages {
@@ -4290,7 +4331,27 @@ struct ChatView: View {
             cacheResult.mode,
             cacheResult.elapsedMS
         )
-        return (appendingResponseCaptions(to: cacheResult.items, messages: messages), diagnostics)
+        return (groupTranscriptActivity(appendingResponseCaptions(to: cacheResult.items, messages: messages)), diagnostics)
+    }
+
+    private func groupTranscriptActivity(_ items: [ChatDisplayItem]) -> [ChatDisplayItem] {
+        guard appCustomizationStore.groupsToolCalls else { return items }
+        var result: [ChatDisplayItem] = []
+        var pending: [OpenCodeMessageEnvelope] = []
+        func flush() {
+            result.append(contentsOf: TranscriptActivityGrouping.slices(pending).map(ChatDisplayItem.activitySlice))
+            pending.removeAll(keepingCapacity: true)
+        }
+        for item in items {
+            if case let .message(message) = item, message.isAssistantMessage {
+                pending.append(message)
+            } else {
+                flush()
+                result.append(item)
+            }
+        }
+        flush()
+        return result
     }
 
     private func appendingResponseCaptions(to items: [ChatDisplayItem], messages: [OpenCodeMessageEnvelope]) -> [ChatDisplayItem] {
@@ -4537,6 +4598,8 @@ struct ChatView: View {
     @ViewBuilder
     private func chatRow(for item: ChatDisplayItem, recovery: ChatStore.SubmissionRecovery?, entry: ChatOutgoingEntry) -> some View {
         switch item {
+        case let .activitySlice(slice):
+            messageRow(for: slice.message, entry: entry, isSlice: true)
         case let .responseCaption(turn):
             ResponseTurnCaption(turn: turn, visibility: responseActionsVisibility) {
                 messageChunkContextMenu(for: turn.message)
@@ -4627,12 +4690,12 @@ struct ChatView: View {
 
     }
 
-    private func messageRow(for message: OpenCodeMessageEnvelope, entry: ChatOutgoingEntry) -> some View {
-        let snapshot = messageRowRenderSnapshot(for: message, entry: entry)
+    private func messageRow(for message: OpenCodeMessageEnvelope, entry: ChatOutgoingEntry, isSlice: Bool = false) -> some View {
+        let snapshot = messageBubbleSnapshot(for: message, entry: entry, isSlice: isSlice)
         let entryContextID = thinkingEntryContextID
 
         return EquatableMessageBubbleHost(
-            snapshot: snapshot.bubble,
+            snapshot: snapshot,
             imageContent: imageContent,
             imageLoadingStore: chatStore.imageLoadingStore,
             videoStreams: videoStreams,
@@ -4641,7 +4704,8 @@ struct ChatView: View {
                 chatFacade.resolveTaskSessionID(from: part, currentSessionID: currentSessionID)
             }
         ) { part in
-            selectedActivityDetail = ActivityDetail(message: message, part: part)
+            let source = visibleChatMessages.first { $0.id == part.messageID } ?? message
+            selectedActivityDetail = ActivityDetail(message: source, part: part)
         } onOpenTaskSession: { taskSessionID in
             Task { await presentTaskSession(sessionID: taskSessionID) }
         } onForkMessage: { forkMessage in
@@ -4672,7 +4736,10 @@ struct ChatView: View {
         .equatable()
         .transition(.identity)
         .modifier(AppAppearanceModifier(store: appCustomizationStore))
-        .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .padding(EdgeInsets(top: message.parts.allSatisfy { $0.timelineContextType != nil } ? 2 : 6,
+                           leading: 16,
+                           bottom: message.parts.allSatisfy { $0.timelineContextType != nil } ? 2 : 6,
+                           trailing: 16))
     }
 
     private func messageRowRenderSnapshot(for message: OpenCodeMessageEnvelope, entry: ChatOutgoingEntry) -> MessageRowRenderSnapshot {
@@ -4682,17 +4749,24 @@ struct ChatView: View {
         )
     }
 
-    private func messageBubbleSnapshot(for message: OpenCodeMessageEnvelope, entry: ChatOutgoingEntry) -> MessageBubbleSnapshot {
+    private func messageBubbleSnapshot(for message: OpenCodeMessageEnvelope, entry: ChatOutgoingEntry, isSlice: Bool = false) -> MessageBubbleSnapshot {
         let isStreaming = isStreamingMessage(message)
         let isRecovery = chatFacade.recoveryInputs(sessionID: sessionID).contains { $0.id == message.id }
         return MessageBubbleSnapshot(
             message: message,
-            detailedMessage: isStreaming ? nil : chatStore.toolMessageDetails[message.id],
+            detailedMessage: isStreaming || isSlice ? nil : chatStore.toolMessageDetails[message.id].map {
+                TranscriptActivityGrouping.filteringContext($0, showsContextChanges: showsContextChanges)
+            },
             currentSessionID: sessionID,
             isStreamingMessage: isStreaming,
             animatesStreamingText: shouldAnimateStreamingText,
             showsToolCalls: appCustomizationStore.showsToolCalls,
             groupsToolCalls: appCustomizationStore.groupsToolCalls,
+            contextModelsByMessageID: Dictionary(visibleChatMessages.compactMap { source in
+                guard message.parts.contains(where: { $0.timelineContextType == .modelSwitched && $0.messageID == source.id }),
+                      let model = source.info.model else { return nil }
+                return (source.id, model)
+            }, uniquingKeysWith: { _, latest in latest }),
             hidesReasoningBlocks: !appCustomizationStore.showsReasoningBlocks || isFunAndGamesSession(sessionID),
             reserveEntryFromComposer: entry.reserves,
             animateEntryFromComposer: entry.animates,
@@ -4838,7 +4912,7 @@ struct ChatView: View {
 
     private func shouldDisplayMessageRow(_ message: OpenCodeMessageEnvelope) -> Bool {
         MessageBubbleMessageVisibilityPolicy.shouldDisplay(
-            message,
+            TranscriptActivityGrouping.filteringContext(message, showsContextChanges: showsContextChanges),
             showsToolCalls: appCustomizationStore.showsToolCalls,
             showsReasoningBlocks: appCustomizationStore.showsReasoningBlocks && !isFunAndGamesSession(sessionID)
         )
@@ -5068,12 +5142,13 @@ struct ChatView: View {
         return ChatThinkingPresentation.shouldShow(messages: messagesExcludingPendingDelivery(messages), pendingMessageID: thinkingPendingMessageID,
             isBusy: isSessionBusy, showsToolCalls: appCustomizationStore.showsToolCalls,
             showsReasoningBlocks: appCustomizationStore.showsReasoningBlocks && !isFunAndGamesSession(sessionID),
-            runningToolName: activeRunningToolName(in: messages))
+            runningToolName: activeRunningToolName(in: messages), groupsToolCalls: appCustomizationStore.groupsToolCalls)
     }
 
     private func activeRunningToolName(in messages: [OpenCodeMessageEnvelope]) -> String? {
         ChatThinkingPresentation.summaryToolName(messages: messagesExcludingPendingDelivery(messages), pendingMessageID: thinkingPendingMessageID,
-            isBusy: isSessionBusy, showsToolCalls: appCustomizationStore.showsToolCalls)
+            isBusy: isSessionBusy, showsToolCalls: appCustomizationStore.showsToolCalls,
+            groupsToolCalls: appCustomizationStore.groupsToolCalls)
     }
 
     private func messagesExcludingPendingDelivery(_ messages: [OpenCodeMessageEnvelope]) -> [OpenCodeMessageEnvelope] {
@@ -5398,7 +5473,11 @@ struct ChatView: View {
         let activity = expandedEarlierActivityMessageIDs.sorted().joined(separator: "|")
         let tools = appCustomizationStore.showsToolCalls
         let reasoningBlocks = appCustomizationStore.showsReasoningBlocks
-        return "reasoning:\(reasoning)#context:\(context)#activity:\(activity)#tools:\(tools)#reasoningBlocks:\(reasoningBlocks)#groupTools:\(appCustomizationStore.groupsToolCalls)"
+        return "reasoning:\(reasoning)#context:\(context)#activity:\(activity)#tools:\(tools)#reasoningBlocks:\(reasoningBlocks)#groupTools:\(appCustomizationStore.groupsToolCalls)#contextChanges:\(showsContextChanges)"
+    }
+
+    private var showsContextChanges: Bool {
+        !chatFacade.isV2Connection || appCustomizationStore.showsContextChanges
     }
 
     private func pruneExpandedReasoningParts() {
