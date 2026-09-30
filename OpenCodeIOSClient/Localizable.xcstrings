@@ -7516,6 +7516,22 @@
         }
       }
     },
+    "Git" : {
+      "localizations" : {
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Git"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Git"
+          }
+        }
+      }
+    },
     "Enabled" : {
       "localizations" : {
         "it" : {

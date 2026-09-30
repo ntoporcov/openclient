@@ -123,6 +123,44 @@ final class ChatHeaderUITests: XCTestCase {
         expanded.terminate()
     }
 
+    func testHeaderTabsInRootAndWindow() {
+        for window in [false, true] {
+            let app = launch(window: window)
+            defer { app.terminate() }
+            let fixture = window ? "Window" : "Root"
+            let header = app.buttons["chat.header"]
+            XCTAssertTrue(header.waitForExistence(timeout: 15))
+            header.tap()
+
+            XCTAssertTrue(app.textFields["chat.header.rename.title"].waitForExistence(timeout: 3))
+            XCTAssertFalse(app.buttons["chat.header.expand"].exists)
+
+            // Only navigate seeded surfaces: never toggle MCP or create a terminal.
+            for tab in ["MCP", "Files", "Terminal", "Chat", "Terminal"] {
+                let button = app.buttons.matching(NSPredicate(format: "label == %@", tab)).firstMatch
+                XCTAssertTrue(button.waitForExistence(timeout: 3), "Missing \(tab) tab in \(fixture)")
+                XCTAssertTrue(button.isHittable)
+                button.tap()
+                XCTAssertTrue(app.navigationBars[tab].waitForExistence(timeout: 3))
+                XCTAssertTrue(button.isSelected, "The \(tab) tab should be selected")
+            }
+            capture(app, "Header-Tabs-Terminal-Popover-\(fixture)")
+            let popoverHierarchy = XCTAttachment(string: app.debugDescription)
+            popoverHierarchy.name = "Header-Tabs-Popover-Hierarchy-\(fixture)"
+            popoverHierarchy.lifetime = .keepAlways
+            add(popoverHierarchy)
+
+            for tab in ["MCP", "Files", "Chat"] {
+                let button = app.buttons.matching(NSPredicate(format: "label == %@", tab)).firstMatch
+                XCTAssertTrue(button.isHittable)
+                button.tap()
+                XCTAssertTrue(app.navigationBars[tab].waitForExistence(timeout: 3))
+                XCTAssertTrue(button.isSelected)
+            }
+            XCTAssertTrue(app.textFields["chat.header.rename.title"].isHittable)
+        }
+    }
+
     func testHeaderSelectionAndRenameRootAndWindow() {
         for window in [false, true] {
             let app = launch(window: window)

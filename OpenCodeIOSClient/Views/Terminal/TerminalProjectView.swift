@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TerminalProjectView: View {
     @ObservedObject var facade: TerminalFacade
+    var usesTransparentBackground = false
     let onTerminalChosen: () -> Void
 
     private var snapshot: TerminalFacade.Snapshot { facade.snapshot }
@@ -10,6 +11,7 @@ struct TerminalProjectView: View {
         TerminalListContent(
             facade: facade,
             snapshot: snapshot,
+            usesTransparentBackground: usesTransparentBackground,
             onTerminalChosen: onTerminalChosen
         )
         .task(id: snapshot.directory) {
@@ -21,6 +23,7 @@ struct TerminalProjectView: View {
 private struct TerminalListContent: View {
     let facade: TerminalFacade
     let snapshot: TerminalFacade.Snapshot
+    let usesTransparentBackground: Bool
     let onTerminalChosen: () -> Void
 
     var body: some View {
@@ -65,7 +68,7 @@ private struct TerminalListContent: View {
                 .accessibilityIdentifier("terminal.list")
             }
         }
-        .background(OpenCodePlatformColor.groupedBackground)
+        .background(usesTransparentBackground ? Color.clear : OpenCodePlatformColor.groupedBackground)
     }
 
     private var emptyContent: some View {

@@ -165,6 +165,42 @@ final class ChatFacade: ObservableObject {
     let funAndGamesStore: FunAndGamesStore
     let chatPresentationStore: ChatPresentationStore
     let mcpFacade: MCPFacade
+    // Header tools follow this chat, including detached chat windows, rather than
+    // the workspace selected in the main project sidebar.
+    lazy var headerTerminalFacade = TerminalFacade(
+        store: TerminalStore(),
+        clientProvider: { [weak self] in
+            guard let self, self.selectedSession != nil else { return nil }
+            return self.viewModel.compatibilityClient(for: .terminal)
+        },
+        directoryProvider: { [weak self] in self?.selectedSession?.directory },
+        apiProfileProvider: { [weak self] in self?.viewModel.connectionStore.apiProfile },
+        generationProvider: { [weak self] in UInt(bitPattern: self?.viewModel.directoryStoreRegistry.generation ?? 0) },
+        workspaceIDProvider: { [weak self] in self?.selectedSession?.workspaceID }
+    )
+    lazy var headerFilesFacade = ProjectFilesFacade(
+        store: ProjectFilesStore(),
+        clientProvider: { [weak self] in
+            guard let self, self.selectedSession != nil else { return nil }
+            return self.viewModel.compatibilityClient(for: .files)
+        },
+        hasGitProjectProvider: { [weak self] in
+            guard let self, let session = self.selectedSession else { return false }
+            return self.projectStore.projects.first { $0.id == session.projectID }?.vcs == "git"
+        },
+        effectiveSelectedDirectoryProvider: { [weak self] in self?.selectedSession?.directory },
+        currentProjectProvider: { [weak self] in
+            guard let self else { return nil }
+            return self.projectStore.projects.first { $0.id == self.selectedSession?.projectID }
+        },
+        workspaceDirectoriesProvider: { [] },
+        workspaceDisplayNameProvider: { $0.map { URL(fileURLWithPath: $0).lastPathComponent } },
+        workspaceKeyProvider: { $0 },
+        isFilesPresentedProvider: { true },
+        preserveNavigationState: {},
+        showFilesRoute: {},
+        apiProfileProvider: { [weak self] in self?.viewModel.connectionStore.apiProfile }
+    )
     let foregroundChatRefreshCoordinator = ForegroundChatRefreshCoordinator()
     private var v2CommandCallbacks: Set<String> = []
     let windowContext: ChatWindowContext?

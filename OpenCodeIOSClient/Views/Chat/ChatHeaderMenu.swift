@@ -10,12 +10,16 @@ struct ChatHeaderMenu: View {
     var maximumWidth: CGFloat = 220
     var onPresentationChange: (Bool) -> Void = { _ in }
     @State private var scope: ChatFacade.HeaderScope?
+    @StateObject private var panel = ChatHeaderPanelState()
+    private let panelCornerRadius: CGFloat = 40
 
     var body: some View {
         let current = facade.selectedSession?.id == session.id ? facade.selectedSession ?? session : session
         let title = facade.headerSnapshot(for: current).navigationTitle
         let toolbar = facade.toolbarSnapshot(for: current)
         Button {
+            panel.reset(title: current.title ?? "")
+            facade.headerFilesFacade.reset()
             popoverScope.wrappedValue = facade.headerScope(for: current)
         } label: {
             VStack(alignment: .leading, spacing: 0) {
@@ -35,8 +39,10 @@ struct ChatHeaderMenu: View {
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityIdentifier("chat.header")
         .popover(item: popoverScope, attachmentAnchor: .rect(.bounds), arrowEdge: .top) { scope in
-            ChatHeaderPopover(facade: facade, scope: scope)
+            ChatHeaderPanel(facade: facade, scope: scope, panel: panel)
                 .frame(width: max(1, containerWidth - 32), height: min(600, max(1, containerHeight - 16)))
+                .containerShape(RoundedRectangle(cornerRadius: panelCornerRadius, style: .continuous))
+                .presentationCornerRadius(panelCornerRadius)
                 .presentationCompactAdaptation(.popover)
         }
         .onChange(of: facade.promptContextID) { dismissPopover() }
@@ -57,8 +63,86 @@ struct ChatHeaderMenu: View {
     }
 
     private func dismissPopover() {
-        guard scope != nil else { return }
-        popoverScope.wrappedValue = nil
+        let wasPresented = scope != nil
+        scope = nil
+        if wasPresented { onPresentationChange(false) }
+    }
+}
+
+private final class ChatHeaderPanelState: ObservableObject {
+    enum Tab: Hashable { case chat, mcp, git, terminal }
+    @Published var tab: Tab = .chat
+    @Published var title = ""
+    @Published var showsFile = false
+    @Published var terminalPath: [String] = []
+
+    func reset(title: String) {
+        tab = .chat
+        self.title = title
+        showsFile = false
+        terminalPath = []
+    }
+}
+
+private struct ChatHeaderPanel: View {
+    let facade: ChatFacade
+    let scope: ChatFacade.HeaderScope
+    @ObservedObject var panel: ChatHeaderPanelState
+
+    var body: some View {
+        TabView(selection: $panel.tab) {
+            ChatHeaderPopover(facade: facade, scope: scope, title: $panel.title)
+                .tabItem { Label("Chat", systemImage: "bubble.left") }
+                .tag(ChatHeaderPanelState.Tab.chat)
+            NavigationStack {
+                MCPListView(facade: facade.mcpFacade)
+                    .navigationTitle("MCP")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .tabItem { Label("MCP", systemImage: OpenClientProjectContentTab.mcp.systemImage) }
+            .tag(ChatHeaderPanelState.Tab.mcp)
+            NavigationStack {
+                GitStatusView(facade: facade.headerFilesFacade) { panel.showsFile = true }
+                    .navigationTitle("Files")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .navigationDestination(isPresented: $panel.showsFile) {
+                        GitDiffView(facade: facade.headerFilesFacade)
+                    }
+            }
+            .tabItem { Label("Files", systemImage: OpenClientProjectContentTab.git.systemImage) }
+            .tag(ChatHeaderPanelState.Tab.git)
+            ChatHeaderTerminal(facade: facade.headerTerminalFacade, path: $panel.terminalPath)
+                .tabItem { Label("Terminal", systemImage: OpenClientProjectContentTab.terminal.systemImage) }
+                .tag(ChatHeaderPanelState.Tab.terminal)
+        }
+        .accessibilityIdentifier("chat.header.panel")
+    }
+}
+
+private struct ChatHeaderTerminal: View {
+    @ObservedObject var facade: TerminalFacade
+    @Binding var path: [String]
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            TerminalProjectView(facade: facade, usesTransparentBackground: true) {
+                if let id = facade.snapshot.activeTerminalID { path = [id] }
+            }
+            .navigationTitle("Terminal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("New Terminal", systemImage: "plus") { facade.createTerminal() }
+                        .disabled(facade.snapshot.isCreatingTerminal)
+                }
+            }
+            .navigationDestination(for: String.self) { id in
+                TerminalDetailView(facade: facade, terminalID: id)
+            }
+        }
+        .onChange(of: facade.snapshot.activeTerminalID) { _, id in
+            if let id { path = [id] }
+        }
     }
 }
 
@@ -66,15 +150,9 @@ private struct ChatHeaderPopover: View {
     @ObservedObject var facade: ChatFacade
     let scope: ChatFacade.HeaderScope
     @Environment(\.dismiss) private var dismiss
-    @State private var title: String
+    @Binding var title: String
     @State private var saving = false
     @State private var changingLiveActivity = false
-
-    init(facade: ChatFacade, scope: ChatFacade.HeaderScope) {
-        self.facade = facade
-        self.scope = scope
-        _title = State(initialValue: scope.session.title ?? "")
-    }
 
     var body: some View {
         let session = facade.selectedSession ?? scope.session
@@ -103,8 +181,8 @@ private struct ChatHeaderPopover: View {
                         }
                     }
                 }
-                if facade.supportsHeaderLiveActivity(scope) {
-                    Section {
+                Section {
+                    if facade.supportsHeaderLiveActivity(scope) {
                         Toggle(isOn: liveActivityBinding) {
                             Label("Live Activity", systemImage: "waveform")
                                 .foregroundStyle(.primary)
@@ -112,8 +190,6 @@ private struct ChatHeaderPopover: View {
                         .disabled(changingLiveActivity)
                         .accessibilityIdentifier("chat.header.liveActivity")
                     }
-                }
-                Section {
                     NavigationLink {
                         ChatAppearanceSettingsView(store: facade.appCustomizationStore, isV2Connection: facade.isV2Connection)
                     } label: {
