@@ -1,1 +1,1 @@
-Conheça o OC Notify: Web Push opcional e autohospedado para sessões do OpenCode. O OpenClient 1.0.22 também melhora a confiabilidade do OpenCode v2.
+Mais controle com fila, redirecionamento e perguntas à parte no OpenCode v2. Explore ferramentas agrupadas, comandos, habilidades e navegação rápida.

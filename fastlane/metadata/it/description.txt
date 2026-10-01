@@ -18,7 +18,7 @@ Pro Lifetime è un acquisto una tantum e include l'icona Pro Life. Pro Monthly �
 
 Funzionalità principali di OpenCode:
 
-- Connettiti al tuo server OpenCode autogestito
+- Connettiti al tuo server OpenCode v1 o v2
 - Salva i server recenti e riconnettiti rapidamente
 - Esplora progetti, spazi di lavoro e cronologia delle sessioni
 - Controlla l'uso dell'abbonamento OpenAI e la spesa su OpenRouter configurando l'utilizzo dei provider
@@ -26,11 +26,12 @@ Funzionalità principali di OpenCode:
 - Apri sessioni esistenti o creane di nuove
 - Continua le conversazioni da iPhone o iPad
 - Segui in tempo reale le risposte dell'assistente e l'attività degli strumenti
-- Consulta ragionamenti, messaggi, output dei comandi e riferimenti ai file
+- Raggruppa gli strumenti e personalizza ragionamento e contesto
 - Invia prompt di testo e allega file compatibili da iOS
 - Disegna idee, annotazioni per l'interfaccia e diagrammi di architettura con la lavagna Excalidraw integrata
 - Detta i prompt quando scrivere non è pratico
-- Usa comandi, menzioni degli agenti, modelli e opzioni di sessione disponibili sul server
+- Usa comandi, abilità, menzioni e modelli del server
+- In v2, accoda messaggi, reindirizza il lavoro o fai domande a parte
 - Segui le attività della sessione mentre il lavoro è in corso
 - Rispondi alle richieste di autorizzazione senza tornare al computer
 - Rispondi a domande a scelta multipla o personalizzate da un'interfaccia nativa

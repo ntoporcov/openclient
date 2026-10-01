@@ -2659,7 +2659,6 @@ extension AppViewModel {
         } catch {
             guard isForegroundChatCatchUpCurrent(context) else { return }
             appendDebugLog("foreground transcript catch-up error: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
         }
         guard isForegroundChatCatchUpCurrent(context) else { return }
         do {

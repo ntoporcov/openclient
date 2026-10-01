@@ -18,7 +18,7 @@ Pro Lifetime is a one-time purchase and includes the Pro Life icon. Pro Monthly 
 
 Core OpenCode features:
 
-- Connect to your own self-hosted OpenCode server
+- Connect to your own self-hosted OpenCode v1 or v2 server
 - Save recent servers and reconnect quickly
 - Browse projects, workspaces, and session history
 - Track OpenAI subscription usage and OpenRouter spending with optional provider usage setup
@@ -26,11 +26,12 @@ Core OpenCode features:
 - Open existing sessions or start new ones
 - Continue chat conversations from iPhone or iPad
 - Stream assistant responses and tool activity live
-- Review reasoning, messages, command output, and file references
+- Group tool calls and customize reasoning and context visibility
 - Send text prompts and attach supported files from iOS
 - Sketch ideas, UI notes, and architecture diagrams with the built-in Excalidraw drawing board
 - Dictate prompts by voice when typing is not convenient
-- Use commands, agent mentions, model choices, and session options when available from your server
+- Use commands, skills, agent mentions, and model choices supported by your server
+- Queue messages, steer ongoing work, or ask a Side Question with OpenCode v2
 - Track session-local todos while work is in progress
 - Respond to permission requests without returning to your computer
 - Answer multiple-choice and custom question prompts in a first-party UI

@@ -18,7 +18,7 @@ O Pro Lifetime é uma compra única e inclui o ícone Pro Life. O Pro Monthly é
 
 Principais recursos do OpenCode:
 
-- Conecte-se ao seu próprio servidor OpenCode autohospedado
+- Conecte-se ao seu servidor OpenCode v1 ou v2
 - Salve servidores recentes e reconecte-se rapidamente
 - Navegue por projetos, espaços de trabalho e histórico de sessões
 - Acompanhe o uso da assinatura do OpenAI e os gastos no OpenRouter ao configurar o uso de provedores
@@ -26,11 +26,12 @@ Principais recursos do OpenCode:
 - Abra sessões existentes ou inicie novas sessões
 - Continue conversas pelo iPhone ou iPad
 - Acompanhe respostas do assistente e ferramentas em tempo real
-- Consulte raciocínio, mensagens, saída de comandos e referências a arquivos
+- Agrupe ferramentas e personalize a exibição de raciocínio e contexto
 - Envie prompts de texto e anexe arquivos compatíveis pelo iOS
 - Esboce ideias, anotações de interface e diagramas de arquitetura no quadro Excalidraw integrado
 - Dite prompts por voz quando não for conveniente digitar
-- Use comandos, menções a agentes, modelos e opções de sessão disponíveis no servidor
+- Use comandos, habilidades, menções a agentes e modelos do servidor
+- No v2, enfileire mensagens, redirecione tarefas ou faça perguntas à parte
 - Acompanhe tarefas da sessão enquanto o trabalho está em andamento
 - Responda a pedidos de permissão sem voltar ao computador
 - Responda a perguntas de múltipla escolha ou personalizadas em uma interface nativa

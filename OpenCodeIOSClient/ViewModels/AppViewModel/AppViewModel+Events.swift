@@ -1308,7 +1308,7 @@ extension AppViewModel {
                 self.markChatBreadcrumb("idle reconcile finish", sessionID: session.id)
             } catch {
                 self.markChatBreadcrumb("idle reconcile error", sessionID: session.id)
-                self.errorMessage = error.localizedDescription
+                self.appendDebugLog("idle reconcile error: \(error.localizedDescription)")
             }
         }
     }

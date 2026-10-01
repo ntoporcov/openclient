@@ -1,11 +1,11 @@
-Resta al corrente con OC Notify.
+Più controllo sulle conversazioni e una visione più chiara del lavoro in corso.
 
-• Configura notifiche Web Push facoltative per sessioni completate, richieste di autorizzazione e domande con OC Notify sul tuo host.
-• Segui la configurazione guidata per aggiungere l'app web complementare alla schermata Home e trasferire le impostazioni di connessione da OpenClient.
-• Apri le notifiche per tornare alla sessione corrispondente in OpenClient.
-• Connessioni a OpenCode v2 più affidabili, con correzioni a progetti, spazi di lavoro, sessioni, strumenti e aggiornamenti in tempo reale.
-• Accedi alle Impostazioni della connessione direttamente dalle impostazioni del progetto e di Attività, accanto alle Impostazioni globali.
-• L'elenco dei progetti rimane coerente dopo la riconnessione, con il nome Radice e un'icona di cartella per identificare la radice del file system.
-• Ripristinato il feedback aptico all'invio e l'effetto di digitazione durante le risposte in streaming nelle chat con OpenCode v2.
+• Metti in coda il prossimo messaggio o reindirizza l'assistente mentre lavora con OpenCode v2.
+• Fai una domanda a parte senza interrompere il lavoro né aggiungerla alla conversazione. Tieni premuto Invia per scegliere un'azione.
+• Raggruppa l'attività degli strumenti, con dettagli espandibili e contatori animati. Personalizza separatamente la visibilità del ragionamento e del contesto.
+• Trova ed esegui comandi e abilità di OpenCode v2 dal menu /. Tieni premuta una voce per leggerne i dettagli, fissarla o condividerla.
+• Accedi a MCP, Git e al terminale dello spazio di lavoro dal menu nell'intestazione della chat.
+• Esplora il nuovo annuncio interattivo delle funzionalità e consulta gli annunci precedenti in Aiuto.
+• Miglioramenti alla riconnessione, alla cronologia delle conversazioni, alla configurazione dell'utilizzo dei provider e alle immagini del plugin.
 
-OC Notify richiede il plugin OpenClient, un endpoint HTTPS autogestito e l'app web complementare aggiunta alla schermata Home. Le notifiche usano Web Push senza un relay ospitato da OpenClient.
+OpenClient supporta OpenCode v1 e v2. Coda, reindirizzamento e domande a parte richiedono v2.
