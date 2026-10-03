@@ -96,10 +96,11 @@ extension View {
     }
 
     @ViewBuilder
-    func opencodeGlassSurface<S: Shape>(clear: Bool = false, isInteractive: Bool = false, in shape: S) -> some View {
+    func opencodeGlassSurface<S: Shape>(clear: Bool = false, isInteractive: Bool = false, tint: Color? = nil, in shape: S) -> some View {
         #if os(iOS) || targetEnvironment(macCatalyst)
         if #available(iOS 26.0, *) {
-            let glass = (clear ? Glass.clear : Glass.regular).interactive(isInteractive)
+            let baseGlass = clear ? Glass.clear : Glass.regular
+            let glass = (tint.map { baseGlass.tint($0) } ?? baseGlass).interactive(isInteractive)
 
             self
                 .background(Color.clear, in: shape)

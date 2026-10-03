@@ -1,6 +1,168 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Reading" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Leggendo" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Lendo" } }
+      }
+    },
+    "Editing" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Modificando" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Editando" } }
+      }
+    },
+    "A little depth. A lot more history." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Un po’ di profondità. Molta più cronologia." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Um pouco de profundidade. Muito mais histórico." } }
+      }
+    },
+    "Meet your new status pill, see what each turn changed, and scroll back without losing your place." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Scopri la nuova pillola di stato, guarda cosa è cambiato a ogni turno e scorri indietro senza perdere il punto." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Conheça sua nova pílula de status, veja o que mudou em cada turno e volte no histórico sem perder sua posição." } }
+      }
+    },
+    "Small pill. Big personality." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Piccola pillola. Grande personalità." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Pequena pílula. Grande personalidade." } }
+      }
+    },
+    "A new 3D status pill keeps you in the loop as the assistant thinks, reads, and gets things done." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Una nuova pillola di stato 3D ti tiene al corrente mentre l’assistente pensa, legge e si mette al lavoro." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Uma nova pílula de status 3D mostra o que está acontecendo enquanto o assistente pensa, lê e põe a mão na massa." } }
+      }
+    },
+    "Curious? Give the pill a long press. It has a playful side." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Ti incuriosisce? Tieni premuta la pillola. Ha un lato giocoso." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Bateu a curiosidade? Toque e segure a pílula. Ela tem um lado divertido." } }
+      }
+    },
+    "See what changed" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Scopri cosa è cambiato" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Veja o que mudou" } }
+      }
+    },
+    "Tap a response, then the Changes button beside Copy to explore that turn’s file diffs. Unchanged lines start collapsed so the important bits stand out." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Tocca una risposta, poi il pulsante Modifiche accanto a Copia per esplorare le differenze nei file di quel turno. Le righe invariate sono compresse inizialmente, così le parti importanti risaltano." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Toque em uma resposta e depois no botão Alterações ao lado de Copiar para explorar as diferenças nos arquivos daquele turno. As linhas sem alterações começam recolhidas para destacar o que importa." } }
+      }
+    },
+    "Per-turn changes require OpenCode v2 and recorded file snapshots." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Le modifiche per turno richiedono OpenCode v2 e istantanee dei file registrate." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "As alterações por turno exigem OpenCode v2 e snapshots de arquivos registrados." } }
+      }
+    },
+    "Scroll back. Yes, finally." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Scorri indietro. Sì, finalmente." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Volte no histórico. Sim, finalmente." } }
+      }
+    },
+    "Older messages load as you scroll, while your place stays put. We’ve spent enough time chasing the scroll position. Now you can spend yours finding that thing the assistant said 200 messages ago." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "I messaggi meno recenti si caricano mentre scorri, senza farti perdere il punto. Abbiamo passato abbastanza tempo a rincorrere la posizione di scorrimento. Ora puoi usare il tuo per ritrovare quella cosa che l’assistente ha detto 200 messaggi fa." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "As mensagens antigas carregam conforme você rola, sem perder sua posição. Já passamos tempo suficiente correndo atrás da posição de rolagem. Agora você pode usar o seu para encontrar aquilo que o assistente disse 200 mensagens atrás." } }
+      }
+    },
+    "%lld° horizontal, %lld° vertical" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "%lld° in orizzontale, %lld° in verticale" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "%lld° na horizontal, %lld° na vertical" } }
+      }
+    },
+    "Glass playground" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Gioco di vetro" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Brincadeira de vidro" } }
+      }
+    },
+    "Drag to spin the pill." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Trascina per ruotare la pillola." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Arraste para girar a pílula." } }
+      }
+    },
+    "Open glass playground" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Apri il gioco di vetro" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Abrir a brincadeira de vidro" } }
+      }
+    },
+    "Collapse Unchanged Lines" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Comprimi righe invariate" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Recolher linhas sem alterações" } }
+      }
+    },
+    "Expand Unchanged Lines" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Espandi righe invariate" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Expandir linhas sem alterações" } }
+      }
+    },
+    "1 unchanged line" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "1 riga invariata" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "1 linha sem alterações" } }
+      }
+    },
+    "%lld unchanged lines" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "%lld righe invariate" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "%lld linhas sem alterações" } }
+      }
+    },
+    "Turn Changes" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Modifiche del turno" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Alterações do turno" } }
+      }
+    },
+    "Could Not Load Changes" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Impossibile caricare le modifiche" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Não foi possível carregar as alterações" } }
+      }
+    },
+    "No Recorded Changes" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Nessuna modifica registrata" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Nenhuma alteração registrada" } }
+      }
+    },
+    "This turn has no recorded file changes. Snapshot capture may be unavailable." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Questo turno non ha modifiche ai file registrate. L'acquisizione delle istantanee potrebbe non essere disponibile." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Este turno não tem alterações de arquivos registradas. A captura de snapshots pode estar indisponível." } }
+      }
+    },
+    "Move Session" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Sposta sessione" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Mover sessão" } }
+      }
+    },
+    "If the session is working, it moves after the current turn. Project files are not moved." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Se la sessione è in esecuzione, verrà spostata dopo il turno corrente. I file del progetto non vengono spostati." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Se a sessão estiver trabalhando, ela será movida após o turno atual. Os arquivos do projeto não são movidos." } }
+      }
+    },
+    "Select an existing directory on the server." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Seleziona una cartella esistente sul server." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Selecione um diretório existente no servidor." } }
+      }
+    },
     "Commands and skills in v2" : {
       "localizations" : {
         "it" : { "stringUnit" : { "state" : "translated", "value" : "Comandi e abilità in v2" } },

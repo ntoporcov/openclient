@@ -2034,6 +2034,7 @@ private struct ChatTranscriptPane<RowContent: View>: View {
     let onAppear: (CGFloat) -> Void
     let onHeightChange: (CGFloat) -> Void
     let onSlowSnapshot: (String) -> Void
+    let onRequestOlderMessages: (ChatTranscriptRow) -> Void
     let rowContent: (ChatTranscriptRow) -> RowContent
 
     var body: some View {
@@ -2066,6 +2067,7 @@ private struct ChatTranscriptPane<RowContent: View>: View {
                 animatedRowIDs: animatedRowIDs,
                 onBottomPullChanged: onBottomPullChanged,
                 onBottomPullEnded: onBottomPullEnded,
+                onRequestOlderMessages: onRequestOlderMessages,
                 rowContent: rowContent
             )
             .background(OpenCodePlatformColor.chatCanvasBackground(for: colorScheme))
@@ -2329,6 +2331,7 @@ struct ChatView: View {
 
     @Namespace private var toolbarGlassNamespace
     @Namespace private var composerGlassNamespace
+    @State private var thinkingPillPlayground: ThinkingPillPlaygroundPresentation?
     // Keep the popover's anchor in place while its settings change the composer layout.
     @State private var pinnedHeaderUsesAssistantLayout: Bool?
     @State private var copiedDebugLog = false
@@ -2340,6 +2343,9 @@ struct ChatView: View {
     @State private var showingTodoInspector = false
     @State private var showingContextMetrics = false
     @State private var additionalLeadingMessageCount = 0
+    @State private var historyLoadTask: Task<Void, Never>?
+    @State private var historyLoadFailed = false
+    @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
     @State private var questionAnswers: [String: Set<String>] = [:]
     @State private var questionCustomAnswers: [String: String] = [:]
     @State private var taskStore = ChatViewTaskStore()
@@ -2394,6 +2400,7 @@ struct ChatView: View {
     @State private var largeMessageChunkCache = OpenCodeLargeMessageChunkCache()
     @State private var chatDisplayItemCache = ChatDisplayItemCache()
     @State private var responseActionsVisibility = ResponseActionsVisibility()
+    @State private var turnChangesRequest: TurnChangesRequest?
     @State private var cachedContextMetrics: OpenCodeSessionContextMetrics?
     @State private var cachedForkableMessages: [OpenCodeForkableMessage] = []
 
@@ -2681,12 +2688,17 @@ struct ChatView: View {
                 onSlowSnapshot: { message in
                     chatFacade.appendDebugLog(message)
                 },
+                onRequestOlderMessages: { requestOlderMessages(for: $0) },
                 rowContent: { row in
                     transcriptRowContent(for: row)
                         .frame(maxWidth: chatContentMaximumWidth)
                         .frame(maxWidth: .infinity)
                 }
              )
+            .onDisappear {
+                historyLoadTask?.cancel()
+                historyLoadTask = nil
+            }
             .onChange(of: chatFacade.presentationMessages.count) { _, count in
                 if count == 0 {
                     additionalLeadingMessageCount = 0
@@ -2845,7 +2857,22 @@ struct ChatView: View {
             }
         }
         .toolbar { chatToolbar }
+#if canImport(RealityKit) && canImport(UIKit)
+        .thinkingPillOverlay($thinkingPillPlayground, syncStore: directoryStore.syncStore,
+                             liveStatus: { thinkingPillLiveStatus })
 #if DEBUG
+        .task {
+            if ProcessInfo.processInfo.environment["OPENCLIENT_GLASS_PLAYGROUND_CHAT_PREVIEW"] == "1" {
+                isComposerInputFocused = false
+                thinkingPillPlayground = ThinkingPillPlaygroundPresentation(title: "Thinking", tint: .secondary)
+            }
+        }
+#endif
+#endif
+#if DEBUG
+        .sheet(item: $turnChangesRequest) { request in
+            TurnChangesSheet(facade: chatFacade, scope: request.scope, promptID: request.promptID)
+        }
         .sheet(isPresented: $chatPresentationStore.isShowingDebugProbe) {
             ChatDebugProbeSheet(chatFacade: chatFacade, copiedDebugLog: $copiedDebugLog)
         }
@@ -3156,15 +3183,18 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
             } else if chatFacade.isV2Connection || chatFacade.windowContext != nil, let error = chatFacade.presentationErrorMessage {
-                HStack(alignment: .top) {
-                    Text(error)
-                        .font(.subheadline)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button("Dismiss") { connectionStore.clearError() }
-                }
-                .padding(.horizontal, 16)
-                .accessibilityIdentifier("chat.v2.error")
+                Text(verbatim: error)
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .accessibilityIdentifier("chat.v2.error")
+                    .task(id: error) {
+                        let contextID = chatFacade.promptContextID
+                        do { try await Task.sleep(for: .seconds(4)) } catch { return }
+                        guard !Task.isCancelled else { return }
+                        chatFacade.dismissPresentationError(error, contextID: contextID)
+                    }
             }
             if overlaySnapshot.showsAccessoryArea {
                 ComposerAccessoryArea(
@@ -4448,6 +4478,23 @@ struct ChatView: View {
         }
     }
 
+    private var thinkingPillLiveStatus: ThinkingPillStatus {
+        let interactions = composerOverlaySnapshot
+        if !interactions.permissions.isEmpty || !interactions.questions.isEmpty {
+            return ThinkingPillStatus(title: "Needs Input", tint: .orange)
+        }
+        if directoryStore.sessionStatuses[liveSession.id] == "retry" {
+            return ThinkingPillStatus(title: "Retrying", tint: .orange)
+        }
+        let busy = isComposerBusy || chatFacade.isV2PromptInFlight(sessionID: sessionID)
+        guard busy else { return ThinkingPillStatus(title: "Ready", tint: .green) }
+        let tool = ChatThinkingPresentation.summaryToolName(
+            messages: messagesExcludingPendingDelivery(transcriptSuffix(4)), pendingMessageID: thinkingPendingMessageID,
+            isBusy: busy, showsToolCalls: false)
+        return ThinkingPillStatus(title: tool == nil ? "Thinking" : "Working",
+                                  tint: tool.map { OpenCodeToolActivityAppearance.resolve($0).tint } ?? .secondary)
+    }
+
     private func thinkingRowListItem(isVisible: Bool, toolName: String?, height: CGFloat) -> some View {
         let snapshot = thinkingRowRenderSnapshot(toolName: toolName)
         return ZStack(alignment: .leading) {
@@ -4455,7 +4502,14 @@ struct ChatView: View {
                 ThinkingRow(
                     animateEntry: snapshot.animateEntry,
                     tint: snapshot.toolName.map { OpenCodeToolActivityAppearance.resolve($0).tint } ?? .secondary,
-                    title: snapshot.toolName == nil ? "Thinking" : "Working"
+                    title: snapshot.toolName == nil ? "Thinking" : "Working",
+                    onOpenPlayground: {
+                        isComposerInputFocused = false
+                        thinkingPillPlayground = ThinkingPillPlaygroundPresentation(
+                            title: snapshot.toolName == nil ? "Thinking" : "Working",
+                            tint: snapshot.toolName.map { OpenCodeToolActivityAppearance.resolve($0).tint } ?? .secondary
+                        )
+                    }
                 )
                     .padding(.horizontal, 16)
                     .accessibilityIdentifier(snapshot.toolName == nil ? "chat.thinking.neutral" : "chat.thinking.tool")
@@ -4518,6 +4572,35 @@ struct ChatView: View {
         return [lastItem.id]
     }
 
+    private var showsManualHistoryControl: Bool {
+        #if canImport(UIKit)
+        isVoiceOverEnabled || historyLoadFailed
+        #else
+        true
+        #endif
+    }
+
+    private func requestOlderMessages(for row: ChatTranscriptRow, revealFetchedPage: Bool = false) {
+        guard case let .olderMessages(count, nextRequestedCount, hasMoreHistory, isLoading) = row,
+              !isLoading else { return }
+        historyLoadFailed = false
+        if count > 0 {
+            additionalLeadingMessageCount += max(0, nextRequestedCount - transcriptRequestedMessageCount)
+        } else if hasMoreHistory, historyLoadTask == nil {
+            historyLoadTask = Task { @MainActor in
+                let loadedCount = await chatFacade.loadOlderMessages(for: liveSession, count: olderMessageWindowSize)
+                guard !Task.isCancelled else { return }
+                // Fetching fills the canonical cache. The viewport coordinator
+                // decides when to reveal/prepare that cached page, preferably at idle.
+                if revealFetchedPage { additionalLeadingMessageCount += loadedCount }
+                // No progress can also mean a page raced a live update. Offer a retry,
+                // rather than automatically retrying the same boundary forever.
+                historyLoadFailed = loadedCount == 0 && chatFacade.hasOlderMessages(forSessionID: sessionID)
+                historyLoadTask = nil
+            }
+        }
+    }
+
     @ViewBuilder
     private func transcriptRowContent(for row: ChatTranscriptRow) -> some View {
         switch row {
@@ -4527,43 +4610,43 @@ struct ChatView: View {
         case let .previousUserContext(message):
             previousUserContextRow(for: message)
         case let .olderMessages(count, nextRequestedCount, hasMoreHistory, isLoading):
-            Button {
-                if count > 0 {
-                    additionalLeadingMessageCount += max(
-                        0,
-                        nextRequestedCount - transcriptRequestedMessageCount
-                    )
-                } else {
-                    Task { @MainActor in
-                        let loadedCount = await chatFacade.loadOlderMessages(
-                            for: liveSession,
-                            count: olderMessageWindowSize
-                        )
-                        additionalLeadingMessageCount += loadedCount
+            if showsManualHistoryControl {
+                Button {
+                    requestOlderMessages(for: .olderMessages(count: count, nextRequestedCount: nextRequestedCount,
+                        hasMoreHistory: hasMoreHistory, isLoading: isLoading), revealFetchedPage: true)
+                } label: {
+                    Group {
+                        if isLoading {
+                            Text("Loading earlier messages...")
+                        } else if count > 0, !hasMoreHistory {
+                            Text("View older messages (\(count))")
+                        } else if count > 0 {
+                            Text("View older messages")
+                        } else {
+                            Text("Load earlier messages")
+                        }
                     }
-                }
-            } label: {
-                Group {
-                    if isLoading {
-                        Text("Loading earlier messages...")
-                    } else if count > 0, !hasMoreHistory {
-                        Text("View older messages (\(count))")
-                    } else if count > 0 {
-                        Text("View older messages")
-                    } else {
-                        Text("Load earlier messages")
-                    }
-                }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(appAccentColor)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .background(OpenCodePlatformColor.secondaryGroupedBackground, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .accessibilityIdentifier(ChatScrollTarget.olderMessagesButton)
+                .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+            } else {
+                ZStack {
+                    if isLoading {
+                        ProgressView()
+                            .accessibilityLabel("Loading earlier messages...")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
+                .accessibilityIdentifier("chat.history.loading")
             }
-            .buttonStyle(.plain)
-            .disabled(isLoading)
-            .accessibilityIdentifier(ChatScrollTarget.olderMessagesButton)
-            .padding(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
         case let .displayItem(item, recovery, _, entry):
             chatRow(for: item, recovery: recovery, entry: entry)
         case let .thinking(isVisible, toolName, height):
@@ -4595,13 +4678,21 @@ struct ChatView: View {
         .modifier(AppAppearanceModifier(store: appCustomizationStore))
     }
 
+    private func turnChangesAction(for turn: AssistantResponseTurn) -> (() -> Void)? {
+        guard let session = chatFacade.selectedSession, let promptID = turn.promptMessageID else { return nil }
+        let scope = chatFacade.headerScope(for: session)
+        guard chatFacade.supportsSessionTools(scope) else { return nil }
+        return { turnChangesRequest = TurnChangesRequest(scope: scope, promptID: promptID) }
+    }
+
     @ViewBuilder
     private func chatRow(for item: ChatDisplayItem, recovery: ChatStore.SubmissionRecovery?, entry: ChatOutgoingEntry) -> some View {
         switch item {
         case let .activitySlice(slice):
             messageRow(for: slice.message, entry: entry, isSlice: true)
         case let .responseCaption(turn):
-            ResponseTurnCaption(turn: turn, visibility: responseActionsVisibility) {
+            ResponseTurnCaption(turn: turn, visibility: responseActionsVisibility,
+                onShowChanges: turnChangesAction(for: turn)) {
                 messageChunkContextMenu(for: turn.message)
             }
             .padding(.horizontal, 16)
@@ -5473,7 +5564,7 @@ struct ChatView: View {
         let activity = expandedEarlierActivityMessageIDs.sorted().joined(separator: "|")
         let tools = appCustomizationStore.showsToolCalls
         let reasoningBlocks = appCustomizationStore.showsReasoningBlocks
-        return "reasoning:\(reasoning)#context:\(context)#activity:\(activity)#tools:\(tools)#reasoningBlocks:\(reasoningBlocks)#groupTools:\(appCustomizationStore.groupsToolCalls)#contextChanges:\(showsContextChanges)"
+        return "reasoning:\(reasoning)#context:\(context)#activity:\(activity)#tools:\(tools)#reasoningBlocks:\(reasoningBlocks)#groupTools:\(appCustomizationStore.groupsToolCalls)#contextChanges:\(showsContextChanges)#historyRetry:\(historyLoadFailed)#voiceOver:\(isVoiceOverEnabled)"
     }
 
     private var showsContextChanges: Bool {
@@ -6411,6 +6502,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
     let animatedRowIDs: Set<String>
     let onBottomPullChanged: (CGFloat) -> Void
     let onBottomPullEnded: (Bool) -> Void
+    var onRequestOlderMessages: (ChatTranscriptRow) -> Void = { _ in }
     let rowContent: (ChatTranscriptRow) -> RowContent
 
     func makeCoordinator() -> Coordinator {
@@ -6429,6 +6521,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             animatedRowIDs: animatedRowIDs,
             onBottomPullChanged: onBottomPullChanged,
             onBottomPullEnded: onBottomPullEnded,
+            onRequestOlderMessages: onRequestOlderMessages,
             rowContent: rowContent
         )
     }
@@ -6468,7 +6561,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         guard Set(rows.map(\.id)).count == rows.count else { return }
         coordinator.submitViewportUpdate(bottomContentInset, animationToken: bottomContentInsetAnimationToken,
             keyboardHeight: keyboardHeight, transition: keyboardTransition, in: collectionView)
-        coordinator.submitViewUpdate(in: collectionView) { [self, weak collectionView, weak coordinator] in
+        coordinator.submitViewUpdate(in: collectionView, rows: rows, token: contentInvalidationToken) { [self, weak collectionView, weak coordinator] in
             guard let collectionView, let coordinator else { return }
             applyUpdate(collectionView, coordinator: coordinator)
         }
@@ -6493,6 +6586,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         coordinator.animatedRowIDs = animatedRowIDs
         coordinator.onBottomPullChanged = onBottomPullChanged
         coordinator.onBottomPullEnded = onBottomPullEnded
+        coordinator.onRequestOlderMessages = onRequestOlderMessages
         coordinator.updateRows(rows, in: collectionView)
         coordinator.scrollToBottomIfNeeded(token: bottomScrollToken, animated: false, in: collectionView)
         coordinator.scrollToBottomIfNeeded(token: animatedBottomScrollToken, animated: true, in: collectionView)
@@ -6538,18 +6632,25 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         var animatedRowIDs: Set<String>
         var onBottomPullChanged: (CGFloat) -> Void
         var onBottomPullEnded: (Bool) -> Void
+        var onRequestOlderMessages: (ChatTranscriptRow) -> Void
         var rowContent: (ChatTranscriptRow) -> RowContent
         weak var collectionView: UICollectionView?
 
         private var rowIDs: [String]
         private var rowSignaturesByID: [String: String]
-        private var pendingViewUpdate: (() -> Void)?
+        private var pendingViewUpdate: (rows: [ChatTranscriptRow], token: String, apply: () -> Void)?
         private var pendingViewport: (inset: CGFloat, animationToken: Int, keyboardHeight: CGFloat,
             transition: ChatKeyboardTransition?, scrollGeneration: Int, preservesBottom: Bool)?
         private var isApplyingViewport = false
         private var keyboardHeight: CGFloat = 0
         private var isApplyingRows = false
         private var userScrollGeneration = 0
+        private var previousHistoryScrollOffset: CGFloat?
+        private var historyGestureStartOffset: CGFloat?
+        private var requestedHistoryBoundary: String?
+        private var historyPrefetchActive = false
+        private var historyRequestPreservesBottom = true
+        private var historyDrainScheduled = false
         private var lastBottomScrollToken: Int?
         private var lastAnimatedBottomScrollToken: Int?
         private var pendingBottomScroll: (token: Int, animated: Bool)?
@@ -6573,10 +6674,12 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             let frames: [CGRect]
         }
         private var initialLayoutSample: InitialLayoutSample?
+        private var openingHistorySignature: String?
 
         func prepareInitialPresentation(in collectionView: UICollectionView) {
             awaitsInitialReveal = true
             initialLayoutSample = nil
+            openingHistorySignature = nil
             collectionView.alpha = 0
         }
 
@@ -6586,6 +6689,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             initialPresentationScheduled = false
             initialLayoutSample = nil
             isMeasuringInitialPresentation = false
+            openingHistorySignature = nil
             collectionView?.layer.removeAnimation(forKey: "opacity")
         }
 
@@ -6610,6 +6714,12 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
 
         func settleInitialPresentation(in collectionView: UICollectionView) {
             guard awaitsInitialReveal, hasInitialContent, collectionView.window != nil else { return }
+            if let openingHistorySignature {
+                // Request dispatch and SwiftUI's expanded presentation arrive on separate
+                // turns. Repeated layout callbacks must not reveal the old, short snapshot.
+                guard rows.first(where: { if case .olderMessages = $0 { return true }; return false })?.renderSignature != openingHistorySignature else { return }
+                self.openingHistorySignature = nil
+            }
             guard !isApplyingRows, !isPerformingViewUpdate,
                   collectionView.bounds.width > 0, collectionView.bounds.height > 0 else {
                 initialLayoutSample = nil
@@ -6639,6 +6749,13 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 scheduleInitialPresentation(in: collectionView)
                 return
             }
+            // Finish cached opening fill while hidden. After the reveal, history
+            // expansion belongs to an upward gesture, never to opening catch-up.
+            if requestHistoryIfNeeded(in: collectionView, beforeInitialReveal: true) {
+                isMeasuringInitialPresentation = false
+                initialLayoutSample = nil
+                return
+            }
             awaitsInitialReveal = false
             initialPresentationHandoff.cancel()
             initialPresentationScheduled = false
@@ -6657,6 +6774,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                           self.initialRevealGeneration == revealGeneration else { return }
                     self.isMeasuringInitialPresentation = false
                     self.applyPendingRowsIfNeeded(in: collectionView)
+                    self.requestHistoryIfNeeded(in: collectionView)
                 }
             }
         }
@@ -6676,6 +6794,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             animatedRowIDs: Set<String>,
             onBottomPullChanged: @escaping (CGFloat) -> Void,
             onBottomPullEnded: @escaping (Bool) -> Void,
+            onRequestOlderMessages: @escaping (ChatTranscriptRow) -> Void,
             rowContent: @escaping (ChatTranscriptRow) -> RowContent
         ) {
             var seenIDs: Set<String> = []
@@ -6693,6 +6812,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             self.animatedRowIDs = animatedRowIDs
             self.onBottomPullChanged = onBottomPullChanged
             self.onBottomPullEnded = onBottomPullEnded
+            self.onRequestOlderMessages = onRequestOlderMessages
             self.rowContent = rowContent
             self.rowIDs = self.rows.map(\.id)
             self.rowSignaturesByID = Self.signaturesByID(for: self.rows)
@@ -6706,12 +6826,57 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             isPerformingViewUpdate = true
         }
 
-        func submitViewUpdate(in collectionView: UICollectionView, _ update: @escaping () -> Void) {
+        private func isHistoryOnlyUpdate(_ newRows: [ChatTranscriptRow]) -> Bool {
+            guard rows.contains(where: { if case .olderMessages = $0 { return true }; return false }) else { return false }
+            // Changes to the history control/previous-prompt preview are expected.
+            // Existing messages and the live tail must retain identity AND content.
+            func transcript(_ rows: [ChatTranscriptRow]) -> [ChatTranscriptRow] {
+                rows.filter {
+                    switch $0 {
+                    case .olderMessages, .previousUserContext: false
+                    default: true
+                    }
+                }
+            }
+            let old = transcript(rows)
+            let new = transcript(newRows)
+            guard !old.isEmpty, new.count >= old.count else { return false }
+            return zip(old, new.suffix(old.count)).allSatisfy {
+                $0.id == $1.id && $0.renderSignature == $1.renderSignature
+            }
+        }
+
+        private func needsHistoryImmediately(in collectionView: UICollectionView) -> Bool {
+            let viewport = collectionView.bounds.height - collectionView.adjustedContentInset.top - collectionView.adjustedContentInset.bottom
+            return viewport > 0 && collectionView.contentOffset.y + collectionView.adjustedContentInset.top < viewport * 0.35
+        }
+
+        private func canInsertHistoryDuringScroll(_ newRows: [ChatTranscriptRow], token: String, in collectionView: UICollectionView) -> Bool {
+            // Keep prepared pages queued while there is still room to scroll. Only
+            // an exhausted buffer justifies changing geometry during a gesture.
+            historyPrefetchActive && needsHistoryImmediately(in: collectionView)
+                && token == contentInvalidationToken && isHistoryOnlyUpdate(newRows)
+        }
+
+        private func scheduleHistoryDrain(in collectionView: UICollectionView) {
+            guard !historyDrainScheduled, let pendingViewUpdate,
+                  canInsertHistoryDuringScroll(pendingViewUpdate.rows, token: pendingViewUpdate.token, in: collectionView) else { return }
+            historyDrainScheduled = true
+            DispatchQueue.main.async { [weak self, weak collectionView] in
+                guard let self else { return }
+                self.historyDrainScheduled = false
+                guard let collectionView else { return }
+                self.applyPendingRowsIfNeeded(in: collectionView)
+            }
+        }
+
+        func submitViewUpdate(in collectionView: UICollectionView, rows newRows: [ChatTranscriptRow], token: String, _ update: @escaping () -> Void) {
             // Queue the row presentation, not viewport geometry: closures and signatures must
             // describe the same snapshot throughout UIKit's asynchronous batch completion.
             guard !isApplyingRows, !isPerformingViewUpdate, !isMeasuringInitialPresentation,
-                  !isApplyingViewport, !isUserScrolling(collectionView) else {
-                pendingViewUpdate = update
+                   !isApplyingViewport,
+                   !isUserScrolling(collectionView) || canInsertHistoryDuringScroll(newRows, token: token, in: collectionView) else {
+                pendingViewUpdate = (newRows, token, update)
                 return
             }
             pendingViewUpdate = nil
@@ -6729,6 +6894,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 if let pendingAtBottomValue, self.userScrollGeneration == scrollGeneration { self.setAtBottom(pendingAtBottomValue) }
                 if let collectionView = self.collectionView { self.applyPendingRowsIfNeeded(in: collectionView) }
                 if let collectionView = self.collectionView { self.scheduleInitialPresentation(in: collectionView) }
+                if let collectionView = self.collectionView { self.requestHistoryIfNeeded(in: collectionView) }
             }
         }
 
@@ -6742,6 +6908,8 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            previousHistoryScrollOffset = scrollView.contentOffset.y
+            historyGestureStartOffset = scrollView.contentOffset.y
             if awaitsInitialReveal {
                 awaitsInitialReveal = false
                 cancelInitialPresentation()
@@ -6760,6 +6928,59 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateBottomState(for: scrollView)
             updateBottomPullState(for: scrollView)
+            let offset = scrollView.contentOffset.y
+            defer { previousHistoryScrollOffset = offset }
+            guard let collectionView = scrollView as? UICollectionView,
+                  !isApplyingRows, !isPerformingViewUpdate, !isApplyingViewport,
+                  isUserScrolling(collectionView), let previousHistoryScrollOffset else { return }
+            if offset < previousHistoryScrollOffset,
+               let historyGestureStartOffset, offset < historyGestureStartOffset - 4 {
+                historyPrefetchActive = true
+            } else if scrollView.isDragging, offset > previousHistoryScrollOffset + 2 {
+                historyPrefetchActive = false
+            }
+            requestHistoryIfNeeded(in: collectionView)
+            scheduleHistoryDrain(in: collectionView)
+        }
+
+        @discardableResult
+        private func requestHistoryIfNeeded(in collectionView: UICollectionView, beforeInitialReveal: Bool = false) -> Bool {
+            guard collectionView.window != nil, hasInitialContent,
+                  beforeInitialReveal || (!awaitsInitialReveal && !isMeasuringInitialPresentation),
+                  !isApplyingRows, !isPerformingViewUpdate, !isApplyingViewport,
+                  let history = rows.first(where: { if case .olderMessages = $0 { return true }; return false }),
+                  case let .olderMessages(count, nextCount, hasMore, loading) = history,
+                  !loading, count > 0 || hasMore,
+                  !beforeInitialReveal || count > 0 else { return false }
+            let viewport = collectionView.bounds.height - collectionView.adjustedContentInset.top - collectionView.adjustedContentInset.bottom
+            guard viewport > 0 else { return false }
+            let fillsOpeningViewport = beforeInitialReveal && userScrollGeneration == 0 && collectionView.contentSize.height < viewport * 2
+            let prefetchesHistory = historyPrefetchActive
+                && collectionView.contentOffset.y + collectionView.adjustedContentInset.top < viewport * 2
+            guard fillsOpeningViewport || prefetchesHistory else { return false }
+            // A cached page needs main-thread render preparation, so leave it for
+            // the pause unless the user is about to exhaust the visible buffer.
+            // Remote I/O can run ahead without expanding the presentation window.
+            guard count == 0 || !isUserScrolling(collectionView) || needsHistoryImmediately(in: collectionView) else { return false }
+            // Only advancing history (including cached -> remote) re-arms prefetch.
+            // Gesture/layout callbacks cannot retry a failed or unchanged page.
+            let firstMessageID = rows.first(where: { if case .displayItem = $0 { return true }; return false })?.id ?? ""
+            let boundary = "\(firstMessageID):\(nextCount):\(count > 0 ? "cached" : "remote")"
+            guard requestedHistoryBoundary != boundary else { return false }
+            requestedHistoryBoundary = boundary
+            if beforeInitialReveal { openingHistorySignature = history.renderSignature }
+            historyRequestPreservesBottom = fillsOpeningViewport && !historyPrefetchActive
+            let generation = userScrollGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.collectionView?.window != nil,
+                      self.requestedHistoryBoundary == boundary else { return }
+                guard self.userScrollGeneration == generation else {
+                    self.requestedHistoryBoundary = nil
+                    return
+                }
+                self.onRequestOlderMessages(history)
+            }
+            return true
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -6767,6 +6988,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             finishBottomPull(for: scrollView)
             applyPendingBottomScrollIfNeeded(in: scrollView)
             applyPendingRowsIfNeeded(in: scrollView)
+            if let collectionView = scrollView as? UICollectionView { requestHistoryIfNeeded(in: collectionView) }
         }
 
         func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
@@ -6775,6 +6997,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             updateBottomState(for: scrollView)
             applyPendingBottomScrollIfNeeded(in: scrollView)
             applyPendingRowsIfNeeded(in: scrollView)
+            if let collectionView = scrollView as? UICollectionView { requestHistoryIfNeeded(in: collectionView) }
         }
 
         func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -6787,6 +7010,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
             guard !isPerformingViewUpdate, !isApplyingViewport else { return }
             applyPendingBottomScrollIfNeeded(in: collectionView, performsLayout: false)
             scheduleInitialPresentation(in: collectionView)
+            requestHistoryIfNeeded(in: collectionView)
         }
 
         func updateRows(_ newRows: [ChatTranscriptRow], in collectionView: UICollectionView) {
@@ -6828,23 +7052,50 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                 TranscriptContinuityDiagnostics.updates.append("\(difference.isEmpty ? "content" : "batch"):\(newIDs.joined(separator: ","))")
             }
             #endif
+            let insertsWhileScrolling = isUserScrolling(collectionView) && isHistoryOnlyUpdate(newRows)
             isApplyingRows = true
             let wasAtBottom = isAtBottom.wrappedValue
             let scrollGeneration = userScrollGeneration
             let survivingIDs = Set(newIDs)
+            let firstMessageID = rows.first(where: { if case .displayItem = $0 { return true }; return false })?.id
+            let prependsHistory = firstMessageID.map { firstID in
+                survivingIDs.contains(firstID) && newRows.prefix(while: { $0.id != firstID }).contains {
+                    if case .displayItem = $0 { return true }; return false
+                }
+            } ?? false
+            let preservesHistoryAnchor = insertsWhileScrolling
+                || (prependsHistory && requestedHistoryBoundary != nil && !historyRequestPreservesBottom)
             let anchor = collectionView.indexPathsForVisibleItems.sorted().compactMap { index -> (String, CGFloat)? in
                 guard rows.indices.contains(index.item), survivingIDs.contains(rows[index.item].id),
+                      case .displayItem = rows[index.item],
                       let attributes = collectionView.layoutAttributesForItem(at: index) else { return nil }
                 return (rows[index.item].id, attributes.frame.minY - collectionView.contentOffset.y)
             }.first
+            var restoredScrollingAnchor = false
+            let restoreScrollingAnchor = { [weak self, weak collectionView] in
+                guard insertsWhileScrolling, !restoredScrollingAnchor, let self, let collectionView else { return }
+                restoredScrollingAnchor = true
+                guard self.userScrollGeneration == scrollGeneration,
+                      let anchor, let index = self.rowIDs.firstIndex(of: anchor.0) else { return }
+                collectionView.layoutIfNeeded()
+                guard let attributes = collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0)) else { return }
+                let oldOffset = collectionView.contentOffset.y
+                collectionView.contentOffset.y = attributes.frame.minY - anchor.1
+                let adjustment = collectionView.contentOffset.y - oldOffset
+                self.previousHistoryScrollOffset = collectionView.contentOffset.y
+                if let start = self.historyGestureStartOffset { self.historyGestureStartOffset = start + adjustment }
+            }
             let finish = { [weak self, weak collectionView] in
                 guard let self, let collectionView else { return }
                 UIView.performWithoutAnimation {
+                    restoreScrollingAnchor()
                     self.configureVisibleHostingCells(in: collectionView, changedRowIDs: changedRowIDs)
-                    collectionView.collectionViewLayout.invalidateLayout()
-                    collectionView.layoutIfNeeded()
-                    if self.userScrollGeneration == scrollGeneration, !self.isUserScrolling(collectionView) {
-                        if wasAtBottom {
+                    if !insertsWhileScrolling {
+                        collectionView.collectionViewLayout.invalidateLayout()
+                        collectionView.layoutIfNeeded()
+                    }
+                    if !insertsWhileScrolling, self.userScrollGeneration == scrollGeneration, !self.isUserScrolling(collectionView) {
+                        if wasAtBottom && !preservesHistoryAnchor {
                             self.scrollToBottom(in: collectionView, animated: false, performsLayout: false)
                         } else if let anchor, let index = self.rowIDs.firstIndex(of: anchor.0),
                                   let attributes = collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0)) {
@@ -6861,6 +7112,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                     guard let self, let collectionView else { return }
                     self.applyPendingRowsIfNeeded(in: collectionView)
                     self.applyPendingBottomScrollIfNeeded(in: collectionView)
+                    self.requestHistoryIfNeeded(in: collectionView)
                 }
             }
             if difference.isEmpty {
@@ -6885,6 +7137,9 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
                             }
                         }
                     } completion: { _ in finish() }
+                    // Offset compensation must happen in this run-loop turn, not in
+                    // the async completion where it could undo continued finger motion.
+                    restoreScrollingAnchor()
                 }
             }
         }
@@ -7114,9 +7369,10 @@ private struct ChatTranscriptCollectionView<RowContent: View>: UIViewRepresentab
         private func applyPendingRowsIfNeeded(in scrollView: UIScrollView) {
             guard let collectionView = scrollView as? UICollectionView, collectionView.window != nil, !isApplyingRows,
                   !isPerformingViewUpdate, !isMeasuringInitialPresentation, !isApplyingViewport,
-                  !isUserScrolling(collectionView), let update = pendingViewUpdate else { return }
+                  let update = pendingViewUpdate,
+                  !isUserScrolling(collectionView) || canInsertHistoryDuringScroll(update.rows, token: update.token, in: collectionView) else { return }
             pendingViewUpdate = nil
-            update()
+            update.apply()
         }
 
         @discardableResult
@@ -7327,6 +7583,7 @@ final class ChatTranscriptContinuityHarness {
 
     let collectionView: CollectionView
     var pinned = true
+    private(set) var historyRequestCount = 0
     private(set) var lifetimes: [String: UUID] = [:]
     private let scrollController = ChatTranscriptScrollController()
     private var coordinator: ChatTranscriptCollectionView<AnyView>.Coordinator?
@@ -7338,10 +7595,15 @@ final class ChatTranscriptContinuityHarness {
     }
 
     func update(ids: [String], revision: Int = 0, streaming: Bool = false, hasInitialContent: Bool = true, bottomInset: CGFloat = 0,
-                keyboardHeight: CGFloat = 0, keyboardTransition: ChatKeyboardTransition? = nil) {
-        let rows = ids.map { id in
+                keyboardHeight: CGFloat = 0, keyboardTransition: ChatKeyboardTransition? = nil,
+                historyCount: Int? = nil, historyLoading: Bool = false) {
+        var rows = ids.map { id in
             ChatTranscriptRow.displayItem(.message(.local(role: "user", text: id + String(repeating: "!", count: revision), messageID: id, sessionID: "continuity", partID: "part-\(id)")),
                 recovery: nil, recoveryStatusVisible: false)
+        }
+        if let historyCount {
+            rows.insert(.olderMessages(count: historyCount, nextRequestedCount: ids.count + 12,
+                hasMoreHistory: true, isLoading: historyLoading), at: 0)
         }
         let view = ChatTranscriptCollectionView<AnyView>(rows: rows,
             isAtBottom: Binding(get: { self.pinned }, set: { self.pinned = $0 }), scrollController: scrollController,
@@ -7351,7 +7613,8 @@ final class ChatTranscriptContinuityHarness {
             showsBottomRefreshIndicator: false, bottomRefreshColorIsActive: false, bottomRefreshHeight: 0,
             isRefreshing: false, isStreaming: streaming, hasInitialContent: hasInitialContent,
             contentInvalidationToken: "", animatedRowIDs: [],
-            onBottomPullChanged: { _ in }, onBottomPullEnded: { _ in }, rowContent: { [weak self] row in
+            onBottomPullChanged: { _ in }, onBottomPullEnded: { _ in },
+            onRequestOlderMessages: { [weak self] _ in self?.historyRequestCount += 1 }, rowContent: { [weak self] row in
                 AnyView(Row(id: row.id, revision: revision) { [weak self] lifetime in
                     self?.lifetimes[row.id] = lifetime
                 })
@@ -7410,6 +7673,7 @@ private struct ChatTranscriptCollectionView<RowContent: View>: View {
     let animatedRowIDs: Set<String>
     let onBottomPullChanged: (CGFloat) -> Void
     let onBottomPullEnded: (Bool) -> Void
+    var onRequestOlderMessages: (ChatTranscriptRow) -> Void = { _ in }
     let rowContent: (ChatTranscriptRow) -> RowContent
 
     var body: some View {

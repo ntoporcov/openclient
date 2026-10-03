@@ -79,7 +79,9 @@ struct ScreenshotSceneView: View {
             }
         case .chat:
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            if ProcessInfo.processInfo.environment["OPENCLIENT_CHAT_CONTROLS_PREVIEW"] == "1" {
+            if #available(iOS 18.0, *), ProcessInfo.processInfo.environment["OPENCLIENT_GLASS_PILL_PREVIEW"] == "1" {
+                GlassThinkingPillPreview()
+            } else if ProcessInfo.processInfo.environment["OPENCLIENT_CHAT_CONTROLS_PREVIEW"] == "1" {
                 WhatsNewChatControlsFixture()
             } else if ProcessInfo.processInfo.environment["OPENCLIENT_TOOL_GROUPING_FIXTURE"] == "1" {
                 ToolGroupingFixture()

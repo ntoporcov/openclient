@@ -1238,6 +1238,77 @@ final class V2SessionWorkflowTests: XCTestCase {
         return model
     }
 
+    func testTurnChangesUsesPromptBoundaryAndPreservesFullPatch() async throws {
+        let model = makeModel()
+        defer { model.disconnect() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        model.directoryStore.insertV2Session(session)
+        _ = model.beginSessionNavigation(session)
+        let scope = model.chatFacade.headerScope(for: session)
+        let store = SessionToolsStore()
+        V2SessionWorkflowURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/session/ses_v2/diff")
+            let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            XCTAssertEqual(query, [.init(name: "from", value: "msg_prompt")])
+            return (200, #"{"data":[{"file":"src/main.swift","patch":"@@ -1 +1 @@\n-old\n+new","additions":1,"deletions":1,"status":"modified"}]}"#)
+        }
+        await model.chatFacade.loadTurnChanges(scope: scope, promptID: "msg_prompt", store: store)
+        XCTAssertEqual(store.diffs.first?.file, "src/main.swift")
+        XCTAssertTrue(store.diffs.first?.patch.contains("+new") == true)
+        XCTAssertFalse(store.isLoading)
+        XCTAssertNil(store.errorMessage)
+    }
+
+    func testSessionMoveQueuesDestinationWithoutOptimisticRelocation() async throws {
+        let model = makeModel()
+        defer { model.disconnect() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        model.directoryStore.insertV2Session(session)
+        _ = model.beginSessionNavigation(session)
+        let scope = model.chatFacade.headerScope(for: session)
+        let store = SessionToolsStore()
+        let read = store.beginRead()
+        store.finishRead(read, search: .init(directories: ["/destination"], selectedDirectory: "/destination"))
+        var posts = 0
+        V2SessionWorkflowURLProtocol.handler = { request in
+            if request.url?.path == "/api/session/ses_v2/move" {
+                posts += 1
+                let body = try JSONSerialization.jsonObject(with: Self.body(request)) as? [String: String]
+                XCTAssertEqual(body, ["directory": "/destination", "delivery": "queue"])
+                return (204, "")
+            }
+            return (503, #"{"message":"Reconciliation pending"}"#)
+        }
+        let moved = await model.chatFacade.moveSession(scope: scope, directory: "/destination", store: store)
+        XCTAssertTrue(moved)
+        XCTAssertEqual(posts, 1)
+        XCTAssertEqual(model.selectedSession?.directory, "/repo")
+        XCTAssertFalse(store.isMoving)
+        _ = model.beginSessionNavigation(Self.session(id: "ses_other", directory: "/repo"))
+        let stale = await model.chatFacade.moveSession(scope: scope, directory: "/destination", store: store)
+        XCTAssertFalse(stale)
+        XCTAssertEqual(posts, 1)
+    }
+
+    func testSessionToolsIgnoresSupersededSearchResultsAndSurfacesDiffErrors() async {
+        let store = SessionToolsStore()
+        let first = store.beginRead()
+        let second = store.beginRead()
+        store.finishRead(second, search: .init(directories: ["/new"], selectedDirectory: "/new"))
+        store.finishRead(first, search: .init(directories: ["/old"], selectedDirectory: "/old"))
+        XCTAssertEqual(store.selectedDirectory, "/new")
+        let model = makeModel()
+        defer { model.disconnect() }
+        let session = Self.session(id: "ses_v2", directory: "/repo")
+        model.directoryStore.insertV2Session(session)
+        _ = model.beginSessionNavigation(session)
+        V2SessionWorkflowURLProtocol.handler = { _ in (400, #"{"message":"Range crosses a location change"}"#) }
+        await model.chatFacade.loadTurnChanges(scope: model.chatFacade.headerScope(for: session), promptID: "msg_prompt", store: store)
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertTrue(store.diffs.isEmpty)
+        XCTAssertFalse(store.isLoading)
+    }
+
     func testV2ComposerDiscoversCommandsAndSkillsInWorkspaceWithoutEnablingAutomation() async throws {
         let model = makeModel()
         defer { model.disconnect() }

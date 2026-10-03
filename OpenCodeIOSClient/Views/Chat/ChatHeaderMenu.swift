@@ -153,6 +153,7 @@ private struct ChatHeaderPopover: View {
     @Binding var title: String
     @State private var saving = false
     @State private var changingLiveActivity = false
+    @State private var showsMoveSession = false
 
     var body: some View {
         let session = facade.selectedSession ?? scope.session
@@ -197,6 +198,13 @@ private struct ChatHeaderPopover: View {
                             .foregroundStyle(.primary)
                     }
                     .accessibilityIdentifier("chat.header.appearance")
+                    if facade.supportsSessionTools(scope), scope.session.parentID == nil {
+                        Button { showsMoveSession = true } label: {
+                            Label("Move Session", systemImage: "folder.badge.arrow.forward")
+                                .foregroundStyle(.primary)
+                        }
+                        .accessibilityIdentifier("chat.header.move")
+                    }
                 }
                 Section("Agents") {
                     ForEach(snapshot.selectableAgents, id: \.name) { agent in
@@ -239,6 +247,7 @@ private struct ChatHeaderPopover: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .accessibilityIdentifier("chat.header.popover")
+        .sheet(isPresented: $showsMoveSession) { MoveSessionSheet(facade: facade, scope: scope) }
     }
 
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }

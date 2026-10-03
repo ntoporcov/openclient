@@ -228,6 +228,12 @@ final class ChatFacade: ObservableObject {
         return connectionStore.errorMessage
     }
 
+    func dismissPresentationError(_ message: String, contextID: String) {
+        guard promptContextID == contextID, presentationErrorMessage == message else { return }
+        if let windowContext { windowContext.errorMessage = nil }
+        else { connectionStore.clearError() }
+    }
+
     var sessionSwitcherPresentation: OpenClientSessionSwitcherPresentation? {
         if let windowContext { return windowContext.sessionSwitcherPresentation }
         return viewModel.directoryStore.sessionSwitcherPresentation
@@ -1763,6 +1769,69 @@ final class ChatFacade: ObservableObject {
     func allowsHeaderActions(_ scope: HeaderScope) -> Bool {
         isCurrentHeaderScope(scope) && !isReadOnly && scope.session.parentID == nil
             && connectionStore.isConnected && viewModel.backendConnection?.isClosed == false
+    }
+
+    func supportsSessionTools(_ scope: HeaderScope) -> Bool {
+        isCurrentHeaderScope(scope) && !isReadOnly && connectionStore.isConnected
+            && viewModel.backendConnection?.isClosed == false
+            && viewModel.backendConnection?.openCodeCompatibility?.profile == .v2
+            && viewModel.backendConnection?.openCodeCompatibility?.client.v2Contract == .release
+    }
+
+    var sessionDirectorySearchRoot: String { viewModel.defaultSearchRoot }
+
+    func loadTurnChanges(scope: HeaderScope, promptID: String, store: SessionToolsStore) async {
+        guard supportsSessionTools(scope), let connection = viewModel.backendConnection,
+              let client = connection.openCodeCompatibility?.client else { return }
+        let request = store.beginRead()
+        do {
+            let diffs = try await client.v2TurnDiff(sessionID: scope.session.id, promptID: promptID)
+            guard !Task.isCancelled, supportsSessionTools(scope), viewModel.isCurrentBackendConnection(connection) else {
+                store.finishRead(request)
+                return
+            }
+            store.finishRead(request, diffs: diffs)
+        } catch {
+            store.finishRead(request, error: Task.isCancelled || !supportsSessionTools(scope) ? nil : error)
+        }
+    }
+
+    func searchSessionMoveDirectories(scope: HeaderScope, query: String, store: SessionToolsStore) async {
+        guard supportsSessionTools(scope), let connection = viewModel.backendConnection,
+              let service = connection.projectLifecycle else { return }
+        let request = store.beginRead()
+        do {
+            let result = try await service.searchDirectories(query: query, root: sessionDirectorySearchRoot)
+            guard !Task.isCancelled, supportsSessionTools(scope), viewModel.isCurrentBackendConnection(connection) else {
+                store.finishRead(request)
+                return
+            }
+            store.finishRead(request, search: result)
+        } catch {
+            store.finishRead(request, error: Task.isCancelled || !supportsSessionTools(scope) ? nil : error)
+        }
+    }
+
+    func moveSession(scope: HeaderScope, directory: String, store: SessionToolsStore) async -> Bool {
+        guard supportsSessionTools(scope), scope.session.parentID == nil,
+              directory.hasPrefix("/"), directory != scope.session.directory,
+              store.selectedDirectory == directory,
+              let connection = viewModel.backendConnection, let client = connection.openCodeCompatibility?.client,
+              store.beginMove() else { return false }
+        do {
+            try await client.moveV2Session(sessionID: scope.session.id, directory: directory)
+            store.finishMove()
+            // A queued move is not yet canonical. session.moved owns directory
+            // relocation and selection; reconciliation catches a missed event.
+            if viewModel.isCurrentBackendConnection(connection) {
+                viewModel.directoryStoreRegistry.requestV2Reconciliation(sessionID: scope.session.id)
+                viewModel.scheduleV2TimelineReconciliation()
+            }
+            return true
+        } catch {
+            store.finishMove(error: supportsSessionTools(scope) ? error : nil)
+            return false
+        }
     }
 
     func allowsHeaderAgentSelection(_ scope: HeaderScope) -> Bool {

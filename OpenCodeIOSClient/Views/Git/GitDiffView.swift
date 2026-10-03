@@ -247,12 +247,15 @@ struct OpenCodeUnifiedDiffData: Identifiable, Hashable, Sendable {
 struct OpenCodeUnifiedDiffView: View {
     let diff: OpenCodeUnifiedDiffData
     var showsHeader = true
+    @State private var collapsesUnchangedLines = true
 
     private var language: String? {
         OpenCodeCodeLanguage.infer(fromPath: diff.file)
     }
 
     var body: some View {
+        let lines = GitPatchParser.parse(diff.patch)
+        let rows = GitPatchParser.displayRows(lines, collapsingUnchangedLines: collapsesUnchangedLines)
         GeometryReader { geometry in
             ScrollView([.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -261,14 +264,37 @@ struct OpenCodeUnifiedDiffView: View {
                             .padding(16)
                     }
 
-                    ForEach(GitPatchParser.parse(diff.patch)) { line in
-                        DiffLineRow(line: line, language: language)
-                            .frame(minWidth: geometry.size.width, alignment: .leading)
+                    ForEach(rows) { row in
+                        switch row {
+                        case let .line(line):
+                            DiffLineRow(line: line, language: language)
+                                .frame(minWidth: geometry.size.width, alignment: .leading)
+                        case let .collapsed(_, count):
+                            Text(count == 1 ? LocalizedStringResource("1 unchanged line") : LocalizedStringResource("\(count) unchanged lines"))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .frame(minWidth: geometry.size.width, alignment: .leading)
+                                .background(.quaternary)
+                        }
                     }
                 }
                 .frame(minWidth: geometry.size.width, alignment: .leading)
             }
             .background(OpenCodePlatformColor.groupedBackground)
+            .opencodeSoftScrollEdgeEffect()
+        }
+        .toolbar {
+            ToolbarItem(placement: .opencodeTrailing) {
+                Button {
+                    collapsesUnchangedLines.toggle()
+                } label: {
+                    Label(collapsesUnchangedLines ? LocalizedStringResource("Expand Unchanged Lines") : LocalizedStringResource("Collapse Unchanged Lines"),
+                        systemImage: collapsesUnchangedLines ? "arrow.up.and.down" : "arrow.down.and.line.horizontal.and.arrow.up")
+                }
+                .accessibilityIdentifier("diff.toggleUnchangedLines")
+            }
         }
     }
 
@@ -441,6 +467,43 @@ enum GitPatchParser {
                 return false
             }
         }
+    }
+
+    enum DisplayRow: Identifiable {
+        case line(Line)
+        case collapsed(id: Int, count: Int)
+
+        var id: Int {
+            switch self {
+            case let .line(line): return line.id
+            case let .collapsed(id, _): return id
+            }
+        }
+    }
+
+    static func displayRows(_ lines: [Line], collapsingUnchangedLines: Bool) -> [DisplayRow] {
+        guard collapsingUnchangedLines else { return lines.map(DisplayRow.line) }
+        var rows: [DisplayRow] = []
+        var index = 0
+        while index < lines.count {
+            let start = index
+            while index < lines.count, lines[index].kind == .context,
+                  lines[index].text.hasPrefix(" "), lines[index].oldLineNumber != nil {
+                index += 1
+            }
+            let count = index - start
+            if count > 6 {
+                rows += lines[start..<(start + 3)].map(DisplayRow.line)
+                rows.append(.collapsed(id: lines[start + 3].id, count: count - 6))
+                rows += lines[(index - 3)..<index].map(DisplayRow.line)
+            } else if count > 0 {
+                rows += lines[start..<index].map(DisplayRow.line)
+            } else {
+                rows.append(.line(lines[index]))
+                index += 1
+            }
+        }
+        return rows
     }
 
     static func parse(_ patch: String) -> [Line] {

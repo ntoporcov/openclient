@@ -12,6 +12,7 @@ struct OpenClientReleaseNotes: Identifiable, Equatable {
         case personalControl
         case webPush
         case conversationControl
+        case chatContinuity
     }
 
     struct Feature: Identifiable, Equatable {
@@ -299,6 +300,14 @@ enum OpenClientReleaseNotesCatalog {
             summary: "Queue the next step, steer the current one, or ask a quick side question. Make the chat feel like yours.",
             features: [],
             hero: .conversationControl,
+            showsSetup: false
+        ),
+        OpenClientReleaseNotes(
+            version: "1.0.24",
+            title: "A little depth. A lot more history.",
+            summary: "Meet your new status pill, see what each turn changed, and scroll back without losing your place.",
+            features: [],
+            hero: .chatContinuity,
             showsSetup: false
         ),
     ]

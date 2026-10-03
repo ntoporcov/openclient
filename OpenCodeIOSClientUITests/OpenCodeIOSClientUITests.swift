@@ -2704,19 +2704,12 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         try await openV2OwnedChat(fixture, in: app)
         let transcript = app.collectionViews["chat.scroll"]
         let older = app.buttons["chat-older-messages-button"]
-        for _ in 0..<10 {
-            if older.exists && older.isHittable { break }
-            transcript.swipeDown()
-        }
-        try await waitForV2Smoke(in: app, "Two real hidden messages must expose the cached-window history control") { older.isHittable }
-        XCTAssertEqual(older.label, "View older messages (2)")
+        XCTAssertFalse(older.exists, "Cached history is revealed by scrolling, without a manual control")
         attachScreenshot(named: "v2-history-14-two-real-hidden-messages")
         let before = XCTAttachment(string: app.debugDescription)
         before.name = "v2-history-14-before-reveal-hierarchy"
         before.lifetime = .keepAlways
         add(before)
-        older.tap()
-        try await waitForV2Smoke(in: app, "History control must disappear when every real message is revealed") { !older.exists }
         let first = transcript.staticTexts["History message 1."]
         let navigationBottom = app.navigationBars.allElementsBoundByIndex.map { $0.frame.maxY }.max() ?? transcript.frame.minY
         for _ in 0..<6 {

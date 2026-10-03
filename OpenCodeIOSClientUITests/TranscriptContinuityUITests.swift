@@ -1,7 +1,153 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class TranscriptContinuityUITests: XCTestCase {
+    func testThinkingPillPlaygroundCanSpinAndDismiss() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        defer { app.terminate() }
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "submission-recovery"
+        app.launchEnvironment["OPENCLIENT_TRANSCRIPT_CONTINUITY"] = "1"
+        app.launchEnvironment["OPENCLIENT_MATERIALIZATION_GATES"] = "1"
+        app.launchEnvironment["OPENCLIENT_THINKING_TOOLS"] = "1"
+        app.launchEnvironment["OPENCLIENT_RECOVERY_PROFILE"] = "v2"
+        app.launchEnvironment["OPENCLIENT_UI_TEST_DARK_MODE"] = "1"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let input = app.textViews["chat.input"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 15))
+        input.tap()
+        input.typeText("Glass playground")
+        app.buttons["chat.send"].firstMatch.tap()
+        let pill = app.buttons["chat.thinking.neutral"].firstMatch
+        XCTAssertTrue(pill.waitForExistence(timeout: 8), app.debugDescription)
+        pill.tap()
+        let surface = app.descendants(matching: .any)["glass-pill.playground.surface"].firstMatch
+        XCTAssertTrue(surface.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["glass-pill.playground.overlay"].firstMatch.exists)
+        XCTAssertFalse(app.sheets.firstMatch.exists, "The toy floats over chat rather than presenting a sheet")
+        let renderer = app.descendants(matching: .any)["glass-pill.playground.ready"].firstMatch
+        XCTAssertTrue(renderer.waitForExistence(timeout: 10))
+        capture(app, name: "glass-playground-open", settleRendering: true)
+        let frontImage = try pillPixels(app, surface: surface)
+        let initialRotation = try XCTUnwrap(surface.value as? String)
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.4))
+            .press(forDuration: 0.05,
+                   thenDragTo: surface.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.65)))
+        XCTAssertTrue(surface.exists, "Dragging rotates the toy rather than dismissing its presentation")
+        XCTAssertNotEqual(surface.value as? String, initialRotation)
+        let releasedRotation = surface.value as? String
+        let coasting = NSPredicate { _, _ in (surface.value as? String) != releasedRotation }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: coasting, object: nil)], timeout: 2), .completed,
+                       "A flick continues rotating after the finger lifts")
+        capture(app, name: "glass-playground-rotated")
+        let rotatedImage = try pillPixels(app, surface: surface)
+        let rotationDifference = pixelDifference(frontImage, rotatedImage)
+        XCTAssertGreaterThan(rotationDifference, 3, "Dragging must change the rendered pill, not only its accessibility value")
+        let returnedToFront = NSPredicate { _, _ in (surface.value as? String) == initialRotation }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: returnedToFront, object: nil)], timeout: 6), .completed,
+                       "The toy returns to face the user after a few idle seconds")
+        capture(app, name: "glass-playground-idle-return", settleRendering: true)
+        XCTAssertLessThan(pixelDifference(frontImage, try pillPixels(app, surface: surface)), rotationDifference * 0.7)
+        XCTAssertFalse(app.buttons["glass-pill.playground.reset"].exists)
+        XCTAssertFalse(app.staticTexts["Drag to spin the pill."].exists)
+        let close = app.buttons["glass-pill.playground.close"]
+        XCTAssertGreaterThan(close.frame.minY, surface.frame.maxY, "Close sits below the toy")
+        close.tap()
+        XCTAssertTrue(surface.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["continuity.diagnostics"].label.contains("posts=1"),
+                      "Opening the toy must not cancel or duplicate the in-flight send")
+        app.buttons["continuity.tool"].tap()
+        XCTAssertTrue(app.staticTexts["Shell"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testThinkingPillRemainsResponsiveThroughToolVisibilityChanges() throws {
+        continueAfterFailure = false
+        for profile in ["legacy", "v2"] {
+            let app = XCUIApplication()
+            defer { app.terminate() }
+            app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "submission-recovery"
+            app.launchEnvironment["OPENCLIENT_TRANSCRIPT_CONTINUITY"] = "1"
+            app.launchEnvironment["OPENCLIENT_MATERIALIZATION_GATES"] = "1"
+            app.launchEnvironment["OPENCLIENT_THINKING_TOOLS"] = "1"
+            app.launchEnvironment["OPENCLIENT_RECOVERY_PROFILE"] = profile
+            app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launch()
+
+            let input = app.textViews["chat.input"].firstMatch
+            XCTAssertTrue(input.waitForExistence(timeout: 15))
+            input.tap()
+            input.typeText("3D pill integration")
+            app.buttons["chat.send"].firstMatch.tap()
+            let neutral = app.descendants(matching: .any)["chat.thinking.neutral"].firstMatch
+            let colored = app.descendants(matching: .any)["chat.thinking.tool"].firstMatch
+            XCTAssertTrue(neutral.waitForExistence(timeout: 8))
+            let posted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'posts=1'"),
+                                                   object: app.staticTexts["continuity.diagnostics"])
+            XCTAssertEqual(XCTWaiter.wait(for: [posted], timeout: 8), .completed)
+            capture(app, name: "glass-pill-\(profile)-thinking")
+
+            app.buttons["continuity.tool"].tap()
+            XCTAssertTrue(neutral.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Shell"].firstMatch.waitForExistence(timeout: 5))
+            app.buttons["continuity.tools"].tap()
+            XCTAssertTrue(colored.waitForExistence(timeout: 5))
+            capture(app, name: "glass-pill-\(profile)-working")
+            app.buttons["continuity.addReasoning"].tap()
+            XCTAssertTrue(colored.exists)
+            app.buttons["continuity.addText"].tap()
+            XCTAssertTrue(colored.exists)
+            capture(app, name: "glass-pill-\(profile)-text-alignment")
+            app.buttons["continuity.tools"].tap()
+            XCTAssertTrue(colored.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Shell"].firstMatch.exists)
+        }
+    }
+
+    func testHistoryLoadsAutomaticallyWhenScrollingUp() throws {
+        try verifyAutomaticHistoryScrolling(velocity: .slow, label: "slow")
+    }
+
+    func testHistoryLoadsAutomaticallyDuringFastScrolling() throws {
+        try verifyAutomaticHistoryScrolling(velocity: .fast, label: "fast")
+    }
+
+    private func verifyAutomaticHistoryScrolling(velocity: XCUIGestureVelocity, label: String) throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        defer { app.terminate() }
+        // Reuse the deterministic 40-message keyboard fixture without opening its keyboard.
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "submission-recovery"
+        app.launchEnvironment["OPENCLIENT_TRANSCRIPT_CONTINUITY"] = "1"
+        app.launchEnvironment["OPENCLIENT_KEYBOARD_CONTINUITY"] = "1"
+        // Omit the recovery placeholder so the opening starts with only the latest
+        // user round. The viewport must fill itself rather than waiting for a pull.
+        app.launchEnvironment["OPENCLIENT_THINKING_EARLY_RESPONSE"] = "user"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let transcript = app.collectionViews["chat.scroll"].firstMatch
+        XCTAssertTrue(transcript.waitForExistence(timeout: 15))
+        let latest = transcript.staticTexts["Keyboard history row 39"].firstMatch
+        XCTAssertTrue(latest.waitForExistence(timeout: 10))
+        XCTAssertTrue(transcript.staticTexts["Keyboard history row 38"].waitForExistence(timeout: 5),
+            "The short latest round must automatically expand to fill the viewport")
+        let oldest = transcript.staticTexts["Keyboard history row 0"].firstMatch
+        XCTAssertFalse(oldest.exists, "Opening must leave older history outside the mounted window")
+        XCTAssertFalse(app.buttons["chat-older-messages-button"].exists)
+        capture(app, name: "automatic-history-\(label)-initial-tail")
+        let navigationBottom = app.navigationBars.allElementsBoundByIndex.map { $0.frame.maxY }.max() ?? transcript.frame.minY
+        for _ in 0..<30 {
+            if oldest.exists && oldest.isHittable && oldest.frame.minY >= navigationBottom { break }
+            transcript.swipeDown(velocity: velocity)
+        }
+        XCTAssertTrue(oldest.exists && oldest.isHittable, "Scrolling alone must reveal the oldest message")
+        XCTAssertGreaterThanOrEqual(oldest.frame.minY, navigationBottom, "The oldest message must be readable below the navigation bar")
+        XCTAssertFalse(app.buttons["chat-older-messages-button"].exists)
+        capture(app, name: "automatic-history-\(label)-oldest-message")
+    }
+
     func testNativeKeyboardDismissalHasNoDeferredReservation() throws {
         continueAfterFailure = false
         for interactive in [false, true] {
@@ -341,7 +487,29 @@ final class TranscriptContinuityUITests: XCTestCase {
         }
     }
 
-    private func capture(_ app: XCUIApplication, name: String) {
+    private func pillPixels(_ app: XCUIApplication, surface: XCUIElement) throws -> [UInt8] {
+        let image = try XCTUnwrap(app.screenshot().image.cgImage)
+        let scale = CGFloat(image.width) / app.frame.width
+        let rect = surface.frame.applying(CGAffineTransform(scaleX: scale, y: scale))
+        let crop = try XCTUnwrap(image.cropping(to: rect))
+        var pixels = [UInt8](repeating: 0, count: 64 * 64)
+        try pixels.withUnsafeMutableBytes { bytes in
+            let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: 64, height: 64,
+                                                  bitsPerComponent: 8, bytesPerRow: 64,
+                                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: 0))
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
+        return pixels
+    }
+
+    private func pixelDifference(_ lhs: [UInt8], _ rhs: [UInt8]) -> Double {
+        zip(lhs, rhs).reduce(0.0) { $0 + abs(Double($1.0) - Double($1.1)) } / Double(lhs.count)
+    }
+
+    private func capture(_ app: XCUIApplication, name: String, settleRendering: Bool = false) {
+        // Accessibility settles before the simulator's GPU-backed layer has
+        // composited its next frame. Allow that frame to reach the screenshot.
+        if settleRendering { Thread.sleep(forTimeInterval: 5) }
         let image = XCTAttachment(screenshot: app.screenshot())
         image.name = name
         image.lifetime = .keepAlways

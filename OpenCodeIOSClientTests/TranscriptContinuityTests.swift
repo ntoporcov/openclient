@@ -194,6 +194,54 @@ final class TranscriptContinuityTests: XCTestCase {
         XCTAssertEqual(ThinkingEntryMotion.progress(elapsed: 0.32, animateEntry: true, reduceMotion: false), 1)
     }
 
+    func testPillMomentumDecaysAndStopsWithoutJumping() {
+        var motion = GlassPillSpinMotion()
+        motion.angle = CGSize(width: 0.7, height: -0.4)
+        motion.release(pointsPerSecond: CGSize(width: 600, height: -200), at: 10, reduceMotion: false)
+        XCTAssertEqual(motion.pose(at: 10), motion.angle)
+        let early = motion.pose(at: 10.2)
+        let middle = motion.pose(at: 10.4)
+        let later = motion.pose(at: 10.6)
+        XCTAssertGreaterThan(early.width, motion.angle.width)
+        XCTAssertLessThan(early.height, motion.angle.height)
+        XCTAssertLessThan(later.width - middle.width, middle.width - early.width)
+        let interrupted = motion.pose(at: 10.5)
+        motion.stop(at: 10.5)
+        XCTAssertEqual(motion.pose(at: 100), interrupted, "A new touch arrests momentum at its visible pose")
+        XCTAssertNil(motion.releasedAt)
+        motion = GlassPillSpinMotion()
+        XCTAssertEqual(motion.pose(at: 100), .zero, "Reset clears both angle and residual momentum")
+    }
+
+    func testPillMomentumRespectsReduceMotionAndCapsFastFlicks() {
+        var motion = GlassPillSpinMotion()
+        motion.release(pointsPerSecond: CGSize(width: 100_000, height: -100_000), at: 0, reduceMotion: false)
+        XCTAssertEqual(motion.velocity, CGSize(width: 12, height: -12))
+        XCTAssertEqual(motion.pose(at: 3), motion.pose(at: 100), "Momentum finishes even after a dropped frame")
+        motion.stop(at: 1)
+        let angle = motion.angle
+        motion.release(pointsPerSecond: CGSize(width: 600, height: 300), at: 1, reduceMotion: true)
+        XCTAssertEqual(motion.pose(at: 10), angle)
+        XCTAssertNil(motion.releasedAt)
+    }
+
+    func testPillReturnsToFrontByShortestPathAndCanBeInterrupted() {
+        var motion = GlassPillSpinMotion()
+        motion.angle = CGSize(width: 6 * .pi + 0.8, height: -4 * .pi - 0.4)
+        motion.returnToFront(at: 10, reduceMotion: false)
+        XCTAssertEqual(motion.pose(at: 10).width, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(motion.pose(at: 10).height, -0.4, accuracy: 0.0001)
+        let middle = motion.pose(at: 10 + GlassPillSpinMotion.returnDuration / 2)
+        XCTAssertEqual(middle.width, 0.4, accuracy: 0.0001)
+        XCTAssertEqual(motion.pose(at: 11), .zero)
+        motion.stop(at: 10 + GlassPillSpinMotion.returnDuration / 2)
+        XCTAssertEqual(motion.pose(at: 20), middle, "Touch interrupts the idle return without a jump")
+        XCTAssertNil(motion.returningAt)
+        motion.returnToFront(at: 20, reduceMotion: true)
+        XCTAssertEqual(motion.pose(at: 20), .zero)
+        XCTAssertNil(motion.returningAt)
+    }
+
     func testThinkingEntryDrawsIntermediateFrameUnderDisabledParentAnimationAndDoesNotReplay() async throws {
         setenv("OPENCLIENT_TRANSCRIPT_CONTINUITY", "1", 1)
         defer { unsetenv("OPENCLIENT_TRANSCRIPT_CONTINUITY") }
@@ -514,6 +562,255 @@ final class TranscriptContinuityTests: XCTestCase {
         XCTAssertEqual(harness.appliedIDs, ["a", "b", "latest"])
         XCTAssertEqual(harness.collectionView.batchCount, batches)
         XCTAssertEqual(harness.collectionView.reloadCount, reloads)
+    }
+
+    func testHistoryPrefetchRequiresUpwardGestureAndRequestsBoundaryOnlyOnce() async {
+        let harness = ChatTranscriptContinuityHarness()
+        let collection = harness.collectionView
+        let controller = UIViewController()
+        controller.view.addSubview(collection)
+        let window = UIWindow(frame: collection.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let ids = (0..<30).map { "row-\($0)" }
+        harness.update(ids: ids, historyCount: 100)
+        await settle(harness)
+        collection.contentOffset.y = 100
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 0, "Opening and programmatic positioning must not drain history")
+
+        collection.simulatesDragging = true
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.contentOffset.y = 150
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 0, "Scrolling toward newer messages must not request history")
+        collection.contentOffset.y = 120
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 0, "A downward pull bouncing back must not request history")
+        collection.contentOffset.y = 90
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 1)
+        collection.contentOffset.y = 40
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 1, "One request per boundary, even across many scroll callbacks")
+
+        collection.simulatesDragging = false
+        collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+        harness.update(ids: ids, historyCount: 100, historyLoading: true)
+        await settle(harness)
+        collection.simulatesDragging = true
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.contentOffset.y = 20
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 1, "An in-flight page must not be requested again")
+        collection.simulatesDragging = false
+        collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+
+        harness.update(ids: ids, historyCount: 0)
+        await settle(harness)
+        collection.simulatesDragging = true
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.contentOffset.y = 0
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 2, "Cached-to-server history advances once, without duplicate gesture retries")
+        collection.simulatesDragging = false
+        collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+
+        harness.update(ids: ids)
+        await settle(harness)
+        collection.simulatesDragging = true
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.contentOffset.y = -20
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 2, "Exhausted history must not issue requests")
+        collection.simulatesDragging = false
+        collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+    }
+
+    func testHistoryPrependDuringDraggingAnchorsMessageWithoutWaitingForGestureToEnd() async throws {
+        let harness = ChatTranscriptContinuityHarness()
+        let collection = harness.collectionView
+        let controller = UIViewController()
+        controller.view.addSubview(collection)
+        let window = UIWindow(frame: collection.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let ids = (12..<30).map { "row-\($0)" }
+        harness.update(ids: ids, historyCount: 100)
+        await settle(harness)
+        collection.contentOffset.y = 40
+        harness.pinned = false
+        await settle(harness)
+        collection.simulatesDragging = true
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.contentOffset.y = 20
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        let cell = try XCTUnwrap(harness.cell(id: "row-12"))
+        let screenY = cell.frame.minY - collection.contentOffset.y
+        let requests = harness.historyRequestCount
+        collection.holdsBatchCompletion = true
+        let expanded = (0..<30).map { "row-\($0)" }
+        harness.update(ids: expanded, historyCount: 88)
+        await settle(harness)
+        XCTAssertTrue(harness.appliedIDs.contains("row-0"), "Pure history pages must land before the drag ends")
+        let duringDrag = try XCTUnwrap(harness.cell(id: "row-12"))
+        XCTAssertEqual(duringDrag.frame.minY - collection.contentOffset.y, screenY, accuracy: 2)
+        // Motion after insertion must survive a later UIKit completion callback.
+        collection.contentOffset.y -= 20
+        let continuedOffset = collection.contentOffset.y
+        let complete = try XCTUnwrap(collection.heldBatchCompletion)
+        collection.heldBatchCompletion = nil
+        collection.holdsBatchCompletion = false
+        complete()
+        await settle(harness)
+        XCTAssertEqual(collection.contentOffset.y, continuedOffset, accuracy: 2)
+        collection.simulatesDragging = false
+        collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+        await settle(harness)
+        XCTAssertTrue(harness.appliedIDs.contains("row-0"))
+        let retained = try XCTUnwrap(harness.cell(id: "row-12"))
+        XCTAssertEqual(retained.frame.minY - collection.contentOffset.y, screenY + 20, accuracy: 2)
+        XCTAssertLessThanOrEqual(harness.historyRequestCount, requests + 1, "Only the next boundary can be prefetched")
+    }
+
+    func testPreparedHistoryPrefersIdleInsertionUnlessScrollingExhaustsBuffer() async throws {
+        for reachesBoundary in [false, true] {
+            let harness = ChatTranscriptContinuityHarness()
+            let collection = harness.collectionView
+            let controller = UIViewController()
+            controller.view.addSubview(collection)
+            let window = UIWindow(frame: collection.frame)
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            let ids = (0..<40).map { "row-\($0)" }
+            harness.update(ids: ids, historyCount: 0)
+            await settle(harness)
+            collection.contentOffset.y = 600
+            harness.pinned = false
+            collection.simulatesDragging = true
+            collection.delegate?.scrollViewWillBeginDragging?(collection)
+            collection.contentOffset.y = 590
+            collection.delegate?.scrollViewDidScroll?(collection)
+            await settle(harness)
+            XCTAssertEqual(harness.historyRequestCount, 1, "Fetch remote history well before the user reaches the boundary")
+            harness.update(ids: (-12..<40).map { "row-\($0)" }, historyCount: 88)
+            await settle(harness)
+            XCTAssertFalse(harness.appliedIDs.contains("row--12"), "While buffered, keep layout unchanged during the gesture")
+            collection.simulatesDragging = false
+            if reachesBoundary {
+                collection.simulatesDecelerating = true
+                collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: true)
+                collection.contentOffset.y = 100
+                collection.layoutIfNeeded()
+            }
+            let anchorID = reachesBoundary ? "row-1" : "row-8"
+            let anchor = try XCTUnwrap(harness.cell(id: anchorID))
+            let screenY = anchor.frame.minY - collection.contentOffset.y
+            if reachesBoundary {
+                collection.delegate?.scrollViewDidScroll?(collection)
+            } else {
+                collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+            }
+            await settle(harness)
+            XCTAssertTrue(harness.appliedIDs.contains("row--12"), "Insert at idle, or just before the existing buffer runs out")
+            let retained = try XCTUnwrap(harness.cell(id: anchorID))
+            XCTAssertEqual(retained.frame.minY - collection.contentOffset.y, screenY, accuracy: 2)
+            collection.simulatesDecelerating = false
+            collection.delegate?.scrollViewDidEndDecelerating?(collection)
+        }
+    }
+
+    func testCachedHistoryPreparationWaitsForPauseWhileBufferRemains() async {
+        let harness = ChatTranscriptContinuityHarness()
+        let collection = harness.collectionView
+        let controller = UIViewController()
+        controller.view.addSubview(collection)
+        let window = UIWindow(frame: collection.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        harness.update(ids: (0..<40).map { "row-\($0)" }, historyCount: 100)
+        await settle(harness)
+        collection.contentOffset.y = 600
+        harness.pinned = false
+        collection.simulatesDragging = true
+        collection.delegate?.scrollViewWillBeginDragging?(collection)
+        collection.contentOffset.y = 590
+        collection.delegate?.scrollViewDidScroll?(collection)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 0, "Cached render preparation should not compete with a buffered gesture")
+        collection.simulatesDragging = false
+        collection.delegate?.scrollViewDidEndDragging?(collection, willDecelerate: false)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 1, "Prepare the next page in the pause, before the user reaches it")
+    }
+
+    func testOpeningFillWaitsForCachedPagesBeforeRevealingAndDoesNotExpandAfterReveal() async {
+        let harness = ChatTranscriptContinuityHarness()
+        let collection = harness.collectionView
+        let controller = UIViewController()
+        controller.view.addSubview(collection)
+        let window = UIWindow(frame: collection.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        harness.update(ids: ["last"], historyCount: 100)
+        harness.prepareInitialReveal()
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 1)
+        XCTAssertTrue(harness.awaitsInitialReveal)
+        XCTAssertEqual(collection.alpha, 0)
+        for _ in 0..<5 { harness.sampleInitialLayout() }
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 1, "Unchanged boundaries must not retry on every layout")
+        XCTAssertTrue(harness.awaitsInitialReveal, "Layout callbacks cannot reveal before the requested page arrives")
+        XCTAssertEqual(collection.alpha, 0)
+        harness.update(ids: ["older", "last"], historyCount: 99)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 2)
+        XCTAssertTrue(harness.awaitsInitialReveal, "Multiple opening pages must all settle while hidden")
+        harness.update(ids: (0..<30).map { "older-\($0)" } + ["last"], historyCount: 70)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 2, "Headroom is bounded; do not drain the transcript")
+        XCTAssertFalse(harness.awaitsInitialReveal)
+        XCTAssertEqual(collection.alpha, 1)
+        let bottom = collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom
+        XCTAssertEqual(collection.contentOffset.y, bottom, accuracy: 2, "Automatic opening fill must remain on the newest message")
+        collection.frame.size.height = 1800
+        collection.layoutIfNeeded()
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 2, "Viewport changes after reveal must not restart opening fill")
+    }
+
+    func testServerOnlyOpeningRevealsWithoutAutomaticPostFadeExpansion() async {
+        let harness = ChatTranscriptContinuityHarness()
+        let collection = harness.collectionView
+        let controller = UIViewController()
+        controller.view.addSubview(collection)
+        let window = UIWindow(frame: collection.frame)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        harness.update(ids: ["last"], historyCount: 0)
+        harness.prepareInitialReveal()
+        await settle(harness)
+        XCTAssertFalse(harness.awaitsInitialReveal)
+        XCTAssertEqual(collection.alpha, 1)
+        XCTAssertEqual(harness.historyRequestCount, 0, "Remote history must not cause a post-reveal opening cascade")
+        harness.update(ids: ["last"], historyCount: 12)
+        await settle(harness)
+        XCTAssertEqual(harness.historyRequestCount, 0, "Late cache hydration must not restart opening fill")
     }
 
     func testScrolledHistoryAnchorAndPinnedTailWithHeightChanges() async throws {

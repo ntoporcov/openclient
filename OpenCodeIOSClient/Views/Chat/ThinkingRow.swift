@@ -14,6 +14,8 @@ struct ThinkingRow: View {
     var animateEntry = false
     var tint: Color = .secondary
     var title: LocalizedStringResource = "Thinking"
+    var pausesPill = false
+    var onOpenPlayground: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
@@ -75,7 +77,40 @@ struct ThinkingRow: View {
         }
     }
 
+    private var uses3DPill: Bool {
+        #if canImport(RealityKit) && canImport(UIKit)
+        if #available(iOS 18.0, *) { return true }
+        #endif
+        return false
+    }
+
+    @ViewBuilder
     private func thinkingRow(phase: Double) -> some View {
+        #if canImport(RealityKit) && canImport(UIKit)
+        if #available(iOS 18.0, *) {
+            HStack {
+                if let onOpenPlayground {
+                    Button(action: onOpenPlayground) {
+                        GlassThinkingPill(title: title, tint: tint, reduceMotionOverride: reduceMotion, isPaused: pausesPill)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Open glass playground")
+                } else {
+                    GlassThinkingPill(title: title, tint: tint, reduceMotionOverride: reduceMotion, isPaused: pausesPill)
+                }
+                Spacer(minLength: 44)
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            fallbackThinkingRow(phase: phase)
+        }
+        #else
+        fallbackThinkingRow(phase: phase)
+        #endif
+    }
+
+    private func fallbackThinkingRow(phase: Double) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
@@ -84,10 +119,16 @@ struct ThinkingRow: View {
                         .frame(width: 6, height: 6)
                         .scaleEffect(0.72 + (phase * 0.73))
                         .opacity(1 - (phase * 0.8))
-                    Text(title)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .opacity(1 - (phase * 0.28))
+                    ZStack(alignment: .leading) {
+                        Text(title)
+                            .id(String(localized: title))
+                            .transition(titleTransition)
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .opacity(1 - (phase * 0.28))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text(title))
                 }
             }
             .padding(.horizontal, 14)
@@ -97,10 +138,26 @@ struct ThinkingRow: View {
                 breathingGlassGlow(phase: phase)
             }
             .scaleEffect(0.994 + (phase * 0.02), anchor: .leading)
+            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .smooth(duration: 0.32), value: title)
+            .transaction { transaction in
+                // Transcript cells suppress animations; opt this pill back in locally.
+                // Only title changes above start a new transition or resize.
+                transaction.disablesAnimations = false
+            }
 
             Spacer(minLength: 44)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var titleTransition: AnyTransition {
+        if reduceMotion {
+            return .opacity
+        }
+        return .asymmetric(
+            insertion: .offset(y: 5).combined(with: .opacity),
+            removal: .offset(y: -5).combined(with: .opacity)
+        )
     }
 
     private func breathingGlassGlow(phase: Double) -> some View {
@@ -126,7 +183,7 @@ struct ThinkingRow: View {
     }
 
     private func startPulseAnimationIfNeeded() {
-        guard !reduceMotion else {
+        guard !reduceMotion, !uses3DPill else {
             pulsePhase = 0
             return
         }

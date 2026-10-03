@@ -63,6 +63,7 @@ struct AssistantResponseTurn: Identifiable, Hashable, Sendable {
     let completedAt: Date?
     var duration: TimeInterval? = nil
     let message: OpenCodeMessageEnvelope
+    var promptMessageID: String? = nil
 
     static func project(
         messages: [OpenCodeMessageEnvelope],
@@ -106,7 +107,8 @@ struct AssistantResponseTurn: Identifiable, Hashable, Sendable {
                 markdownParts: answers.flatMap(\.parts),
                 completedAt: completedAt,
                 duration: duration,
-                message: latestAnswer.message
+                message: latestAnswer.message,
+                promptMessageID: promptID
             ))
         }
 
@@ -147,6 +149,7 @@ struct ResponseTurnCaption<Details: View>: View {
 
     let turn: AssistantResponseTurn
     let visibility: ResponseActionsVisibility
+    var onShowChanges: (() -> Void)? = nil
     @ViewBuilder let details: () -> Details
 
     var body: some View {
@@ -159,6 +162,7 @@ struct ResponseTurnCaption<Details: View>: View {
                     completedAt: turn.completedAt,
                     duration: turn.duration,
                     markdownParts: turn.markdownParts,
+                    onShowChanges: onShowChanges,
                     details: details
                 )
                 .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4)))
@@ -199,6 +203,7 @@ struct MessageResponseActions<Details: View>: View {
     var completedAt: Date? = nil
     var duration: TimeInterval? = nil
     var markdownParts: [String]? = nil
+    var onShowChanges: (() -> Void)? = nil
     @ViewBuilder let details: () -> Details
 
     @State private var copyFeedbackID: UUID?
@@ -245,6 +250,17 @@ struct MessageResponseActions<Details: View>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("chat.copyResponse.\(messageID)")
+                .fixedSize()
+            }
+
+            if let onShowChanges {
+                Button(action: onShowChanges) {
+                    Label("Turn Changes", systemImage: "doc.text.magnifyingglass")
+                        .labelStyle(.iconOnly)
+                        .modifier(ResponseCaptionControlLabel())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("chat.turnChanges.\(messageID)")
                 .fixedSize()
             }
 
