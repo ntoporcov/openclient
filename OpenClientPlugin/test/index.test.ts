@@ -7,6 +7,41 @@ import plugin from "../src/index.js"
 
 const OpenClientPlugin = plugin.server
 
+describe("V1 bridge origin", () => {
+  for (const [serverURL, port] of [
+    ["https://host.tailnet.ts.net", 443],
+    ["https://host.tailnet.ts.net:8443", 8443],
+    ["http://host.tailnet.ts.net", 80],
+    [undefined, 4096],
+  ] as const) {
+    test(`advertises ${port} for ${serverURL ?? "the host URL"}`, async () => {
+      const input = {
+        client: { app: { log: async () => {} } },
+        serverUrl: new URL("http://127.0.0.1:4096"), directory: "/repo", project: { id: "project" },
+      }
+      const hooks = await OpenClientPlugin(input as never, { serverURL })
+      try {
+        const bridgePort = await bridgePortFor(port)
+        const health = await fetch(`http://127.0.0.1:${bridgePort}/openclient/v1/health`).then((response) => response.json())
+        expect(health).toMatchObject({ service: "openclient-plugin", protocol: 1, port: bridgePort, openCodePort: port })
+        expect(Object.keys(hooks.tool ?? {})).toContain("openclient_execute_tool")
+      } finally {
+        await hooks.dispose?.()
+      }
+    })
+  }
+
+  test("rejects invalid overrides before starting services", async () => {
+    const input = {
+      client: { app: { log: async () => {} } },
+      serverUrl: new URL("http://127.0.0.1:4096"), directory: "/repo", project: { id: "project" },
+    }
+    for (const serverURL of ["not-a-url", "ftp://host", "https://user:pass@host", "https://host/path", "https://host?query=1", "https://host#fragment"]) {
+      await expect(OpenClientPlugin(input as never, { serverURL })).rejects.toThrow()
+    }
+  })
+})
+
 describe("plugin failure isolation", () => {
   test("first reachable bridge health is notification-ready after successful initialization", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "openclient-index-ready-"))

@@ -4,16 +4,13 @@ import { acquireNotifications } from "./notifications.js"
 import { normalizeV2NotificationEvent, normalizeV2Session } from "./notifications-v2.js"
 import { registerV2Tools } from "./tools-v2.js"
 import type { OpenClientPluginOptions } from "./index.js"
+import { configuredServerURL } from "./server-url.js"
 
 // V2 provides in-process domain APIs, but no server URL on its plugin context.
 // Use the host's explicit serve arguments (never guess based on the API version).
 export function v2ServerURL(options: Pick<OpenClientPluginOptions, "serverURL">, argv = process.argv, env = process.env): URL {
   if (options.serverURL !== undefined) {
-    const url = new URL(options.serverURL)
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
-      throw new Error("serverURL must be an HTTP(S) origin without credentials")
-    }
-    return url
+    return configuredServerURL(options.serverURL)
   }
   const index = argv.indexOf("--port")
   const raw = index >= 0 ? argv[index + 1] : argv.find((value) => value.startsWith("--port="))?.slice(7) ?? env.OPENCODE_SERVER_PORT

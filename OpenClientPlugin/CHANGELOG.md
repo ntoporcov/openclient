@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Honor `serverURL` on V1 for bridge discovery behind HTTPS reverse proxies,
+  including Tailscale Serve (#24). Set it to the OpenCode origin used in the app.
+
 ## 0.4.1
 
 - Keep OpenClient tool execution outside V2 Code Mode so native visual renderer

@@ -65,6 +65,37 @@ npm entry with `file:///absolute/path/to/OpenClientPlugin/dist` on V2, or
 Do not also load the old npm entry or the standalone notification adapter.
 OpenCode must be restarted after changing plugin code or configuration.
 
+### Reverse proxies and Tailscale Serve
+
+Bridge discovery matches the advertised OpenCode port to the port in the app's
+server URL. If a proxy forwards `https://host.tailnet.ts.net` (port `443`) to
+OpenCode on port `4096`, set `serverURL` to `https://host.tailnet.ts.net`.
+This option supports both V1 and V2; V1 support requires the unreleased fix for
+#24 (it is not included in plugin `0.4.1`).
+
+For V1, add the option to the plugin tuple:
+
+```json
+{
+  "plugin": [
+    ["file:///absolute/path/to/OpenClientPlugin/dist/index.js", {
+      "serverURL": "https://host.tailnet.ts.net"
+    }]
+  ]
+}
+```
+
+Build the local plugin as described above, then restart OpenCode. For V2, put
+the same `serverURL` in the `options` object shown below. Use an HTTP(S) origin
+without credentials, a path, query, or fragment; include any custom external port.
+The override also supplies the OpenCode origin used by notifications.
+
+The app still reaches the bridge directly on the server hostname at ports
+`4070...4090` over HTTP/WebSocket, so those ports must be reachable through your
+trusted network. Proxying the OpenCode port alone does not proxy the bridge.
+When running multiple servers on one hostname, give each a distinct external
+port so discovery can distinguish their bridges.
+
 ### V2 options
 
 V2 uses `plugins` and an object for package options (rather than v1's `plugin`

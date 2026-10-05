@@ -2,22 +2,24 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { acquireBridge } from "./lifecycle.js"
 import { acquireNotifications, type NotificationsOptions } from "./notifications.js"
 import { createOpenClientTools } from "./tools.js"
+import { configuredServerURL } from "./server-url.js"
 
 export type OpenClientPluginOptions = {
   notifications?: NotificationsOptions
-  /** Optional override for v2 hosts that do not expose their listening port in argv. */
+  /** OpenCode origin used by the app, including the external port when behind a proxy. */
   serverURL?: string
 }
 
 const OpenClientPlugin = async (input: Parameters<Plugin>[0], options: OpenClientPluginOptions = {}) => {
   const { client } = input
+  const serverURL = options.serverURL === undefined ? input.serverUrl : configuredServerURL(options.serverURL)
   let notifications: Awaited<ReturnType<typeof acquireNotifications>> | undefined
   notifications = await acquireNotifications({
     options: options.notifications,
     client,
     directory: input.directory,
     project: input.project,
-    getServerURL: () => input.serverUrl,
+    getServerURL: () => serverURL,
     onLog: (level, message) => void log(level, message),
   }).catch((error) => {
     void log("error", `Notifications failed to start: ${error instanceof Error ? error.message : String(error)}`)
@@ -27,7 +29,7 @@ const OpenClientPlugin = async (input: Parameters<Plugin>[0], options: OpenClien
   let lease: Awaited<ReturnType<typeof acquireBridge>>
   try {
     lease = await acquireBridge({
-      openCodePort: normalizedPort(input.serverUrl),
+      openCodePort: normalizedPort(serverURL),
       onLog: (level, message) => void log(level, message),
     })
   } catch (error) {
