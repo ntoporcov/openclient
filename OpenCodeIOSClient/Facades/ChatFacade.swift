@@ -463,6 +463,10 @@ final class ChatFacade: ObservableObject {
 
     var isV2Connection: Bool { connectionStore.apiProfile == .v2 }
 
+    var waitsForLegacyTranscriptAdmission: Bool {
+        viewModel.backendConnection?.openCodeCompatibility?.profile == .legacy
+    }
+
     private static let submissionLogger = Logger(subsystem: "com.ntoporcov.openclient", category: "PromptSubmission")
 
     /// Keep preflight failures observable in release builds, without recording draft contents.

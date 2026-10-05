@@ -79,13 +79,13 @@ enum SubmissionTranscriptPresentation {
             if input.canBeReplaced(by: message) { return message }
             // Once delivered, bridge missing parts at the server's position, not
             // the old submit-time anchor captured halfway through the prior turn.
-            if input.delivery != nil, input.hasEnteredTimeline { return input.message }
+            if input.usesPendingDeliveryPresentation, input.hasEnteredTimeline { return input.message }
             return nil
         }
         let canonicalIDs = Set(canonical.map(\.id))
         var result = canonical
         let ordered = inputs.values.sorted(by: { ($0.submittedAt, $0.id) < ($1.submittedAt, $1.id) })
-        for input in ordered where input.delivery == nil {
+        for input in ordered where !input.usesPendingDeliveryPresentation {
             guard !canonicalIDs.contains(input.id) else { continue }
             let preceding = Set(input.precedingMessageIDs)
             let index = result.lastIndex(where: { preceding.contains($0.id) }).map { $0 + 1 } ?? 0
@@ -93,7 +93,7 @@ enum SubmissionTranscriptPresentation {
         }
         // Pending delivery has no fixed turn position yet. Keep it after all
         // current work until the canonical transcript establishes its position.
-        result.append(contentsOf: ordered.filter { $0.delivery != nil && !canonicalIDs.contains($0.id) }.map(\.message))
+        result.append(contentsOf: ordered.filter { $0.usesPendingDeliveryPresentation && !canonicalIDs.contains($0.id) }.map(\.message))
         return result
     }
 
@@ -103,7 +103,7 @@ enum SubmissionTranscriptPresentation {
     }
 
     static func showsStatus(input: ChatStore.SubmissionRecovery, now: Date) -> Bool {
-        if input.delivery != nil { return input.isAwaitingDelivery }
+        if input.usesPendingDeliveryPresentation { return input.isAwaitingDelivery }
         return !(input.phase == .admitted && !input.pendingStatusUnknown)
             && now >= input.submittedAt.addingTimeInterval(1.5)
     }
@@ -113,7 +113,7 @@ enum SubmissionTranscriptPresentation {
     }
 
     static func statusUpdates(input: ChatStore.SubmissionRecovery) -> [Date] {
-        if input.delivery != nil { return [] }
+        if input.usesPendingDeliveryPresentation { return [] }
         guard input.phase != .admitted || input.pendingStatusUnknown else { return [] }
         let revealAt = input.submittedAt.addingTimeInterval(1.5)
         return (0...60).map { revealAt.addingTimeInterval(Double($0) / 30) }

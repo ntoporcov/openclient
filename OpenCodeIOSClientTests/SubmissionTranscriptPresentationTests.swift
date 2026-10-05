@@ -5,6 +5,60 @@ import Combine
 
 @MainActor
 final class SubmissionTranscriptPresentationTests: XCTestCase {
+    func testLegacyPendingMessageStaysBelowCurrentWorkUntilExactCanonicalAdmission() throws {
+        let store = ChatStore()
+        let connection = UUID()
+        store.selectSubmissionOwner("legacy", connectionID: connection)
+        let local = message("pending-v1")
+        let before = message("working", role: "assistant")
+        store.stageSubmissionPresentation(local, sessionID: "session", canonical: [before],
+            attachments: [], agentMentions: [], waitsForTranscript: true)
+        let staged = try XCTUnwrap(store.recoveryInputs(sessionID: "session").first)
+        XCTAssertTrue(staged.isAwaitingDelivery)
+        XCTAssertTrue(SubmissionTranscriptPresentation.showsStatus(input: staged, now: staged.submittedAt))
+        XCTAssertTrue(store.beginPromptAdmission(.init(sessionID: "session", messageID: local.id,
+            text: local.id, scope: .init()), connectionID: connection))
+        store.applyPromptAdmission(.admitted, messageID: local.id, connectionID: connection)
+        let pending = try XCTUnwrap(store.recoveryInputs(sessionID: "session").first)
+        XCTAssertNil(pending.delivery, "V1 presentation must not invent a V2 delivery mode")
+        XCTAssertEqual(pending.text, local.id)
+        XCTAssertTrue(pending.isAwaitingDelivery, "HTTP acceptance is not transcript admission")
+        XCTAssertTrue(SubmissionTranscriptPresentation.showsStatus(input: pending, now: .now))
+        let laterWork = message("still-working", role: "assistant")
+        XCTAssertFalse(store.confirmCanonicalSubmission(laterWork.info))
+        XCTAssertFalse(store.confirmCanonicalSubmission(message("different-user").info))
+        XCTAssertEqual(SubmissionTranscriptPresentation.messages(canonical: [before, laterWork],
+            recoveries: store.recoveryInputs(sessionID: "session")), [before, laterWork, pending.message])
+
+        XCTAssertTrue(store.confirmCanonicalSubmission(local.info))
+        let admitted = try XCTUnwrap(store.recoveryInputs(sessionID: "session").first)
+        XCTAssertFalse(admitted.isAwaitingDelivery)
+        XCTAssertFalse(SubmissionTranscriptPresentation.showsStatus(input: admitted, now: .now))
+        let header = OpenCodeMessageEnvelope(info: local.info, parts: [])
+        let answer = message("answer", role: "assistant")
+        XCTAssertEqual(SubmissionTranscriptPresentation.messages(canonical: [before, laterWork, header, answer],
+            recoveries: [admitted]), [before, laterWork, pending.message, answer])
+        store.retireSubmissionPresentations(in: [local], sessionID: "session")
+        XCTAssertTrue(store.recoveryInputs(sessionID: "session").isEmpty)
+    }
+
+    func testLegacyPendingPresentationSurvivesUncertaintyAndReconnectAndRejectsCleanly() throws {
+        let store = ChatStore()
+        let connection = UUID()
+        store.selectSubmissionOwner("legacy", connectionID: connection)
+        XCTAssertTrue(store.beginPromptAdmission(.init(sessionID: "session", messageID: "pending-v1",
+            text: "pending-v1", scope: .init()), connectionID: connection, waitsForTranscript: true))
+        store.applyPromptAdmission(.uncertain, messageID: "pending-v1", connectionID: connection)
+        store.selectSubmissionOwner("other", connectionID: UUID())
+        store.selectSubmissionOwner("legacy", connectionID: UUID())
+        let input = try XCTUnwrap(store.recoveryInputs(sessionID: "session").first)
+        XCTAssertEqual(input.phase, .uncertain)
+        XCTAssertTrue(input.isAwaitingDelivery)
+        XCTAssertTrue(SubmissionTranscriptPresentation.showsStatus(input: input, now: .now))
+        store.rollbackV2Prompt(messageID: "pending-v1", sessionID: "session")
+        XCTAssertTrue(store.recoveryInputs(sessionID: "session").isEmpty)
+    }
+
     func testGroupingKeepsProgressVisibleThroughoutBusyTurn() {
         let user = OpenCodeMessageEnvelope.local(role: "user", text: "Work", messageID: "user", sessionID: "s", partID: "u")
         var assistant = OpenCodeMessageEnvelope.local(role: "assistant", text: "Working", messageID: "assistant", sessionID: "s", partID: "a")

@@ -5078,7 +5078,8 @@ struct ChatView: View {
         chatStore.stageSubmissionPresentation(.local(role: "user", text: optimisticPrompt.text,
             agentMentions: optimisticPrompt.mentions, attachments: draftAttachments, messageID: messageID,
             sessionID: sessionID, partID: partID), sessionID: sessionID,
-            canonical: transcriptSuffix(chatSourceMessageCount), attachments: draftAttachments, agentMentions: optimisticPrompt.mentions)
+            canonical: transcriptSuffix(chatSourceMessageCount), attachments: draftAttachments, agentMentions: optimisticPrompt.mentions,
+            waitsForTranscript: chatFacade.waitsForLegacyTranscriptAdmission)
         _ = chatFacade.insertOptimisticUserMessage(optimisticPrompt.text, agentMentions: optimisticPrompt.mentions, attachments: draftAttachments, in: liveSession, messageID: messageID, partID: partID, animated: false)
         pendingOutgoingSend = pendingSend
         scheduleOutgoingEntryAnimation(messageID: messageID)

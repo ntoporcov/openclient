@@ -38,8 +38,11 @@ final class ChatStore: ObservableObject {
         // Presentation anchors include prior local submissions, never admission evidence.
         var precedingMessageIDs: [String] = []
         var delivery: OpenCodePromptDelivery?
+        // V1 has no inbox delivery mode; its local row waits for canonical transcript evidence.
+        var waitsForTranscript = false
         var hasEnteredTimeline = false
-        var isAwaitingDelivery: Bool { delivery != nil && !hasEnteredTimeline }
+        var usesPendingDeliveryPresentation: Bool { delivery != nil || waitsForTranscript }
+        var isAwaitingDelivery: Bool { usesPendingDeliveryPresentation && !hasEnteredTimeline }
         var id: String { message.id }
         var text: String { message.parts.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n") }
 
@@ -81,7 +84,7 @@ final class ChatStore: ObservableObject {
         }
     }
 
-    func beginPromptAdmission(_ request: BackendSubmission, connectionID: UUID) -> Bool {
+    func beginPromptAdmission(_ request: BackendSubmission, connectionID: UUID, waitsForTranscript: Bool = false) -> Bool {
         guard !hasPendingPromptAdmission(sessionID: request.sessionID, connectionID: connectionID),
                !submissionRecoveries.values.contains(where: { $0.sessionID == request.sessionID && ($0.phase == .submitting || $0.phase == .uncertain) }),
                canonicalSubmissionSessions[request.messageID] != request.sessionID,
@@ -101,7 +104,8 @@ final class ChatStore: ObservableObject {
                 precedingMessageIDs: presentation?.precedingMessageIDs ??
                     ((cachedMessagesBySessionID[request.sessionID] ?? messages.filter { $0.info.sessionID == request.sessionID }).map(\.id)
                          + recoveryInputs(sessionID: request.sessionID).map(\.id)),
-                delivery: request.delivery ?? presentation?.delivery)
+                delivery: request.delivery ?? presentation?.delivery,
+                waitsForTranscript: waitsForTranscript || presentation?.waitsForTranscript == true)
             stagedSubmissionPresentations[request.messageID] = nil
             if let cached = cachedMessagesBySessionID[request.sessionID] {
                 cacheMessages(cached, forSessionID: request.sessionID)
@@ -190,13 +194,14 @@ final class ChatStore: ObservableObject {
     func stageSubmissionPresentation(_ message: OpenCodeMessageEnvelope, sessionID: String,
                                      canonical: [OpenCodeMessageEnvelope], attachments: [OpenCodeComposerAttachment],
                                      agentMentions: [OpenCodeAgentMention], submittedAt: Date = .now,
-                                     delivery: OpenCodePromptDelivery? = nil) {
+                                      delivery: OpenCodePromptDelivery? = nil, waitsForTranscript: Bool = false) {
         guard submissionRecoveries[message.id] == nil, stagedSubmissionPresentations[message.id] == nil,
               canonicalSubmissionSessions[message.id] != sessionID else { return }
         stagedSubmissionPresentations[message.id] = SubmissionRecovery(sessionID: sessionID, message: message,
             phase: .submitting, attachments: attachments, agentMentions: agentMentions,
             submittedAt: submittedAt,
-            precedingMessageIDs: canonical.map(\.id) + recoveryInputs(sessionID: sessionID).map(\.id), delivery: delivery)
+            precedingMessageIDs: canonical.map(\.id) + recoveryInputs(sessionID: sessionID).map(\.id), delivery: delivery,
+            waitsForTranscript: waitsForTranscript)
     }
 
     func discardStagedSubmissionPresentation(messageID: String) {

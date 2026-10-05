@@ -2009,7 +2009,8 @@ extension AppViewModel {
             scope: .init(projectID: selectedSession.projectID, directory: submission.directory, workspaceID: selectedSession.workspaceID),
             partID: submission.partID, attachments: submission.attachments, agentMentions: submission.agentMentions,
             agent: submission.agent, model: submission.model, variant: submission.variant)
-        guard chatStore.beginPromptAdmission(request, connectionID: connection.id) else { return blocked("admission store refused") }
+        guard chatStore.beginPromptAdmission(request, connectionID: connection.id,
+            waitsForTranscript: connection.openCodeCompatibility?.profile == .legacy) else { return blocked("admission store refused") }
         if connection.openCodeCompatibility != nil {
             owner.applyCanonicalMessages(chatStore.withoutRecoveryMessages(owner.syncState.messageEnvelopes(forSessionID: selectedSession.id),
                 sessionID: selectedSession.id), forSessionID: selectedSession.id)
