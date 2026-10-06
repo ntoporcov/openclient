@@ -18,7 +18,7 @@ final class SessionFormStore {
         var operationReference: BackendFormReference? = nil
     }
 
-    private let canonical: SessionFormStore?
+    private var canonical: SessionFormStore?
     private var storedForms: [BackendFormKey: BackendForm] = [:]
     private var editedForms: [BackendFormKey: BackendForm] = [:]
     private(set) var forms: [BackendFormKey: BackendForm] {
@@ -36,6 +36,34 @@ final class SessionFormStore {
     @ObservationIgnored var onCanonicalChange: @MainActor () -> Void = {}
 
     init(canonical: SessionFormStore? = nil) { self.canonical = canonical }
+
+    func rebind(to canonical: SessionFormStore) {
+        self.canonical = canonical
+    }
+
+    /// Moving is not settling: retaining tombstones in the old owner would hide forms on a return move.
+    func transferSession(_ sessionID: String, to target: SessionFormStore) {
+        guard target !== self else { return }
+        onCanonicalChange()
+        target.onCanonicalChange()
+        revision &+= 1
+        target.revision &+= 1
+        for (key, form) in forms where key.sessionID == sessionID {
+            target.storedForms[key] = form
+            if var state = editing[key] {
+                if state.phase.isBusy { state.phase = .uncertain }
+                state.operationID = nil
+                state.operationConnectionID = nil
+                state.operationReference = nil
+                target.editing[key] = state
+            }
+            storedForms[key] = nil
+            editing[key] = nil
+        }
+        let settled = terminalKeys.filter { $0.sessionID == sessionID }
+        target.terminalKeys.formUnion(settled)
+        terminalKeys.subtract(settled)
+    }
 
     func reset() {
         onCanonicalChange()

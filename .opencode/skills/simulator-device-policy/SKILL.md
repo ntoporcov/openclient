@@ -14,28 +14,18 @@ Every simulator validation must cover both classes unless the user explicitly re
 
 This policy applies to all simulator usage, including builds, unit tests, UI tests, screenshots, app installation and launch, accessibility inspection, performance checks, and manual interaction.
 
-## Select The Latest Stable Xcode First
+## Verify The Selected Xcode First
 
-Before inspecting runtimes or running the first simulator command in a task, use `xcodes` to inspect and select the newest installed stable, non-beta Xcode:
-
-```bash
-xcodes installed
-xcodes select <newest-installed-stable-xcode-version-or-absolute-app-path>
-```
-
-Use an explicit version or absolute app path so the command never opens an interactive picker. Choose the highest installed public-release Xcode and exclude beta and release-candidate builds. Do not use a prerelease Xcode merely because it has a higher version or is already selected.
-
-Verify that selection succeeded before proceeding:
+Assume Xcode is already selected on this machine. Before simulator work, verify the selection without changing it:
 
 ```bash
-xcodes select --print-path
 xcode-select -p
 xcodebuild -version
 ```
 
-The selected developer directory must belong to the intended newest stable Xcode. Do not work around this policy by setting `DEVELOPER_DIR`, calling `sudo xcode-select` directly, or continuing with an older Xcode when `xcodes` is available.
+Do not run `xcodes select` unless explicitly asked: it prompts for an administrator password even when the correct Xcode is already selected. Use the selected stable Xcode; if verification shows a prerelease or an invalid developer directory, report the mismatch.
 
-If `xcodes select` requires administrator authorization that cannot be completed non-interactively, stop and report the exact command the user must authorize. Do not expose, request, or embed an administrator password. If the necessary Xcode is not installed, report the missing version; do not start a large Xcode installation unless the user explicitly requests it.
+Do not set `DEVELOPER_DIR` or call `sudo xcode-select` to bypass the selected toolchain. Do not start an Xcode installation unless explicitly requested.
 
 ## Resolve The Current Devices
 

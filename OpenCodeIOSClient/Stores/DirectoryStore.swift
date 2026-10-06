@@ -31,6 +31,33 @@ final class DirectoryStoreRegistry: ObservableObject {
     private(set) var v2ProjectRevision: UInt = 0
     @Published private(set) var v2DeletedSessionIDs: Set<String> = []
 
+    struct SessionRelocation {
+        let previous: OpenCodeSession
+        let session: OpenCodeSession
+        let owner: DirectoryStore
+    }
+    let sessionRelocations = PassthroughSubject<SessionRelocation, Never>()
+
+    /// Location changes retain session identity and state. Publish only after the new owner is complete.
+    func relocateV2Session(_ session: OpenCodeSession, from previous: OpenCodeSession, to owner: DirectoryStore) {
+        v2LifecycleRevisions[session.id, default: 0] &+= 1
+        let followsSelection = activeStore.selectedSession?.id == session.id
+        let sources = stores(containingSessionID: session.id).filter { $0 !== owner }
+        if let source = sources.first(where: { $0 === activeStore }) ?? sources.first {
+            owner.adoptV2SessionState(sessionID: session.id, from: source)
+        }
+        owner.insertV2Session(session)
+        if followsSelection {
+            owner.selectedSession = session
+            if let key = key(for: owner), owner !== activeStore {
+                activeKey = key
+                activeStore = owner
+            }
+        }
+        for source in sources { source.removeV2Session(sessionID: session.id) }
+        sessionRelocations.send(.init(previous: previous, session: session, owner: owner))
+    }
+
     func isV2SessionDeleted(_ id: String) -> Bool { v2DeletedSessionIDs.contains(id) }
 
     func markV2SessionDeleted(_ id: String) {
@@ -806,6 +833,8 @@ final class DirectoryStore: ObservableObject {
                 parentID: data["parentID"]?.stringValue ?? previous?.parentID
             )
             session.time = OpenCodeMessageTime(created: previous?.time?.created ?? event.created, updated: event.created)
+            session.agent = previous?.agent
+            session.model = previous?.model
             insertV2Session(session)
             return true
         case "session.deleted":
@@ -869,6 +898,22 @@ final class DirectoryStore: ObservableObject {
         syncStore.state.questionsBySessionID[sessionID] = nil
         syncStore.state.sessionDiffsBySessionID[sessionID] = nil
         sessionFormStore.removeSession(sessionID)
+    }
+
+    fileprivate func adoptV2SessionState(sessionID: String, from source: DirectoryStore) {
+        if source.syncState.messagesBySessionID[sessionID] != nil {
+            applyV2Messages(source.syncState.messageEnvelopes(forSessionID: sessionID), forSessionID: sessionID)
+        }
+        if let status = source.sessionStatuses[sessionID] { applySessionStatus(status, forSessionID: sessionID) }
+        syncStore.state.todosBySessionID[sessionID] = source.syncState.todosBySessionID[sessionID]
+        syncStore.state.permissionsBySessionID[sessionID] = source.syncState.permissionsBySessionID[sessionID]
+        syncStore.state.questionsBySessionID[sessionID] = source.syncState.questionsBySessionID[sessionID]
+        syncStore.state.sessionDiffsBySessionID[sessionID] = source.syncState.sessionDiffsBySessionID[sessionID]
+        permissionRevision &+= 1
+        questionRevision &+= 1
+        permissionRevisionsBySessionID[sessionID] = permissionRevision
+        questionRevisionsBySessionID[sessionID] = questionRevision
+        source.sessionFormStore.transferSession(sessionID, to: sessionFormStore)
     }
 
     func applyV2Interactions(

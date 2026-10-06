@@ -25,6 +25,7 @@ final class ChatWindowContext: ObservableObject {
     @Published private(set) var session: OpenCodeSession
     @Published private(set) var owner: DirectoryStore
     @Published private(set) var navigationRevision: UInt = 0
+    @Published private(set) var locationRevision: UInt = 0
     @Published private(set) var isLoading = false
     @Published private(set) var isClosed = false
     @Published var errorMessage: String?
@@ -60,6 +61,9 @@ final class ChatWindowContext: ObservableObject {
         }.store(in: &observations)
         model.directoryStoreRegistry.$generation.dropFirst().sink { [weak self] _ in self?.close() }
             .store(in: &observations)
+        model.directoryStoreRegistry.sessionRelocations.sink { [weak self] relocation in
+            self?.follow(relocation)
+        }.store(in: &observations)
         parentContext?.$navigationRevision.dropFirst().sink { [weak self] _ in self?.close() }
             .store(in: &observations)
         model.windowSessionInterests[id] = session.id
@@ -77,7 +81,7 @@ final class ChatWindowContext: ObservableObject {
             && (parentContext?.isCurrent ?? true) && parentContext?.navigationRevision == parentNavigationRevision
     }
 
-    var contextID: String { "\(connectionID)|\(registryGeneration)|\(id)|\(navigationRevision)" }
+    var contextID: String { "\(connectionID)|\(registryGeneration)|\(id)|\(navigationRevision)|\(locationRevision)" }
     var appearanceStore: AppCustomizationStore { model.appearanceStore(for: connection) }
 
     func saveDraft() {
@@ -169,7 +173,8 @@ final class ChatWindowContext: ObservableObject {
                     try await self.model.loadMessages(for: session, prefetchToolDetails: false,
                         refreshTodos: false, presentationIndependent: true, canonicalOwner: owner)
                 }
-                guard !Task.isCancelled, self.isCurrent, self.navigationRevision == revision else { return }
+                guard !Task.isCancelled, self.isCurrent, self.navigationRevision == revision,
+                      self.session.directory == session.directory, self.session.workspaceID == session.workspaceID else { return }
                 if self.model.connectionStore.apiProfile == .v2 {
                     await self.model.hydrateV2Interactions(for: session)
                 } else {
@@ -207,6 +212,34 @@ final class ChatWindowContext: ObservableObject {
         formEditors.removeAll()
         model.windowSessionInterests[id] = nil
         model.updateEventInterestSnapshot()
+    }
+
+    private func follow(_ relocation: DirectoryStoreRegistry.SessionRelocation) {
+        guard !isClosed, model.backendConnection?.id == connectionID,
+              model.directoryStoreRegistry.generation == registryGeneration,
+              session.id == relocation.session.id,
+              session.directory == relocation.previous.directory,
+              session.workspaceID == relocation.previous.workspaceID else { return }
+        hydration?.cancel()
+        hydration = nil
+        hydrationID = UUID()
+        isLoading = false
+        if owner !== relocation.owner {
+            let oldKey = ObjectIdentifier(owner.sessionFormStore)
+            if let editor = formEditors.removeValue(forKey: oldKey) {
+                editor.rebind(to: relocation.owner.sessionFormStore)
+                formEditors[ObjectIdentifier(relocation.owner.sessionFormStore)] = editor
+            }
+        }
+        locationRevision &+= 1
+        session = relocation.session
+        owner = relocation.owner
+        history = history.map { $0.id == session.id ? session : $0 }
+        switcherCandidates = []
+        switcherTarget = nil
+        sessionSwitcherPresentation = nil
+        mcpStore.reset()
+        browser.selectContext(connectionID: connectionID, projectID: session.projectID, directory: session.directory)
     }
 }
 

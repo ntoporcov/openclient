@@ -411,7 +411,7 @@ final class SessionListFacade: ObservableObject {
             showsWorkspaces: showsWorkspaces,
             workspaceSections: showsWorkspaces
                 ? workspaceSections(directories: workspaceDirectories, excluding: pinnedIDSet,
-                    ownerBySessionID: ownerBySessionID)
+                    ownerBySessionID: ownerBySessionID, canonicalSessionByID: canonicalSessionByID)
                 : [],
             hasMoreSessions: !showsWorkspaces && viewModel.directoryStore.hasMoreSessions,
             errorMessage: isScreenshotScene ? nil : viewModel.errorMessage,
@@ -750,7 +750,8 @@ final class SessionListFacade: ObservableObject {
     private func workspaceSections(
         directories: [String],
         excluding pinnedIDSet: Set<String>,
-        ownerBySessionID: [String: DirectoryStore]
+        ownerBySessionID: [String: DirectoryStore],
+        canonicalSessionByID: [String: OpenCodeSession]
     ) -> [WorkspaceSection] {
         directories.map { directory in
             let key = viewModel.workspacePageKey(directory: directory)
@@ -759,7 +760,8 @@ final class SessionListFacade: ObservableObject {
             let managed = key.flatMap { viewModel.projectStore.worktreeInventories[$0.inventory] }?
                 .contains { $0.directory == directory && $0.isManaged } == true
             let canonical = viewModel.directoryStoreRegistry.existingStore(for: directory)?.sessions ?? []
-            let scopedSessions = viewModel.sessionListStore.workspacePageSessions(state.sessions, applying: canonical)
+            let located = state.sessions.map { canonicalSessionByID[$0.id] ?? $0 }
+            let scopedSessions = viewModel.sessionListStore.workspacePageSessions(located, applying: canonical)
             let sessions = scopedSessions.filter {
                 $0.directory == directory && $0.workspaceID == key?.inventory.workspaceID
                     && $0.isRootSession && !$0.isArchived && !pinnedIDSet.contains($0.id)

@@ -1224,11 +1224,11 @@ final class V2SessionWorkflowTests: XCTestCase {
         }
     }
 
-    private func makeModel() -> AppViewModel {
+    private func makeModel(version: String = "test") -> AppViewModel {
         let model = AppViewModel()
         model.localCacheRepository = NoOpOpenCodeLocalCacheRepository()
         model.config = .init(baseURL: "https://v2-session-workflows.invalid", apiPreference: .v2)
-        model.connectionStore.applySuccessfulV2Connection(version: "test", healthy: true)
+        model.connectionStore.applySuccessfulV2Connection(version: version, healthy: true)
         _ = try? model.requireBackendConnection()
         #if DEBUG
         model.commerceFacade.debugEntitlementOverride = .unlocked
@@ -1288,6 +1288,235 @@ final class V2SessionWorkflowTests: XCTestCase {
         let stale = await model.chatFacade.moveSession(scope: scope, directory: "/destination", store: store)
         XCTAssertFalse(stale)
         XCTAssertEqual(posts, 1)
+    }
+
+    func testLiveSessionMoveKeepsOpenChatAndWindowsWithDraftsAndTranscript() throws {
+        for destination in ["/repo/worktree", "/repo"] {
+            let model = makeModel()
+            defer { model.stopEventStream() }
+            let session = Self.session(id: "ses_move", directory: "/repo")
+            let source = model.directoryStore
+            source.insertV2Session(session)
+            _ = model.beginSessionNavigation(session)
+            let message = OpenCodeMessageEnvelope.local(role: "assistant", text: "Before move", messageID: "msg_before", sessionID: session.id)
+            XCTAssertTrue(model.chatStore.applyInitialV2Transcript([message], olderCursor: nil, sessionID: session.id))
+            source.applyV2Messages([message], forSessionID: session.id)
+            source.applySessionStatus("busy", forSessionID: session.id)
+            let window = ChatWindowContext(model: model, connection: try model.requireBackendConnection(), session: session, owner: source)
+            defer { window.close() }
+            let facade = ChatFacade(viewModel: model, windowContext: window)
+            model.composerStore.draftMessage = "Root draft"
+            window.composer.draftMessage = "Window draft"
+            let moved = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from:
+                #"{"type":"session.moved","location":{"directory":"/repo"},"data":{"sessionID":"ses_move","location":{"directory":"\#(destination)","workspaceID":"wrk_destination"},"projectID":"proj_repo"}}"#))
+
+            model.handleV2Event(moved)
+
+            let owner = try XCTUnwrap(model.directoryStoreRegistry.ownerStore(forSessionID: session.id))
+            XCTAssertEqual(model.selectedSession?.id, session.id)
+            XCTAssertEqual(model.selectedSession?.directory, destination)
+            XCTAssertEqual(model.selectedSession?.workspaceID, "wrk_destination")
+            XCTAssertTrue(model.directoryStore === owner)
+            XCTAssertTrue(window.isCurrent)
+            XCTAssertTrue(window.owner === owner)
+            XCTAssertEqual(facade.selectedSession?.directory, destination)
+            XCTAssertEqual(facade.presentationMessages, [message])
+            XCTAssertEqual(model.chatFacade.presentationMessages, [message])
+            XCTAssertEqual(model.chatStore.preparedSessionID, session.id)
+            XCTAssertEqual(owner.sessionStatuses[session.id], "busy")
+            XCTAssertEqual(model.composerStore.draftMessage, "Root draft")
+            XCTAssertEqual(window.composer.draftMessage, "Window draft")
+            if owner !== source {
+                XCTAssertFalse(source.sessions.contains { $0.id == session.id })
+            }
+            for type in ["session.text.started", "session.text.delta"] {
+                model.handleV2Event(try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from:
+                    #"{"type":"\#(type)","location":{"directory":"\#(destination)","workspaceID":"wrk_destination"},"data":{"sessionID":"ses_move","assistantMessageID":"msg_after","ordinal":0,"delta":"After move"}}"#)))
+            }
+            for presentation in [model.chatFacade.presentationMessages, facade.presentationMessages] {
+                XCTAssertEqual(presentation.first(where: { $0.id == "msg_after" })?.parts.first?.text, "After move")
+            }
+        }
+    }
+
+    func testReconciliationFollowsMovedSessionWithoutLosingWindowOrRootSelection() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let session = Self.session(id: "ses_move", directory: "/repo")
+        let source = model.directoryStore
+        source.insertV2Session(session)
+        _ = model.beginSessionNavigation(session)
+        let window = ChatWindowContext(model: model, connection: try model.requireBackendConnection(), session: session, owner: source)
+        defer { window.close() }
+        model.composerStore.draftMessage = "Root draft"
+        window.composer.draftMessage = "Window draft"
+        V2SessionWorkflowURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/api/session/ses_move":
+                return (200, #"{"data":{"id":"ses_move","projectID":"proj_repo","location":{"directory":"/repo/worktree"},"time":{"created":1,"updated":2}}}"#)
+            case "/api/session/ses_move/permission", "/api/session/ses_move/form":
+                return (200, #"{"data":[]}"#)
+            case "/api/session/ses_move/message":
+                return (200, #"{"data":[],"cursor":{}}"#)
+            default: return (503, #"{"message":"Not configured"}"#)
+            }
+        }
+        model.directoryStoreRegistry.requestV2Reconciliation(sessionID: session.id)
+        model.scheduleV2TimelineReconciliation(immediate: true)
+        await model.v2TimelineReconcileTask?.value
+
+        XCTAssertEqual(model.selectedSession?.id, session.id)
+        XCTAssertEqual(model.selectedSession?.directory, "/repo/worktree")
+        XCTAssertTrue(window.isCurrent)
+        XCTAssertEqual(window.session.directory, "/repo/worktree")
+        XCTAssertTrue(window.owner === model.directoryStore)
+        XCTAssertEqual(model.composerStore.draftMessage, "Root draft")
+        XCTAssertEqual(window.composer.draftMessage, "Window draft")
+    }
+
+    func testBackgroundMovePreservesRootSelectionAndWindowFormDraftAcrossReturnMove() throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let root = Self.session(id: "ses_root", directory: "/repo")
+        let session = Self.session(id: "ses_background", directory: "/repo")
+        let source = model.directoryStore
+        source.insertV2Session(root)
+        source.insertV2Session(session)
+        _ = model.beginSessionNavigation(root)
+        let window = ChatWindowContext(model: model, connection: try model.requireBackendConnection(), session: session, owner: source)
+        defer { window.close() }
+        let form = try JSONDecoder().decode(OpenCodeV2Form.self, from: Data(
+            #"{"id":"frm_move","sessionID":"ses_background","title":"Input","fields":[{"key":"answer","type":"string"}]}"#.utf8)).backendForm
+        source.sessionFormStore.upsert(form)
+        let editor = window.formEditor(for: source.sessionFormStore)
+        editor.setValue(.string("Keep this answer"), fieldID: "answer", for: form.key)
+        for (origin, destination) in [("/repo", "/repo/worktree"), ("/repo/worktree", "/repo")] {
+            let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from:
+                #"{"type":"session.moved","location":{"directory":"\#(origin)"},"data":{"sessionID":"ses_background","location":{"directory":"\#(destination)"},"projectID":"proj_repo"}}"#))
+            model.handleV2Event(event)
+            XCTAssertEqual(model.selectedSession?.id, root.id)
+            XCTAssertTrue(model.directoryStore === source)
+            XCTAssertTrue(window.isCurrent)
+            XCTAssertEqual(window.session.directory, destination)
+            let currentEditor = window.formEditor(for: window.owner.sessionFormStore)
+            XCTAssertTrue(currentEditor === editor)
+            XCTAssertEqual(currentEditor.forms[form.key], form)
+            XCTAssertEqual(currentEditor.state(for: form.key).draft["answer"], .string("Keep this answer"))
+        }
+    }
+
+    func testReconnectInventoryRelocatesGlobalListedOpenSession() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let session = Self.session(id: "ses_move", directory: "/repo")
+        let source = model.directoryStoreRegistry.activate(nil)
+        source.insertV2Session(session)
+        source.selectedSession = session
+        let window = ChatWindowContext(model: model, connection: try model.requireBackendConnection(), session: session, owner: source)
+        defer { window.close() }
+        let moved = #"{"id":"ses_move","projectID":"global","location":{"directory":"/repo/worktree"},"time":{"created":1,"updated":2}}"#
+        V2SessionWorkflowURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/api/location": return (200, #"{"directory":"/repo","project":{"id":"global","directory":"/","canonical":"/"}}"#)
+            case "/api/project": return (200, #"[{"id":"global","canonical":"/","time":{"created":1,"updated":1},"sandboxes":[]}]"#)
+            case "/api/session":
+                let directory = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "directory" }?.value
+                return (200, #"{"data":[\#(directory == "/repo" ? "" : moved)],"cursor":{}}"#)
+            case "/api/session/active": return (200, #"{"data":{}}"#)
+            case "/api/permission/request": return (200, #"{"data":[]}"#)
+            case "/api/form": return (200, #"{"location":{"directory":"/repo"},"data":[]}"#)
+            case "/api/session/ses_move": return (200, #"{"data":\#(moved)}"#)
+            case "/api/session/ses_move/permission", "/api/session/ses_move/form": return (200, #"{"data":[]}"#)
+            case "/api/session/ses_move/message": return (200, #"{"data":[],"cursor":{}}"#)
+            default: return (503, #"{"message":"Not configured"}"#)
+            }
+        }
+        model.directoryStoreRegistry.requestV2Reconciliation(reconnect: true)
+        model.scheduleV2TimelineReconciliation(immediate: true)
+        await model.v2TimelineReconcileTask?.value
+
+        XCTAssertEqual(model.selectedSession?.id, session.id)
+        XCTAssertEqual(model.selectedSession?.directory, "/repo/worktree")
+        XCTAssertTrue(window.isCurrent)
+        XCTAssertEqual(window.session.directory, "/repo/worktree")
+        XCTAssertTrue(source.sessions.isEmpty)
+    }
+
+    func testStalePreMoveReadCannotUndoMoveOrStealNewSelection() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        let session = Self.session(id: "ses_move", directory: "/repo")
+        model.directoryStore.insertV2Session(session)
+        _ = model.beginSessionNavigation(session)
+        let started = expectation(description: "Old location read suspended")
+        var release: CheckedContinuation<Void, Never>?
+        var reads = 0
+        V2SessionWorkflowURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/api/session/ses_move":
+                reads += 1
+                let directory = reads == 1 ? "/repo" : "/repo/worktree"
+                if reads == 1 { await withCheckedContinuation { release = $0; started.fulfill() } }
+                return (200, #"{"data":{"id":"ses_move","projectID":"global","location":{"directory":"\#(directory)"},"time":{"created":1,"updated":2}}}"#)
+            case "/api/session/ses_move/permission", "/api/session/ses_move/form": return (200, #"{"data":[]}"#)
+            case "/api/session/ses_move/message": return (200, #"{"data":[],"cursor":{}}"#)
+            default: return (503, #"{"message":"Not configured"}"#)
+            }
+        }
+        model.directoryStoreRegistry.requestV2Reconciliation(sessionID: session.id)
+        model.scheduleV2TimelineReconciliation(immediate: true)
+        await fulfillment(of: [started], timeout: 3)
+        model.handleV2Event(try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from:
+            #"{"type":"session.moved","location":{"directory":"/repo"},"data":{"sessionID":"ses_move","location":{"directory":"/repo/worktree"},"projectID":"global"}}"#)))
+        _ = model.beginSessionNavigation(Self.session(id: "ses_other", directory: "/other"))
+        release?.resume()
+        await model.v2TimelineReconcileTask?.value
+
+        XCTAssertEqual(reads, 2)
+        XCTAssertEqual(model.directoryStoreRegistry.session(matching: session.id)?.directory, "/repo/worktree")
+        XCTAssertEqual(model.selectedSession?.id, "ses_other")
+        XCTAssertEqual(model.directoryStoreRegistry.activeKey, "/other")
+    }
+
+    func testMoveDiscoversDestinationAndRemovesStaleSourceWorkspaceRow() async throws {
+        let model = makeModel(version: "2.0.16")
+        defer { model.stopEventStream() }
+        let project = OpenCodeProject(id: "proj_repo", worktree: "/repo", vcs: "git", name: "Repo", sandboxes: [], icon: nil, time: nil)
+        model.projects = [project]
+        model.currentProject = project
+        let session = OpenCodeSession(id: "ses_move", title: "Moving", workspaceID: nil, directory: "/repo", projectID: project.id, parentID: nil)
+        model.directoryStore.insertV2Session(session)
+        let key = try XCTUnwrap(model.worktreeInventoryKey(for: project))
+        let inventory = model.projectStore.beginWorktreeInventoryRequest(for: key)
+        XCTAssertTrue(model.projectStore.applyWorktreeInventory([.init(directory: "/repo", kind: .root)], for: key, requestID: inventory))
+        let pageKey = BackendWorkspacePageKey(inventory: key, directory: "/repo")
+        let page = try XCTUnwrap(model.sessionListStore.beginWorkspacePage(pageKey, replacing: true))
+        XCTAssertTrue(model.sessionListStore.finishWorkspacePage(pageKey, requestID: page, sessions: [session], nextCursor: nil, limit: 50, hasMore: false))
+        // Test the sidebar even when the moved session was not open in the root chat.
+        model.projectWorkspacesEnabledByScope["server|\(model.config.recentServerID)|\(project.worktree)"] = true
+        var inventoryReads = 0
+        V2SessionWorkflowURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/api/session/ses_move":
+                return (200, #"{"data":{"id":"ses_move","projectID":"proj_repo","location":{"directory":"/repo/worktree"},"time":{"created":1,"updated":2}}}"#)
+            case "/api/session/ses_move/permission", "/api/session/ses_move/form": return (200, #"{"data":[]}"#)
+            case "/api/session/ses_move/message": return (200, #"{"data":[],"cursor":{}}"#)
+            case "/api/worktree":
+                inventoryReads += 1
+                return (200, #"[{"directory":"/repo"},{"directory":"/repo/worktree","strategy":"git"}]"#)
+            default: return (503, #"{"message":"Not configured"}"#)
+            }
+        }
+        let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from:
+            #"{"type":"session.moved","location":{"directory":"/repo"},"data":{"sessionID":"ses_move","location":{"directory":"/repo/worktree"},"projectID":"proj_repo"}}"#))
+        model.handleV2Event(event)
+        await model.v2TimelineReconcileTask?.value
+
+        XCTAssertEqual(inventoryReads, 1)
+        XCTAssertEqual(model.workspaceDirectories(), ["/repo", "/repo/worktree"])
+        let sections = model.sessionListFacade.makeSnapshot().workspaceSections
+        XCTAssertEqual(sections.first(where: { $0.directory == "/repo/worktree" })?.rows.map(\.id), [session.id])
+        XCTAssertEqual(sections.first(where: { $0.directory == "/repo" })?.rows.map(\.id), [])
     }
 
     func testSessionToolsIgnoresSupersededSearchResultsAndSurfacesDiffErrors() async {

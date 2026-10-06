@@ -354,14 +354,13 @@ extension AppViewModel {
         } else {
             if event.type == "session.moved", let previous = directoryStoreRegistry.session(matching: sessionID) {
                 owner.insertV2Session(previous)
-                for old in directoryStoreRegistry.stores(containingSessionID: sessionID) where old !== owner {
-                    owner.applyV2Messages(old.syncState.messageEnvelopes(forSessionID: sessionID), forSessionID: sessionID)
-                    if let status = old.sessionStatuses[sessionID] { owner.applySessionStatus(status, forSessionID: sessionID) }
-                    old.removeV2Session(sessionID: sessionID)
+                _ = owner.applyV2Event(event)
+                if let moved = owner.sessions.first(where: { $0.id == sessionID }) {
+                    applyV2SessionRelocation(moved, from: previous, to: owner, followsSelection: wasSelected)
                 }
-                if wasSelected, owner !== directoryStore { chatStore.clearActiveTranscript() }
+            } else {
+                _ = owner.applyV2Event(event)
             }
-            _ = owner.applyV2Event(event)
             if wasSelected, event.type == "session.execution.failed" {
                 errorMessage = event.data.objectValue?["error"]?.objectValue?["message"]?.literalStringValue
             }
@@ -510,7 +509,18 @@ extension AppViewModel {
                 let page = try await client.listV2Sessions(projectID: projectID, directory: directory, roots: false)
                 guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
                 let unchanged = directoryStoreRegistry.unchangedV2Sessions(page.sessions, since: snapshot)
-                store.applyV2DiscoveredSessions(unchanged, ifUnchangedSince: sessionsBeforeRequest)
+                var discovered: [OpenCodeSession] = []
+                for session in unchanged {
+                    if let previous = directoryStoreRegistry.session(matching: session.id),
+                       previous.directory != session.directory || previous.workspaceID != session.workspaceID {
+                        let owner = directoryStoreRegistry.targetStore(forV2Session: session)
+                        applyV2SessionRelocation(session, from: previous, to: owner, followsSelection: selectedSession?.id == session.id)
+                        directoryStoreRegistry.requestV2Reconciliation(sessionID: session.id)
+                    } else {
+                        discovered.append(session)
+                    }
+                }
+                store.applyV2DiscoveredSessions(discovered, ifUnchangedSince: sessionsBeforeRequest)
                 for session in unchanged {
                     guard isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation else { return }
                     await funAndGamesFacade.reconcileSetup(for: session.id)
@@ -547,26 +557,43 @@ extension AppViewModel {
         }
     }
 
+    private func applyV2SessionRelocation(_ session: OpenCodeSession, from previous: OpenCodeSession,
+                                          to owner: DirectoryStore, followsSelection: Bool) {
+        if followsSelection { prepareForDirectoryStoreActivation() }
+        directoryStoreRegistry.relocateV2Session(session, from: previous, to: owner)
+        if followsSelection {
+            // This is the same chat, not a fresh selection: keep its transcript and composer intact.
+            sessionNavigationGeneration &+= 1
+            selectedDirectory = directoryStoreRegistry.key(for: owner).flatMap(DirectoryStoreRegistry.directory(forKey:))
+            if let project = projects.first(where: { $0.id == session.projectID }), currentProject?.id != project.id {
+                currentProject = project
+            }
+            sessionInteractionStore.applySelectedSession(sessionID: session.id, sessions: owner.sessions, syncState: owner.syncState)
+        }
+        sessionListFacade.invalidateWorkspaceSnapshot()
+    }
+
     private func reconcileV2KnownSession(sessionID: String) async {
         let client = client
         let registryGeneration = directoryStoreRegistry.generation
         let originalOwner = directoryStoreRegistry.ownerStore(forSessionID: sessionID)
         let originalSession = directoryStoreRegistry.session(matching: sessionID)
-        let lifecycleRevision = directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID)
+        var lifecycleRevision = directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID)
         do {
             let session = try await client.getV2Session(sessionID: sessionID)
             guard !Task.isCancelled, directoryStoreRegistry.generation == registryGeneration,
                   directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID) == lifecycleRevision,
                   directoryStoreRegistry.session(matching: sessionID) == originalSession else { return }
             let owner = directoryStoreRegistry.targetStore(forV2Session: session)
-            owner.insertV2Session(session)
+            if let originalSession, originalOwner !== owner
+                || originalSession.directory != session.directory || originalSession.workspaceID != session.workspaceID {
+                applyV2SessionRelocation(session, from: originalSession, to: owner, followsSelection: selectedSession?.id == sessionID)
+                lifecycleRevision = directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID)
+            } else {
+                owner.insertV2Session(session)
+            }
             if let parent = session.parentID { handleBackendEvent(.actionSignal(.sessionParent(sessionID: session.id, parentID: parent))) }
             applyV2SessionConfiguration(session)
-            if let originalOwner, originalOwner !== owner {
-                if selectedSession?.id == sessionID { chatStore.clearActiveTranscript() }
-                if let status = originalOwner.sessionStatuses[sessionID] { owner.applySessionStatus(status, forSessionID: sessionID) }
-                originalOwner.removeV2Session(sessionID: sessionID)
-            }
             let permissionRevision = owner.permissionRevision
             let questionRevision = owner.questionRevision
             do {
@@ -590,6 +617,13 @@ extension AppViewModel {
                    directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID) == lifecycleRevision,
                    owner.sessions.first(where: { $0.id == sessionID }) == session else { return }
             await reconcileV2TimelineFromEvent(sessionID: sessionID)
+            guard !Task.isCancelled, directoryStoreRegistry.generation == registryGeneration,
+                  directoryStoreRegistry.v2LifecycleRevision(sessionID: sessionID) == lifecycleRevision else { return }
+            // A move can arrive without a worktree inventory event (including moves missed offline).
+            if let project = projects.first(where: { $0.id == session.projectID }),
+               let directory = session.directory, !workspaceDirectories(for: project).contains(directory) {
+                await refreshProjectWorktreeInventory(projectID: project.id)
+            }
         } catch OpenCodeAPIError.httpError(404, _) {
             // Only GET Session.Info proves deletion. A missing subresource does not.
             guard !Task.isCancelled, directoryStoreRegistry.generation == registryGeneration,

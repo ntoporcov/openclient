@@ -486,6 +486,8 @@ Preferred order of operations:
 
 ## Device Install Workflow
 
+Assume Xcode is already selected on this machine. Verify with `xcode-select -p` and `xcodebuild -version` if needed; do not run `xcodes select` unless explicitly asked, because it prompts for an administrator password even when the correct Xcode is already selected.
+
 This project is meant to be tested frequently on your iPhone.
 
 ### Requirements
