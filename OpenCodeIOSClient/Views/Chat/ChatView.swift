@@ -854,14 +854,10 @@ enum ChatTranscriptContinuity {
         return newIDs.difference(from: oldIDs)
     }
 
-    static func requestedCount(messages: [OpenCodeMessageEnvelope], additional: Int, initial: Int, fallback: Int) -> Int {
-        #if targetEnvironment(macCatalyst)
-        return min(messages.count, initial + additional)
-        #else
-        let base = OpenCodeChatTranscriptWindowing.messageCountIncludingLatestUserRounds(
-            1, fallbackMessageCount: fallback, in: messages.map(\.info))
-        return min(messages.count, min(base, initial) + additional)
-        #endif
+    static func requestedCount(totalCount: Int, additional: Int, initial: Int = 24) -> Int {
+        // A short latest turn must not shrink the opening window of a long thread.
+        // UIKit can expand this bounded seed while hidden if the viewport needs more.
+        min(totalCount, initial + additional)
     }
 }
 
@@ -2406,8 +2402,6 @@ struct ChatView: View {
 
     @State private var selectedInstructionTab: AppleIntelligenceInstructionTab = .user
 
-    private let initialMessageWindowSize = 12
-    private let fallbackMessageWindowSize = 3
     private let olderMessageWindowSize = 12
     private let bottomRefreshThreshold: CGFloat = 72
     private let bottomRefreshIndicatorHeight: CGFloat = 34
@@ -4184,8 +4178,7 @@ struct ChatView: View {
             let selection = GroupedTranscriptWindowing.select(
                 totalCount: allMessages.count,
                 requestedCount: projected.map {
-                    ChatTranscriptContinuity.requestedCount(messages: $0, additional: additionalLeadingMessageCount,
-                        initial: initialMessageWindowSize, fallback: fallbackMessageWindowSize)
+                    ChatTranscriptContinuity.requestedCount(totalCount: $0.count, additional: additionalLeadingMessageCount)
                 } ?? transcriptRequestedMessageCount,
                 batchSize: olderMessageWindowSize, rowRanges: ranges)
             window = OpenCodeChatTranscriptWindow(messages: Array(allMessages.suffix(selection.messageCount)),
@@ -4194,8 +4187,7 @@ struct ChatView: View {
             window = OpenCodeChatTranscriptWindowing.window(
                 totalCount: projected?.count ?? chatSourceMessageCount,
                 requestedCount: projected.map {
-                    ChatTranscriptContinuity.requestedCount(messages: $0, additional: additionalLeadingMessageCount,
-                        initial: initialMessageWindowSize, fallback: fallbackMessageWindowSize)
+                    ChatTranscriptContinuity.requestedCount(totalCount: $0.count, additional: additionalLeadingMessageCount)
                 } ?? transcriptRequestedMessageCount,
                 batchSize: olderMessageWindowSize,
                 loadSuffix: { count in projected.map { Array($0.suffix(count)) } ?? transcriptSuffix(count) },
@@ -4242,24 +4234,7 @@ struct ChatView: View {
     }
 
     private var transcriptRequestedMessageCount: Int {
-        let baseCount: Int
-        if directoryStore.syncStore.messageCount(forSessionID: sessionID) > 0 {
-            baseCount = directoryStore.syncStore.messageCountIncludingLatestUserRounds(
-                1,
-                fallbackMessageCount: fallbackMessageWindowSize,
-                forSessionID: sessionID
-            )
-        } else {
-            baseCount = OpenCodeChatTranscriptWindowing.messageCountIncludingLatestUserRounds(
-                1,
-                fallbackMessageCount: fallbackMessageWindowSize,
-                in: sessionScopedFallbackMessages.map(\.info)
-            )
-        }
-        return min(
-            chatSourceMessageCount,
-            min(baseCount, initialMessageWindowSize) + additionalLeadingMessageCount
-        )
+        ChatTranscriptContinuity.requestedCount(totalCount: chatSourceMessageCount, additional: additionalLeadingMessageCount)
     }
 
     private func transcriptSuffix(_ count: Int) -> [OpenCodeMessageEnvelope] {

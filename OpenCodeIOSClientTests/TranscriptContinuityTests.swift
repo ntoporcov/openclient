@@ -318,11 +318,29 @@ final class TranscriptContinuityTests: XCTestCase {
         let cleared = SubmissionTranscriptPresentation.messages(canonical: history + [local], recoveries: [])
         for additional in [0, 12, 40] {
             let windows = [projected, confirmed, cleared].map { messages in
-                Array(messages.suffix(ChatTranscriptContinuity.requestedCount(messages: messages, additional: additional, initial: 12, fallback: 12))).map(\.id)
+                Array(messages.suffix(ChatTranscriptContinuity.requestedCount(totalCount: messages.count, additional: additional))).map(\.id)
             }
             XCTAssertEqual(windows[0], windows[1])
             XCTAssertEqual(windows[1], windows[2])
         }
+    }
+
+    func testLongThreadOpeningIncludesEarlierTurnsAndKeepsPaginationBounded() {
+        let messages = (0..<100).map {
+            OpenCodeMessageEnvelope.local(role: $0.isMultiple(of: 2) ? "user" : "assistant",
+                text: "Short message", messageID: "m\($0)", sessionID: "s")
+        }
+        func window(additional: Int) -> OpenCodeChatTranscriptWindow {
+            OpenCodeChatTranscriptWindowing.window(from: messages,
+                requestedCount: ChatTranscriptContinuity.requestedCount(totalCount: messages.count, additional: additional),
+                batchSize: 12, hasDisplayableContent: { !$0.isEmpty })
+        }
+        let opening = window(additional: 0)
+        XCTAssertEqual(opening.messages.first?.id, "m76", "Seed a full window even when the last turn is only two messages")
+        XCTAssertEqual(opening.messages.last?.id, "m99")
+        XCTAssertEqual(opening.hiddenMessageCount, 76)
+        XCTAssertEqual(window(additional: 12).messages.first?.id, "m64", "Scrolling still expands by one bounded page")
+        XCTAssertEqual(ChatTranscriptContinuity.requestedCount(totalCount: 3, additional: 0), 3)
     }
 
     func testInitialBottomRequestWaitsForUsableViewportWithoutAnotherDataUpdate() async throws {
