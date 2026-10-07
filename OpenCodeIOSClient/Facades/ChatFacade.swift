@@ -222,6 +222,19 @@ final class ChatFacade: ObservableObject {
         return chatStore.withoutRecoveryMessages(messageSource(for: session), sessionID: session.id)
     }
 
+    /// `presentationMessages.count` without assembling every envelope. ChatView's body reads
+    /// this on each pass, and the full projection is O(messages + parts) per call.
+    var presentationMessageCount: Int {
+        if let windowContext {
+            guard windowContext.isCurrent else { return 0 }
+            let sessionID = windowContext.session.id
+            let messages = windowContext.owner.syncState.messagesBySessionID[sessionID] ?? []
+            return chatStore.countWithoutRecoveryMessages(ids: messages.lazy.map(\.id), sessionID: sessionID)
+        }
+        guard let session = selectedSession else { return 0 }
+        return chatStore.countWithoutRecoveryMessages(ids: messageSourceIDs(for: session), sessionID: session.id)
+    }
+
     var isLoadingPresentation: Bool { windowContext?.isLoading ?? chatStore.isLoadingSelectedSession }
     var presentationErrorMessage: String? {
         if let windowContext { return windowContext.errorMessage }
@@ -448,10 +461,6 @@ final class ChatFacade: ObservableObject {
     var activeChatSessionID: String? {
         if let windowContext { return windowContext.isCurrent ? windowContext.session.id : nil }
         return viewModel.activeChatSessionID
-    }
-
-    var showsChatActivityShimmer: Bool {
-        appCustomizationStore.showsChatActivityShimmer
     }
 
     var isReadOnly: Bool {
@@ -1989,23 +1998,60 @@ final class ChatFacade: ObservableObject {
         configurationTasksByConnectionID.removeAll()
     }
 
-    func messageSource(for session: OpenCodeSession) -> [OpenCodeMessageEnvelope] {
+    private enum MessageSourceSelection {
+        case windowSync(DirectoryStore)
+        case preparedChatStore
+        case sync(DirectoryStore)
+        case cached([OpenCodeMessageEnvelope])
+        case selectedLegacy
+        case empty
+    }
+
+    private func messageSourceSelection(for session: OpenCodeSession) -> MessageSourceSelection {
         let directoryStore = directoryStore(forSessionID: session.id)
-        if windowContext != nil { return directoryStore.syncState.messageEnvelopes(forSessionID: session.id) }
+        if windowContext != nil { return .windowSync(directoryStore) }
         if directoryStore.selectedSession?.id == session.id,
            viewModel.chatStore.preparedSessionID == session.id,
            viewModel.chatStore.messages.contains(where: {
                $0.info.sessionID == session.id && ($0.info.role ?? "").lowercased() == "user"
            }) {
+            return .preparedChatStore
+        }
+        if directoryStore.syncState.messageCount(forSessionID: session.id) > 0 { return .sync(directoryStore) }
+        if let cachedMessages = viewModel.cachedMessagesBySessionID[session.id], !cachedMessages.isEmpty { return .cached(cachedMessages) }
+        if directoryStore.selectedSession?.id == session.id { return .selectedLegacy }
+        return .empty
+    }
+
+    func messageSource(for session: OpenCodeSession) -> [OpenCodeMessageEnvelope] {
+        switch messageSourceSelection(for: session) {
+        case let .windowSync(directoryStore), let .sync(directoryStore):
+            return directoryStore.syncState.messageEnvelopes(forSessionID: session.id)
+        case .preparedChatStore:
             return viewModel.chatStore.messages.filter { $0.info.sessionID == session.id }
-        }
-        let syncedMessages = directoryStore.syncState.messageEnvelopes(forSessionID: session.id)
-        if !syncedMessages.isEmpty { return syncedMessages }
-        if let cachedMessages = viewModel.cachedMessagesBySessionID[session.id], !cachedMessages.isEmpty { return cachedMessages }
-        if directoryStore.selectedSession?.id == session.id {
+        case let .cached(cachedMessages):
+            return cachedMessages
+        case .selectedLegacy:
             return viewModel.messages.filter { $0.info.sessionID == session.id }
+        case .empty:
+            return []
         }
-        return []
+    }
+
+    /// Message IDs from the same source `messageSource(for:)` would use, without assembling parts.
+    private func messageSourceIDs(for session: OpenCodeSession) -> [String] {
+        switch messageSourceSelection(for: session) {
+        case let .windowSync(directoryStore), let .sync(directoryStore):
+            return (directoryStore.syncState.messagesBySessionID[session.id] ?? []).map(\.id)
+        case .preparedChatStore:
+            return viewModel.chatStore.messages.compactMap { $0.info.sessionID == session.id ? $0.id : nil }
+        case let .cached(cachedMessages):
+            return cachedMessages.map(\.id)
+        case .selectedLegacy:
+            return viewModel.messages.compactMap { $0.info.sessionID == session.id ? $0.id : nil }
+        case .empty:
+            return []
+        }
     }
 
     private func lastUserMessage(for session: OpenCodeSession) -> OpenCodeMessageEnvelope? {

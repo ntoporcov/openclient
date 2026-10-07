@@ -77,12 +77,6 @@ struct ChatAppearanceSettingsView: View {
             }
 
             Section {
-                Toggle("Show Chat Activity Shimmer", isOn: Binding(
-                    get: { store.showsChatActivityShimmer },
-                    set: { store.setShowsChatActivityShimmer($0) }
-                ))
-                .accessibilityIdentifier("configurations.chat-activity-shimmer")
-
                 Toggle("Show Tool Calls", isOn: Binding(
                     get: { store.showsToolCalls },
                     set: { store.setShowsToolCalls($0) }

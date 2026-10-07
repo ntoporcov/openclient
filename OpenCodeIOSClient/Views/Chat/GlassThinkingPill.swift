@@ -552,13 +552,17 @@ private final class GlassThinkingPillScene {
 
     func set(title: String, color: UIColor, textColor: UIColor, darkAppearance: Bool, reduceMotion: Bool,
              rotation: CGSize, isInteractive: Bool) {
-        camera.position = isInteractive ? [0, 0, 7.4] : [0.22, 0, 3]
+        // This runs on every RealityView update. Observed properties notify on every
+        // assignment, not only on change, so guard each write or the hosting SwiftUI
+        // view re-evaluates its body once per frame for the whole busy turn.
+        let cameraPosition: SIMD3<Float> = isInteractive ? [0, 0, 7.4] : [0.22, 0, 3]
+        if camera.position != cameraPosition { camera.position = cameraPosition }
         if renderedRotation != rotation {
             let orientation = simd_quatf(angle: Float(rotation.height), axis: [1, 0, 0])
                 * simd_quatf(angle: Float(rotation.width), axis: [0, 1, 0])
             toy.orientation = orientation
+            renderedRotation = rotation
         }
-        renderedRotation = rotation
         let appearanceChanged = !self.textColor.isEqual(textColor)
         self.textColor = textColor
         self.darkAppearance = darkAppearance
@@ -580,7 +584,7 @@ private final class GlassThinkingPillScene {
 
     func finishImmediately() {
         transition = nil
-        isAnimating = false
+        if isAnimating { isAnimating = false }
         barrel.orientation = simd_quatf(angle: 0, axis: [1, 0, 0])
         lettering.components.set(OpacityComponent(opacity: 1))
         replaceLettering(desiredTitle)
@@ -591,12 +595,12 @@ private final class GlassThinkingPillScene {
     private func beginIfNeeded() {
         guard transition == nil else { return }
         guard displayedTitle != desiredTitle || !currentColor.isEqual(desiredColor) else {
-            isAnimating = false
+            if isAnimating { isAnimating = false }
             return
         }
         transition = Roll(start: .now, title: desiredTitle, fromColor: currentColor,
                           toColor: desiredColor, rotates: displayedTitle != desiredTitle)
-        isAnimating = true
+        if !isAnimating { isAnimating = true }
     }
 
     // Advance inside RealityView's update pass so every frame reaches its renderer.
@@ -606,7 +610,7 @@ private final class GlassThinkingPillScene {
             updateGlow(at: date)
             updateTextShimmer(at: date)
             let facing = (toy.orientation * barrel.orientation).act(SIMD3<Float>(0, 0, 1)).z
-            lettering.components.set(OpacityComponent(opacity: min(1, max(0, facing * 4))))
+            setLetteringOpacity(min(1, max(0, facing * 4)))
         }
         guard var roll = transition else { return }
         let progress = min(1, max(0, date.timeIntervalSince(roll.start) / (roll.rotates ? 0.95 : 0.4)))
@@ -632,8 +636,17 @@ private final class GlassThinkingPillScene {
         }
     }
 
+    @ObservationIgnored private var letteringOpacity: Float = 1
+
+    private func setLetteringOpacity(_ opacity: Float) {
+        guard abs(letteringOpacity - opacity) > 0.001 else { return }
+        letteringOpacity = opacity
+        lettering.components.set(OpacityComponent(opacity: opacity))
+    }
+
     private func replaceLettering(_ title: String) {
         displayedTitle = title
+        letteringUsesShimmer = false
         let mesh = MeshResource.generateText(
             title, extrusionDepth: 0.003,
             font: .systemFont(ofSize: 0.32, weight: .medium),
@@ -651,18 +664,36 @@ private final class GlassThinkingPillScene {
         lettering.position = [0.22 - bounds.center.x * scale, -bounds.center.y * scale, 0.365]
     }
 
+    @ObservationIgnored private var shimmerInk: UnlitMaterial?
+    @ObservationIgnored private var shimmerInkIsDark: Bool?
+    @ObservationIgnored private var letteringUsesShimmer = false
+
     private func updateTextShimmer(at date: Date) {
-        var ink = UnlitMaterial()
         if pulses, let texture = darkAppearance ? Self.darkTextShimmer : Self.lightTextShimmer {
-            var sampler = MaterialParameters.Texture.Sampler()
-            sampler.modify { $0.sAddressMode = .repeat }
-            ink.color = .init(tint: .white, texture: .init(texture, sampler: sampler))
+            // Building a material and texture binding on every frame was the pill's main
+            // per-frame CPU cost. Keep one material per appearance and only move its offset.
+            var ink: UnlitMaterial
+            if let cached = shimmerInk, shimmerInkIsDark == darkAppearance {
+                ink = cached
+            } else {
+                ink = UnlitMaterial()
+                var sampler = MaterialParameters.Texture.Sampler()
+                sampler.modify { $0.sAddressMode = .repeat }
+                ink.color = .init(tint: .white, texture: .init(texture, sampler: sampler))
+                shimmerInkIsDark = darkAppearance
+            }
             ink.textureCoordinateTransform = .init(
                 offset: [Float(-date.timeIntervalSince(pulseStart) / 3.6), 0], scale: [0.45, 1])
-        } else {
+            shimmerInk = ink
+            lettering.model?.materials = [ink]
+            letteringUsesShimmer = true
+        } else if letteringUsesShimmer {
+            // replaceLettering already installs the plain ink; only swap back after a shimmer.
+            var ink = UnlitMaterial()
             ink.color = .init(tint: textColor)
+            lettering.model?.materials = [ink]
+            letteringUsesShimmer = false
         }
-        lettering.model?.materials = [ink]
     }
 
     // A single UV space across the shaped word lets the highlight travel across
@@ -706,11 +737,17 @@ private final class GlassThinkingPillScene {
 
     private func applyColor(_ color: UIColor) {
         currentColor = color
-        var material = PhysicallyBasedMaterial()
+        // Runs on every frame of a color roll. Mutating the existing material only re-uploads
+        // its changed parameters; constructing a new PhysicallyBasedMaterial each frame was
+        // the pill's largest remaining per-frame cost.
+        var material = (sphere.model?.materials.first as? PhysicallyBasedMaterial) ?? {
+            var fresh = PhysicallyBasedMaterial()
+            fresh.roughness = 0.16
+            fresh.metallic = 0.25
+            fresh.clearcoat = 1.0
+            return fresh
+        }()
         material.baseColor = .init(tint: color)
-        material.roughness = 0.16
-        material.metallic = 0.25
-        material.clearcoat = 1.0
         material.emissiveColor = .init(color: color)
         material.emissiveIntensity = darkAppearance ? 0.8 : 0.4
         sphere.model?.materials = [material]

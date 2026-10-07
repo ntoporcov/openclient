@@ -20,7 +20,7 @@ final class ConnectionAppearanceRegistryTests: XCTestCase {
 
     private var legacy: AppCustomizationPreferences {
         .init(chatBubbleStyle: .solid, accentColor: .pink,
-              showsChatActivityShimmer: false, showsToolCalls: false, showsReasoningBlocks: false,
+              showsToolCalls: false, showsReasoningBlocks: false,
               showsActivityLastUserMessage: false, isTodoStripMinimized: true,
               sessionCardStyle: .activity, composerStyle: .assistant,
               autoConnectServerID: "one", autoConnectLandingDestination: .activity)
@@ -68,7 +68,6 @@ final class ConnectionAppearanceRegistryTests: XCTestCase {
         one.setAccentColor(.teal)
         one.setShowsToolCalls(true)
         one.setShowsReasoningBlocks(true)
-        one.setShowsChatActivityShimmer(true)
         one.setShowsActivityLastUserMessage(true)
         one.setTodoStripMinimized(false)
         one.setSessionCardStyle(.compact)

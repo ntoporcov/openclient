@@ -247,8 +247,7 @@ final class ChatHeaderUITests: XCTestCase {
         let composerStyle = app.buttons["chat.appearance.composer-style"]
         if isRunningOniPad {
             XCTAssertFalse(composerStyle.exists)
-            XCTAssertTrue(app.switches["configurations.chat-activity-shimmer"].waitForExistence(timeout: 3))
-            XCTAssertTrue(app.switches["configurations.show-tool-calls"].exists)
+            XCTAssertTrue(app.switches["configurations.show-tool-calls"].waitForExistence(timeout: 3))
             XCTAssertTrue(app.switches["configurations.show-reasoning-blocks"].exists)
             capture(app, "Appearance-iPad-Composer-Style-Hidden")
             app.navigationBars["Appearance Settings"].buttons.firstMatch.tap()

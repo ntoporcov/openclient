@@ -5,6 +5,9 @@ import AppKit
 #elseif canImport(UIKit)
 import UIKit
 #endif
+#if targetEnvironment(macCatalyst)
+import ImageIO
+#endif
 
 struct OpenClientPaywallView: View {
     @ObservedObject var commerce: CommerceFacade
@@ -354,6 +357,13 @@ private struct PaywallAppIcon: View {
     }
 
     private static var appIconImage: Image? {
+#if targetEnvironment(macCatalyst)
+        // The asset-catalog app icon is compiled from Icon Composer into a layered icon stack.
+        // On Mac Catalyst, UIImage(named:) for that asset raises an Objective-C exception inside
+        // UIKit, which terminates the app as soon as the paywall appears. Decode the flattened
+        // .icns the build ships instead, so UIKit's asset lookup never runs for the icon.
+        return catalystBundleIconImage()
+#else
         let names = iconNames
         for name in names {
 #if canImport(UIKit)
@@ -367,7 +377,22 @@ private struct PaywallAppIcon: View {
 #endif
         }
         return nil
+#endif
     }
+
+#if targetEnvironment(macCatalyst)
+    private static func catalystBundleIconImage() -> Image? {
+        let fileName = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String ?? "AppIcon"
+        guard let url = Bundle.main.url(forResource: (fileName as NSString).deletingPathExtension, withExtension: "icns"),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        var largest: CGImage?
+        for index in 0..<CGImageSourceGetCount(source) {
+            guard let image = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            if image.width > (largest?.width ?? 0) { largest = image }
+        }
+        return largest.map { Image(decorative: $0, scale: 1) }
+    }
+#endif
 
     private static var iconNames: [String] {
         var names: [String] = []

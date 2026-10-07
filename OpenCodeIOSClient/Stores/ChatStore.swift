@@ -234,10 +234,18 @@ final class ChatStore: ObservableObject {
 
     /// Strip only this owner's local IDs; exact canonical evidence always wins.
     func withoutRecoveryMessages(_ messages: [OpenCodeMessageEnvelope], sessionID: String) -> [OpenCodeMessageEnvelope] {
-        messages.filter { message in
-            submissionRecoveries[message.id]?.sessionID != sessionID
-                || canonicalSubmissionSessions[message.id] == sessionID
+        messages.filter { isPresentable(messageID: $0.id, sessionID: sessionID) }
+    }
+
+    func countWithoutRecoveryMessages(ids: some Sequence<String>, sessionID: String) -> Int {
+        ids.reduce(into: 0) { count, id in
+            if isPresentable(messageID: id, sessionID: sessionID) { count += 1 }
         }
+    }
+
+    private func isPresentable(messageID: String, sessionID: String) -> Bool {
+        submissionRecoveries[messageID]?.sessionID != sessionID
+            || canonicalSubmissionSessions[messageID] == sessionID
     }
 
     var v2PromptInFlightSessionIDs: Set<String> {

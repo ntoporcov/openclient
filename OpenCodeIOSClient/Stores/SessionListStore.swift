@@ -394,14 +394,20 @@ final class SessionListStore: ObservableObject {
         }
         var seen = Set<String>()
 
-        return deduplicatedRecentSessions()
+        let candidates = deduplicatedRecentSessions()
             .filter { $0.isRootSession && !$0.isArchived && !hiddenActionSessionIDs.contains($0.id) }
+        // Sort small keys rather than whole sessions: this rebuilds on every Activity
+        // refresh during streaming, and moving large structs dominated the sort cost.
+        let orderedIndices = candidates.indices
+            .map { (index: $0, time: Self.sortTime(for: candidates[$0], preview: previews[candidates[$0].id]), id: candidates[$0].id) }
             .sorted { lhs, rhs in
-                let lhsTime = Self.sortTime(for: lhs, preview: previews[lhs.id])
-                let rhsTime = Self.sortTime(for: rhs, preview: previews[rhs.id])
-                if lhsTime != rhsTime { return lhsTime > rhsTime }
+                if lhs.time != rhs.time { return lhs.time > rhs.time }
                 return lhs.id < rhs.id
             }
+
+        // Eager on purpose: lazy compactMap re-invokes its closure, which breaks the `seen` dedupe.
+        return orderedIndices
+            .map { candidates[$0.index] }
             .compactMap { session -> RecentProjectSession? in
                 let key = "\(Self.recentDirectoryKey(session.directory)):\(session.id)"
                 guard seen.insert(key).inserted else { return nil }

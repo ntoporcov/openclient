@@ -118,7 +118,7 @@ enum OpenClientReleaseNotesCatalog {
                 ),
                 OpenClientReleaseNotes.Feature(
                     title: "Make it yours",
-                    detail: "Choose a new icon and decide whether chat activity gets a subtle shimmer.",
+                    detail: "Choose a new icon to make OpenClient yours.",
                     systemImage: "paintpalette.fill"
                 ),
                 OpenClientReleaseNotes.Feature(

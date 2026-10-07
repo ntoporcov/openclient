@@ -14,6 +14,7 @@ struct OpenCodeIOSClientApp: App {
 #endif
 
     init() {
+        OpenClientMainThreadWatchdog.shared.startIfEnabled()
 #if DEBUG
         let testEnvironment = ProcessInfo.processInfo.environment
         if testEnvironment["OPENCODE_UI_TEST_MODE"] == "1" {

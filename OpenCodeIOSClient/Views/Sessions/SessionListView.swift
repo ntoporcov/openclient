@@ -537,13 +537,17 @@ private struct SessionListContent: View, Equatable {
     ) -> some View {
         Button {
             #if targetEnvironment(macCatalyst)
+            let clickedAt = ContinuousClock.now
+            OpenClientSessionSwitchLog.log("button fired id=\(row.id) firstResponder=\(UIResponder.openClientFirstResponderDescription)")
             selectionFeedback.commit(row.id)
             let context = facade.selectionContextID
             selectionHandoff.schedule {
                 guard let session = facade.sessionForSelection(id: row.id, context: context) else {
+                    OpenClientSessionSwitchLog.log("handoff dropped id=\(row.id) after \(OpenClientSessionSwitchLog.elapsedMS(since: clickedAt)) ms contextChanged=\(facade.selectionContextID != context)")
                     selectionFeedback.reset()
                     return
                 }
+                OpenClientSessionSwitchLog.log("handoff fired id=\(row.id) after \(OpenClientSessionSwitchLog.elapsedMS(since: clickedAt)) ms")
                 selectSession(session)
                 if snapshot.selectedSessionID == row.id { selectionFeedback.reset() }
             }
@@ -591,16 +595,21 @@ private struct SessionListContent: View, Equatable {
     }
 
     private func selectSession(_ session: OpenCodeSession) {
+        let startedAt = ContinuousClock.now
         let ticket = facade.beginSelection(session)
+        OpenClientSessionSwitchLog.log("selection began id=\(session.id) beginSelection=\(OpenClientSessionSwitchLog.elapsedMS(since: startedAt)) ms")
         #if targetEnvironment(macCatalyst)
         onSessionChosen()
         #else
         withAnimation(opencodeSelectionAnimation) { onSessionChosen() }
         #endif
         let load: @MainActor @Sendable () async -> Void = {
-            guard await facade.prepareSelectionForNavigation(ticket) else { return }
+            let prepared = await facade.prepareSelectionForNavigation(ticket)
+            OpenClientSessionSwitchLog.log("selection prepared id=\(session.id) ok=\(prepared) at \(OpenClientSessionSwitchLog.elapsedMS(since: startedAt)) ms")
+            guard prepared else { return }
             guard !Task.isCancelled else { return }
             await facade.completeSelection(ticket)
+            OpenClientSessionSwitchLog.log("selection completed id=\(session.id) at \(OpenClientSessionSwitchLog.elapsedMS(since: startedAt)) ms")
         }
         #if targetEnvironment(macCatalyst)
         selectionFeedback.load(load)

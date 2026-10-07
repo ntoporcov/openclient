@@ -616,12 +616,17 @@ struct NoOpOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
 
 enum OpenCodeLocalCacheRepositoryFactory {
     static func makeDefault() -> any OpenCodeLocalCacheRepository {
-        do {
-            return SwiftDataOpenCodeLocalCacheRepository(
-                modelContainer: try makeContainer(isStoredInMemoryOnly: false)
-            )
-        } catch {
-            return NoOpOpenCodeLocalCacheRepository()
+        // A @ModelActor's executor is bound to the thread that creates its ModelContext.
+        // Creating it on the main actor made every cache write (including JSON encoding of
+        // whole transcripts) run on the main thread; profiles showed those as UI stalls.
+        DispatchQueue.global(qos: .utility).sync {
+            do {
+                return SwiftDataOpenCodeLocalCacheRepository(
+                    modelContainer: try makeContainer(isStoredInMemoryOnly: false)
+                )
+            } catch {
+                return NoOpOpenCodeLocalCacheRepository()
+            }
         }
     }
 

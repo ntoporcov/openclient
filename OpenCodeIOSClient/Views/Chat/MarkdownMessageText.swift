@@ -127,7 +127,9 @@ struct MarkdownMessageText: View {
             case let .table(_, headers, rows):
                 styledTable(headers: headers, rows: rows)
             case let .codeBlock(id, language, value):
-                HighlightedCodeBlock(code: value, language: language)
+                // The still-open fence grows on every stream flush; highlighting runs through
+                // JavaScriptCore, so defer it until the block closes or streaming ends.
+                HighlightedCodeBlock(code: value, language: language, highlightsSyntax: id != activeStreamingCodeBlockID)
                     .padding(.vertical, codeBlockOuterPadding)
                     .overlay(alignment: .bottom) {
                         if id == activeStreamingCodeBlockID {
@@ -1252,6 +1254,20 @@ struct CompletedResponseText: View {
 
 @MainActor
 private final class CompletedResponseDocumentCache {
+    private struct SharedKey: Hashable {
+        let parts: [String]
+        let fontName: String
+        let pointSize: CGFloat
+        let isDark: Bool
+        let isRightToLeft: Bool
+    }
+
+    /// Hosting cells rebuild their SwiftUI tree on every configure, which discards per-view
+    /// state. Without a shared store every session switch re-rendered each visible document
+    /// (markdown parse, attributed assembly, syntax highlighting); profiles showed it as the
+    /// largest app-level cost inside transcript layout.
+    private static var shared = OpenCodeBoundedRenderCache<SharedKey, NSAttributedString>(limit: 160)
+
     private var parts: [String] = []
     private var font: UIFont?
     private var colorScheme: ColorScheme?
@@ -1261,9 +1277,19 @@ private final class CompletedResponseDocumentCache {
     func document(parts: [String], font: UIFont, colorScheme: ColorScheme, layoutDirection: LayoutDirection) -> NSAttributedString {
         if let rendered, self.parts == parts, self.font == font,
            self.colorScheme == colorScheme, self.layoutDirection == layoutDirection { return rendered }
-        let document = MarkdownMessageText.selectableDocument(
-            from: parts, baseFont: font, colorScheme: colorScheme, layoutDirection: layoutDirection
-        )
+        let key = SharedKey(parts: parts, fontName: font.fontName, pointSize: font.pointSize,
+                            isDark: colorScheme == .dark, isRightToLeft: layoutDirection == .rightToLeft)
+        let document: NSAttributedString
+        if let cached = Self.shared[key] {
+            document = cached
+        } else {
+            document = OpenClientPerformanceSignposts.interval("CompletedDocumentRender", detail: "\(parts.count) parts") {
+                MarkdownMessageText.selectableDocument(
+                    from: parts, baseFont: font, colorScheme: colorScheme, layoutDirection: layoutDirection
+                )
+            }
+            Self.shared[key] = document
+        }
         self.parts = parts
         self.font = font
         self.colorScheme = colorScheme
@@ -1280,8 +1306,25 @@ enum MessageLinkExtractor {
         types: NSTextCheckingResult.CheckingType.link.rawValue
     )
 
+    private struct CacheKey: Hashable {
+        let text: String
+        let limit: Int
+    }
+
+    // Data detection runs on every bubble body pass for completed messages; the text is immutable.
+    private static var cache = OpenCodeBoundedRenderCache<CacheKey, [URL]>(limit: 400)
+
     static func urls(in text: String, limit: Int = 3) -> [URL] {
-        guard limit > 0, let detector else { return [] }
+        guard limit > 0, detector != nil else { return [] }
+        let key = CacheKey(text: text, limit: limit)
+        if let cached = cache[key] { return cached }
+        let urls = detectURLs(in: text, limit: limit)
+        cache[key] = urls
+        return urls
+    }
+
+    private static func detectURLs(in text: String, limit: Int) -> [URL] {
+        guard let detector else { return [] }
 
         let searchableText = removingCode(from: text)
         let range = NSRange(searchableText.startIndex..<searchableText.endIndex, in: searchableText)
@@ -1582,17 +1625,16 @@ private struct OpenClientNativeLinkView: NSViewRepresentable {
 fileprivate final class OpenCodeMarkdownRenderCache {
     static let shared = OpenCodeMarkdownRenderCache()
 
-    private var blocksByText: [String: [MarkdownMessageText.MarkdownBlock]] = [:]
-    private var inlineMarkdownByText: [String: AttributedString] = [:]
+    private var blocksByText = OpenCodeBoundedRenderCache<String, [MarkdownMessageText.MarkdownBlock]>(limit: 220)
+    private var inlineMarkdownByText = OpenCodeBoundedRenderCache<String, AttributedString>(limit: 600)
 
     func blocks(for text: String, build: () -> [MarkdownMessageText.MarkdownBlock]) -> [MarkdownMessageText.MarkdownBlock] {
         if let cached = blocksByText[text] {
             return cached
         }
 
-        let blocks = build()
+        let blocks = OpenClientPerformanceSignposts.interval("MarkdownParse", detail: "\(text.utf16.count) chars") { build() }
         if text.count <= 24_000 {
-            trimIfNeeded(&blocksByText, limit: 220)
             blocksByText[text] = blocks
         }
         return blocks
@@ -1611,15 +1653,55 @@ fileprivate final class OpenCodeMarkdownRenderCache {
             return nil
         }
 
-        trimIfNeeded(&inlineMarkdownByText, limit: 600)
         inlineMarkdownByText[text] = attributed
         return attributed
     }
+}
 
-    private func trimIfNeeded<Value>(_ cache: inout [String: Value], limit: Int) {
-        if cache.count >= limit {
-            cache.removeAll(keepingCapacity: true)
+/// Insertion-ordered cache that evicts its oldest quarter when full.
+///
+/// Streaming inserts a new key on every flush, so a cache that empties itself at the limit
+/// would periodically force every visible completed message to re-parse in one frame.
+struct OpenCodeBoundedRenderCache<Key: Hashable, Value> {
+    private var values: [Key: Value] = [:]
+    private var insertionOrder: [Key] = []
+    private let limit: Int
+
+    init(limit: Int) {
+        self.limit = max(1, limit)
+    }
+
+    var count: Int { values.count }
+
+    subscript(key: Key) -> Value? {
+        get { values[key] }
+        set {
+            guard let newValue else {
+                if values.removeValue(forKey: key) != nil, let index = insertionOrder.firstIndex(of: key) {
+                    insertionOrder.remove(at: index)
+                }
+                return
+            }
+            if values.updateValue(newValue, forKey: key) == nil {
+                if values.count > limit {
+                    evictOldest()
+                }
+                insertionOrder.append(key)
+            }
         }
+    }
+
+    mutating func removeAll() {
+        values.removeAll(keepingCapacity: true)
+        insertionOrder.removeAll(keepingCapacity: true)
+    }
+
+    private mutating func evictOldest() {
+        let evictionCount = max(1, limit / 4)
+        for key in insertionOrder.prefix(evictionCount) {
+            values[key] = nil
+        }
+        insertionOrder.removeFirst(min(evictionCount, insertionOrder.count))
     }
 }
 

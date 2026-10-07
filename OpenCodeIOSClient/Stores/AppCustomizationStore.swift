@@ -80,7 +80,6 @@ enum AppAccentColor: String, Codable, CaseIterable, Identifiable {
 struct AppCustomizationPreferences: Codable, Equatable {
     var chatBubbleStyle: ChatBubbleStyle
     var accentColor: AppAccentColor
-    var showsChatActivityShimmer: Bool
     var showsToolCalls: Bool
     var groupsToolCalls: Bool
     var showsReasoningBlocks: Bool
@@ -104,7 +103,6 @@ struct AppCustomizationPreferences: Codable, Equatable {
     init(
         chatBubbleStyle: ChatBubbleStyle = .glass,
         accentColor: AppAccentColor = .blue,
-        showsChatActivityShimmer: Bool = true,
         showsToolCalls: Bool = true,
         groupsToolCalls: Bool = true,
         showsReasoningBlocks: Bool = true,
@@ -119,7 +117,6 @@ struct AppCustomizationPreferences: Codable, Equatable {
     ) {
         self.chatBubbleStyle = chatBubbleStyle
         self.accentColor = accentColor
-        self.showsChatActivityShimmer = showsChatActivityShimmer
         self.showsToolCalls = showsToolCalls
         self.groupsToolCalls = groupsToolCalls
         self.showsReasoningBlocks = showsReasoningBlocks
@@ -136,7 +133,6 @@ struct AppCustomizationPreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case chatBubbleStyle
         case accentColor
-        case showsChatActivityShimmer
         case showsToolCalls
         case groupsToolCalls
         case showsReasoningBlocks
@@ -156,7 +152,6 @@ struct AppCustomizationPreferences: Codable, Equatable {
             .flatMap(ChatBubbleStyle.init(rawValue:)) ?? .glass
         let storedAccent = try container.decodeIfPresent(String.self, forKey: .accentColor)
         accentColor = storedAccent == "gray" ? .clear : storedAccent.flatMap(AppAccentColor.init(rawValue:)) ?? .blue
-        showsChatActivityShimmer = try container.decodeIfPresent(Bool.self, forKey: .showsChatActivityShimmer) ?? true
         showsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .showsToolCalls) ?? true
         groupsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .groupsToolCalls) ?? true
         showsReasoningBlocks = try container.decodeIfPresent(Bool.self, forKey: .showsReasoningBlocks) ?? true
@@ -205,10 +200,6 @@ final class AppCustomizationStore: ObservableObject {
 
     func makeConnectionAppearanceRegistry() -> ConnectionAppearanceRegistry {
         ConnectionAppearanceRegistry(defaults: defaults, storageKey: storageKey + ".connections", legacyPreferences: preferences)
-    }
-
-    var showsChatActivityShimmer: Bool {
-        preferences.showsChatActivityShimmer
     }
 
     var showsToolCalls: Bool {
@@ -263,12 +254,6 @@ final class AppCustomizationStore: ObservableObject {
 
     var composerStyle: ComposerStyle {
         preferences.composerStyle
-    }
-
-    func setShowsChatActivityShimmer(_ shows: Bool) {
-        guard preferences.showsChatActivityShimmer != shows else { return }
-        preferences.showsChatActivityShimmer = shows
-        persist()
     }
 
     func setShowsToolCalls(_ shows: Bool) {

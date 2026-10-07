@@ -689,6 +689,10 @@ final class ActivityFacade: ObservableObject {
     }
 
     private func makeSnapshot() -> Snapshot {
+        OpenClientPerformanceSignposts.interval("ActivitySnapshot") { buildSnapshot() }
+    }
+
+    private func buildSnapshot() -> Snapshot {
         let owners = viewModel.directoryStoreRegistry.ownerStoresBySessionID()
         let rows = recentCandidates().map { makeRow($0, owner: owners[$0.session.id]) }
         let sessionIDs = Set(rows.map { $0.recent.session.id })

@@ -392,13 +392,16 @@ private struct ActivityContent: View, Equatable {
     }
 
     private var recentSections: [ActivityRecentSection] {
-        let now = Date()
-        let calendar = Calendar.autoupdatingCurrent
+        // Bucket every row once per body pass; the calendar math was being redone per row per bucket.
+        let boundaries = ActivityRecentBucket.Boundaries(now: Date(), calendar: .autoupdatingCurrent)
+        let rows = recentRows
+        var rowsByBucket: [ActivityRecentBucket: [ActivityFacade.RowSnapshot]] = [:]
+        for row in rows {
+            rowsByBucket[ActivityRecentBucket.bucket(for: row.updatedAt, boundaries: boundaries), default: []].append(row)
+        }
         return ActivityRecentBucket.allCases.compactMap { bucket in
-            let rows = recentRows.filter {
-                ActivityRecentBucket.bucket(for: $0.updatedAt, now: now, calendar: calendar) == bucket
-            }
-            return rows.isEmpty ? nil : ActivityRecentSection(bucket: bucket, rows: rows)
+            guard let rows = rowsByBucket[bucket], !rows.isEmpty else { return nil }
+            return ActivityRecentSection(bucket: bucket, rows: rows)
         }
     }
 
@@ -611,14 +614,27 @@ enum ActivityRecentBucket: Int, CaseIterable, Identifiable {
         }
     }
 
+    struct Boundaries {
+        let startOfToday: Date
+        let startOfYesterday: Date
+        let startOfLastWeek: Date
+
+        init(now: Date, calendar: Calendar) {
+            startOfToday = calendar.startOfDay(for: now)
+            startOfYesterday = calendar.date(byAdding: .day, value: -1, to: startOfToday) ?? startOfToday
+            startOfLastWeek = calendar.date(byAdding: .day, value: -7, to: startOfToday) ?? startOfYesterday
+        }
+    }
+
     static func bucket(for date: Date?, now: Date, calendar: Calendar) -> ActivityRecentBucket {
+        bucket(for: date, boundaries: Boundaries(now: now, calendar: calendar))
+    }
+
+    static func bucket(for date: Date?, boundaries: Boundaries) -> ActivityRecentBucket {
         guard let date else { return .older }
-        let startOfToday = calendar.startOfDay(for: now)
-        let startOfYesterday = calendar.date(byAdding: .day, value: -1, to: startOfToday) ?? startOfToday
-        let startOfLastWeek = calendar.date(byAdding: .day, value: -7, to: startOfToday) ?? startOfYesterday
-        if date >= startOfToday { return .recent }
-        if date >= startOfYesterday { return .yesterday }
-        if date >= startOfLastWeek { return .lastWeek }
+        if date >= boundaries.startOfToday { return .recent }
+        if date >= boundaries.startOfYesterday { return .yesterday }
+        if date >= boundaries.startOfLastWeek { return .lastWeek }
         return .older
     }
 }

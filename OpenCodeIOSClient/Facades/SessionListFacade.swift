@@ -324,6 +324,10 @@ final class SessionListFacade: ObservableObject {
     }
 
     func makeSnapshot() -> Snapshot {
+        OpenClientPerformanceSignposts.interval("SessionListSnapshot") { buildSnapshot() }
+    }
+
+    private func buildSnapshot() -> Snapshot {
         snapshotBuildCount += 1
         let scope = CacheScope(connectionID: viewModel.backendConnection?.id,
             cacheNamespace: viewModel.localCacheNamespace,

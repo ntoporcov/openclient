@@ -1270,17 +1270,6 @@ private struct OpenClientWhatsNewSetupSection: View {
 
             OpenClientWhatsNewIconPicker(connection: connection)
 
-            Toggle(isOn: Binding(
-                get: { connection.showsChatActivityShimmer },
-                set: { connection.setShowsChatActivityShimmer($0) }
-            )) {
-                Label("Chat activity shimmer", systemImage: "sparkles.rectangle.stack")
-                    .font(.headline)
-            }
-            .tint(.purple)
-            .padding(16)
-            .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
             OpenClientWhatsNewAutoConnectPicker(connection: connection)
         }
     }

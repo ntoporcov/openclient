@@ -237,6 +237,7 @@ final class AppViewModel: ObservableObject {
     var selectedProjectContentTab: OpenClientProjectContentTab {
         get { projectStore.selectedContentTab }
         set {
+            guard projectStore.selectedContentTab != newValue else { return }
             objectWillChange.send()
             projectStore.selectedContentTab = newValue
         }

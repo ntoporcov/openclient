@@ -96,7 +96,6 @@ final class ConnectionFacade: ObservableObject {
     var providerUsageUsesInsecureTransport: Bool {
         viewModel.backendConnection?.openCodeCompatibility?.client.config.usesInsecureHTTP ?? false
     }
-    var showsChatActivityShimmer: Bool { appCustomizationStore.showsChatActivityShimmer }
     var showsToolCalls: Bool { appCustomizationStore.showsToolCalls }
     var showsReasoningBlocks: Bool { appCustomizationStore.showsReasoningBlocks }
     var composerStyle: ComposerStyle { appCustomizationStore.composerStyle }
@@ -175,10 +174,6 @@ final class ConnectionFacade: ObservableObject {
     @discardableResult
     func startAutomaticConnectionIfConfigured() -> Bool {
         viewModel.startAutomaticConnectionIfConfigured()
-    }
-
-    func setShowsChatActivityShimmer(_ shows: Bool) {
-        appCustomizationStore.setShowsChatActivityShimmer(shows)
     }
 
     func isAppIconEnabled(_ icon: OpenClientAppIcon) -> Bool {

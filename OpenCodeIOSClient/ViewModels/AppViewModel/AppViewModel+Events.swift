@@ -1052,12 +1052,18 @@ extension AppViewModel {
             return
         }
 
+        let flushSignpost = OpenClientPerformanceSignposts.begin("StreamFlush", detail: "\(reason) \(events.count) events -> \(reducerEvents.count)")
         let reduceStart = ContinuousClock.now
-        let application = eventSyncCoordinator.applyDirectoryEvents(reducerEvents.map(\.typedEvent), to: directoryEventState())
+        let application = OpenClientPerformanceSignposts.interval("StreamFlushReduce") {
+            eventSyncCoordinator.applyDirectoryEvents(reducerEvents.map(\.typedEvent), to: directoryEventState())
+        }
         let reduceElapsedMS = reduceStart.elapsedMilliseconds
         let publishStart = ContinuousClock.now
-        applyDirectoryEventState(application.state, updatesSelectedMessages: true)
+        OpenClientPerformanceSignposts.interval("StreamFlushPublish") {
+            applyDirectoryEventState(application.state, updatesSelectedMessages: true)
+        }
         let publishElapsedMS = publishStart.elapsedMilliseconds
+        OpenClientPerformanceSignposts.end("StreamFlush", flushSignpost)
 
         liveActivityFacade.reducerDidCommit(sessionIDs: Set(events.compactMap(\.sessionID)))
 

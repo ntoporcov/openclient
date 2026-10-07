@@ -26,13 +26,12 @@ final class AppCustomizationStoreTests: XCTestCase {
         XCTAssertEqual(SessionCardStyle.allCases.map(\.title), ["Compact", "Default", "Activity"])
     }
 
-    func testPreferencesPersistAndDefaultShimmerToEnabled() throws {
+    func testPreferencesPersistAndRestore() throws {
         let suiteName = "AppCustomizationStoreTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let store = AppCustomizationStore(defaults: defaults)
-        XCTAssertTrue(store.showsChatActivityShimmer)
         XCTAssertTrue(store.showsToolCalls)
         XCTAssertTrue(store.groupsToolCalls)
         XCTAssertTrue(store.showsContextChanges)
@@ -44,7 +43,6 @@ final class AppCustomizationStoreTests: XCTestCase {
         XCTAssertNil(store.autoConnectServerID)
         XCTAssertEqual(store.autoConnectLandingDestination, .projects)
 
-        store.setShowsChatActivityShimmer(false)
         store.setShowsToolCalls(false)
         store.setGroupsToolCalls(false)
         store.setShowsContextChanges(false)
@@ -57,7 +55,6 @@ final class AppCustomizationStoreTests: XCTestCase {
         store.setAutoConnectLandingDestination(.activity)
 
         let restored = AppCustomizationStore(defaults: defaults)
-        XCTAssertFalse(restored.showsChatActivityShimmer)
         XCTAssertFalse(restored.showsToolCalls)
         XCTAssertFalse(restored.groupsToolCalls)
         XCTAssertFalse(restored.showsContextChanges)
@@ -84,7 +81,6 @@ final class AppCustomizationStoreTests: XCTestCase {
 
         let store = AppCustomizationStore(defaults: defaults)
 
-        XCTAssertFalse(store.showsChatActivityShimmer)
         XCTAssertTrue(store.showsToolCalls)
         XCTAssertTrue(store.groupsToolCalls)
         XCTAssertTrue(store.showsReasoningBlocks)
@@ -113,7 +109,6 @@ final class AppCustomizationStoreTests: XCTestCase {
 
         let store = AppCustomizationStore(defaults: defaults)
 
-        XCTAssertFalse(store.showsChatActivityShimmer)
         XCTAssertEqual(store.sessionCardStyle, .simple)
         XCTAssertEqual(store.composerStyle, .messenger)
         XCTAssertEqual(store.autoConnectServerID, "server-one")

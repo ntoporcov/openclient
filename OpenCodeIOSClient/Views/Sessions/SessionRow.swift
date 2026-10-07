@@ -131,6 +131,9 @@ final class SessionSelectionSurfaceView: UIView {
     func beginNativePress(inputTimestamp: TimeInterval? = nil) {
         guard let feedback else { return }
         pressedSessionID = sessionID
+        #if targetEnvironment(macCatalyst)
+        OpenClientSessionSwitchLog.log("press began id=\(sessionID) firstResponder=\(UIResponder.openClientFirstResponderDescription)")
+        #endif
         #if DEBUG
         let started = ProcessInfo.processInfo.systemUptime
         os_signpost(.begin, log: sessionSelectionLog, name: "Press To Layer Commit",

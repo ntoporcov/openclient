@@ -10,6 +10,7 @@ import AppKit
 struct HighlightedCodeBlock: View {
     let code: String
     let language: String?
+    var highlightsSyntax = true
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -70,7 +71,7 @@ struct HighlightedCodeBlock: View {
     }
 
     private var shouldUsePlainTextFallback: Bool {
-        if code.count > 12_000 {
+        if !highlightsSyntax || code.count > 12_000 {
             return true
         }
 
@@ -176,7 +177,7 @@ final class OpenCodeSyntaxHighlighter {
 
     private let highlighter: Highlighter?
     private var configuredTheme: String?
-    private var highlightedCodeCache: [CacheKey: AttributedString] = [:]
+    private var highlightedCodeCache = OpenCodeBoundedRenderCache<CacheKey, AttributedString>(limit: 96)
 
     private init() {
         highlighter = Highlighter()
@@ -195,7 +196,10 @@ final class OpenCodeSyntaxHighlighter {
 
         configureTheme(named: theme)
 
-        guard let highlighted = highlighter.highlight(code, as: normalizedLanguage) else {
+        let highlighted = OpenClientPerformanceSignposts.interval("SyntaxHighlight", detail: "\(code.utf16.count) chars") {
+            highlighter.highlight(code, as: normalizedLanguage)
+        }
+        guard let highlighted else {
             return nil
         }
 
@@ -203,9 +207,6 @@ final class OpenCodeSyntaxHighlighter {
             return nil
         }
 
-        if highlightedCodeCache.count >= 96 {
-            highlightedCodeCache.removeAll(keepingCapacity: true)
-        }
         highlightedCodeCache[cacheKey] = attributed
         return attributed
     }

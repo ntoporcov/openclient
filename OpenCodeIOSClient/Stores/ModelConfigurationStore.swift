@@ -521,10 +521,16 @@ final class ModelConfigurationStore: ObservableObject {
 
     private func modelVisibilityKey(_ reference: OpenCodeModelReference) -> String { "\(reference.providerID):\(reference.modelID)" }
 
+    // DateFormatter parsing goes through ICU; this ran for every model on each session open.
+    private var parsedReleaseDatesByValue: [String: Date?] = [:]
+
     private func parsedReleaseDate(_ value: String?) -> Date? {
         guard let value else { return nil }
-        return internetReleaseDateFormatter.date(from: value)
+        if let cached = parsedReleaseDatesByValue[value] { return cached }
+        let parsed = internetReleaseDateFormatter.date(from: value)
             ?? fullReleaseDateFormatter.date(from: value)
+        parsedReleaseDatesByValue[value] = parsed
+        return parsed
     }
 
     private static func loadModelVisibilityPreferences() -> [String: ModelVisibilityPreference] {

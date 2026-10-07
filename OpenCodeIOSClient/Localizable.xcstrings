@@ -3947,22 +3947,6 @@
         }
       }
     },
-    "Chat activity shimmer" : {
-      "localizations" : {
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Effetto shimmer attività chat"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Brilho da atividade de chat"
-          }
-        }
-      }
-    },
     "Chat Appearance" : {
       "localizations" : {
         "en" : {
@@ -4231,18 +4215,18 @@
         }
       }
     },
-    "Choose a new icon and decide whether chat activity gets a subtle shimmer." : {
+    "Choose a new icon to make OpenClient yours." : {
       "localizations" : {
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scegli una nuova icona e decidi se l'attività della chat deve avere un effetto shimmer sottile."
+            "value" : "Scegli una nuova icona per rendere OpenClient davvero tuo."
           }
         },
         "pt-BR" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Escolha um novo ícone e decida se a atividade do chat terá um brilho sutil."
+            "value" : "Escolha um novo ícone para deixar o OpenClient com a sua cara."
           }
         }
       }
@@ -19918,22 +19902,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mostrar controles do navegador"
-          }
-        }
-      }
-    },
-    "Show Chat Activity Shimmer" : {
-      "localizations" : {
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mostra shimmer attività chat"
-          }
-        },
-        "pt-BR" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mostrar brilho da atividade de chat"
           }
         }
       }

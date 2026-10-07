@@ -68,6 +68,7 @@
 		15DC950F3073F1C9401075D6 /* CreateWorkspaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8409662C50D2BEAF859F67D7 /* CreateWorkspaceSheet.swift */; };
 		1621464BE50ABB2038A4F6A4 /* OpenCodeProviderUsageWidgetContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86EE3D764DE1B924A408C47 /* OpenCodeProviderUsageWidgetContent.swift */; };
 		16CEC496585A1932D18D7252 /* FunAndGamesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770DAD6B1290DD7EE6686359 /* FunAndGamesStore.swift */; };
+		16D1D95510281BA45AC1A6AE /* OpenClientPerformanceDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBBEF459D424A3004017CC8 /* OpenClientPerformanceDiagnostics.swift */; };
 		16EB1CE37E1DB3592FF2846B /* OpenClientVisualVideoTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07BCC4CB8A1DEC6D03C3721 /* OpenClientVisualVideoTool.swift */; };
 		17207130D56238ACDC372FEC /* OpenClientVisualHTMLTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8623181740A38776BAB1F5D /* OpenClientVisualHTMLTool.swift */; };
 		177E72328931BAC4248C0494 /* SessionToolsSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B63DDFBB5EA220FC314F231 /* SessionToolsSheets.swift */; };
@@ -199,6 +200,7 @@
 		45A7E28C41CFCAEE2D094F8B /* OpenClientNotificationConfigurationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B13670114575969E8F55DD /* OpenClientNotificationConfigurationCoordinator.swift */; };
 		4782B39F41A3D8AC1C461021 /* OpenClientBridgeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E762A9C6F3ED33D0CE1AC144 /* OpenClientBridgeProtocol.swift */; };
 		47B91CEE698DF0EB1C551606 /* FindPlaceGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39F3209079C16C06C440EF6 /* FindPlaceGame.swift */; };
+		4834FA70D567BA5E048071C7 /* OpenClientPerformanceDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBBEF459D424A3004017CC8 /* OpenClientPerformanceDiagnostics.swift */; };
 		49CAA4615D897BB8C08490A2 /* ProviderUsageAccountRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9542471BC79C123DEBA53F9B /* ProviderUsageAccountRepository.swift */; };
 		4B00D3200BEE83CAF8A9F15F /* NewSessionDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8994E8493B69E44F2907F0B /* NewSessionDefaults.swift */; };
 		4B2015CA69C1210852288D93 /* AppIconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02E2830562F22A3FB26FB56E /* AppIconStore.swift */; };
@@ -1000,6 +1002,7 @@
 		ABAE1F6E3449F99D3B632339 /* ProjectStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStore.swift; sourceTree = "<group>"; };
 		AC220CA26635182C3304FB1D /* OpenCodeLiveActivityActionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeLiveActivityActionClient.swift; sourceTree = "<group>"; };
 		AD22634739A584D72F8DFA45 /* OpenCodeChatActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeChatActivityAttributes.swift; sourceTree = "<group>"; };
+		ADBBEF459D424A3004017CC8 /* OpenClientPerformanceDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientPerformanceDiagnostics.swift; sourceTree = "<group>"; };
 		AF84CA84B5EE419EE9036B0D /* AppSupportURLs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSupportURLs.swift; sourceTree = "<group>"; };
 		B049680071C4C1B30DEB5B72 /* ios-120.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "ios-120.png"; path = "../OpenCodeIOSClient/Assets.xcassets/AppIcon.appiconset/ios-120.png"; sourceTree = "<group>"; };
 		B1C270047AFCB121C8BE87AC /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStore.swift; sourceTree = "<group>"; };
@@ -1178,6 +1181,14 @@
 				27555B7202DD5569C6DAEA9B /* OpenCodePTYConnection.swift */,
 			);
 			path = API;
+			sourceTree = "<group>";
+		};
+		07D69F24A9DE8DCD6EF6E78A /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				ADBBEF459D424A3004017CC8 /* OpenClientPerformanceDiagnostics.swift */,
+			);
+			path = Diagnostics;
 			sourceTree = "<group>";
 		};
 		186379DBDD696856B0BA7E13 /* Facades */ = {
@@ -1789,6 +1800,7 @@
 				4004EBCC02E2BA5D266AF674 /* Backends */,
 				4E3ACC33E1E45044004278A6 /* Commerce */,
 				EFFB924401AD408E0C904CDB /* Coordinators */,
+				07D69F24A9DE8DCD6EF6E78A /* Diagnostics */,
 				186379DBDD696856B0BA7E13 /* Facades */,
 				B3D9507B6CFA61DCAD621769 /* Models */,
 				3C2CE2EAFE77CF7AA14D7042 /* Persistence */,
@@ -2003,13 +2015,13 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				FE46DB5F396A39389531C069 /* OpenCodeIOSClient */,
 				3A4666958AE1034C80B61FAB /* OpenCodeChatActivityExtension */,
-				3FA005BF49CBCE2F53A0A028 /* OpenCodeShareExtension */,
-				BB490846463F18E8EE36413F /* OpenCodeMacClient */,
+				FE46DB5F396A39389531C069 /* OpenCodeIOSClient */,
 				03ABFB08B570A48C3F9A2AA3 /* OpenCodeIOSClientTests */,
 				323A6934DF3EC04D7353FAEF /* OpenCodeIOSClientUITests */,
+				BB490846463F18E8EE36413F /* OpenCodeMacClient */,
 				FB00EC303AAA20A8C2BAEED2 /* OpenCodeMacClientTests */,
+				3FA005BF49CBCE2F53A0A028 /* OpenCodeShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -2450,6 +2462,7 @@
 				0D0ECE26727F1FEEB90C19A7 /* OpenClientInternationalizationAnnouncementCard.swift in Sources */,
 				45A7E28C41CFCAEE2D094F8B /* OpenClientNotificationConfigurationCoordinator.swift in Sources */,
 				5309B4DF6575FCC68A0F1CBD /* OpenClientPaywallView.swift in Sources */,
+				16D1D95510281BA45AC1A6AE /* OpenClientPerformanceDiagnostics.swift in Sources */,
 				FA5BECE4CC4D2148464C1BA6 /* OpenClientSharePayloadStore.swift in Sources */,
 				1230257B3E18263B50D0CCA4 /* OpenClientSpeechRecognitionController.swift in Sources */,
 				DEBF2CC3C842DFD2AB3792C5 /* OpenClientVideoStreamClient.swift in Sources */,
@@ -2714,6 +2727,7 @@
 				BFDEEDED60C7D296CDBBEFC6 /* OpenClientInternationalizationAnnouncementCard.swift in Sources */,
 				84B086B4C76CD76D7E9CAA4F /* OpenClientNotificationConfigurationCoordinator.swift in Sources */,
 				70E4E1C33A9EE3D0965C9018 /* OpenClientPaywallView.swift in Sources */,
+				4834FA70D567BA5E048071C7 /* OpenClientPerformanceDiagnostics.swift in Sources */,
 				9CF2CD2D68B22F2052447920 /* OpenClientSharePayloadStore.swift in Sources */,
 				81A15CCC5771C2F9C70709F6 /* OpenClientSpeechRecognitionController.swift in Sources */,
 				A5EF7D73A91FF4C08A16960B /* OpenClientVideoStreamClient.swift in Sources */,
@@ -2892,6 +2906,21 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		1F7E9CEEDDD2DE3B70D01154 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 70;
+				DEVELOPMENT_TEAM = 845JU3PD5V;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.24;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Profile;
+		};
 		2E581C6DA0FE2C4959BE5615 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -2906,6 +2935,40 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenClient.app/OpenClient";
 			};
 			name = Release;
+		};
+		2EF78F1F6E21EF53820DD1F7 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "Liquidy Trees \"AppIcon Pro Life\"";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGN_ENTITLEMENTS = OpenCodeIOSClient/OpenCodeIOSClient.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				INFOPLIST_FILE = "OpenCodeIOSClient/Generated-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACCATALYST_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient;
+				PRODUCT_NAME = OpenClient;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Profile;
+		};
+		32D74B5DDD56DCF65BC46B05 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.macos.tests;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenCodeMacClient.app/Contents/MacOS/OpenCodeMacClient";
+			};
+			name = Profile;
 		};
 		37A38C3C67B13A34407EB08A /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -2951,6 +3014,22 @@
 			};
 			name = Debug;
 		};
+		54FEA3FD8A5EF04F55DC81C2 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = OpenCodeChatActivityExtension/OpenCodeChatActivityExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = OpenCodeChatActivityExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.liveactivity;
+				PRODUCT_NAME = OpenCodeChatActivityExtension;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "";
+			};
+			name = Profile;
+		};
 		595BF7E4FBD810F72C1F7FEF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -2961,6 +3040,20 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenCodeMacClient.app/Contents/MacOS/OpenCodeMacClient";
 			};
 			name = Debug;
+		};
+		66FAA1A3C9562CAE8D7A9FA3 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.uitests;
+				PRODUCT_NAME = OpenCodeIOSClientUITests;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "";
+				TEST_TARGET_NAME = OpenCodeIOSClient;
+			};
+			name = Profile;
 		};
 		6AEB18EE97BAC8A7F4EAB27D /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -2984,6 +3077,21 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
+		};
+		7816A7CF6F27691259514816 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.tests;
+				PRODUCT_NAME = OpenCodeIOSClientTests;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenClient.app/OpenClient";
+			};
+			name = Profile;
 		};
 		83F882A870541B5EDE0113C7 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -3065,6 +3173,22 @@
 			};
 			name = Debug;
 		};
+		CBE4CA58726E77E627F753EC /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OpenCodeIOSClient/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OpenClient;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.macos;
+				PRODUCT_NAME = OpenCodeMacClient;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Profile;
+		};
 		CD0074863F9B49599EBE4F30 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -3095,6 +3219,22 @@
 				TARGETED_DEVICE_FAMILY = "";
 			};
 			name = Debug;
+		};
+		E799241D9674FE88E58FD41B /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = OpenCodeShareExtension/OpenCodeShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = OpenCodeShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.share;
+				PRODUCT_NAME = OpenCodeShareExtension;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "";
+			};
+			name = Profile;
 		};
 		F3059729406E127440E12557 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -3149,6 +3289,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D9F5DA65746E4481F4CAC286 /* Debug */,
+				E799241D9674FE88E58FD41B /* Profile */,
 				9469566DE86E98D4E9EA8E45 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -3158,6 +3299,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				C93032DB083B98279E43133F /* Debug */,
+				66FAA1A3C9562CAE8D7A9FA3 /* Profile */,
 				F3059729406E127440E12557 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -3167,6 +3309,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CD0074863F9B49599EBE4F30 /* Debug */,
+				7816A7CF6F27691259514816 /* Profile */,
 				2E581C6DA0FE2C4959BE5615 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -3176,6 +3319,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3CA8C140CADC377BF35011CD /* Debug */,
+				54FEA3FD8A5EF04F55DC81C2 /* Profile */,
 				FADF990DFD22F2C3EBA78024 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -3185,6 +3329,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				F52112745607A5203173B8CD /* Debug */,
+				CBE4CA58726E77E627F753EC /* Profile */,
 				B4884DF5A162B1F37CD06ACC /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -3194,6 +3339,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				6AEB18EE97BAC8A7F4EAB27D /* Debug */,
+				2EF78F1F6E21EF53820DD1F7 /* Profile */,
 				B90B4C9C97016BC70E1E5AF1 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -3203,6 +3349,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				595BF7E4FBD810F72C1F7FEF /* Debug */,
+				32D74B5DDD56DCF65BC46B05 /* Profile */,
 				83F882A870541B5EDE0113C7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -3212,6 +3359,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				37B20BB1A98ED0C0FD08E35D /* Debug */,
+				1F7E9CEEDDD2DE3B70D01154 /* Profile */,
 				37A38C3C67B13A34407EB08A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
