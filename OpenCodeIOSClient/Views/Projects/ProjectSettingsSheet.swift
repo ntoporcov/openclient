@@ -9,12 +9,26 @@ struct ProjectSettingsSheet: View {
     @State private var selectedActionCommandName = ""
     @State private var selectedActionIconName = "bolt.fill"
     @State private var symbolPickerContext: ProjectActionSymbolPickerContext?
+    @State private var projectForRename: OpenCodeProject?
+    @State private var projectForColor: OpenCodeProject?
+    @State private var projectForImage: OpenCodeProject?
 
     var body: some View {
         let snapshot = facade.settingsSnapshot
 
         NavigationStack(path: $navigationPath) {
             Form {
+                if let project = facade.currentProject, facade.canEditPreferences(for: project) {
+                    Section("Project Appearance") {
+                        Button {
+                            projectForRename = project
+                        } label: {
+                            LabeledContent("Name", value: project.name ?? URL(fileURLWithPath: project.worktree).lastPathComponent)
+                        }
+                        Button("Set Color", systemImage: "paintpalette") { projectForColor = project }
+                        Button("Set Image", systemImage: "photo.on.rectangle") { projectForImage = project }
+                    }
+                }
                 Section {
                     NavigationLink(value: ConfigurationRoute.globalSettings) {
                         Label("Global Settings", systemImage: "gearshape")
@@ -132,6 +146,15 @@ struct ProjectSettingsSheet: View {
             }
         }
         .configurationLifecycle(viewModel: configurations, navigationPath: $navigationPath)
+        .sheet(item: $projectForRename) { project in
+            ProjectRenameSheet(facade: facade, project: project)
+        }
+        .sheet(item: $projectForColor) { project in
+            ProjectColorPickerSheet(facade: facade, project: project)
+        }
+        .sheet(item: $projectForImage) { project in
+            ProjectImagePickerSheet(facade: facade, project: project)
+        }
         .sheet(item: $symbolPickerContext) { context in
             ProjectActionSymbolPickerSheet(selectedSymbolName: context.selectedSymbolName) { symbolName in
                 if let actionID = context.actionID {

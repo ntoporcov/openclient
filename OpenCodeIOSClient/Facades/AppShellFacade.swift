@@ -314,6 +314,13 @@ final class AppShellFacade: ObservableObject {
             && !connection.isUsingAppleIntelligence
             && viewModel.effectiveTerminalDirectory != nil
         let scopeTitle = viewModel.projectScopeTitle
+        let projectName = projects.currentProject?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title: String
+        if projects.currentProject?.id != "global", let projectName, !projectName.isEmpty {
+            title = projectName
+        } else {
+            title = scopeTitle.split(separator: "/").last.map(String.init) ?? scopeTitle
+        }
         return ProjectContentSnapshot(
             selectedTab: selectedTab,
             availableTabs: OpenClientProjectContentTab.allCases.filter { tab in
@@ -328,7 +335,7 @@ final class AppShellFacade: ObservableObject {
                     return true
                 }
             },
-            title: scopeTitle.split(separator: "/").last.map(String.init) ?? scopeTitle,
+            title: title,
             isShowingSettings: projects.isShowingProjectSettingsSheet,
             hasGitProject: projectFiles.hasGitProject,
             filesMode: files.filesMode,

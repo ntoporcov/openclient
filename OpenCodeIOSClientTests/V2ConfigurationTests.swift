@@ -9,6 +9,65 @@ final class V2ConfigurationTests: XCTestCase {
         URLProtocol.unregisterClass(V2ConfigurationURLProtocol.self)
     }
 
+    func testProjectMetadataUsesV2AndPreservesLatestAppearance() async throws {
+        let model = makeModel()
+        _ = try model.requireBackendConnection()
+        defer { model.connectionStore.beginConnecting() }
+        let project = OpenCodeProject(id: "project_test", worktree: "/repo", vcs: "git", name: "Original", sandboxes: ["/branch"], icon: .init(url: nil, override: "data:image/png;base64,old", color: "pink"), time: nil)
+        model.projects = [project]
+        model.currentProject = project
+        let facade = model.projectFacade
+        XCTAssertTrue(facade.canEditPreferences(for: project))
+        var calls = 0
+        V2ConfigurationURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/project/project_test")
+            XCTAssertEqual(request.httpMethod, "PATCH")
+            let body = try Self.body(request)
+            calls += 1
+            switch calls {
+            case 1:
+                XCTAssertEqual(body["name"], .string("Renamed"))
+                XCTAssertNil(body["icon"])
+            case 2:
+                XCTAssertNil(body["name"], "Appearance edits must not restore a stale name")
+                XCTAssertEqual(body["icon"], .object(["override": .string("data:image/png;base64,old"), "color": .string("cyan")]))
+            default:
+                XCTAssertEqual(body["icon"], .object(["override": .string(""), "color": .string("cyan")]))
+            }
+            let color = calls == 1 ? "pink" : "cyan"
+            let image = calls == 3 ? "" : "data:image/png;base64,old"
+            return (200, #"{"id":"project_test","canonical":"/repo","name":"Renamed","vcs":"git","sandboxes":["/branch"],"icon":{"color":"\#(color)","override":"\#(image)"}}"#)
+        }
+        let renamed = await facade.rename(" Renamed ", project: project)
+        XCTAssertTrue(renamed)
+        let colored = await facade.setColor("cyan", for: project)
+        XCTAssertTrue(colored)
+        let cleared = await facade.setImageOverride(nil, for: project)
+        XCTAssertTrue(cleared)
+        XCTAssertEqual(model.currentProject?.name, "Renamed")
+        XCTAssertEqual(model.projects.first?.icon?.color, "cyan")
+        XCTAssertEqual(model.projects.first?.icon?.override, "")
+        XCTAssertEqual(model.projects.first?.sandboxes, ["/branch"])
+        V2ConfigurationURLProtocol.handler = { _ in (500, "Save failed") }
+        let failed = await facade.rename("Lost", project: project)
+        XCTAssertFalse(failed)
+        XCTAssertNotNil(facade.metadataError)
+        XCTAssertEqual(model.currentProject?.name, "Renamed")
+    }
+
+    func testImageDiscoveryRequestsExpandedV2Limit() async throws {
+        V2ConfigurationURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/fs/find")
+            let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            XCTAssertEqual(query.first { $0.name == "limit" }?.value, "1000")
+            XCTAssertEqual(query.first { $0.name == "location[directory]" }?.value, "/repo")
+            let files = (0..<150).map { #"{"name":"logo\#($0).png","path":"logo\#($0).png","type":"file"}"# }.joined(separator: ",")
+            return (200, Self.response("[\(files)]"))
+        }
+        let files = try await makeClient().findV2Files(query: "png", directory: "/repo", limit: 1000)
+        XCTAssertEqual(files.count, 150)
+    }
+
     func testDiscoveryPreservesMethodIDsAndCredentialIdentity() throws {
         let integration = try decode(OpenCodeV2Integration.self, Self.integration)
         XCTAssertEqual(integration.methods.map(\.id), ["key", "oauth:browser-login", "env", "command:cli-login"])

@@ -1125,8 +1125,9 @@ struct OpenCodeAPIClient: Sendable {
         return response.data.map { $0.normalized(directory: response.location.directory) }
     }
 
-    func findV2Files(query: String, directory: String, workspaceID: String? = nil) async throws -> [String] {
-        let response: OpenCodeV2DataResponse<[OpenCodeV2FileEntry]> = try await send(path: "/api/fs/find", method: "GET", queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID) + [URLQueryItem(name: "query", value: query), URLQueryItem(name: "type", value: "file")])
+    func findV2Files(query: String, directory: String, workspaceID: String? = nil, limit: Int? = nil) async throws -> [String] {
+        let limitItems = limit.map { [URLQueryItem(name: "limit", value: String($0))] } ?? []
+        let response: OpenCodeV2DataResponse<[OpenCodeV2FileEntry]> = try await send(path: "/api/fs/find", method: "GET", queryItems: v2LocationQueryItems(directory: directory, workspaceID: workspaceID) + [URLQueryItem(name: "query", value: query), URLQueryItem(name: "type", value: "file")] + limitItems)
         return response.data.map(\.path)
     }
 

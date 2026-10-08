@@ -35,6 +35,30 @@ struct OpenClientWhatsNewChatContinuity: View {
                 Text("Older messages load as you scroll, while your place stays put. We’ve spent enough time chasing the scroll position. Now you can spend yours finding that thing the assistant said 200 messages ago.")
                     .foregroundStyle(.secondary)
             }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Your projects, your names.", systemImage: "paintpalette").font(.title2.bold())
+                Text("Rename OpenCode v2 projects and change their color or image from Project Settings or the project menu. Your project name now follows you into the navigation bar.")
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Label("More room for logos.", systemImage: "photo.on.rectangle").font(.title2.bold())
+                Text("Browse a larger selection of project images, search by filename, and reveal more with Show More. Images appear in batches of 48.")
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Settings that stay on track.", systemImage: "slider.horizontal.3").font(.title2.bold())
+                Text("Provider settings keep their place as you navigate back. Usage tracking loads provider credentials when you open it, with a retry option if discovery fails.")
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Know your session.", systemImage: "chart.bar.xaxis").font(.title2.bold())
+                Text("Explore recorded token usage, response timing, and model details from the context menu. Missing metrics are shown as unavailable, and totals clearly describe the loaded history.")
+                    .foregroundStyle(.secondary)
+            }
         }
         .accessibilityIdentifier("new-features.chat-continuity")
     }

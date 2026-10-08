@@ -7,5 +7,8 @@ Follow the work. See what changed. Pick up where you left off.
 • Pending prompts on OpenCode v1 now appear below the status pill.
 • Improved OpenCode v1 bridge discovery behind reverse proxies.
 • Fixed OpenAI usage setup on OpenCode v2, provider settings navigation, and scrolling in half-height settings sheets.
+• Rename OpenCode v2 projects and customize their color and image. Project names now appear in the navigation bar.
+• Find more project logos with filename search and Show More batches of 48 images.
+• Explore recorded token usage, response timing, and model details in the context sheet.
 
 OpenClient supports OpenCode v1 and v2. Per-response file changes require OpenCode v2 and recorded file snapshots.

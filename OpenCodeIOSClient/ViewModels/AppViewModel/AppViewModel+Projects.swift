@@ -316,23 +316,11 @@ extension AppViewModel {
     }
 
     func setProjectColor(_ color: String, for project: OpenCodeProject) async {
-        guard canEditProjectPreferences(project) else { return }
-        let icon = OpenCodeProject.Icon(
-            url: project.icon?.url,
-            override: project.icon?.override,
-            color: color
-        )
-        await updateProjectPreferences(project, icon: icon)
+        await projectFacade.setColor(color, for: project)
     }
 
     func setProjectImageOverride(_ dataURL: String?, for project: OpenCodeProject) async {
-        guard canEditProjectPreferences(project) else { return }
-        let icon = OpenCodeProject.Icon(
-            url: project.icon?.url,
-            override: dataURL ?? "",
-            color: project.icon?.color
-        )
-        await updateProjectPreferences(project, icon: icon)
+        await projectFacade.setImageOverride(dataURL, for: project)
     }
 
     func discoverProjectImageCandidates(for project: OpenCodeProject) async -> [ProjectImageCandidate] {
@@ -342,7 +330,7 @@ extension AppViewModel {
         for query in ["png", "jpg", "jpeg"] {
             do {
                 let results = try await (connectionStore.apiProfile == .v2
-                    ? client.findV2Files(query: query, directory: project.worktree)
+                    ? client.findV2Files(query: query, directory: project.worktree, limit: 1000)
                     : client.findFiles(query: query, directory: project.worktree))
                 for result in results where isSupportedProjectImagePath(result) {
                     paths.insert(result)
@@ -360,7 +348,6 @@ extension AppViewModel {
                 if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
                 return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
             }
-            .prefix(96)
             .map { path in
                 ProjectImageCandidate(
                     path: path,
@@ -452,25 +439,7 @@ extension AppViewModel {
         errorMessage = BackendError.disconnected.localizedDescription
     }
 
-    private func updateProjectPreferences(_ project: OpenCodeProject, icon: OpenCodeProject.Icon) async {
-        guard canEditProjectPreferences(project), let connection = backendConnection,
-              let requestClient = connection.openCodeCompatibility?.client else { return }
-        do {
-            let updated = try await requestClient.updateProject(
-                projectID: project.id,
-                directory: project.worktree,
-                name: project.name,
-                icon: icon
-            )
-            guard !Task.isCancelled, isCurrentBackendConnection(connection), config == requestClient.config else { return }
-            applyUpdatedProject(updated)
-        } catch {
-            guard !Task.isCancelled, isCurrentBackendConnection(connection) else { return }
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func applyUpdatedProject(_ project: OpenCodeProject) {
+    func applyUpdatedProject(_ project: OpenCodeProject) {
         if let index = projects.firstIndex(where: { $0.id == project.id }) {
             projects[index] = project
         } else {

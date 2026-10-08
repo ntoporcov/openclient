@@ -18,6 +18,7 @@ struct ProjectListView: View {
     let onProjectChosen: () -> Void
     @State private var projectForColorPicker: OpenCodeProject?
     @State private var projectForImagePicker: OpenCodeProject?
+    @State private var projectForRename: OpenCodeProject?
     @State private var isShowingBridgeStatus = false
     @State private var isEditingProjects = false
     @State private var isShowingAnnouncements = false
@@ -160,6 +161,11 @@ struct ProjectListView: View {
                                 if isEditingProjects {
                                     EmptyView()
                                 } else if facade.canEditPreferences(for: project) {
+                                    Button {
+                                        projectForRename = project
+                                    } label: {
+                                        Label("Rename", systemImage: "pencil")
+                                    }
                                     Button {
                                         projectForColorPicker = project
                                     } label: {
@@ -1849,7 +1855,7 @@ private enum ProjectListLayout {
     static let conversationButtonSpacing: CGFloat = 8
 }
 
-private struct ProjectColorPickerSheet: View {
+struct ProjectColorPickerSheet: View {
     @Environment(\.appAccentColor) private var appAccentColor
     @ObservedObject var facade: ProjectFacade
     let project: OpenCodeProject
@@ -1874,8 +1880,7 @@ private struct ProjectColorPickerSheet: View {
                     ForEach(colors, id: \.self) { color in
                         Button {
                             Task {
-                                await facade.setColor(color, for: project)
-                                dismiss()
+                                if await facade.setColor(color, for: project) { dismiss() }
                             }
                         } label: {
                             VStack(spacing: 8) {
@@ -1897,7 +1902,11 @@ private struct ProjectColorPickerSheet: View {
                 .padding(.horizontal)
 
                 Spacer(minLength: 0)
+                if let error = facade.metadataError {
+                    Text(verbatim: error).foregroundStyle(.red).padding()
+                }
             }
+            .disabled(facade.isSavingMetadata)
             .navigationTitle("Project Color")
             .opencodeInlineNavigationTitle()
             .toolbar {
@@ -1907,6 +1916,7 @@ private struct ProjectColorPickerSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .onAppear { facade.clearMetadataError() }
     }
 }
 
@@ -1921,7 +1931,7 @@ private func projectColorTitle(_ color: String) -> LocalizedStringResource {
     }
 }
 
-private struct ProjectImagePickerSheet: View {
+struct ProjectImagePickerSheet: View {
     @ObservedObject var facade: ProjectFacade
     let project: OpenCodeProject
     @Environment(\.dismiss) private var dismiss
@@ -1929,6 +1939,13 @@ private struct ProjectImagePickerSheet: View {
     @State private var thumbnails: [String: String] = [:]
     @State private var isLoading = true
     @State private var selectedPath: String?
+    @State private var searchText = ""
+    @State private var visibleCount = 48
+
+    private var filteredCandidates: [ProjectImageCandidate] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? candidates : candidates.filter { $0.displayPath.localizedCaseInsensitiveContains(query) }
+    }
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
@@ -1947,7 +1964,7 @@ private struct ProjectImagePickerSheet: View {
                 } else {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 10) {
-                            ForEach(candidates) { candidate in
+                            ForEach(filteredCandidates.prefix(visibleCount)) { candidate in
                                 Button {
                                     Task { await select(candidate) }
                                 } label: {
@@ -1964,10 +1981,17 @@ private struct ProjectImagePickerSheet: View {
                             }
                         }
                         .padding()
+                        if visibleCount < filteredCandidates.count {
+                            Button("Show More") { visibleCount += 48 }
+                                .buttonStyle(.bordered)
+                                .padding(.bottom)
+                        }
                     }
                 }
             }
             .navigationTitle("Project Image")
+            .searchable(text: $searchText)
+            .onChange(of: searchText) { visibleCount = 48 }
             .opencodeInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .opencodeLeading) {
@@ -1978,16 +2002,22 @@ private struct ProjectImagePickerSheet: View {
                     if project.icon?.override?.isEmpty == false {
                         Button("Clear", role: .destructive) {
                             Task {
-                                await facade.setImageOverride(nil, for: project)
-                                dismiss()
+                                if await facade.setImageOverride(nil, for: project) { dismiss() }
                             }
                         }
                     }
                 }
             }
             .task {
+                facade.clearMetadataError()
                 candidates = await facade.discoverImageCandidates(for: project)
                 isLoading = false
+            }
+            .disabled(facade.isSavingMetadata)
+            .safeAreaInset(edge: .bottom) {
+                if let error = facade.metadataError {
+                    Text(verbatim: error).foregroundStyle(.red).padding()
+                }
             }
         }
         .presentationDetents([.medium, .large])
@@ -2008,8 +2038,47 @@ private struct ProjectImagePickerSheet: View {
             selectedPath = nil
             return
         }
-        await facade.setImageOverride(dataURL, for: project)
-        dismiss()
+        if await facade.setImageOverride(dataURL, for: project) { dismiss() }
+    }
+}
+
+struct ProjectRenameSheet: View {
+    @ObservedObject var facade: ProjectFacade
+    let project: OpenCodeProject
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Name", text: $name)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("project.metadata.name")
+                if let error = facade.metadataError {
+                    Text(verbatim: error).foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Rename")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task {
+                            if await facade.rename(name, project: project) { dismiss() }
+                        }
+                    }
+                    .disabled(facade.isSavingMetadata || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .interactiveDismissDisabled(facade.isSavingMetadata)
+        .onAppear {
+            name = project.name ?? URL(fileURLWithPath: project.worktree).lastPathComponent
+            facade.clearMetadataError()
+        }
+        .presentationDetents([.medium])
     }
 }
 

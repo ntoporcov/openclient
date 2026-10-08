@@ -7,5 +7,8 @@ Segui il lavoro. Scopri cosa è cambiato. Riprendi da dove eri rimasto.
 • I messaggi in attesa su OpenCode v1 ora appaiono sotto l'indicatore di stato.
 • Migliorato il rilevamento del bridge OpenCode v1 dietro proxy inversi.
 • Corretti la configurazione dell’utilizzo di OpenAI su OpenCode v2, la navigazione nelle impostazioni dei provider e lo scorrimento dei pannelli delle impostazioni a metà altezza.
+• Rinomina i progetti OpenCode v2 e personalizza il colore e l’immagine. Il nome del progetto ora compare nella barra di navigazione.
+• Trova più loghi dei progetti con la ricerca per nome del file e Mostra altro in gruppi di 48 immagini.
+• Esplora l’utilizzo registrato dei token, i tempi di risposta e i dettagli del modello nel pannello del contesto.
 
 OpenClient supporta OpenCode v1 e v2. Le modifiche ai file per singola risposta richiedono OpenCode v2 e istantanee dei file registrate.

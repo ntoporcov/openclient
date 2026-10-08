@@ -1,6 +1,38 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Your projects, your names.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "I tuoi progetti, i tuoi nomi." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Seus projetos, seus nomes." } }
+    } },
+    "Rename OpenCode v2 projects and change their color or image from Project Settings or the project menu. Your project name now follows you into the navigation bar.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Rinomina i progetti OpenCode v2 e cambia il colore o l’immagine dalle impostazioni o dal menu del progetto. Il nome del progetto ora compare anche nella barra di navigazione." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Renomeie projetos do OpenCode v2 e altere a cor ou a imagem nas configurações ou no menu do projeto. O nome do projeto agora também aparece na barra de navegação." } }
+    } },
+    "More room for logos.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Più spazio per i loghi." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Mais espaço para logos." } }
+    } },
+    "Browse a larger selection of project images, search by filename, and reveal more with Show More. Images appear in batches of 48.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Sfoglia una selezione più ampia di immagini del progetto, cerca per nome del file e scopri altre immagini con Mostra altro. Le immagini vengono mostrate in gruppi di 48." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Explore uma seleção maior de imagens do projeto, pesquise pelo nome do arquivo e veja outras com Mostrar mais. As imagens aparecem em grupos de 48." } }
+    } },
+    "Settings that stay on track.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Impostazioni sempre al posto giusto." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Configurações no lugar certo." } }
+    } },
+    "Provider settings keep their place as you navigate back. Usage tracking loads provider credentials when you open it, with a retry option if discovery fails.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Le impostazioni dei provider mantengono la posizione quando torni indietro. Il monitoraggio dell’utilizzo carica le credenziali dei provider all’apertura e permette di riprovare se il rilevamento non riesce." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "As configurações dos provedores mantêm a posição ao voltar. O monitoramento de uso carrega as credenciais dos provedores ao abrir, com a opção de tentar novamente se a descoberta falhar." } }
+    } },
+    "Know your session.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Conosci la tua sessione." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Conheça sua sessão." } }
+    } },
+    "Explore recorded token usage, response timing, and model details from the context menu. Missing metrics are shown as unavailable, and totals clearly describe the loaded history.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Esplora l’utilizzo registrato dei token, i tempi di risposta e i dettagli del modello dal menu del contesto. Le metriche mancanti sono indicate come non disponibili e i totali si riferiscono chiaramente alla cronologia caricata." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Explore o uso registrado de tokens, os tempos de resposta e os detalhes do modelo pelo menu de contexto. Métricas ausentes aparecem como indisponíveis, e os totais se referem claramente ao histórico carregado." } }
+    } },
     "Archived": {"localizations": {"it": {"stringUnit": {"state": "translated", "value": "Archiviata"}}, "pt-BR": {"stringUnit": {"state": "translated", "value": "Arquivada"}}}},
     "Average Time to First Token": {"localizations": {"it": {"stringUnit": {"state": "translated", "value": "Tempo medio al primo token"}}, "pt-BR": {"stringUnit": {"state": "translated", "value": "Tempo médio até o primeiro token"}}}},
     "Cache Read Share": {"localizations": {"it": {"stringUnit": {"state": "translated", "value": "Quota di lettura dalla cache"}}, "pt-BR": {"stringUnit": {"state": "translated", "value": "Proporção de leitura do cache"}}}},

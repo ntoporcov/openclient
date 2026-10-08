@@ -160,9 +160,8 @@ final class ProjectFacade: ObservableObject {
         !isReadOnly && viewModel.backendConnection?.isClosed == false && viewModel.backendConnection?.worktrees != nil
     }
     var allowsProjectMetadataEditing: Bool {
-        // Only the legacy adapter has a verified metadata writer. Lifecycle/files services do not imply one.
         !isReadOnly && viewModel.backendConnection?.isClosed == false
-            && viewModel.backendConnection?.openCodeCompatibility?.profile == .legacy
+            && viewModel.backendConnection?.openCodeCompatibility != nil
     }
     var requiresWorktreeDestinationParent: Bool { viewModel.backendConnection?.worktrees?.requiresDestinationParent == true }
     var supportsWorktreeDestinationParent: Bool { viewModel.backendConnection?.worktrees?.supportsDestinationParent == true }
@@ -368,14 +367,46 @@ final class ProjectFacade: ObservableObject {
     }
     func presentActionsPaywall() { viewModel.commerceFacade.presentPaywall(reason: .actions) }
 
-    func setColor(_ color: String, for project: OpenCodeProject) async {
-        guard canEditPreferences(for: project) else { return }
-        await viewModel.setProjectColor(color, for: project)
+    @Published private(set) var isSavingMetadata = false
+    @Published private(set) var metadataError: String?
+
+    func clearMetadataError() { metadataError = nil }
+
+    func rename(_ name: String, project: OpenCodeProject) async -> Bool {
+        await saveMetadata(project: project, name: name.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    func setImageOverride(_ dataURL: String?, for project: OpenCodeProject) async {
-        guard canEditPreferences(for: project) else { return }
-        await viewModel.setProjectImageOverride(dataURL, for: project)
+    @discardableResult
+    func setColor(_ color: String, for project: OpenCodeProject) async -> Bool {
+        let latest = projects.first { $0.id == project.id } ?? project
+        return await saveMetadata(project: latest, icon: .init(url: latest.icon?.url, override: latest.icon?.override, color: color))
+    }
+
+    @discardableResult
+    func setImageOverride(_ dataURL: String?, for project: OpenCodeProject) async -> Bool {
+        let latest = projects.first { $0.id == project.id } ?? project
+        return await saveMetadata(project: latest, icon: .init(url: latest.icon?.url, override: dataURL ?? "", color: latest.icon?.color))
+    }
+
+    private func saveMetadata(project: OpenCodeProject, name: String? = nil, icon: OpenCodeProject.Icon? = nil) async -> Bool {
+        guard !isSavingMetadata, canEditPreferences(for: project),
+              let connection = viewModel.backendConnection,
+              let compatibility = connection.openCodeCompatibility else { return false }
+        isSavingMetadata = true
+        metadataError = nil
+        defer { isSavingMetadata = false }
+        do {
+            let updated = try await (compatibility.profile == .v2
+                ? compatibility.client.updateV2Project(projectID: project.id, directory: project.worktree, name: name, icon: icon)
+                : compatibility.client.updateProject(projectID: project.id, directory: project.worktree, name: name, icon: icon))
+            guard !Task.isCancelled, viewModel.isCurrentBackendConnection(connection) else { return false }
+            viewModel.applyUpdatedProject(updated)
+            return true
+        } catch {
+            guard !Task.isCancelled, viewModel.isCurrentBackendConnection(connection) else { return false }
+            metadataError = error.localizedDescription
+            return false
+        }
     }
 
     func discoverImageCandidates(for project: OpenCodeProject) async -> [ProjectImageCandidate] {
