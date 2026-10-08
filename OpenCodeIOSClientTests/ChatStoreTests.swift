@@ -1235,6 +1235,40 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertEqual(appended.last?.parts.count, 4)
     }
 
+    func testLargeStreamingActivityGroupPreservesSourcesAndPreviousSnapshot() {
+        let messages = (0..<2_000).map { index in
+            var message = OpenCodeMessageEnvelope.local(role: "assistant", text: "", messageID: "m\(index)", sessionID: "s")
+            message.parts = (0..<3).map { part in
+                OpenCodePart(id: "p\(index)-\(part)", messageID: message.id, sessionID: "s", type: "reasoning",
+                    mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil, text: "Thinking")
+            }
+            return message
+        }
+        let snapshot = TranscriptActivityGrouping.slices(messages)
+        XCTAssertEqual(snapshot.count, 1)
+        XCTAssertEqual(snapshot[0].sourceMessageIDs, messages.map(\.id))
+        XCTAssertEqual(snapshot[0].parts, messages.flatMap(\.parts))
+
+        var updated = messages
+        updated[updated.count - 1].parts[2].text = "More thinking"
+        let next = TranscriptActivityGrouping.slices(updated)
+        XCTAssertEqual(next[0].id, snapshot[0].id)
+        XCTAssertEqual(next[0].parts.last?.text, "More thinking")
+        XCTAssertEqual(snapshot[0].parts.last?.text, "Thinking")
+    }
+
+    func testMeasureLargeStreamingActivityGrouping() {
+        let messages = (0..<2_000).map { index in
+            var message = OpenCodeMessageEnvelope.local(role: "assistant", text: "", messageID: "m\(index)", sessionID: "s")
+            message.parts = [OpenCodePart(id: "p\(index)", messageID: message.id, sessionID: "s", type: "reasoning",
+                mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil, text: "Thinking")]
+            return message
+        }
+        measure {
+            XCTAssertEqual(TranscriptActivityGrouping.slices(messages).first?.parts.count, messages.count)
+        }
+    }
+
     func testReasoningOnlyActivityGroupsAndUngroupedOrder() {
         let part = OpenCodePart(id: "r", messageID: "m", sessionID: "s", type: "reasoning",
             mime: nil, filename: nil, url: nil, reason: nil, tool: nil, callID: nil, state: nil, text: "Thinking")

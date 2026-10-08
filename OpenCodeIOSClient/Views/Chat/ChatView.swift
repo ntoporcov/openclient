@@ -4141,10 +4141,12 @@ struct ChatView: View {
         let projected = recoveries.isEmpty ? nil : SubmissionTranscriptPresentation.messages(
             canonical: transcriptSuffix(chatSourceMessageCount), recoveries: recoveries)
         let window: OpenCodeChatTranscriptWindow
+        let items: [ChatDisplayItem]
         if appCustomizationStore.groupsToolCalls {
             let allMessages = projected ?? transcriptSuffix(chatSourceMessageCount)
+            let allItems = displayedChatItems(for: allMessages)
             let indices = Dictionary(uniqueKeysWithValues: allMessages.enumerated().map { ($0.element.id, $0.offset) })
-            let ranges = displayedChatItems(for: allMessages).compactMap { item -> ClosedRange<Int>? in
+            let ranges = allItems.compactMap { item -> ClosedRange<Int>? in
                 if case let .activitySlice(slice) = item, !shouldDisplayMessageRow(slice.message) { return nil }
                 let sources = item.windowSourceMessageIDs.compactMap { indices[$0] }
                 guard let first = sources.min(), let last = sources.max() else { return nil }
@@ -4158,6 +4160,21 @@ struct ChatView: View {
                 batchSize: olderMessageWindowSize, rowRanges: ranges)
             window = OpenCodeChatTranscriptWindow(messages: Array(allMessages.suffix(selection.messageCount)),
                 hiddenMessageCount: selection.hiddenRowCount, nextRequestedMessageCount: selection.nextMessageCount)
+            // Window selection completes overlapping row spans, so these already
+            // prepared groups can be reused without regrouping/chunking the suffix.
+            let visibleIDs = Set(window.messages.map(\.id))
+            items = allItems.filter { item in
+                switch item {
+                case let .responseCaption(turn):
+                    return visibleIDs.contains(turn.anchorMessageID)
+                case .findPlaceReveal:
+                    return window.messages.contains { $0.isAssistantMessage && $0.containsText(FindPlaceGame.winMarker) }
+                case .findBugSolved:
+                    return window.messages.contains { $0.isAssistantMessage && $0.containsText(FindBugGame.winMarker) }
+                default:
+                    return item.windowSourceMessageIDs.contains { visibleIDs.contains($0) }
+                }
+            }
         } else {
             window = OpenCodeChatTranscriptWindowing.window(
                 totalCount: projected?.count ?? chatSourceMessageCount,
@@ -4171,9 +4188,9 @@ struct ChatView: View {
             ) { messages in
                 !displayedChatItems(for: messages).isEmpty || shouldShowThinking(in: messages)
             }
+            items = displayedChatItems(for: window.messages)
         }
         let messages = window.messages
-        let items = displayedChatItems(for: messages)
         let showsThinking = shouldShowThinking(in: messages)
         let thinkingToolName = activeRunningToolName(in: messages)
         let tailHeight = ChatTranscriptTailSpacing.height(

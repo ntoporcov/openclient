@@ -39,13 +39,15 @@ enum TranscriptActivityGrouping {
                 // Transport step markers do not separate visible activity.
                 if part.type == "step-start" || part.type == "step-finish" { continue }
                 let activity = isActivity(part)
-                if let last = result.last,
-                   last.source.info.role == "assistant",
-                   last.isActivity == activity,
-                   activity || last.source.id == message.id {
-                    result[result.count - 1].parts.append(part)
-                    if (last.additionalSourceMessageIDs.last ?? last.source.id) != message.id {
-                        result[result.count - 1].additionalSourceMessageIDs.append(message.id)
+                // Do not retain a copy of the last slice while mutating its arrays:
+                // that forces copy-on-write of the growing group for every part.
+                if let index = result.indices.last,
+                   result[index].source.info.role == "assistant",
+                   result[index].isActivity == activity,
+                   activity || result[index].source.id == message.id {
+                    result[index].parts.append(part)
+                    if (result[index].additionalSourceMessageIDs.last ?? result[index].source.id) != message.id {
+                        result[index].additionalSourceMessageIDs.append(message.id)
                     }
                 } else {
                     result.append(.init(source: message, parts: [part], isActivity: activity))
