@@ -1,11 +1,11 @@
-Più controllo sulle conversazioni e una visione più chiara del lavoro in corso.
+Segui il lavoro. Scopri cosa è cambiato. Riprendi da dove eri rimasto.
 
-• Metti in coda il prossimo messaggio o reindirizza l'assistente mentre lavora con OpenCode v2.
-• Fai una domanda a parte senza interrompere il lavoro né aggiungerla alla conversazione. Tieni premuto Invia per scegliere un'azione.
-• Raggruppa l'attività degli strumenti, con dettagli espandibili e contatori animati. Personalizza separatamente la visibilità del ragionamento e del contesto.
-• Trova ed esegui comandi e abilità di OpenCode v2 dal menu /. Tieni premuta una voce per leggerne i dettagli, fissarla o condividerla.
-• Accedi a MCP, Git e al terminale dello spazio di lavoro dal menu nell'intestazione della chat.
-• Esplora il nuovo annuncio interattivo delle funzionalità e consulta gli annunci precedenti in Aiuto.
-• Miglioramenti alla riconnessione, alla cronologia delle conversazioni, alla configurazione dell'utilizzo dei provider e alle immagini del plugin.
+• Un nuovo indicatore di stato 3D animato mostra quando l'assistente sta pensando, leggendo, modificando o lavorando. Tienilo premuto per una sorpresa divertente.
+• Esamina le modifiche ai file di una singola risposta con il pulsante Modifiche accanto a Copia. Le righe invariate sono inizialmente nascoste per mettere in risalto le differenze.
+• Consulta i messaggi meno recenti con uno scorrimento più stabile durante il caricamento della cronologia.
+• Passa da uno spazio di lavoro all'altro dall'intestazione della chat e sposta le sessioni tra spazi in modo più affidabile con OpenCode v2.
+• I messaggi in attesa su OpenCode v1 ora appaiono sotto l'indicatore di stato.
+• Migliorato il rilevamento del bridge OpenCode v1 dietro proxy inversi.
+• Corretti la configurazione dell’utilizzo di OpenAI su OpenCode v2, la navigazione nelle impostazioni dei provider e lo scorrimento dei pannelli delle impostazioni a metà altezza.
 
-OpenClient supporta OpenCode v1 e v2. Coda, reindirizzamento e domande a parte richiedono v2.
+OpenClient supporta OpenCode v1 e v2. Le modifiche ai file per singola risposta richiedono OpenCode v2 e istantanee dei file registrate.

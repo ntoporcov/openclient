@@ -62,6 +62,7 @@ struct ActivityView: View {
         .sheet(isPresented: $isShowingSettings) {
             ActivitySettingsSheet(facade: facade, connection: connection, configurations: configurations, bridge: bridge)
                 .presentationDetents([.medium, .large])
+                .presentationContentInteraction(.scrolls)
         }
         .task {
             await facade.prepareForPresentation()
@@ -143,16 +144,12 @@ private struct ActivitySettingsSheet: View {
         NavigationStack(path: $navigationPath) {
             Form {
                 Section {
-                    NavigationLink {
-                        RootConfigurationsView(facade: connection)
-                    } label: {
+                    NavigationLink(value: ConfigurationRoute.globalSettings) {
                         Label("Global Settings", systemImage: "gearshape")
                     }
                     .accessibilityIdentifier("activity.settings.global-settings")
 
-                    NavigationLink {
-                        ConfigurationsView(viewModel: configurations, connection: connection, bridge: bridge, navigationPath: $navigationPath)
-                    } label: {
+                    NavigationLink(value: ConfigurationRoute.connectionSettings) {
                         Label("Connection Settings", systemImage: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("activity.settings.configurations")
@@ -174,6 +171,7 @@ private struct ActivitySettingsSheet: View {
                 }
             }
             .navigationTitle("Activity Settings")
+            .configurationDestinations(viewModel: configurations, connection: connection, bridge: bridge, navigationPath: $navigationPath)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -181,6 +179,7 @@ private struct ActivitySettingsSheet: View {
                 }
             }
         }
+        .configurationLifecycle(viewModel: configurations, navigationPath: $navigationPath)
     }
 }
 

@@ -3,6 +3,47 @@ import XCTest
 
 @MainActor
 final class ProviderUsageFacadeTests: XCTestCase {
+    func testAppearanceLoadsV2DiscoveryBeforePublishingCredentialSources() async throws {
+        let legacyContext = Self.context()
+        let context = ProviderUsageDiscoveryContext(
+            backend: legacyContext.backend,
+            connectionLifetimeID: legacyContext.connectionLifetimeID,
+            apiProfile: .v2,
+            scope: legacyContext.scope
+        )
+        let store = ProviderUsageStore()
+        var state = ProviderUsageV2ProviderState(readiness: .notHydrated, integrations: [])
+        var loads = 0
+        let facade = ProviderUsageFacade(
+            store: store,
+            accounts: FacadeProviderUsageAccountRepository(),
+            providerClient: FacadeProviderUsageFetching(),
+            contextProvider: { context },
+            legacyStateProvider: { .init(readiness: .notHydrated, connectedProviders: []) },
+            v2StateProvider: { state },
+            loadDiscovery: {
+                loads += 1
+                state = .init(readiness: .ready, integrations: [
+                    .init(id: "openai", label: "OpenAI", credentialConnections: [
+                        .init(id: "cred_codex", label: "Synthetic", method: "oauth")
+                    ])
+                ])
+            },
+            importerFactory: { _, _, _ in
+                XCTFail("Discovery must not import credentials before approval")
+                throw ProviderUsageCredentialImportError.unsupportedSource
+            }
+        )
+
+        await facade.appeared(provider: .codex)
+
+        XCTAssertEqual(loads, 1)
+        XCTAssertEqual(store.candidateReadiness, .ready)
+        let candidate = try XCTUnwrap(store.candidates.first)
+        XCTAssertEqual(candidate.provider, .codex)
+        XCTAssertTrue(facade.beginSetup(from: candidate))
+    }
+
     func testIdenticalDiscoveryPreservesSetupAndImporterIsCreatedOnlyForApprovedRead() async throws {
         let context = Self.context()
         let source = ProviderUsageLegacyProviderState(

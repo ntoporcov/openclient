@@ -259,6 +259,7 @@ struct ProviderUsageSetupCandidate: Identifiable, Hashable, Sendable {
 enum ProviderUsageDiscoveryReadiness: Hashable, Sendable {
     case notHydrated
     case ready
+    case failed(String)
 }
 
 enum ProviderUsageLegacySource: Hashable, Sendable {

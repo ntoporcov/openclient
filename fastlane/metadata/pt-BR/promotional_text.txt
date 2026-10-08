@@ -1,1 +1,1 @@
-Mais controle com fila, redirecionamento e perguntas à parte no OpenCode v2. Explore ferramentas agrupadas, comandos, habilidades e navegação rápida.
+Acompanhe o assistente com um novo indicador 3D, confira alterações de arquivos por resposta no OpenCode v2 e explore o histórico com rolagem mais estável.

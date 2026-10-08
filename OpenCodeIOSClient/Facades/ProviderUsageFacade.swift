@@ -19,6 +19,7 @@ final class ProviderUsageFacade {
     private let contextProvider: ContextProvider
     private let legacyStateProvider: LegacyStateProvider
     private let v2StateProvider: V2StateProvider
+    private let loadDiscovery: @MainActor () async -> Void
     private let importerFactory: ImporterFactory
     private var didRequestAccountLoad = false
     private var isActive = true
@@ -39,6 +40,7 @@ final class ProviderUsageFacade {
         contextProvider: @escaping ContextProvider,
         legacyStateProvider: @escaping LegacyStateProvider,
         v2StateProvider: @escaping V2StateProvider,
+        loadDiscovery: @escaping @MainActor () async -> Void = {},
         importerFactory: @escaping ImporterFactory
     ) {
         self.store = store
@@ -48,6 +50,7 @@ final class ProviderUsageFacade {
         self.contextProvider = contextProvider
         self.legacyStateProvider = legacyStateProvider
         self.v2StateProvider = v2StateProvider
+        self.loadDiscovery = loadDiscovery
         self.importerFactory = importerFactory
     }
 
@@ -71,9 +74,18 @@ final class ProviderUsageFacade {
     func appeared(provider: ProviderUsageProvider) async {
         visibleProvider = provider
         await loadPersistedAccountsOnce()
-        synchronizeDiscovery()
-        guard isActive else { return }
+        guard isActive, !Task.isCancelled, visibleProvider == provider else { return }
+        await reloadDiscovery()
+        guard isActive, !Task.isCancelled, visibleProvider == provider else { return }
         await refreshStaleAccounts(provider: provider)
+    }
+
+    func reloadDiscovery() async {
+        guard isActive, !Task.isCancelled, let provider = visibleProvider else { return }
+        synchronizeDiscovery()
+        await loadDiscovery()
+        guard isActive, !Task.isCancelled, visibleProvider == provider else { return }
+        synchronizeDiscovery()
     }
 
     func synchronizeDiscovery() {

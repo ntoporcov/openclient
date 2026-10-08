@@ -100,6 +100,12 @@ final class ConfigurationsFacade: ObservableObject {
             return
         }
         guard let context = v2Context() else { return }
+        if ifNeeded, modelConfigurationStore.hasLoadedProviders(
+            for: viewModel.providerConfigurationScope(directory: context.directory)
+        ) {
+            isProviderCatalogReady = true
+            return
+        }
         let requestID = UUID()
         providerRequestID = requestID
         providerReadTask?.cancel()
@@ -128,6 +134,8 @@ final class ConfigurationsFacade: ObservableObject {
     func loadV2Integrations() async {
         guard let context = v2Context() else { return }
         await v2Coordinator.load(context)
+        guard !Task.isCancelled, context.isCurrent() else { return }
+        viewModel.providerUsageFacade.synchronizeDiscovery()
     }
 
     private func v2Context() -> V2ConfigurationContext? {
@@ -222,7 +230,7 @@ final class ConfigurationsFacade: ObservableObject {
                 guard let self, self.eventRefreshID == requestID, context.isCurrent() else { return }
                 let refresh = self.pendingEventRefresh
                 self.pendingEventRefresh = []
-                if refresh.contains(.integrations) { await self.v2Coordinator.load(context) }
+                if refresh.contains(.integrations) { await self.loadV2Integrations() }
                 guard !Task.isCancelled, self.eventRefreshID == requestID, context.isCurrent() else { return }
                 if refresh.contains(.providers) { await context.refreshModels() }
                 guard !Task.isCancelled, self.eventRefreshID == requestID, context.isCurrent() else { return }

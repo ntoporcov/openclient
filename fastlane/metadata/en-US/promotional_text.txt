@@ -1,1 +1,1 @@
-Stay in control with Queue, Steer, and Side Question for OpenCode v2. Explore grouped tool activity, commands, skills, and faster workspace navigation.
+Follow your assistant with a new 3D status indicator, review per-response file changes on OpenCode v2, and explore your chat history with smoother scrolling.

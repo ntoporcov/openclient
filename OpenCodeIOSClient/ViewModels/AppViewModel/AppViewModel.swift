@@ -70,6 +70,14 @@ final class AppViewModel: ObservableObject {
             guard let self else { return .init(readiness: .notHydrated, integrations: []) }
             return ProviderUsageDiscovery.v2State(from: self.configurationsFacade.v2ProviderStore)
         },
+        loadDiscovery: { [weak self] in
+            guard let self else { return }
+            if self.connectionStore.apiProfile == .v2 {
+                await self.configurationsFacade.loadV2Integrations()
+            } else {
+                await self.configurationsFacade.loadProvidersForConfigurationIfNeeded()
+            }
+        },
         importerFactory: providerUsageImporterFactoryOverride ?? { [weak self] candidate, allowsInsecureHTTP, currentContext in
             try OpenCodeProviderUsageComposition.makeImporter(
                 candidate: candidate,

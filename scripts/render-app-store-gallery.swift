@@ -148,6 +148,46 @@ func render(_ slide: Slide, ipad: Bool) throws -> URL {
     return url
 }
 
+func renderDuo(_ slide: Slide) throws {
+    let source = sources.appendingPathComponent("iPhone-Duo-gallery-\(slide.id).png")
+    guard let screenshot = NSImage(contentsOf: source),
+          let sourceBitmap = NSBitmapImageRep(data: try Data(contentsOf: source)) else { fatalError("Missing Duo capture: \(source.path)") }
+    let size = NSSize(width: sourceBitmap.pixelsWide, height: sourceBitmap.pixelsHigh)
+    precondition([NSSize(width: 1398, height: 2034), NSSize(width: 2007, height: 2853)].contains(size), "Unexpected Duo portrait dimensions: \(size)")
+    let rep = try canvas(size) {
+        NSGradient(starting: NSColor(srgbRed: 0.045, green: 0.055, blue: 0.085, alpha: 1),
+                   ending: NSColor(srgbRed: 0.095, green: 0.085, blue: 0.15, alpha: 1))!.draw(in: NSRect(origin: .zero, size: size), angle: -70)
+        let scale = size.width / 1398
+        text(slide.feature, frame: rect(90 * scale, 70 * scale, 1200 * scale, 48 * scale, in: size),
+             font: .systemFont(ofSize: 26 * scale, weight: .bold), color: slide.accent)
+        text(slide.headline, frame: rect(86 * scale, 142 * scale, 1220 * scale, 240 * scale, in: size),
+             font: .systemFont(ofSize: 96 * scale, weight: .bold), color: .white)
+        text(slide.subtitle, frame: rect(90 * scale, 405 * scale, 1220 * scale, 110 * scale, in: size),
+             font: .systemFont(ofSize: 32 * scale, weight: .regular), color: .init(white: 0.75, alpha: 1), spacing: 5)
+        let imageHeight = size.height - 600 * scale
+        let imageWidth = imageHeight * size.width / size.height
+        let frame = rect((size.width - imageWidth) / 2, 550 * scale, imageWidth, imageHeight, in: size)
+        NSColor(white: 0.22, alpha: 1).setFill()
+        NSBezierPath(roundedRect: frame.insetBy(dx: -8, dy: -8), xRadius: 36, yRadius: 36).fill()
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: frame, xRadius: 30, yRadius: 30).addClip()
+        screenshot.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+    try validatedPNG(rep).write(to: output.appendingPathComponent("iPhone-Duo-\(slide.id).png"))
+}
+
+if CommandLine.arguments.contains("--duo-only") {
+    for slide in slides { try renderDuo(slide) }
+    let sheet = try canvas(NSSize(width: 1500, height: 900)) {
+        for (index, slide) in slides.enumerated() {
+            let image = NSImage(contentsOf: output.appendingPathComponent("iPhone-Duo-\(slide.id).png"))!
+            image.draw(in: NSRect(x: (index % 5) * 300, y: (1 - index / 5) * 450, width: 300, height: 450))
+        }
+    }
+    try validatedPNG(sheet).write(to: output.appendingPathComponent("iPhone-Duo-contact-sheet.png"))
+    print("Rendered \(slides.count) iPhone Duo gallery images in \(output.path)")
+} else {
 for ipad in [false, true] {
     let images = try slides.map { try render($0, ipad: ipad) }
     let thumb = ipad ? NSSize(width: 412.8, height: 550.4) : NSSize(width: 264, height: 573.6)
@@ -160,3 +200,4 @@ for ipad in [false, true] {
     try validatedPNG(sheet).write(to: output.appendingPathComponent("\(ipad ? "iPad" : "iPhone")-contact-sheet.png"))
 }
 print("Rendered \(slides.count * 2) gallery images and two contact sheets in \(output.path)")
+}

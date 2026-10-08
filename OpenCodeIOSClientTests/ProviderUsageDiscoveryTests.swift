@@ -3,6 +3,21 @@ import XCTest
 
 @MainActor
 final class ProviderUsageDiscoveryTests: XCTestCase {
+    func testV2DiscoveryFailureIsDistinctFromLoadingAndClearsAfterRetry() {
+        let store = V2ProviderStore()
+        store.discoveryErrorMessage = "Synthetic request failure"
+        let failed = discover(.v2, v2: ProviderUsageDiscovery.v2State(from: store))
+        XCTAssertEqual(failed.readiness, .failed("Synthetic request failure"))
+        XCTAssertTrue(failed.candidates.isEmpty)
+
+        store.isLoading = true
+        XCTAssertEqual(ProviderUsageDiscovery.v2State(from: store).readiness, .notHydrated)
+        store.isLoading = false
+        store.discoveryErrorMessage = nil
+        store.isReady = true
+        XCTAssertEqual(ProviderUsageDiscovery.v2State(from: store).readiness, .ready)
+    }
+
     func testSupportedProviderCatalogIsStableAndOwnsOpenCodeMappings() {
         XCTAssertEqual(ProviderUsageProvider.allCases, [.codex, .openRouter])
         XCTAssertEqual(ProviderUsageProvider.allCases.map(\.id), ["codex", "openrouter"])

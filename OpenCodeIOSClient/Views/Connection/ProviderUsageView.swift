@@ -33,6 +33,7 @@ struct ProviderUsageView: View {
                     $0.sourceLabel.localizedCaseInsensitiveCompare($1.sourceLabel) == .orderedAscending
                 },
                 isTracked: { facade.hasTrackedAccount(for: $0) },
+                onRetry: { Task { await facade.reloadDiscovery() } },
                 onSelect: { candidate in
                     allowsInsecureTransport = false
                     _ = facade.beginSetup(from: candidate)
@@ -328,11 +329,15 @@ private struct ProviderUsageDiscoverySection: View {
     let hasContext: Bool
     let candidates: [ProviderUsageDiscoveryCandidate]
     let isTracked: (ProviderUsageDiscoveryCandidate) -> Bool
+    let onRetry: () -> Void
     let onSelect: (ProviderUsageDiscoveryCandidate) -> Void
 
     var body: some View {
         Section {
-            if readiness == .notHydrated {
+            if case .failed(let message) = readiness {
+                Text(message).foregroundStyle(.red)
+                Button("Try Again", action: onRetry)
+            } else if readiness == .notHydrated {
                 if hasContext {
                     ProgressView("Waiting for provider data...")
                 } else {

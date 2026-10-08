@@ -9,7 +9,7 @@ enum ProviderUsageDiscovery {
         switch context.apiProfile {
         case .legacy:
             guard legacy.readiness == .ready else {
-                return .init(readiness: .notHydrated, context: context, candidates: [])
+                return .init(readiness: legacy.readiness, context: context, candidates: [])
             }
             return .init(
                 readiness: .ready,
@@ -32,7 +32,7 @@ enum ProviderUsageDiscovery {
             )
         case .v2:
             guard v2.readiness == .ready else {
-                return .init(readiness: .notHydrated, context: context, candidates: [])
+                return .init(readiness: v2.readiness, context: context, candidates: [])
             }
             let candidates = v2.integrations.flatMap { integration -> [ProviderUsageDiscoveryCandidate] in
                 guard let usageProvider = ProviderUsageProvider(openCodeProviderID: integration.id) else { return [] }
@@ -80,6 +80,9 @@ enum ProviderUsageDiscovery {
 
     @MainActor
     static func v2State(from store: V2ProviderStore) -> ProviderUsageV2ProviderState {
+        if !store.isReady, !store.isLoading, let error = store.discoveryErrorMessage {
+            return .init(readiness: .failed(error), integrations: [])
+        }
         guard store.isReady else { return .init(readiness: .notHydrated, integrations: []) }
         return .init(
             readiness: .ready,

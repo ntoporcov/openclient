@@ -522,6 +522,51 @@ final class OpenCodeIOSClientUITests: XCTestCase {
     }
 
     @MainActor
+    func testActivityConnectionSettingsProviderNavigationBackOrder() {
+        verifyNestedSettingsProviderNavigation(scene: "activity", settingsButtonID: "activity.settings",
+                                               connectionLinkID: "activity.settings.configurations", rootTitle: "Activity Settings")
+    }
+
+    @MainActor
+    func testProjectConnectionSettingsProviderNavigationBackOrder() {
+        verifyNestedSettingsProviderNavigation(scene: "sessions", settingsButtonID: "project.settings",
+                                               connectionLinkID: "project.settings.configurations", rootTitle: "Project Settings")
+    }
+
+    @MainActor
+    private func verifyNestedSettingsProviderNavigation(scene: String, settingsButtonID: String, connectionLinkID: String, rootTitle: String) {
+        let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = scene
+        app.launch()
+        defer { app.terminate() }
+
+        XCTAssertTrue(app.buttons[settingsButtonID].waitForExistence(timeout: 10))
+        app.buttons[settingsButtonID].tap()
+        let connectionSettings = app.buttons[connectionLinkID]
+        XCTAssertTrue(connectionSettings.waitForExistence(timeout: 5))
+        connectionSettings.tap()
+        XCTAssertTrue(app.navigationBars["Connection Settings"].waitForExistence(timeout: 5))
+        let provider = app.buttons["configurations.provider.models.openai"]
+        let settingsForm = app.collectionViews["configurations.form"]
+        let sheetTop = app.navigationBars["Connection Settings"].frame.minY
+        for _ in 0..<5 where !provider.isHittable { settingsForm.swipeUp() }
+        XCTAssertTrue(provider.isHittable)
+        XCTAssertEqual(app.navigationBars["Connection Settings"].frame.minY, sheetTop, accuracy: 5,
+                       "Scrolling settings content must preserve the current sheet detent")
+        provider.tap()
+
+        XCTAssertTrue(app.switches["Show All Models"].waitForExistence(timeout: 5), "The pushed screen must be provider models, not another settings menu")
+        XCTAssertTrue(app.navigationBars["OpenAI"].exists)
+        attachScreenshot(named: "\(scene)-settings-provider-models")
+        app.navigationBars["OpenAI"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Connection Settings"].waitForExistence(timeout: 5))
+        app.navigationBars["Connection Settings"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars[rootTitle].waitForExistence(timeout: 5))
+        XCTAssertTrue(connectionSettings.isHittable)
+    }
+
+    @MainActor
     func testActivitySettingsHideLastUserMessageAndPersistPreference() {
         let app = XCUIApplication()
         app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "activity"
@@ -1208,6 +1253,67 @@ final class OpenCodeIOSClientUITests: XCTestCase {
             user.exists && assistant.exists && composer.exists && composer.isHittable
         }
         attachScreenshot(named: "v2-smoke-\(regular ? "regular" : "compact")-activity-opened-chat")
+    }
+
+    @MainActor
+    func testV2SettingsModelNavigationAndUsageDiscovery() async throws {
+        let fixture = try DeletionFixture.loadOwnedManifest(legacy: false)
+        try await fixture.verify()
+        let app = XCUIApplication()
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["OPENCODE_UI_TEST_MODE"] = "1"
+        app.launchEnvironment["OPENCODE_UI_TEST_BASE_URL"] = fixture.baseURL
+        app.launchEnvironment["OPENCODE_UI_TEST_USERNAME"] = fixture.username
+        app.launchEnvironment["OPENCODE_UI_TEST_PASSWORD"] = fixture.password
+        app.launchEnvironment["OPENCODE_UI_TEST_AUTO_CONNECT"] = "0"
+        addTeardownBlock { @MainActor in app.terminate() }
+        app.launch()
+        _ = try await prepareV2SmokeLayout(in: app)
+        let connect = app.buttons["connection.connect"]
+        for _ in 0..<6 where !connect.isHittable { app.collectionViews["connection.form"].swipeUp() }
+        XCTAssertTrue(connect.isHittable)
+        connect.tap()
+        let settings = app.buttons["projects.configurations"]
+        try await waitForV2Smoke(in: app, "Expected settings after V2 bootstrap", timeout: 30) {
+            settings.exists && settings.isHittable
+        }
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["Connection Settings"].waitForExistence(timeout: 10))
+
+        func reveal(_ element: XCUIElement) {
+            for _ in 0..<8 where !element.isHittable {
+                let form = app.collectionViews["configurations.form"]
+                if form.exists { form.swipeUp() }
+                else { app.swipeUp() }
+            }
+            XCTAssertTrue(element.waitForExistence(timeout: 10))
+            XCTAssertTrue(element.isHittable)
+        }
+
+        // Visit usage before Add Provider has ever hydrated integrations.
+        let usage = app.buttons["configurations.usage-levels.codex"]
+        reveal(usage)
+        usage.tap()
+        XCTAssertTrue(app.navigationBars["OpenAI"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No supported provider credentials were found on this server."].waitForExistence(timeout: 15))
+        attachScreenshot(named: "v2-settings-usage-discovery")
+        app.navigationBars["OpenAI"].buttons.firstMatch.tap()
+
+        // Repeated visits exercise task cancellation as the root becomes covered.
+        for _ in 0..<3 {
+            let provider = app.buttons["configurations.provider.models.test"]
+            let form = app.collectionViews["configurations.form"]
+            for _ in 0..<5 where !provider.isHittable { form.swipeDown() }
+            reveal(provider)
+            provider.tap()
+            XCTAssertTrue(app.switches["Show All Models"].waitForExistence(timeout: 10))
+            // Query again after animations/network activity have settled.
+            XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.switches["Show All Models"].isHittable)
+            attachScreenshot(named: "v2-settings-provider-models")
+            app.navigationBars.buttons.matching(NSPredicate(format: "label != %@", "Done")).firstMatch.tap()
+            XCTAssertTrue(app.navigationBars["Connection Settings"].waitForExistence(timeout: 5))
+        }
     }
 
     @MainActor

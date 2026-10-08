@@ -164,6 +164,10 @@ final class ModelConfigurationStore: ObservableObject {
         loadedProviderScope != scope || allProviders.isEmpty
     }
 
+    func hasLoadedProviders(for scope: String) -> Bool {
+        isProviderStateReady && loadedProviderScope == scope
+    }
+
     func markProvidersLoaded(for scope: String) {
         loadedProviderScope = scope
     }

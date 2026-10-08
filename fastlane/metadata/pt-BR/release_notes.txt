@@ -1,11 +1,11 @@
-Mais controle das conversas e uma visão mais clara do trabalho em andamento.
+Acompanhe o trabalho. Veja o que mudou. Continue de onde parou.
 
-• Coloque a próxima mensagem na fila ou redirecione o assistente enquanto ele trabalha no OpenCode v2.
-• Faça uma pergunta à parte sem interromper a tarefa nem adicioná-la à conversa. Mantenha Enviar pressionado para escolher uma ação.
-• Agrupe a atividade das ferramentas, com detalhes expansíveis e contadores animados. Personalize separadamente a exibição do raciocínio e do contexto.
-• Encontre e execute comandos e habilidades do OpenCode v2 no menu /. Mantenha uma opção pressionada para ler os detalhes, fixar ou compartilhar.
-• Acesse MCP, Git e o terminal do espaço de trabalho diretamente pelo menu do cabeçalho da conversa.
-• Explore o novo anúncio interativo de recursos e consulte anúncios anteriores na Ajuda.
-• Melhorias na reconexão, no histórico de conversas, na configuração de uso de provedores e na exibição de imagens do plugin.
+• Um novo indicador de status 3D animado mostra quando o assistente está pensando, lendo, editando ou trabalhando. Mantenha-o pressionado para uma surpresa divertida.
+• Confira as alterações nos arquivos de cada resposta com o botão Alterações ao lado de Copiar. As linhas sem alterações começam recolhidas para destacar as diferenças.
+• Explore mensagens antigas com rolagem mais estável enquanto o histórico da conversa é carregado.
+• Troque de espaço de trabalho pelo cabeçalho da conversa e mova sessões entre espaços com mais confiabilidade no OpenCode v2.
+• As mensagens pendentes no OpenCode v1 agora aparecem abaixo do indicador de status.
+• Melhorias na descoberta da ponte do OpenCode v1 atrás de proxies reversos.
+• Correções na configuração de uso do OpenAI no OpenCode v2, na navegação das configurações de provedores e na rolagem dos painéis de configurações em meia altura.
 
-O OpenClient é compatível com OpenCode v1 e v2. Fila, redirecionamento e perguntas à parte exigem v2.
+O OpenClient é compatível com OpenCode v1 e v2. As alterações de arquivos por resposta exigem OpenCode v2 e registros do estado dos arquivos.

@@ -1,11 +1,11 @@
-More control over your conversations and a clearer view of ongoing work.
+Follow the work. See what changed. Pick up where you left off.
 
-• Queue your next message or steer the assistant while it works on OpenCode v2.
-• Ask a Side Question without interrupting the task or adding it to the conversation. Hold Send to choose an action.
-• Group tool activity, with expandable details and animated tool counts. Customize reasoning and context visibility independently.
-• Find and run your OpenCode v2 commands and skills from the / menu. Hold an entry to read its details, pin it, or share it.
-• Access MCP, Git, and the workspace terminal directly from the chat header popover.
-• Explore the new interactive feature announcement and revisit announcements from Help.
-• Improvements to reconnecting, transcript history, provider usage setup, and plugin image display.
+• A new animated 3D status pill shows when the assistant is thinking, reading, editing, or working. Long-press it for a playful surprise.
+• Review file changes for an individual response with the Changes button beside Copy. Unchanged lines start collapsed so you can focus on the diff.
+• Browse older messages with more stable scrolling as conversation history loads.
+• Switch workspaces from the chat header and enjoy more reliable session moves between workspaces on OpenCode v2.
+• Pending prompts on OpenCode v1 now appear below the status pill.
+• Improved OpenCode v1 bridge discovery behind reverse proxies.
+• Fixed OpenAI usage setup on OpenCode v2, provider settings navigation, and scrolling in half-height settings sheets.
 
-OpenClient supports OpenCode v1 and v2. Queue, Steer, and Side Question require v2.
+OpenClient supports OpenCode v1 and v2. Per-response file changes require OpenCode v2 and recorded file snapshots.

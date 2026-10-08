@@ -371,7 +371,9 @@ extension AppViewModel {
             scheduleWidgetSnapshotPublication(includeModelOptions: true)
             return true
         } catch {
-            guard isCurrentBackendConnection(connection), connectionStore.apiProfile == profile,
+            // Cancellation is a lifecycle transition, not an empty server catalog.
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled,
+                  isCurrentBackendConnection(connection), connectionStore.apiProfile == profile,
                   directoryStoreRegistry.generation == generation, sessionNavigationGeneration == navigationGeneration,
                   effectiveSelectedDirectory == directory else { return false }
             objectWillChange.send()

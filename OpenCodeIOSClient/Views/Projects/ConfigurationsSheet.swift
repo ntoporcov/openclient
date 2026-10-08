@@ -12,6 +12,7 @@ struct ConfigurationsSheet: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             ConfigurationsView(viewModel: viewModel, connection: connection, bridge: bridge, navigationPath: $navigationPath)
+                .configurationDestinations(viewModel: viewModel, connection: connection, bridge: bridge, navigationPath: $navigationPath)
                 .toolbar {
                     ToolbarItem(placement: .opencodeTrailing) {
                         Button("Done") { viewModel.dismiss() }
@@ -19,7 +20,9 @@ struct ConfigurationsSheet: View {
                 }
         }
         .id(viewModel.configurationRevision)
+        .configurationLifecycle(viewModel: viewModel, navigationPath: $navigationPath)
         .presentationDetents([.medium, .large])
+        .presentationContentInteraction(.scrolls)
     }
 }
 
@@ -34,9 +37,7 @@ struct ConfigurationsView: View {
 
             Form {
                 Section {
-                    NavigationLink {
-                        RootConfigurationsView(facade: connection)
-                    } label: {
+                    NavigationLink(value: ConfigurationRoute.globalSettings) {
                         Label("Global Settings", systemImage: "gearshape")
                     }
                     .accessibilityIdentifier("configurations.global-settings")
@@ -124,6 +125,7 @@ struct ConfigurationsView: View {
                                     )
                                 )
                             }
+                            .accessibilityIdentifier("configurations.provider.models.\(provider.id)")
                             .swipeActions(edge: .trailing) {
                                 if viewModel.supportsProviderManagement && !viewModel.isV2Connection {
                                     Button(role: .destructive) {
@@ -160,65 +162,15 @@ struct ConfigurationsView: View {
                 }
 
             }
+            .accessibilityIdentifier("configurations.form")
             .navigationTitle("Connection Settings")
             .opencodeInlineNavigationTitle()
-            .task(id: viewModel.configurationRevision) {
-                await viewModel.loadProvidersForConfigurationIfNeeded()
-            }
-            .onChange(of: viewModel.configurationRevision) { _, _ in navigationPath = NavigationPath() }
-            .onDisappear { viewModel.v2ProviderStore.stopAttempt() }
             .onAppear {
                 #if DEBUG
                 if OpenClientScreenshotScene.current == .providerSetup, navigationPath.isEmpty {
                     navigationPath.append(ConfigurationRoute.addProvider)
                 }
                 #endif
-            }
-            .navigationDestination(for: ConfigurationRoute.self) { route in
-                if route.requiresProviderManagement && !viewModel.supportsProviderManagement {
-                    ContentUnavailableView("Provider Unavailable", systemImage: "server.rack")
-                } else {
-                    switch route {
-                    case .plugins:
-                        PluginsConfigurationView(
-                            viewModel: viewModel,
-                            store: viewModel.pluginStore,
-                            bridge: bridge
-                        )
-                    case .addProvider:
-                        if viewModel.isV2Connection {
-                            V2ProvidersConfigurationView(facade: viewModel, store: viewModel.v2ProviderStore)
-                        } else {
-                            AddProviderView(viewModel: viewModel)
-                        }
-                    case .customProvider:
-                        if viewModel.isV2Connection {
-                            Text("Custom provider configuration is unavailable on this v2 server. Configure it on the server instead.")
-                        } else {
-                            CustomProviderView(viewModel: viewModel)
-                        }
-                    case .providerConnect(let providerID):
-                        if !viewModel.isV2Connection, let provider = viewModel.modelConfigurationStore.provider(id: providerID) {
-                            ProviderConnectView(viewModel: viewModel, provider: provider) {
-                                navigationPath = NavigationPath()
-                            }
-                        } else {
-                            ContentUnavailableView("Provider Unavailable", systemImage: "server.rack")
-                        }
-                    case .providerMethod(let providerID, let methodIndex):
-                        if !viewModel.isV2Connection, let provider = viewModel.modelConfigurationStore.provider(id: providerID),
-                           viewModel.authMethods(for: provider).indices.contains(methodIndex) {
-                            let method = viewModel.authMethods(for: provider)[methodIndex]
-                            ProviderConnectMethodView(viewModel: viewModel, provider: provider, method: method, methodIndex: methodIndex) {
-                                navigationPath = NavigationPath()
-                            }
-                        } else {
-                            ContentUnavailableView("Auth Method Unavailable", systemImage: "person.badge.key")
-                        }
-                    case .providerVisibility(let providerID):
-                        ProviderModelVisibilityView(viewModel: viewModel, providerID: providerID)
-                    }
-                }
             }
     }
 
@@ -233,7 +185,87 @@ struct ConfigurationsView: View {
     }
 }
 
-private enum ConfigurationRoute: Hashable {
+// Register value destinations at each sheet's stack root, never on a pushed
+// settings screen. All entries then share the same data-driven navigation path.
+private struct ConfigurationDestinations: ViewModifier {
+    @ObservedObject var viewModel: ConfigurationsFacade
+    let connection: ConnectionFacade
+    let bridge: OpenClientBridgeFacade?
+    @Binding var navigationPath: NavigationPath
+
+    func body(content: Content) -> some View {
+        content.navigationDestination(for: ConfigurationRoute.self) { route in
+            if route.requiresProviderManagement && !viewModel.supportsProviderManagement {
+                ContentUnavailableView("Provider Unavailable", systemImage: "server.rack")
+            } else {
+                switch route {
+                case .globalSettings:
+                    RootConfigurationsView(facade: connection)
+                case .connectionSettings:
+                    ConfigurationsView(viewModel: viewModel, connection: connection, bridge: bridge, navigationPath: $navigationPath)
+                case .plugins:
+                    PluginsConfigurationView(viewModel: viewModel, store: viewModel.pluginStore, bridge: bridge)
+                case .addProvider:
+                    if viewModel.isV2Connection {
+                        V2ProvidersConfigurationView(facade: viewModel, store: viewModel.v2ProviderStore)
+                    } else {
+                        AddProviderView(viewModel: viewModel)
+                    }
+                case .customProvider:
+                    if viewModel.isV2Connection {
+                        Text("Custom provider configuration is unavailable on this v2 server. Configure it on the server instead.")
+                    } else {
+                        CustomProviderView(viewModel: viewModel)
+                    }
+                case .providerConnect(let providerID):
+                    if !viewModel.isV2Connection, let provider = viewModel.modelConfigurationStore.provider(id: providerID) {
+                        ProviderConnectView(viewModel: viewModel, provider: provider) {
+                            navigationPath = NavigationPath()
+                        }
+                    } else {
+                        ContentUnavailableView("Provider Unavailable", systemImage: "server.rack")
+                    }
+                case .providerMethod(let providerID, let methodIndex):
+                    if !viewModel.isV2Connection, let provider = viewModel.modelConfigurationStore.provider(id: providerID),
+                       viewModel.authMethods(for: provider).indices.contains(methodIndex) {
+                        let method = viewModel.authMethods(for: provider)[methodIndex]
+                        ProviderConnectMethodView(viewModel: viewModel, provider: provider, method: method, methodIndex: methodIndex) {
+                            navigationPath = NavigationPath()
+                        }
+                    } else {
+                        ContentUnavailableView("Auth Method Unavailable", systemImage: "person.badge.key")
+                    }
+                case .providerVisibility(let providerID):
+                    ProviderModelVisibilityView(viewModel: viewModel, providerID: providerID)
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    func configurationDestinations(
+        viewModel: ConfigurationsFacade,
+        connection: ConnectionFacade,
+        bridge: OpenClientBridgeFacade?,
+        navigationPath: Binding<NavigationPath>
+    ) -> some View {
+        modifier(ConfigurationDestinations(viewModel: viewModel, connection: connection, bridge: bridge, navigationPath: navigationPath))
+    }
+
+    func configurationLifecycle(viewModel: ConfigurationsFacade, navigationPath: Binding<NavigationPath>) -> some View {
+        // Attach to the NavigationStack so pushes cannot cancel shared reads.
+        task(id: viewModel.configurationRevision) {
+            await viewModel.loadProvidersForConfigurationIfNeeded()
+        }
+        .onChange(of: viewModel.configurationRevision) { _, _ in navigationPath.wrappedValue = NavigationPath() }
+        .onDisappear { viewModel.v2ProviderStore.stopAttempt() }
+    }
+}
+
+enum ConfigurationRoute: Hashable {
+    case globalSettings
+    case connectionSettings
     case plugins
     case addProvider
     case customProvider
@@ -242,8 +274,10 @@ private enum ConfigurationRoute: Hashable {
     case providerVisibility(String)
 
     var requiresProviderManagement: Bool {
-        if case .providerVisibility = self { return false }
-        return true
+        switch self {
+        case .globalSettings, .connectionSettings, .providerVisibility: return false
+        default: return true
+        }
     }
 }
 
@@ -593,6 +627,7 @@ private struct ProviderModelVisibilityView: View {
         .onChange(of: provider) { _, _ in reloadSnapshot() }
         .onChange(of: viewModel.modelConfigurationStore.modelVisibilityPreferences) { _, _ in reloadSnapshot() }
         .searchable(text: $query, prompt: "Search models")
+        .accessibilityIdentifier("configurations.provider.models")
         .navigationTitle(provider?.name ?? String(localized: "Provider"))
         .opencodeInlineNavigationTitle()
     }

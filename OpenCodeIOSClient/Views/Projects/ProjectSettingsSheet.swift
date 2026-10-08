@@ -16,16 +16,12 @@ struct ProjectSettingsSheet: View {
         NavigationStack(path: $navigationPath) {
             Form {
                 Section {
-                    NavigationLink {
-                        RootConfigurationsView(facade: connection)
-                    } label: {
+                    NavigationLink(value: ConfigurationRoute.globalSettings) {
                         Label("Global Settings", systemImage: "gearshape")
                     }
                     .accessibilityIdentifier("project.settings.global-settings")
 
-                    NavigationLink {
-                        ConfigurationsView(viewModel: configurations, connection: connection, bridge: bridge, navigationPath: $navigationPath)
-                    } label: {
+                    NavigationLink(value: ConfigurationRoute.connectionSettings) {
                         Label("Connection Settings", systemImage: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("project.settings.configurations")
@@ -126,6 +122,7 @@ struct ProjectSettingsSheet: View {
             }
             .navigationTitle("Project Settings")
             .opencodeInlineNavigationTitle()
+            .configurationDestinations(viewModel: configurations, connection: connection, bridge: bridge, navigationPath: $navigationPath)
             .toolbar {
                 ToolbarItem(placement: .opencodeTrailing) {
                     Button("Done") {
@@ -134,6 +131,7 @@ struct ProjectSettingsSheet: View {
                 }
             }
         }
+        .configurationLifecycle(viewModel: configurations, navigationPath: $navigationPath)
         .sheet(item: $symbolPickerContext) { context in
             ProjectActionSymbolPickerSheet(selectedSymbolName: context.selectedSymbolName) { symbolName in
                 if let actionID = context.actionID {
@@ -144,6 +142,7 @@ struct ProjectSettingsSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationContentInteraction(.scrolls)
     }
 
     @ViewBuilder
