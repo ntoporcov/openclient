@@ -181,9 +181,9 @@ final class OpenClientWhatsNewStoreTests: XCTestCase {
         XCTAssertFalse(release.showsSetup)
         XCTAssertEqual(
             OpenClientReleaseNotesCatalog.releases.map(\.version),
-            ["1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.19", "1.0.20", "1.0.21", "1.0.22", "1.0.23"]
+            ["1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.19", "1.0.20", "1.0.21", "1.0.22", "1.0.23", "1.0.24"]
         )
-        XCTAssertEqual(Set(OpenClientReleaseNotesCatalog.releases.map(\.version)).count, 9)
+        XCTAssertEqual(Set(OpenClientReleaseNotesCatalog.releases.map(\.version)).count, 10)
     }
 
     func testCatalogPreservesPrivateWebPushRelease() throws {
