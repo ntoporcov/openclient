@@ -1,6 +1,20 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Find your comfort level." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Find your comfort level." } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Trova la spaziatura che fa per te." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Encontre seu nível de conforto." } }
+      }
+    },
+    "Give your transcript a little breathing room. Try a line height below; your choice is saved for your chats. You can change it anytime in Chat Appearance." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Give your transcript a little breathing room. Try a line height below; your choice is saved for your chats. You can change it anytime in Chat Appearance." } },
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Dai un po’ di respiro alla conversazione. Prova un’interlinea qui sotto: la tua scelta viene salvata per le chat. Puoi cambiarla in qualsiasi momento in Aspetto della chat." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Dê mais espaço ao texto da conversa. Experimente uma altura de linha abaixo; sua escolha fica salva para seus chats. Você pode alterá-la a qualquer momento em Aparência do chat." } }
+      }
+    },
     "Line Height": { "comment": "Chat appearance control for spacing between lines of text.", "localizations": {
       "it": { "stringUnit": { "state": "translated", "value": "Interlinea" } },
       "pt-BR": { "stringUnit": { "state": "translated", "value": "Espaçamento entre linhas" } }

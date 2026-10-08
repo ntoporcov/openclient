@@ -15,7 +15,7 @@ struct OpenClientWhatsNewView: View {
             ScrollView {
                 Group {
                     if release.hero == .chatContinuity {
-                        OpenClientWhatsNewChatContinuity(release: release)
+                        OpenClientWhatsNewChatContinuity(release: release, store: connection.appCustomizationStore)
                     } else if release.hero == .conversationControl {
                         OpenClientWhatsNewChatControls(release: release, delivery: Binding(
                             get: { connection.streamingDelivery }, set: { connection.setStreamingDelivery($0) }),
