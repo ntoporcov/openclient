@@ -550,7 +550,13 @@ final class OpenCodeIOSClientUITests: XCTestCase {
         let provider = app.buttons["configurations.provider.models.openai"]
         let settingsForm = app.collectionViews["configurations.form"]
         let sheetTop = app.navigationBars["Connection Settings"].frame.minY
-        for _ in 0..<5 where !provider.isHittable { settingsForm.swipeUp() }
+        for _ in 0..<20 where !provider.isHittable {
+            let visibleFrame = settingsForm.frame.intersection(app.frame)
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: visibleFrame.midX, dy: visibleFrame.maxY - 60))
+            let end = start.withOffset(CGVector(dx: 0, dy: -80))
+            start.press(forDuration: 0.1, thenDragTo: end)
+        }
         XCTAssertTrue(provider.isHittable)
         XCTAssertEqual(app.navigationBars["Connection Settings"].frame.minY, sheetTop, accuracy: 5,
                        "Scrolling settings content must preserve the current sheet detent")
