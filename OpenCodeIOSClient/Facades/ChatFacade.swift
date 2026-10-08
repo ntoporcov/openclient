@@ -362,6 +362,10 @@ final class ChatFacade: ObservableObject {
     }
 
     private unowned let viewModel: AppViewModel
+    // Only the root chat is covered by this sheet; detached chat windows remain live.
+    var isTranscriptCoveredByNewSessionSheet: Bool {
+        windowContext == nil && viewModel.newProjectChatSheetRequest != nil
+    }
     private weak var liveActivityBackgroundBridge: LiveActivityBackgroundBridge?
     private var observations: Set<AnyCancellable> = []
     private var activeDirectoryObservations: Set<AnyCancellable> = []
@@ -400,7 +404,7 @@ final class ChatFacade: ObservableObject {
             viewModel.chatPresentationStore.objectWillChange.eraseToAnyPublisher(),
             mcpStore.objectWillChange.eraseToAnyPublisher(),
         ])
-        .receive(on: DispatchQueue.main)
+        .debounce(for: .zero, scheduler: DispatchQueue.main)
         .sink { [weak self] _ in self?.objectWillChange.send() }
         .store(in: &observations)
 
@@ -2127,7 +2131,7 @@ final class ChatFacade: ObservableObject {
             store.objectWillChange.eraseToAnyPublisher(),
             store.syncStore.objectWillChange.eraseToAnyPublisher()
         )
-        .receive(on: DispatchQueue.main)
+        .debounce(for: .zero, scheduler: DispatchQueue.main)
         .sink { [weak self] _ in self?.objectWillChange.send() }
         .store(in: &activeDirectoryObservations)
     }

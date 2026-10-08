@@ -28,6 +28,7 @@ extension AppAccentColor {
 
 extension EnvironmentValues {
     @Entry var chatBubbleStyle: ChatBubbleStyle = .glass
+    @Entry var chatLineHeight: ChatLineHeight = .tight
     // Keep palette colors independent of navigation and control tint overrides.
     @Entry var appAccentColor: Color = .blue
     @Entry var appAccentForeground: Color = .white
@@ -53,6 +54,7 @@ struct AppAppearanceModifier: ViewModifier {
             .environment(\.appUsesSystemControlColors, store.accentColor == .clear || store.accentColor == .inverted)
             .toggleStyle(AppAccentToggleStyle())
             .environment(\.chatBubbleStyle, store.chatBubbleStyle)
+            .environment(\.chatLineHeight, store.chatLineHeight)
     }
 }
 

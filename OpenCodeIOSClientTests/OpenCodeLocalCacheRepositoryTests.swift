@@ -2,7 +2,45 @@ import XCTest
 import SwiftData
 @testable import OpenClient
 
+extension SwiftDataOpenCodeLocalCacheRepository {
+    func isExecutingOnMainThreadForTest() -> Bool { Thread.isMainThread }
+}
+
 final class OpenCodeLocalCacheRepositoryTests: XCTestCase {
+    @MainActor
+    func testDeferredRepositoryConstructsAndExecutesOffMainThreadAndPreservesWrites() async throws {
+        let executorChecked = expectation(description: "cache executor checked")
+        let repository = DeferredOpenCodeLocalCacheRepository {
+            XCTAssertFalse(Thread.isMainThread)
+            do {
+                let inner = try OpenCodeLocalCacheRepositoryFactory.makeInMemory()
+                guard let modelActor = inner as? SwiftDataOpenCodeLocalCacheRepository else {
+                    XCTFail("Expected SwiftData repository")
+                    executorChecked.fulfill()
+                    return inner
+                }
+                Task {
+                    let isMain = await modelActor.isExecutingOnMainThreadForTest()
+                    XCTAssertFalse(isMain)
+                    executorChecked.fulfill()
+                }
+                return inner
+            } catch {
+                XCTFail("Cache construction failed: \(error)")
+                executorChecked.fulfill()
+                return NoOpOpenCodeLocalCacheRepository()
+            }
+        }
+        let messages = [message(id: "cached", sessionID: "session", text: "Background cache")]
+        try await repository.saveChatMessages(messages, serverID: "deferred-test", sessionID: "session")
+        let loaded = try await repository.loadChat(serverID: "deferred-test", sessionID: "session")
+        XCTAssertEqual(loaded?.messages, messages)
+        try await repository.clear(serverID: "deferred-test")
+        let cleared = try await repository.loadChat(serverID: "deferred-test", sessionID: "session")
+        XCTAssertNil(cleared)
+        await fulfillment(of: [executorChecked], timeout: 5)
+    }
+
     @MainActor
     func testOlderPagesOverPersistedHistoryKeepPrefixSuffixAndCapacityOrder() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

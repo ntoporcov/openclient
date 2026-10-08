@@ -1,8 +1,29 @@
 import XCTest
+import UIKit
 @testable import OpenClient
 
 @MainActor
 final class AppCustomizationStoreTests: XCTestCase {
+    func testLineHeightMigratesWithDeviceDefaultAndRestoresExplicitChoice() throws {
+        let oldPreferences = try JSONDecoder().decode(AppCustomizationPreferences.self, from: Data("{}".utf8))
+        XCTAssertNil(oldPreferences.chatLineHeight)
+        let name = "LineHeightPreferences.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = AppCustomizationStore(defaults: defaults)
+#if targetEnvironment(macCatalyst)
+        XCTAssertEqual(store.chatLineHeight, .standard)
+#else
+        XCTAssertEqual(store.chatLineHeight, UIDevice.current.userInterfaceIdiom == .pad ? .standard : .tight)
+#endif
+        for choice in ChatLineHeight.allCases {
+            store.setChatLineHeight(choice)
+            let restored = AppCustomizationStore(defaults: defaults)
+            XCTAssertEqual(restored.chatLineHeight, choice)
+            XCTAssertEqual(restored.preferences.appearanceOnly.chatLineHeight, choice)
+        }
+    }
+
     func testAnnouncementChoicesPersistWithoutResettingExistingOptIn() throws {
         let name = "AnnouncementPreferences.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

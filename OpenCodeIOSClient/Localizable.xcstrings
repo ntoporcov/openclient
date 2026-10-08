@@ -1,6 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Line Height": { "comment": "Chat appearance control for spacing between lines of text.", "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Interlinea" } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Espaçamento entre linhas" } }
+    } },
+    "Tight": { "comment": "Smallest chat line spacing.", "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Compatta" } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Compacto" } }
+    } },
+    "Relaxed": { "comment": "Largest chat line spacing.", "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Ampia" } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Amplo" } }
+    } },
+    "Choose comfortable spacing\nbetween the lines of your chats.": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "Scegli una spaziatura confortevole\ntra le righe delle tue chat." } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Escolha um espaçamento confortável\nentre as linhas das suas conversas." } }
+    } },
     "Your projects, your names.": { "localizations": {
       "it": { "stringUnit": { "state": "translated", "value": "I tuoi progetti, i tuoi nomi." } },
       "pt-BR": { "stringUnit": { "state": "translated", "value": "Seus projetos, seus nomes." } }

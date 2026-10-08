@@ -7,6 +7,7 @@ import UIKit
 #endif
 
 struct MarkdownMessageText: View {
+    @Environment(\.chatLineHeight) private var chatLineHeight
     @Environment(\.appSystemAccentColor) private var appAccentColor
     @Environment(\.appAccentForeground) private var appAccentForeground
     enum Style {
@@ -589,7 +590,8 @@ struct MarkdownMessageText: View {
         from parts: [String],
         baseFont: UIFont,
         colorScheme: ColorScheme,
-        layoutDirection: LayoutDirection = .leftToRight
+        layoutDirection: LayoutDirection = .leftToRight,
+        lineHeight: ChatLineHeight = .tight
     ) -> NSAttributedString {
         let document = NSMutableAttributedString(string: "")
         let scale = baseFont.pointSize / 17
@@ -613,7 +615,7 @@ struct MarkdownMessageText: View {
             let blocks = message.blocks
             for (blockIndex, block) in blocks.enumerated() {
                 let paragraph = NSMutableParagraphStyle()
-                paragraph.lineSpacing = 3
+                paragraph.lineSpacing = 3 + lineHeight.additionalSpacing
                 paragraph.lineBreakMode = .byWordWrapping
                 paragraph.alignment = layoutDirection == .rightToLeft ? .right : .left
                 paragraph.baseWritingDirection = layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight
@@ -1087,9 +1089,9 @@ struct MarkdownMessageText: View {
     private var textLineSpacing: CGFloat {
         switch style {
         case .standard:
-            return isUser ? 1 : 3
+            return (isUser ? 1 : 3) + chatLineHeight.additionalSpacing
         case .reasoning:
-            return 2
+            return 2 + chatLineHeight.additionalSpacing
         }
     }
 
@@ -1230,6 +1232,7 @@ struct MarkdownMessageText: View {
 
 #if canImport(UIKit)
 struct CompletedResponseText: View {
+    @Environment(\.chatLineHeight) private var chatLineHeight
     let markdownParts: [String]
     var onTextTap: (() -> Void)? = nil
 
@@ -1244,7 +1247,8 @@ struct CompletedResponseText: View {
                 parts: markdownParts,
                 font: SelectableResponseText.preferredFont(for: dynamicTypeSize),
                 colorScheme: colorScheme,
-                layoutDirection: layoutDirection
+                layoutDirection: layoutDirection,
+                lineHeight: chatLineHeight
             ),
             onTextTap: onTextTap
         )
@@ -1260,6 +1264,7 @@ private final class CompletedResponseDocumentCache {
         let pointSize: CGFloat
         let isDark: Bool
         let isRightToLeft: Bool
+        let lineHeight: ChatLineHeight
     }
 
     /// Hosting cells rebuild their SwiftUI tree on every configure, which discards per-view
@@ -1273,19 +1278,21 @@ private final class CompletedResponseDocumentCache {
     private var colorScheme: ColorScheme?
     private var layoutDirection: LayoutDirection?
     private var rendered: NSAttributedString?
+    private var lineHeight: ChatLineHeight?
 
-    func document(parts: [String], font: UIFont, colorScheme: ColorScheme, layoutDirection: LayoutDirection) -> NSAttributedString {
+    func document(parts: [String], font: UIFont, colorScheme: ColorScheme, layoutDirection: LayoutDirection, lineHeight: ChatLineHeight) -> NSAttributedString {
         if let rendered, self.parts == parts, self.font == font,
-           self.colorScheme == colorScheme, self.layoutDirection == layoutDirection { return rendered }
+           self.colorScheme == colorScheme, self.layoutDirection == layoutDirection,
+           self.lineHeight == lineHeight { return rendered }
         let key = SharedKey(parts: parts, fontName: font.fontName, pointSize: font.pointSize,
-                            isDark: colorScheme == .dark, isRightToLeft: layoutDirection == .rightToLeft)
+                            isDark: colorScheme == .dark, isRightToLeft: layoutDirection == .rightToLeft, lineHeight: lineHeight)
         let document: NSAttributedString
         if let cached = Self.shared[key] {
             document = cached
         } else {
             document = OpenClientPerformanceSignposts.interval("CompletedDocumentRender", detail: "\(parts.count) parts") {
                 MarkdownMessageText.selectableDocument(
-                    from: parts, baseFont: font, colorScheme: colorScheme, layoutDirection: layoutDirection
+                    from: parts, baseFont: font, colorScheme: colorScheme, layoutDirection: layoutDirection, lineHeight: lineHeight
                 )
             }
             Self.shared[key] = document
@@ -1294,6 +1301,7 @@ private final class CompletedResponseDocumentCache {
         self.font = font
         self.colorScheme = colorScheme
         self.layoutDirection = layoutDirection
+        self.lineHeight = lineHeight
         self.rendered = document
         return document
     }

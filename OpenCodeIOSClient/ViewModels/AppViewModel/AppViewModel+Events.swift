@@ -399,14 +399,17 @@ extension AppViewModel {
                 scheduleV2TimelineReconciliation()
             }
         }
-        if let selected = selectedSession {
+        let isTextDelta = event.type == "session.text.delta" || event.type == "session.reasoning.delta"
+        if !isTextDelta, let selected = selectedSession {
             sessionInteractionStore.applySelectedSession(sessionID: selected.id, sessions: directoryStore.sessions, syncState: directoryStore.syncState)
-        } else if wasSelected {
+        } else if !isTextDelta, wasSelected {
             _ = sessionInteractionStore.applyVisibleInteractions(todos: [], permissions: [], questions: [])
         }
         sessionListFacade.invalidateWorkspaceSnapshot(transcriptOnly: event.affectsTranscript)
         liveActivityFacade.reducerDidCommit(sessionIDs: [sessionID])
-        objectWillChange.send()
+        // Transcript stores already publish the reduced content. Token deltas do not
+        // change root navigation or interactions, so don't invalidate the whole shell.
+        if !isTextDelta { objectWillChange.send() }
     }
 
     func scheduleV2InteractionRefresh(for sessionID: String) {

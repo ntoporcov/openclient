@@ -616,10 +616,10 @@ struct NoOpOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
 
 enum OpenCodeLocalCacheRepositoryFactory {
     static func makeDefault() -> any OpenCodeLocalCacheRepository {
-        // A @ModelActor's executor is bound to the thread that creates its ModelContext.
-        // Creating it on the main actor made every cache write (including JSON encoding of
-        // whole transcripts) run on the main thread; profiles showed those as UI stalls.
-        DispatchQueue.global(qos: .utility).sync {
+        // DispatchQueue.sync can execute inline on the calling (main) thread. Construct
+        // the ModelContext in a detached task instead; callers await readiness without
+        // blocking startup or binding the model executor to the UI queue.
+        DeferredOpenCodeLocalCacheRepository {
             do {
                 return SwiftDataOpenCodeLocalCacheRepository(
                     modelContainer: try makeContainer(isStoredInMemoryOnly: false)
@@ -652,6 +652,56 @@ enum OpenCodeLocalCacheRepositoryFactory {
             migrationPlan: OpenCodeLocalCacheMigrationPlan.self,
             configurations: [configuration]
         )
+    }
+}
+
+/// Shares one asynchronously constructed repository across all reads and writes.
+/// Cache timestamps still determine write precedence when callers resume concurrently.
+struct DeferredOpenCodeLocalCacheRepository: OpenCodeLocalCacheRepository {
+    private let repository: Task<any OpenCodeLocalCacheRepository, Never>
+
+    init(make: @escaping @Sendable () -> any OpenCodeLocalCacheRepository) {
+        repository = Task.detached(priority: .utility) { make() }
+    }
+
+    func loadProjects(serverID: String) async throws -> OpenCodeCachedProjectsSnapshot? {
+        try await repository.value.loadProjects(serverID: serverID)
+    }
+
+    func saveProjects(_ projects: [OpenCodeProject], serverID: String, refreshedAt: Date, writtenAt: Date) async throws {
+        try await repository.value.saveProjects(projects, serverID: serverID, refreshedAt: refreshedAt, writtenAt: writtenAt)
+    }
+
+    func loadDirectorySessions(serverID: String, directory: String?) async throws -> OpenCodeCachedDirectorySessionsSnapshot? {
+        try await repository.value.loadDirectorySessions(serverID: serverID, directory: directory)
+    }
+
+    func saveDirectorySessions(_ sessions: [OpenCodeSession], serverID: String, directory: String?, refreshedAt: Date, writtenAt: Date) async throws {
+        try await repository.value.saveDirectorySessions(sessions, serverID: serverID, directory: directory, refreshedAt: refreshedAt, writtenAt: writtenAt)
+    }
+
+    func saveDirectoryMetadata(statuses: [String: String], permissions: [OpenCodePermission], questions: [OpenCodeQuestionRequest], serverID: String, directory: String?, refreshedAt: Date, writtenAt: Date) async throws {
+        try await repository.value.saveDirectoryMetadata(statuses: statuses, permissions: permissions, questions: questions, serverID: serverID, directory: directory, refreshedAt: refreshedAt, writtenAt: writtenAt)
+    }
+
+    func loadChat(serverID: String, sessionID: String) async throws -> OpenCodeCachedChatSnapshot? {
+        try await repository.value.loadChat(serverID: serverID, sessionID: sessionID)
+    }
+
+    func saveChatMessages(_ messages: [OpenCodeMessageEnvelope], serverID: String, sessionID: String, refreshedAt: Date, writtenAt: Date, coverage: OpenCodeLocalCacheTranscriptCoverage) async throws {
+        try await repository.value.saveChatMessages(messages, serverID: serverID, sessionID: sessionID, refreshedAt: refreshedAt, writtenAt: writtenAt, coverage: coverage)
+    }
+
+    func saveTodos(_ todos: [OpenCodeTodo], serverID: String, sessionID: String, refreshedAt: Date, writtenAt: Date) async throws {
+        try await repository.value.saveTodos(todos, serverID: serverID, sessionID: sessionID, refreshedAt: refreshedAt, writtenAt: writtenAt)
+    }
+
+    func removeSession(serverID: String, sessionID: String, removedAt: Date) async throws {
+        try await repository.value.removeSession(serverID: serverID, sessionID: sessionID, removedAt: removedAt)
+    }
+
+    func clear(serverID: String) async throws {
+        try await repository.value.clear(serverID: serverID)
     }
 }
 

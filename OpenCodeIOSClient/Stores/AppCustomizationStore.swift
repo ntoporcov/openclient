@@ -1,5 +1,39 @@
 import Combine
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
+
+enum ChatLineHeight: String, Codable, CaseIterable, Identifiable {
+    case tight, standard, relaxed
+
+    var id: String { rawValue }
+    var title: LocalizedStringResource {
+        switch self {
+        case .tight: "Tight"
+        case .standard: "Standard"
+        case .relaxed: "Relaxed"
+        }
+    }
+
+    var additionalSpacing: CGFloat {
+        switch self {
+        case .tight: 0
+        case .standard: 3
+        case .relaxed: 6
+        }
+    }
+
+    @MainActor static var deviceDefault: Self {
+#if targetEnvironment(macCatalyst) || os(macOS)
+        .standard
+#elseif canImport(UIKit)
+        UIDevice.current.userInterfaceIdiom == .pad ? .standard : .tight
+#else
+        .tight
+#endif
+    }
+}
 
 enum SessionCardStyle: String, Codable, CaseIterable, Identifiable {
     case compact
@@ -79,6 +113,8 @@ enum AppAccentColor: String, Codable, CaseIterable, Identifiable {
 
 struct AppCustomizationPreferences: Codable, Equatable {
     var chatBubbleStyle: ChatBubbleStyle
+    // Nil preserves device-specific defaults for existing and new preferences.
+    var chatLineHeight: ChatLineHeight?
     var accentColor: AppAccentColor
     var showsToolCalls: Bool
     var groupsToolCalls: Bool
@@ -102,6 +138,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
 
     init(
         chatBubbleStyle: ChatBubbleStyle = .glass,
+        chatLineHeight: ChatLineHeight? = nil,
         accentColor: AppAccentColor = .blue,
         showsToolCalls: Bool = true,
         groupsToolCalls: Bool = true,
@@ -116,6 +153,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         autoConnectLandingDestination: AutoConnectLandingDestination = .projects
     ) {
         self.chatBubbleStyle = chatBubbleStyle
+        self.chatLineHeight = chatLineHeight
         self.accentColor = accentColor
         self.showsToolCalls = showsToolCalls
         self.groupsToolCalls = groupsToolCalls
@@ -132,6 +170,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case chatBubbleStyle
+        case chatLineHeight
         case accentColor
         case showsToolCalls
         case groupsToolCalls
@@ -148,6 +187,8 @@ struct AppCustomizationPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        chatLineHeight = try container.decodeIfPresent(String.self, forKey: .chatLineHeight)
+            .flatMap(ChatLineHeight.init(rawValue:))
         chatBubbleStyle = try container.decodeIfPresent(String.self, forKey: .chatBubbleStyle)
             .flatMap(ChatBubbleStyle.init(rawValue:)) ?? .glass
         let storedAccent = try container.decodeIfPresent(String.self, forKey: .accentColor)
@@ -207,6 +248,13 @@ final class AppCustomizationStore: ObservableObject {
     }
 
     var groupsToolCalls: Bool { preferences.groupsToolCalls }
+    var chatLineHeight: ChatLineHeight { preferences.chatLineHeight ?? .deviceDefault }
+
+    func setChatLineHeight(_ height: ChatLineHeight) {
+        guard preferences.chatLineHeight != height else { return }
+        preferences.chatLineHeight = height
+        persist()
+    }
     var showsContextChanges: Bool { preferences.showsContextChanges }
     var preferredStreamingDelivery: OpenCodePromptDelivery? { preferences.preferredStreamingDelivery }
 

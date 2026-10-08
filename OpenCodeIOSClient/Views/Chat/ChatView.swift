@@ -1802,6 +1802,19 @@ private struct ChatDisplaySnapshot {
     }
 }
 
+/// A presentation-only cache for a transcript covered by a modal. Reducers keep
+/// consuming events; revealing the chat always rebuilds from their current state.
+final class CoveredTranscriptSnapshotCache<Value> {
+    private var cached: (key: String, value: Value)?
+
+    func snapshot(key: String, isCovered: Bool, build: () -> Value) -> Value {
+        if isCovered, let cached, cached.key == key { return cached.value }
+        let value = build()
+        cached = (key, value)
+        return value
+    }
+}
+
 private struct TimedChatDisplaySnapshot {
     let snapshot: ChatDisplaySnapshot
 }
@@ -2386,6 +2399,7 @@ struct ChatView: View {
     @State private var animatedBottomScrollToken = 0
     @State private var largeMessageChunkCache = OpenCodeLargeMessageChunkCache()
     @State private var chatDisplayItemCache = ChatDisplayItemCache()
+    @State private var coveredTranscriptSnapshotCache = CoveredTranscriptSnapshotCache<TimedChatDisplaySnapshot>()
     @State private var responseActionsVisibility = ResponseActionsVisibility()
     @State private var turnChangesRequest: TurnChangesRequest?
     @State private var cachedContextMetrics: OpenCodeSessionContextMetrics?
@@ -4133,7 +4147,12 @@ struct ChatView: View {
     private var messageBottomPadding: CGFloat { 20 }
 
     private var timedChatDisplaySnapshot: TimedChatDisplaySnapshot {
-        OpenClientPerformanceSignposts.interval("ChatDisplaySnapshot") { makeTimedChatDisplaySnapshot() }
+        coveredTranscriptSnapshotCache.snapshot(
+            key: sessionID,
+            isCovered: chatFacade.isTranscriptCoveredByNewSessionSheet
+        ) {
+            OpenClientPerformanceSignposts.interval("ChatDisplaySnapshot") { makeTimedChatDisplaySnapshot() }
+        }
     }
 
     private func makeTimedChatDisplaySnapshot() -> TimedChatDisplaySnapshot {
@@ -5518,7 +5537,7 @@ struct ChatView: View {
         let activity = expandedEarlierActivityMessageIDs.sorted().joined(separator: "|")
         let tools = appCustomizationStore.showsToolCalls
         let reasoningBlocks = appCustomizationStore.showsReasoningBlocks
-        return "reasoning:\(reasoning)#context:\(context)#activity:\(activity)#tools:\(tools)#reasoningBlocks:\(reasoningBlocks)#groupTools:\(appCustomizationStore.groupsToolCalls)#contextChanges:\(showsContextChanges)#historyRetry:\(historyLoadFailed)#voiceOver:\(isVoiceOverEnabled)"
+        return "reasoning:\(reasoning)#context:\(context)#activity:\(activity)#tools:\(tools)#reasoningBlocks:\(reasoningBlocks)#groupTools:\(appCustomizationStore.groupsToolCalls)#contextChanges:\(showsContextChanges)#historyRetry:\(historyLoadFailed)#voiceOver:\(isVoiceOverEnabled)#lineHeight:\(appCustomizationStore.chatLineHeight.rawValue)"
     }
 
     private var showsContextChanges: Bool {

@@ -5,6 +5,28 @@ import XCTest
 
 @MainActor
 final class TranscriptContinuityTests: XCTestCase {
+    func testCoveredTranscriptSkipsRenderingAndRevealsLatestState() {
+        let cache = CoveredTranscriptSnapshotCache<String>()
+        var canonicalText = "First"
+        var builds = 0
+        func render(_ key: String, covered: Bool) -> String {
+            cache.snapshot(key: key, isCovered: covered) {
+                builds += 1
+                return canonicalText
+            }
+        }
+        XCTAssertEqual(render("session", covered: false), "First")
+        canonicalText = "Streaming update"
+        XCTAssertEqual(render("session", covered: true), "First")
+        XCTAssertEqual(builds, 1)
+        canonicalText = "Completed answer"
+        XCTAssertEqual(render("session", covered: false), "Completed answer")
+        XCTAssertEqual(builds, 2)
+        canonicalText = "Different session"
+        XCTAssertEqual(render("other-session", covered: true), "Different session")
+        XCTAssertEqual(builds, 3)
+    }
+
     #if !targetEnvironment(macCatalyst)
     func testOldChatIsHiddenWhenSelectionChangesBeforeShellRouteReplacement() async throws {
         let model = AppViewModel()

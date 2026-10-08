@@ -8,6 +8,7 @@ import AppKit
 #endif
 
 struct HighlightedCodeBlock: View {
+    @Environment(\.chatLineHeight) private var chatLineHeight
     let code: String
     let language: String?
     var highlightsSyntax = true
@@ -65,7 +66,7 @@ struct HighlightedCodeBlock: View {
             }
         }
         .font(.system(.footnote, design: .monospaced))
-        .lineSpacing(3)
+        .lineSpacing(3 + chatLineHeight.additionalSpacing)
         .fixedSize(horizontal: true, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
     }

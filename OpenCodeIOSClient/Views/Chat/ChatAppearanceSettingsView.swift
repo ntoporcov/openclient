@@ -40,6 +40,24 @@ struct ChatAppearanceSettingsView: View {
                 .accessibilityIdentifier("appearance.bubble-preview")
             }
 
+            Section("Line Height") {
+                Picker("Line Height", selection: Binding(
+                    get: { store.chatLineHeight },
+                    set: { store.setChatLineHeight($0) }
+                )) {
+                    ForEach(ChatLineHeight.allCases) { height in
+                        Text(height.title).tag(height)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("appearance.line-height")
+
+                Text("Choose comfortable spacing\nbetween the lines of your chats.")
+                    .lineSpacing(3 + store.chatLineHeight.additionalSpacing)
+                    .padding(.vertical, 8)
+                    .accessibilityIdentifier("appearance.line-height-preview")
+            }
+
             if OpenCodePlatformCapabilities.supportsComposerStyleChoice {
                 Section {
                     NavigationLink {
