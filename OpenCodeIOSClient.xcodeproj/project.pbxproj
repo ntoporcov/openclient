@@ -47,6 +47,7 @@
 		0EE73B562BD2A545A71C3BF6 /* SessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5412AE7F684F6084E8DF091 /* SessionCoordinator.swift */; };
 		0F65EE1CA6B6AC46F1D7CB4F /* AppShellFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8DEB0B751A39E08D6408B4 /* AppShellFacade.swift */; };
 		1046A0A0EBA686EF95D87082 /* ProjectPreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F9BC37EE0D2242B03FD133 /* ProjectPreferencesStore.swift */; };
+		104A9D0BB42643324AB82925 /* SessionMetadataSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF6EB1285FDE8E105B36C16 /* SessionMetadataSnapshot.swift */; };
 		111CC2758661D043459F0975 /* LiveActivityFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45DDBE478258371B4E093C65 /* LiveActivityFacade.swift */; };
 		113A6249FB11AA0C61F1797F /* BackendSessionFormsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6EB2884BBD76B63FAE6931 /* BackendSessionFormsService.swift */; };
 		115DE79368C57A8059EA3E4E /* ProviderUsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23EA924F146D8E82D7731696 /* ProviderUsageView.swift */; };
@@ -201,6 +202,7 @@
 		4782B39F41A3D8AC1C461021 /* OpenClientBridgeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E762A9C6F3ED33D0CE1AC144 /* OpenClientBridgeProtocol.swift */; };
 		47B91CEE698DF0EB1C551606 /* FindPlaceGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39F3209079C16C06C440EF6 /* FindPlaceGame.swift */; };
 		4834FA70D567BA5E048071C7 /* OpenClientPerformanceDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBBEF459D424A3004017CC8 /* OpenClientPerformanceDiagnostics.swift */; };
+		49C6A2585CCB85181F46AA04 /* SessionMetadataRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 907E6D48CD5D1226DC96AA52 /* SessionMetadataRenderingTests.swift */; };
 		49CAA4615D897BB8C08490A2 /* ProviderUsageAccountRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9542471BC79C123DEBA53F9B /* ProviderUsageAccountRepository.swift */; };
 		4B00D3200BEE83CAF8A9F15F /* NewSessionDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8994E8493B69E44F2907F0B /* NewSessionDefaults.swift */; };
 		4B2015CA69C1210852288D93 /* AppIconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02E2830562F22A3FB26FB56E /* AppIconStore.swift */; };
@@ -379,6 +381,7 @@
 		8705629CBF404A33F9F18000 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E879D651F7196549575BBF97 /* Assets.xcassets */; };
 		87641DA4C2622DA0A08C012F /* OpenCodeCommandsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD1913FAB65347A5AC53DCA /* OpenCodeCommandsService.swift */; };
 		877ACBC7346F3B1895A0C38A /* OpenCodeProviderUsageDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3709F71C94118068B066715F /* OpenCodeProviderUsageDisplay.swift */; };
+		880E717291290A8B3454613B /* SessionMetadataSectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01C7B3A32117F47BC86BE5F /* SessionMetadataSectionsView.swift */; };
 		8817A2651D590B1003E2FEB7 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = D567A56922447D35D0D0AEBF /* Localizable.xcstrings */; };
 		8846023DEB9E358753EE5940 /* Highlighter in Frameworks */ = {isa = PBXBuildFile; productRef = 159EAC60F6EE2A1F5496333B /* Highlighter */; };
 		8871F25B049700EF458DF313 /* OpenClientWhatsNewStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D572C030A992FBAB5FCE81D9 /* OpenClientWhatsNewStore.swift */; };
@@ -468,6 +471,7 @@
 		A87EF7F1E06E3C8418C1B032 /* ProviderUsageCredentialImportProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4200DE67B0A644299E9E6A43 /* ProviderUsageCredentialImportProtocol.swift */; };
 		A915985F15ED84D56FA96D96 /* StreamingDeliveryFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8034C55E822395FDA7A23FC9 /* StreamingDeliveryFixture.swift */; };
 		A9FD3644B48741E26BF23EF9 /* ScreenshotSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE4DD43AEBE68274E4B039C /* ScreenshotSceneView.swift */; };
+		AB5578A0AA854CD7C8F9E8B7 /* SessionMetadataSectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01C7B3A32117F47BC86BE5F /* SessionMetadataSectionsView.swift */; };
 		AB79E34F281C6B4F32A1FF42 /* OpenCodeBackendEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A74871D7A18DCF1FAD9ED49 /* OpenCodeBackendEventSource.swift */; };
 		AC28230D0125FE7C822653FB /* OpenClientVisualMapTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BB0B32EF74022820B9E868E /* OpenClientVisualMapTool.swift */; };
 		AD15D8F5AD243B0A8440CB48 /* ChatHeaderMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DA10A3719639EF1810CC16 /* ChatHeaderMenu.swift */; };
@@ -475,6 +479,7 @@
 		ADF0BE981D635D2C95E21760 /* BackendWorktreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC256B8BBA1478950CE328 /* BackendWorktreeTests.swift */; };
 		AE1A82D5932B64751B34DC5E /* RecentChatPreloadQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7128E66E7B2AF09B283EB966 /* RecentChatPreloadQueueTests.swift */; };
 		AE2C88A767D6900CA011EB32 /* OpenCodeShortcutEntities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3ED753F16689F0C02D2F82 /* OpenCodeShortcutEntities.swift */; };
+		AE331FF1F56005ECA76C5641 /* SessionMetadataSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF6EB1285FDE8E105B36C16 /* SessionMetadataSnapshot.swift */; };
 		AF0C12B963DBDA1AC2401B00 /* OpenCodeAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F548AE214A483AB9207C376D /* OpenCodeAPIClient.swift */; };
 		AF8E6A335318A183AF3AE791 /* OpenClientDeviceToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE4916F5B99DA18598CFD4A7 /* OpenClientDeviceToolRegistry.swift */; };
 		AFA543FA0AA5D9A9096635FF /* OpenClient_icons in Resources */ = {isa = PBXBuildFile; fileRef = 48D7157082D1C19F1F8B3547 /* OpenClient_icons */; };
@@ -949,6 +954,7 @@
 		8DCE695045A0897FBF719E9D /* ChatWindowRestorationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatWindowRestorationCoordinator.swift; sourceTree = "<group>"; };
 		8F5D984CB4763ACF45322788 /* StablePickerMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StablePickerMenu.swift; sourceTree = "<group>"; };
 		8FE226896BC39EE597FAFCD0 /* OpenCodeStateReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeStateReducer.swift; sourceTree = "<group>"; };
+		907E6D48CD5D1226DC96AA52 /* SessionMetadataRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMetadataRenderingTests.swift; sourceTree = "<group>"; };
 		9117702395C7A5C205D112FD /* ModelConfigurationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelConfigurationStoreTests.swift; sourceTree = "<group>"; };
 		91314F0164DCE364BE3B4DE3 /* StreamingDeliveryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingDeliveryUITests.swift; sourceTree = "<group>"; };
 		921EDCCE2EA311067043B6FC /* TerminalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalStore.swift; sourceTree = "<group>"; };
@@ -1003,6 +1009,7 @@
 		AC220CA26635182C3304FB1D /* OpenCodeLiveActivityActionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeLiveActivityActionClient.swift; sourceTree = "<group>"; };
 		AD22634739A584D72F8DFA45 /* OpenCodeChatActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeChatActivityAttributes.swift; sourceTree = "<group>"; };
 		ADBBEF459D424A3004017CC8 /* OpenClientPerformanceDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientPerformanceDiagnostics.swift; sourceTree = "<group>"; };
+		ADF6EB1285FDE8E105B36C16 /* SessionMetadataSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMetadataSnapshot.swift; sourceTree = "<group>"; };
 		AF84CA84B5EE419EE9036B0D /* AppSupportURLs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSupportURLs.swift; sourceTree = "<group>"; };
 		B049680071C4C1B30DEB5B72 /* ios-120.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "ios-120.png"; path = "../OpenCodeIOSClient/Assets.xcassets/AppIcon.appiconset/ios-120.png"; sourceTree = "<group>"; };
 		B1C270047AFCB121C8BE87AC /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStore.swift; sourceTree = "<group>"; };
@@ -1051,6 +1058,7 @@
 		CF114084B6003DD850A211F3 /* GalleryScreenshotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryScreenshotUITests.swift; sourceTree = "<group>"; };
 		CFC0BC6B94598163839BEB51 /* AppViewModel+Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Connection.swift"; sourceTree = "<group>"; };
 		CFD078B7015EA38C5705FD47 /* ProjectsPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsPreviews.swift; sourceTree = "<group>"; };
+		D01C7B3A32117F47BC86BE5F /* SessionMetadataSectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMetadataSectionsView.swift; sourceTree = "<group>"; };
 		D073AD443E85BE52D279626D /* ConnectionAppearanceRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionAppearanceRegistry.swift; sourceTree = "<group>"; };
 		D08BF2A29B384ECC84A1B508 /* OpenCodeProviderUsageWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeProviderUsageWidgets.swift; sourceTree = "<group>"; };
 		D173E5CA44E0FAA00024A7DC /* ActivityRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityRow.swift; sourceTree = "<group>"; };
@@ -1375,6 +1383,7 @@
 				F52537FB705E167517B3096B /* SessionInteractionStoreTests.swift */,
 				BE014F17D6C5C03A87A94014 /* SessionListPerformanceTests.swift */,
 				1B139514D80415E620B9F722 /* SessionListStoreTests.swift */,
+				907E6D48CD5D1226DC96AA52 /* SessionMetadataRenderingTests.swift */,
 				DEC54A09CAF47843F4085200 /* SessionSwitcherTests.swift */,
 				792F5F6B82B80A518E660155 /* SideQuestionTests.swift */,
 				ED9D407AAF39EC3DBB60F8EC /* SpeechVoiceStoreTests.swift */,
@@ -1660,6 +1669,7 @@
 				B8EAAB8F9B939101BF1FFB00 /* SessionFormStore.swift */,
 				445E28ADB7450FBB1F94C653 /* SessionInteractionStore.swift */,
 				C9159522F297AB0893D930A2 /* SessionListStore.swift */,
+				ADF6EB1285FDE8E105B36C16 /* SessionMetadataSnapshot.swift */,
 				64B78AF6BDF3F8A101F64526 /* SessionToolsStore.swift */,
 				4E115D639A8ADC0143BB4A36 /* SideQuestionStore.swift */,
 				8D13DAF3408800F31B1421A0 /* SpeechVoiceStore.swift */,
@@ -1759,6 +1769,7 @@
 				67ED70E3B988B800EF2527FE /* ReasoningBlock.swift */,
 				02665C6127FAD65D061D80CB /* SelectableResponseText.swift */,
 				273C00B34F7BE93D06DA6197 /* SessionFormPanel.swift */,
+				D01C7B3A32117F47BC86BE5F /* SessionMetadataSectionsView.swift */,
 				D9382EFD876E6280F196E6BD /* SessionSwitcherKeyboardBridge.swift */,
 				3B63DDFBB5EA220FC314F231 /* SessionToolsSheets.swift */,
 				84881BCFA7C059C24BC342A0 /* SideQuestionSheet.swift */,
@@ -2292,6 +2303,7 @@
 				6C0A74A52E436B2699EC0AB4 /* SessionInteractionStoreTests.swift in Sources */,
 				C50FF2F7B4A249C0BC2CE148 /* SessionListPerformanceTests.swift in Sources */,
 				0E6F60E08977B86AA1DE35A3 /* SessionListStoreTests.swift in Sources */,
+				49C6A2585CCB85181F46AA04 /* SessionMetadataRenderingTests.swift in Sources */,
 				4CB6E52319BD33BBCE7A37B1 /* SessionSwitcherTests.swift in Sources */,
 				543850015120FF40C2BE8264 /* SideQuestionTests.swift in Sources */,
 				88D3CAF50A613523F39B11EC /* SpeechVoiceStoreTests.swift in Sources */,
@@ -2568,6 +2580,8 @@
 				36806375DDC255DAC83369B9 /* SessionListStore.swift in Sources */,
 				43F9653E8519801E2457452C /* SessionListView.swift in Sources */,
 				D980C38ADDBB9FF1127FFE04 /* SessionLiveActivityMenu.swift in Sources */,
+				AB5578A0AA854CD7C8F9E8B7 /* SessionMetadataSectionsView.swift in Sources */,
+				AE331FF1F56005ECA76C5641 /* SessionMetadataSnapshot.swift in Sources */,
 				829CCBF6A81A1C789BEF7D94 /* SessionRow.swift in Sources */,
 				A37F598787E5A11393ADD398 /* SessionSwitcherKeyboardBridge.swift in Sources */,
 				177E72328931BAC4248C0494 /* SessionToolsSheets.swift in Sources */,
@@ -2833,6 +2847,8 @@
 				4D36F0C67743C733914F6B41 /* SessionListStore.swift in Sources */,
 				BF46C26DEF4B2706BAF1E6D1 /* SessionListView.swift in Sources */,
 				71E3BC763941CB2A6B6399C4 /* SessionLiveActivityMenu.swift in Sources */,
+				880E717291290A8B3454613B /* SessionMetadataSectionsView.swift in Sources */,
+				104A9D0BB42643324AB82925 /* SessionMetadataSnapshot.swift in Sources */,
 				28CF3363B05EEFDA379C92F7 /* SessionRow.swift in Sources */,
 				D7554DA5241EB46DF904CF6A /* SessionSwitcherKeyboardBridge.swift in Sources */,
 				A6B5756768A1E644D671F9FF /* SessionToolsSheets.swift in Sources */,
@@ -2909,7 +2925,7 @@
 		1F7E9CEEDDD2DE3B70D01154 /* Profile */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 73;
+				CURRENT_PROJECT_VERSION = 74;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -2973,7 +2989,7 @@
 		37A38C3C67B13A34407EB08A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 73;
+				CURRENT_PROJECT_VERSION = 74;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -2985,7 +3001,7 @@
 		37B20BB1A98ED0C0FD08E35D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 73;
+				CURRENT_PROJECT_VERSION = 74;
 				DEVELOPMENT_TEAM = 845JU3PD5V;
 				ENABLE_TESTABILITY = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

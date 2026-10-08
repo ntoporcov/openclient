@@ -5689,7 +5689,7 @@ struct SessionContextUsageToolbarButton: View {
     }
 }
 
-private struct ContextUsageRing: View {
+struct ContextUsageRing: View {
     let progress: Double
     let tint: Color
     let lineWidth: CGFloat
@@ -5728,7 +5728,8 @@ private struct SessionContextMetricsSheet: View {
                     LabeledContent("Input Tokens", value: number(context.input))
                     LabeledContent("Output Tokens", value: number(context.output))
                     LabeledContent("Reasoning Tokens", value: number(context.reasoning))
-                    LabeledContent("Cache Tokens", value: "\(number(context.cacheRead)) / \(number(context.cacheWrite))")
+                    LabeledContent("Cache Read Tokens", value: number(context.cacheRead))
+                    LabeledContent("Cache Write Tokens", value: number(context.cacheWrite))
                     LabeledContent("Last Activity", value: time(context.messageCreatedAt))
                 } else {
                     Text("Context usage appears after the model returns token metrics for this chat.")
@@ -5736,13 +5737,20 @@ private struct SessionContextMetricsSheet: View {
                 }
             }
 
-            Section("Session") {
+            Section {
                 LabeledContent("Session", value: session.title?.nilIfEmpty ?? session.id)
                 LabeledContent("Messages", value: number(metrics.messageCount))
                 LabeledContent("User Messages", value: number(metrics.userMessageCount))
                 LabeledContent("Assistant Messages", value: number(metrics.assistantMessageCount))
                 LabeledContent("Total Cost", value: currency(metrics.totalCost))
+            } header: {
+                Text("Session")
+            } footer: {
+                Text("Message counts and cost cover loaded history.")
             }
+
+            SessionMetadataSectionsView(sections: metrics.responseMetadataSections)
+            SessionMetadataSectionsView(sections: [OpenCodeResponseMetadataBuilder.sessionSection(session)])
 
             if !metrics.breakdown.isEmpty {
                 Section("Estimated Input Breakdown") {
@@ -5835,9 +5843,10 @@ private struct SessionContextMetricsSheet: View {
         return "\(value.formatted(.number))%"
     }
 
-    private func currency(_ value: Double) -> String {
+    private func currency(_ value: Double?) -> String {
+        guard let value else { return String(localized: "Unavailable") }
         let fractionDigits = value > 0 && value < 0.01 ? 4 : 2
-        return "$" + String(format: "%.*f", fractionDigits, value)
+        return value.formatted(.currency(code: "USD").precision(.fractionLength(fractionDigits)))
     }
 
     private func time(_ value: Double?) -> String {
