@@ -26,6 +26,7 @@ final class ProjectFacade: ObservableObject {
         let selectedDirectory: String?
         let isLoading: Bool
         let errorMessage: String?
+        var requiresDSHBrowseConfiguration = false
     }
 
     struct ActionSnapshot: Identifiable, Equatable {
@@ -126,7 +127,8 @@ final class ProjectFacade: ObservableObject {
             results: viewModel.createProjectResults,
             selectedDirectory: viewModel.createProjectSelectedDirectory,
             isLoading: viewModel.isLoading,
-            errorMessage: viewModel.errorMessage
+            errorMessage: viewModel.errorMessage,
+            requiresDSHBrowseConfiguration: viewModel.projectStore.requiresDSHBrowseConfiguration
         )
     }
 
@@ -286,6 +288,20 @@ final class ProjectFacade: ObservableObject {
     }
 
     func refreshList() async { await viewModel.refreshProjectList() }
+
+    func applyBackendSnapshot(_ snapshot: BackendProjectsSnapshot) {
+        viewModel.projectStore.applyBackendSnapshot(snapshot)
+        if let selected = viewModel.currentProject,
+           !snapshot.projects.contains(where: { $0.id == selected.id }) {
+            let connectionID = viewModel.backendConnection?.id
+            Task { [weak self] in
+                guard let self, viewModel.backendConnection?.id == connectionID,
+                      viewModel.currentProject?.id == selected.id,
+                      !viewModel.projects.contains(where: { $0.id == selected.id }) else { return }
+                await viewModel.selectProject(nil)
+            }
+        }
+    }
     func loadRecentSessions() async {
         await viewModel.loadRecentProjectSessionsAcrossProjects()
     }
@@ -302,6 +318,7 @@ final class ProjectFacade: ObservableObject {
 
     func presentCreateProject() {
         guard allowsProjectCreation else { return }
+        viewModel.projectStore.requiresDSHBrowseConfiguration = false
         viewModel.presentCreateProjectSheet()
     }
     func dismissCreateProject() { viewModel.isShowingCreateProjectSheet = false }

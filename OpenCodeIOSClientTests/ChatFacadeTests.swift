@@ -167,6 +167,333 @@ final class ChatFacadeTests: XCTestCase {
         XCTAssertEqual(snapshot.reasoningTitle, "Deep Think")
     }
 
+    func testCreationOnlyAgentUsesCanonicalSessionAndHiddenDisplayMetadata() {
+        let viewModel = makeViewModel()
+        installAgentPolicy(.creationOnly, in: viewModel)
+        var session = makeSession(id: "creation-only-canonical")
+        session.agent = "custom-review"
+        var preset = OpenCodeAgent(name: "custom-review", description: "Reviews changes carefully.",
+            mode: "primary", hidden: true, model: nil, variant: nil)
+        preset.displayName = "My Review Agent"
+        viewModel.modelConfigurationStore.availableAgents.append(preset)
+        viewModel.modelConfigurationStore.selectAgent(named: "build", forSessionID: session.id)
+        viewModel.selectedSession = session
+        viewModel.messages = [makeMessage(id: "prior-user", sessionID: session.id, role: "user", agent: "review")]
+
+        let snapshot = viewModel.chatFacade.toolbarSnapshot(for: session)
+
+        XCTAssertEqual(snapshot.selectedAgentName, "custom-review")
+        XCTAssertEqual(snapshot.agentTitle, "My Review Agent")
+        XCTAssertEqual(snapshot.agentDescription, "Reviews changes carefully.")
+        XCTAssertTrue(snapshot.isAgentReadOnly)
+        XCTAssertFalse(snapshot.isAgentLoading)
+        XCTAssertFalse(snapshot.selectableAgents.contains { $0.name == "custom-review" })
+    }
+
+    func testCreationOnlyAgentFallsBackToRawIDOrDefaultNotRememberedChoice() {
+        let viewModel = makeViewModel()
+        installAgentPolicy(.creationOnly, in: viewModel)
+        var session = makeSession(id: "creation-only-fallback")
+        session.agent = "unlisted-MixedCase-preset"
+        viewModel.modelConfigurationStore.selectAgent(named: "review", forSessionID: session.id)
+        viewModel.selectedSession = session
+        viewModel.isLoadingSelectedSession = true
+        viewModel.messages = [makeMessage(id: "prior-user", sessionID: session.id, role: "user", agent: "build")]
+
+        var snapshot = viewModel.chatFacade.toolbarSnapshot(for: session)
+        XCTAssertEqual(snapshot.agentTitle, "unlisted-MixedCase-preset")
+        XCTAssertNil(snapshot.agentDescription)
+
+        session.agent = nil
+        snapshot = viewModel.chatFacade.toolbarSnapshot(for: session)
+        XCTAssertEqual(snapshot.agentTitle, String(localized: "Default"))
+        XCTAssertNil(snapshot.selectedAgentName)
+        XCTAssertNil(snapshot.agentDescription)
+        XCTAssertFalse(snapshot.isAgentLoading)
+    }
+
+    func testCreationOnlyAgentCannotBeChangedEvenInBlankSession() {
+        let viewModel = makeViewModel()
+        installAgentPolicy(.mutable, in: viewModel)
+        var session = makeSession(id: "creation-only-blank")
+        session.agent = "build"
+        viewModel.selectedDirectory = session.directory
+        viewModel.allSessions = [session]
+        viewModel.selectedSession = session
+        viewModel.isConnected = true
+        let facade = viewModel.chatFacade
+        XCTAssertTrue(facade.allowsHeaderAgentSelection(facade.headerScope(for: session)))
+
+        installAgentPolicy(.creationOnly, in: viewModel)
+        let scope = facade.headerScope(for: session)
+        XCTAssertTrue(facade.isCurrentHeaderScope(scope))
+        XCTAssertFalse(facade.allowsHeaderAgentSelection(scope))
+        facade.selectHeaderAgent(named: "review", scope: scope)
+        facade.selectAgent(named: "review", for: session)
+        XCTAssertNil(viewModel.modelConfigurationStore.selectedAgentName(for: session.id))
+        XCTAssertEqual(facade.toolbarSnapshot(for: session).agentTitle, "build")
+    }
+
+    func testHeaderPermissionsReadCanonicalOwnerAndRouteWhileSessionRunning() async throws {
+        let (model, session, service) = permissionFixture()
+        let facade = model.chatFacade
+        let scope = facade.headerScope(for: session)
+        var current = session
+        current.permissions = .init(currentPreset: "auto")
+        facade.directoryStore(forSessionID: session.id).upsertSessions([current])
+        facade.directoryStore(forSessionID: session.id).applySessionStatus("busy", forSessionID: session.id)
+        XCTAssertEqual(scope.session.permissions?.currentPreset, "workspace-write")
+        XCTAssertEqual(facade.headerPermissions(scope)?.currentPreset, "auto")
+        XCTAssertTrue(facade.supportsHeaderPermissions(scope))
+        service.beforeSet = {
+            XCTAssertEqual(facade.headerPermissions(scope)?.currentPreset, "auto", "No optimistic full-access change")
+        }
+        let result = await facade.setHeaderPermissions(.fullAccess, scope: scope)
+        XCTAssertTrue(result)
+        XCTAssertEqual(facade.headerPermissions(scope)?.currentPreset, "danger-full-access")
+        XCTAssertEqual(service.writes.first?.0, session.id)
+        XCTAssertEqual(service.writes.first?.1, .fullAccess)
+        XCTAssertEqual(service.writes.first?.2, .init(projectID: session.projectID, directory: session.directory, workspaceID: session.workspaceID))
+    }
+
+    func testHeaderPermissionsUnknownRequiresRefreshBeforeAnyWrite() async {
+        let (model, session, service) = permissionFixture(current: nil)
+        let facade = model.chatFacade
+        let scope = facade.headerScope(for: session)
+        XCTAssertTrue(facade.supportsHeaderPermissions(scope))
+        XCTAssertNil(facade.headerPermissions(scope)?.currentPreset)
+        let blocked = await facade.setHeaderPermissions(.fullAccess, scope: scope)
+        XCTAssertFalse(blocked)
+        XCTAssertTrue(service.writes.isEmpty)
+        service.session.permissions = .init(currentPreset: "custom")
+        let loaded = await facade.refreshHeaderPermissions(scope)
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(facade.headerPermissions(scope)?.currentPreset, "custom")
+        XCTAssertEqual(service.reads.first?.0, session.id)
+    }
+
+    func testHeaderPermissionsFailedWriteRereadsAppliedServerValue() async {
+        let (model, session, service) = permissionFixture()
+        let facade = model.chatFacade
+        let scope = facade.headerScope(for: session)
+        service.writeError = URLError(.networkConnectionLost)
+        let result = await facade.setHeaderPermissions(.fullAccess, scope: scope)
+        XCTAssertFalse(result)
+        XCTAssertEqual(service.reads.count, 1)
+        XCTAssertEqual(facade.headerPermissions(scope)?.currentPreset, "danger-full-access")
+        XCTAssertNotNil(facade.presentationErrorMessage)
+    }
+
+    func testHeaderPermissionsFailedWriteAndReadBecomeUnknownNotRolledBack() async {
+        let (model, session, service) = permissionFixture()
+        let facade = model.chatFacade
+        let scope = facade.headerScope(for: session)
+        service.writeError = URLError(.networkConnectionLost)
+        service.readError = URLError(.networkConnectionLost)
+        let result = await facade.setHeaderPermissions(.fullAccess, scope: scope)
+        XCTAssertFalse(result)
+        XCTAssertNotNil(facade.headerPermissions(scope))
+        XCTAssertNil(facade.headerPermissions(scope)?.currentPreset)
+        XCTAssertNotNil(facade.presentationErrorMessage)
+    }
+
+    func testHeaderPermissionsRejectStaleReadOnlyDisconnectedAndUnsupportedScopes() async {
+        let (model, session, service) = permissionFixture()
+        let facade = model.chatFacade
+        let scope = facade.headerScope(for: session)
+        model.backendMode = .cachedServer
+        XCTAssertFalse(facade.supportsHeaderPermissions(scope))
+        let cached = await facade.refreshHeaderPermissions(scope)
+        XCTAssertFalse(cached)
+        model.backendMode = .server
+        model.isConnected = false
+        let disconnected = await facade.setHeaderPermissions(.fullAccess, scope: scope)
+        XCTAssertFalse(disconnected)
+        model.isConnected = true
+        model.selectedSession = makeSession(id: "other")
+        let stale = await facade.setHeaderPermissions(.fullAccess, scope: scope)
+        XCTAssertFalse(stale)
+        model.selectedSession = session
+        installAgentPolicy(.creationOnly, in: model)
+        XCTAssertFalse(facade.supportsHeaderPermissions(facade.headerScope(for: session)))
+        XCTAssertTrue(service.writes.isEmpty)
+        XCTAssertTrue(service.reads.isEmpty)
+    }
+
+    func testHeaderPermissionsLateNavigationResponseCannotMutateOrReportInNewScope() async {
+        let (model, session, service) = permissionFixture()
+        let facade = model.chatFacade
+        let scope = facade.headerScope(for: session)
+        let other = makeSession(id: "other-permission-chat")
+        service.beforeSet = {
+            model.allSessions = [session, other]
+            model.selectedSession = other
+        }
+        service.writeError = URLError(.networkConnectionLost)
+        let result = await facade.setHeaderPermissions(.fullAccess, scope: scope)
+        XCTAssertFalse(result)
+        XCTAssertTrue(service.reads.isEmpty)
+        XCTAssertNil(facade.presentationErrorMessage)
+        XCTAssertEqual(facade.directoryStore(forSessionID: session.id).sessions.first { $0.id == session.id }?.permissions?.currentPreset, "workspace-write")
+        XCTAssertNil(facade.directoryStore(forSessionID: other.id).sessions.first { $0.id == other.id }?.permissions)
+    }
+
+    func testHeaderPermissionsLateConnectionResponseIsDiscarded() async {
+        let (model, session, service) = permissionFixture()
+        let facade = model.chatFacade
+        let scope = facade.headerScope(for: session)
+        service.beforeSet = { self.installAgentPolicy(.creationOnly, in: model) }
+        service.writeError = URLError(.networkConnectionLost)
+        let result = await facade.setHeaderPermissions(.fullAccess, scope: scope)
+        XCTAssertFalse(result)
+        XCTAssertTrue(service.reads.isEmpty)
+        XCTAssertNil(facade.presentationErrorMessage)
+        XCTAssertEqual(facade.directoryStore(forSessionID: session.id).sessions.first { $0.id == session.id }?.permissions?.currentPreset, "workspace-write")
+    }
+
+    private func permissionFixture(current: String? = "workspace-write") -> (AppViewModel, OpenCodeSession, HeaderPermissionTestService) {
+        let model = makeViewModel()
+        var session = makeSession(id: "permission-session")
+        session.permissions = .init(currentPreset: current)
+        let service = HeaderPermissionTestService(session: session)
+        let backend = HomeTestBackend()
+        model.backendConnection = BackendConnection(descriptor: .init(id: "permission-test", name: "Test", version: "1"),
+            capabilities: [.sessionPermissions], projects: backend, sessions: backend, chat: backend, models: backend, events: backend,
+            sessionPermissions: service)
+        model.selectedDirectory = session.directory
+        model.allSessions = [session]
+        model.selectedSession = session
+        model.isConnected = true
+        return (model, session, service)
+    }
+
+    private func installAgentPolicy(_ policy: BackendAgentSelectionPolicy, in viewModel: AppViewModel) {
+        let backend = HomeTestBackend()
+        viewModel.backendConnection = BackendConnection(descriptor: .init(id: "agent-policy-test", name: "Test", version: "1"),
+            projects: backend, sessions: backend, chat: backend, models: backend, events: backend,
+            agentSelectionPolicy: policy)
+    }
+
+    func testServerContextMetricsPreservesLegacyOpenCodePath() {
+        let model = makeViewModel()
+        let session = makeSession(id: "legacy-metrics")
+        model.selectedDirectory = session.directory
+        model.allSessions = [session]
+        model.selectedSession = session
+        XCTAssertNil(model.chatFacade.serverContextMetrics(for: session.id))
+    }
+
+    func testServerContextMetricsUnknownDSHNeverFallsBackToTranscriptCounts() throws {
+        let model = makeViewModel()
+        installMetadataBackend(in: model)
+        let session = makeSession(id: "unknown-dsh-metrics")
+        model.selectedDirectory = session.directory
+        model.allSessions = [session]
+        model.selectedSession = session
+        model.messages = [makeMessage(id: "message", sessionID: session.id, role: "assistant")]
+        let metrics = try XCTUnwrap(model.chatFacade.serverContextMetrics(for: session.id))
+        XCTAssertNil(metrics.context)
+        XCTAssertNil(metrics.totalCost)
+        XCTAssertNil(metrics.messageCount)
+        XCTAssertNotNil(metrics.metadataSections)
+        XCTAssertTrue(metrics.breakdown.isEmpty)
+    }
+
+    func testServerContextMetricsReadsCanonicalUpdatesWhileBusyAndDistinguishesZero() throws {
+        let model = makeViewModel()
+        installMetadataBackend(in: model)
+        let initial = metadataSession(id: "live-metrics", tokens: 0)
+        model.selectedDirectory = initial.directory
+        model.allSessions = [initial]
+        model.selectedSession = initial
+        let facade = model.chatFacade
+        let owner = facade.directoryStore(forSessionID: initial.id)
+        owner.applySessionStatus("busy", forSessionID: initial.id)
+        let zero = try XCTUnwrap(facade.serverContextMetrics(for: initial.id))
+        XCTAssertEqual(zero.context?.total, 0)
+        XCTAssertEqual(zero.context?.usage, 0)
+        owner.upsertSessions([metadataSession(id: initial.id, tokens: 500)])
+        let updated = try XCTUnwrap(facade.serverContextMetrics(for: initial.id))
+        XCTAssertEqual(updated.context?.total, 500)
+        XCTAssertEqual(updated.context?.usage, 50)
+        XCTAssertEqual(owner.sessionStatuses[initial.id], "busy")
+        XCTAssertNil(updated.totalCost)
+        XCTAssertTrue(updated.breakdown.isEmpty)
+        owner.upsertSessions([metadataSession(id: initial.id, tokens: 500, isCurrent: false)])
+        let stale = try XCTUnwrap(facade.serverContextMetrics(for: initial.id))
+        XCTAssertNil(stale.context)
+        XCTAssertNotNil(stale.metadataSections)
+    }
+
+    func testServerContextMetricsDoesNotLeakAcrossSelectionOrMissingSession() throws {
+        let model = makeViewModel()
+        installMetadataBackend(in: model)
+        let first = metadataSession(id: "first-metrics", tokens: 500)
+        let second = metadataSession(id: "second-metrics", tokens: 100)
+        model.selectedDirectory = first.directory
+        model.allSessions = [first, second]
+        model.selectedSession = first
+        let facade = model.chatFacade
+        XCTAssertEqual(facade.serverContextMetrics(for: first.id)?.context?.total, 500)
+        model.selectedSession = second
+        XCTAssertNil(try XCTUnwrap(facade.serverContextMetrics(for: first.id)).context)
+        XCTAssertEqual(facade.serverContextMetrics(for: second.id)?.context?.total, 100)
+        XCTAssertNil(try XCTUnwrap(facade.serverContextMetrics(for: "missing")).context)
+    }
+
+    func testServerContextMetricsDoesNotClaimCachedValuesAreLiveAfterDisconnect() throws {
+        let model = makeViewModel()
+        installMetadataBackend(in: model)
+        let session = metadataSession(id: "disconnected-metrics", tokens: 500)
+        model.selectedDirectory = session.directory
+        model.allSessions = [session]
+        model.selectedSession = session
+        XCTAssertEqual(model.chatFacade.serverContextMetrics(for: session.id)?.context?.total, 500)
+        model.isConnected = false
+        XCTAssertNil(try XCTUnwrap(model.chatFacade.serverContextMetrics(for: session.id)).context)
+        model.backendConnection = nil
+        XCTAssertNil(try XCTUnwrap(model.chatFacade.serverContextMetrics(for: session.id)).context)
+    }
+
+    func testServerContextMetricsUsesWindowOwnerAndInvalidatesReplacedConnection() throws {
+        let model = makeViewModel()
+        installMetadataBackend(in: model)
+        model.isConnected = true
+        let first = metadataSession(id: "window-first", tokens: 100)
+        let second = metadataSession(id: "window-second", tokens: 500, directory: "/tmp/other-metadata")
+        let firstOwner = model.directoryStoreRegistry.store(for: first.directory)
+        let secondOwner = model.directoryStoreRegistry.store(for: second.directory)
+        firstOwner.upsertSessions([first])
+        secondOwner.upsertSessions([second])
+        let connection = try XCTUnwrap(model.backendConnection)
+        let firstWindow = ChatWindowContext(model: model, connection: connection, session: first, owner: firstOwner)
+        let secondWindow = ChatWindowContext(model: model, connection: connection, session: second, owner: secondOwner)
+        defer { firstWindow.close(); secondWindow.close() }
+        let firstFacade = ChatFacade(viewModel: model, windowContext: firstWindow)
+        let secondFacade = ChatFacade(viewModel: model, windowContext: secondWindow)
+        XCTAssertEqual(firstFacade.serverContextMetrics(for: first.id)?.context?.total, 100)
+        XCTAssertEqual(secondFacade.serverContextMetrics(for: second.id)?.context?.total, 500)
+        XCTAssertNil(try XCTUnwrap(firstFacade.serverContextMetrics(for: second.id)).context)
+        installMetadataBackend(in: model)
+        XCTAssertFalse(firstWindow.isCurrent)
+        XCTAssertNil(try XCTUnwrap(firstFacade.serverContextMetrics(for: first.id)).context)
+    }
+
+    private func metadataSession(id: String, tokens: Int, isCurrent: Bool = true, directory: String = "/tmp/project") -> OpenCodeSession {
+        var session = makeSession(id: id, directory: directory)
+        session.backendMetadata = .init(projections: [
+            "contextPressure": .object(["projectedTokens": .number(Double(tokens)), "pressureTokens": .number(99), "contextWindow": .number(1000)])
+        ], isCurrent: isCurrent, createdAt: nil, origin: nil, isSeeded: nil, delegationDepth: nil, version: nil)
+        return session
+    }
+
+    private func installMetadataBackend(in model: AppViewModel) {
+        let backend = HomeTestBackend()
+        model.backendConnection = BackendConnection(descriptor: .init(id: "metadata-test", name: "Test", version: "1"),
+            capabilities: [.sessionMetadata], projects: backend, sessions: backend, chat: backend, models: backend, events: backend)
+        model.isConnected = true
+    }
+
     func testToolbarSnapshotChangesAfterEachPickerSelection() {
         let viewModel = makeViewModel()
         let session = makeSession(id: "session-picker-updates")
@@ -851,5 +1178,31 @@ final class ChatFacadeTests: XCTestCase {
             ),
             parts: []
         )
+    }
+}
+
+@MainActor
+private final class HeaderPermissionTestService: BackendSessionPermissionsService {
+    var session: OpenCodeSession
+    var reads: [(String, BackendScope)] = []
+    var writes: [(String, BackendSessionPermissionPreset, BackendScope)] = []
+    var beforeSet: (() -> Void)?
+    var readError: Error?
+    var writeError: Error?
+
+    init(session: OpenCodeSession) { self.session = session }
+
+    func refreshPermissions(sessionID: String, scope: BackendScope) async throws -> OpenCodeSession {
+        reads.append((sessionID, scope))
+        if let readError { throw readError }
+        return session
+    }
+
+    func setPermissions(sessionID: String, preset: BackendSessionPermissionPreset, scope: BackendScope) async throws -> OpenCodeSession {
+        writes.append((sessionID, preset, scope))
+        beforeSet?()
+        session.permissions = .init(currentPreset: preset.rawValue)
+        if let writeError { throw writeError }
+        return session
     }
 }

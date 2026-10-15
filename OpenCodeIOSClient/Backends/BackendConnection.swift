@@ -10,7 +10,12 @@ struct BackendDescriptor: Equatable, Hashable, Sendable {
 
 enum BackendCapability: Hashable, Sendable {
     case commands, fork, compaction, files, terminal, mcp, providerConfiguration
-    case worktrees, interactions, bridge, localCache, liveActivities
+    case worktrees, interactions, bridge, localCache, liveActivities, sessionPermissions, sessionMetadata
+}
+
+enum BackendAgentSelectionPolicy: Sendable {
+    case mutable
+    case creationOnly
 }
 
 @MainActor protocol BackendSessionViewingService: Sendable {
@@ -46,12 +51,29 @@ struct BackendTranscriptPage: Sendable {
     var olderCursor: String? = nil
 }
 
+/// Explicit per-session intent, never a change to the server's future-session default.
+enum BackendSessionPermissionPreset: String, Equatable, Sendable {
+    case workspaceWrite = "workspace-write"
+    case fullAccess = "danger-full-access"
+}
+
+/// Canonical backend permission metadata. An unknown value is not Workspace Write.
+struct BackendSessionPermissionState: Codable, Hashable, Sendable {
+    var currentPreset: String?
+}
+
+@MainActor protocol BackendSessionPermissionsService: Sendable {
+    func refreshPermissions(sessionID: String, scope: BackendScope) async throws -> OpenCodeSession
+    func setPermissions(sessionID: String, preset: BackendSessionPermissionPreset, scope: BackendScope) async throws -> OpenCodeSession
+}
+
 struct BackendSessionCreation: Sendable {
     var title: String? = nil
     var scope: BackendScope
     var agent: String? = nil
     var model: OpenCodeModelReference? = nil
     var variant: String? = nil
+    var permissionPreset: BackendSessionPermissionPreset? = nil
 }
 
 struct BackendSubmission: Sendable {
@@ -97,6 +119,12 @@ struct BackendModelCatalog: Sendable {
     func searchSessions(query: String, scope: BackendScope, limit: Int) async throws -> [OpenCodeSession]
 }
 
+@MainActor protocol BackendSessionActivityService: Sendable {
+    /// Complete current statuses within the requested scope; live changes arrive
+    /// through the connection's existing event source.
+    func sessionStatuses(scope: BackendScope) async throws -> [String: String]
+}
+
 @MainActor protocol BackendChatService: Sendable {
     func transcript(sessionID: String, scope: BackendScope, cursor: String?, limit: Int) async throws -> BackendTranscriptPage
     func submit(_ request: BackendSubmission) async throws -> BackendAdmission
@@ -108,6 +136,8 @@ struct BackendModelCatalog: Sendable {
 }
 
 enum BackendEvent: Sendable {
+    /// Complete registry replacement, including removals and server ordering.
+    case projectsSnapshot(BackendProjectsSnapshot)
     case mutation(directory: String?, event: OpenCodeTypedEvent)
     case actionSignal(BackendActionSignal)
     case sessionForm(directory: String?, event: BackendSessionFormsEvent)
@@ -133,6 +163,7 @@ final class BackendConnection {
     let descriptor: BackendDescriptor
     let capabilities: Set<BackendCapability>
     let healthy: Bool
+    let agentSelectionPolicy: BackendAgentSelectionPolicy
     let projects: any BackendProjectsService
     let sessions: any BackendSessionsService
     let chat: any BackendChatService
@@ -145,6 +176,9 @@ final class BackendConnection {
     let worktrees: (any BackendWorktreesService)?
     let worktreeReset: (any BackendWorktreeResetService)?
     let sessionSelection: (any BackendSessionSelectionService)?
+    let sessionActivity: (any BackendSessionActivityService)?
+    let sessionPermissions: (any BackendSessionPermissionsService)?
+    let mcp: (any BackendMCPService)?
     private(set) var isClosed = false
     private var subscribers: [UUID: AsyncStream<BackendEvent>.Continuation] = [:]
     private var eventGeneration = 0
@@ -163,11 +197,16 @@ final class BackendConnection {
         projectLifecycle: (any BackendProjectLifecycleService)? = nil,
         worktrees: (any BackendWorktreesService)? = nil,
         worktreeReset: (any BackendWorktreeResetService)? = nil,
-        sessionSelection: (any BackendSessionSelectionService)? = nil
+        sessionSelection: (any BackendSessionSelectionService)? = nil,
+        sessionActivity: (any BackendSessionActivityService)? = nil,
+        agentSelectionPolicy: BackendAgentSelectionPolicy = .mutable,
+        sessionPermissions: (any BackendSessionPermissionsService)? = nil,
+        mcp: (any BackendMCPService)? = nil
     ) {
         self.descriptor = descriptor
         self.capabilities = capabilities
         self.healthy = healthy
+        self.agentSelectionPolicy = agentSelectionPolicy
         self.projects = projects
         self.sessions = sessions
         self.chat = chat
@@ -179,6 +218,9 @@ final class BackendConnection {
         self.worktrees = worktrees
         self.worktreeReset = worktreeReset
         self.sessionSelection = sessionSelection
+        self.sessionActivity = sessionActivity
+        self.sessionPermissions = sessionPermissions
+        self.mcp = mcp
     }
 
     func require(_ capability: BackendCapability) throws {

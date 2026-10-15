@@ -176,6 +176,84 @@ platform :ios do
   end
 
   desc "Print the latest TestFlight build number for a version"
+  lane :dsh_latest_testflight_build do
+    api_key = asc_api_key
+    source = File.read(File.join(repo_root, "project.yml"))
+    target = source[/^  DSHClient:\n.*?(?=^  \w|\z)/m]
+    version = target && target[/^        MARKETING_VERSION:\s*(\S+)/, 1]
+    UI.user_error!("Could not read DSHClient MARKETING_VERSION") unless version
+    latest = latest_testflight_build_number(
+      api_key: api_key, app_identifier: "com.ntoporcov.dshclient",
+      version: version, initial_build_number: 0
+    )
+    UI.message("Latest DSH TestFlight build for #{version}: #{latest}")
+  end
+
+  desc "Archive DSHClient for App Store Connect"
+  lane :dsh_archive do
+    sh(xcodegen_generate_command(repo_root))
+    build_app(
+      project: File.join(repo_root, "OpenCodeIOSClient.xcodeproj"),
+      scheme: "DSHClient", configuration: "Release", clean: true,
+      export_method: "app-store",
+      export_options: { signingStyle: "automatic" },
+      xcargs: "-allowProvisioningUpdates",
+      export_xcargs: "-allowProvisioningUpdates",
+      derived_data_path: File.join(repo_root, "build", "dsh-derived-data"),
+      archive_path: File.join(repo_root, "build", "fastlane", "dsh", "DSHClient.xcarchive"),
+      output_directory: File.join(repo_root, "build", "fastlane", "dsh"),
+      output_name: "DSHClient"
+    )
+  end
+
+  desc "Bump only DSHClient from ASC's latest build, archive, and upload to TestFlight"
+  lane :dsh_beta do
+    api_key = asc_api_key
+    project_path = File.join(repo_root, "project.yml")
+    source = File.read(project_path)
+    target = source[/^  DSHClient:\n.*?(?=^  \w|\z)/m]
+    version = target && target[/^        MARKETING_VERSION:\s*(\S+)/, 1]
+    UI.user_error!("Could not read DSHClient version/build in project.yml") unless version && target.match?(/^        CURRENT_PROJECT_VERSION: \d+$/)
+    latest = latest_testflight_build_number(
+      api_key: api_key, app_identifier: "com.ntoporcov.dshclient",
+      version: version, initial_build_number: 0
+    )
+    build_number = latest.to_i + 1
+    updated = target.sub(/^        CURRENT_PROJECT_VERSION: \d+$/, "        CURRENT_PROJECT_VERSION: #{build_number}")
+    File.write(project_path, source.sub(target, updated))
+    UI.message("Uploading DSHClient #{version} (#{build_number})")
+    dsh_archive
+    dsh_upload
+  end
+
+  desc "Retry uploading the already-exported DSH IPA without rebuilding"
+  lane :dsh_upload do
+    api_key = asc_api_key
+    ipa = File.join(repo_root, "build", "fastlane", "dsh", "DSHClient.ipa")
+    UI.user_error!("Missing DSHClient.ipa; run dsh_archive or dsh_beta first") unless File.file?(ipa)
+    identifier = get_ipa_info_plist_value(ipa: ipa, key: "CFBundleIdentifier")
+    UI.user_error!("Expected com.ntoporcov.dshclient, found #{identifier}") unless identifier == "com.ntoporcov.dshclient"
+    # Fastlane's altool shell command does not quote its temporary package path.
+    temporary_directory = File.join(repo_root, "build", "fastlane", "dsh", "tmp")
+    UI.user_error!("DSH upload temporary directory must not contain spaces") if temporary_directory.match?(/\s/)
+    FileUtils.mkdir_p(temporary_directory)
+    previous_tmpdir = ENV["TMPDIR"]
+    begin
+      ENV["TMPDIR"] = temporary_directory
+      upload_to_testflight(
+        api_key: api_key,
+        app_identifier: "com.ntoporcov.dshclient",
+        ipa: ipa,
+        uses_non_exempt_encryption: false,
+        skip_waiting_for_build_processing: true,
+        distribute_external: false
+      )
+    ensure
+      ENV["TMPDIR"] = previous_tmpdir
+    end
+  end
+
+  desc "Print the latest OpenClient TestFlight build number for a version"
   lane :latest_testflight_build do |options|
     api_key = asc_api_key
     version = options[:version]

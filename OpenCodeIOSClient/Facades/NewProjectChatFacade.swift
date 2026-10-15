@@ -200,6 +200,9 @@ final class NewProjectChatFacade: ObservableObject {
     func shouldDismissForPaywall(_ request: NewProjectChatSheetRequest) -> Bool {
         paywallReason != nil && request.sharePayloadID == nil && widget?.sheetID != request.id
     }
+    var supportsSessionPermissions: Bool {
+        !isReadOnly && viewModel.backendConnection?.capabilities.contains(.sessionPermissions) == true
+    }
     var selectableAgents: [OpenCodeAgent] { viewModel.selectableAgents }
     var sortedProviders: [OpenCodeProvider] { viewModel.sortedProviders }
     var newSessionDefaults: NewSessionDefaults { viewModel.newSessionDefaults }
@@ -661,6 +664,11 @@ final class NewProjectChatFacade: ObservableObject {
             return false
         }
         let content = NewProjectChatInitialContent(text: prompt.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments)
+        if let handoff, let checkpoint = handoff.checkpoint, checkpoint.session != nil,
+           checkpoint.appliedSelection?.permissionPreset != composerSelection.permissionPreset {
+            handoff.error = String(localized: "Open the existing chat to change its permissions.")
+            return false
+        }
         if let handoff, let checkpoint = handoff.checkpoint, let session = checkpoint.session {
             guard checkpoint.scope?.projectID == projectID,
                   handoff.workspaceDirectory == workspaceDirectory, handoff.workspaceSelection == workspaceSelection,
@@ -761,12 +769,14 @@ final class NewProjectChatFacade: ObservableObject {
             if !transferredReservation { reservation.settle(refund: true) }
         }
         do {
+            if selection.permissionPreset != nil { try connection.require(.sessionPermissions) }
             if checkpoint.session == nil {
                 guard !checkpoint.creationStarted else { return false }
                 checkpoint.creationStarted = true
                 checkpoint.session = try await connection.sessions.createSession(.init(
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines), scope: handoff.scope,
-                    agent: selection.agentName, model: selection.modelReference, variant: selection.reasoningVariant))
+                    agent: selection.agentName, model: selection.modelReference, variant: selection.reasoningVariant,
+                    permissionPreset: selection.permissionPreset))
                 checkpoint.appliedSelection = selection
                 // A known create counts even when its response outlives navigation or the connection.
                 viewModel.recordCreatedSessionForMetering()
@@ -842,7 +852,8 @@ final class NewProjectChatFacade: ObservableObject {
                     guard !Task.isCancelled, isCurrentShare(handoff) else { throw CancellationError() }
                     checkpoint.agentSelectionUncertain = false
                     checkpoint.appliedSelection = .init(agentName: agent,
-                        modelReference: previous.modelReference, reasoningVariant: previous.reasoningVariant)
+                        modelReference: previous.modelReference, reasoningVariant: previous.reasoningVariant,
+                        permissionPreset: previous.permissionPreset)
                     checkpoint.session?.agent = agent
                     viewModel.modelConfigurationStore.selectAgent(named: agent, forSessionID: session.id)
                 }

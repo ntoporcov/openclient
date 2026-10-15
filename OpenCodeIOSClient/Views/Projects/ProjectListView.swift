@@ -709,6 +709,35 @@ private struct InlineSubtitleSelectTrigger: View {
     }
 }
 
+private struct NewChatSessionPermissionsCard: View {
+    @Binding var fullAccess: Bool
+    let isStarting: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Full Access", isOn: $fullAccess)
+                .disabled(isStarting)
+                .accessibilityIdentifier("projects.newChat.fullAccess")
+            if fullAccess {
+                Text("This session can access the host's entire filesystem and run commands without approval prompts.")
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("projects.newChat.fullAccess.warning")
+            } else {
+                Text("Off explicitly uses Workspace Write, even if the server default is Full Access.")
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("projects.newChat.fullAccess.explanation")
+            }
+        }
+        .font(.subheadline)
+        .multilineTextAlignment(.leading)
+        .padding(16)
+        .background(
+            OpenCodePlatformColor.secondaryGroupedBackground,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+    }
+}
+
 private enum ProjectNewChatQuickPicker: Equatable {
     case workspace
     case agent
@@ -738,6 +767,10 @@ struct ProjectNewChatSheet: View, Equatable {
     @State private var selectedAgentName: String?
     @State private var selectedModelReference: OpenCodeModelReference?
     @State private var selectedReasoningVariant: String?
+    // Permission elevation is explicit, connection-bound, and never restored from a draft.
+    @State private var fullAccess = false
+    @State private var showsFullAccessConfirmation = false
+    @State private var fullAccessContextID: String?
     @State private var isModelPickerPresented = false
     @State private var hasInitializedComposerSettings = false
     @State private var chatTitleDraft = ""
@@ -896,6 +929,7 @@ struct ProjectNewChatSheet: View, Equatable {
             syncWorkspaceSelection()
         }
         .onChange(of: viewModel.connectionContextID) { _, _ in
+            resetSessionPermissions()
             if !viewModel.ownsSubmission(request) {
                 dismissSheet()
             } else {
@@ -906,6 +940,25 @@ struct ProjectNewChatSheet: View, Equatable {
                 initializeSelectionIfNeeded()
                 initializeComposerSettingsIfNeeded()
             }
+        }
+        .onChange(of: viewModel.supportsSessionPermissions) { _, supportsPermissions in
+            if !supportsPermissions { resetSessionPermissions() }
+        }
+        .alert("Enable Full Access?", isPresented: $showsFullAccessConfirmation) {
+            Button("Cancel", role: .cancel) { resetSessionPermissions() }
+                .accessibilityIdentifier("projects.newChat.fullAccess.cancel")
+            Button("Enable Full Access", role: .destructive) {
+                guard viewModel.supportsSessionPermissions,
+                      fullAccessContextID == viewModel.connectionContextID,
+                      !isStartingChat, startingSnapshot == nil else {
+                    resetSessionPermissions()
+                    return
+                }
+                fullAccess = true
+            }
+            .accessibilityIdentifier("projects.newChat.fullAccess.confirm")
+        } message: {
+            Text("Full Access lets this session access the host's entire filesystem and run commands without approval prompts. Only enable it for a host and agent you trust.")
         }
         .onChange(of: showsWorkspacePicker) { _, shows in
             if !shows && workspaceSelection == .createNew { workspaceSelection = .main }
@@ -953,6 +1006,14 @@ struct ProjectNewChatSheet: View, Equatable {
                 destinationSubtitle
 
                 newWorktreeFields
+
+                if viewModel.supportsSessionPermissions {
+                    NewChatSessionPermissionsCard(
+                        fullAccess: fullAccessBinding,
+                        isStarting: isStartingChat || startingSnapshot != nil
+                    )
+                    .frame(maxWidth: 320)
+                }
 
                 Spacer(minLength: 0)
             }
@@ -1331,8 +1392,8 @@ struct ProjectNewChatSheet: View, Equatable {
                 isSelected: selectedAgentName == nil
             )] + viewModel.selectableAgents.map { agent in
                 .action(
-                    id: agent.name,
-                    title: agent.name.capitalized,
+                    id: "agent:\(agent.name)",
+                    title: agent.displayName ?? agent.name.capitalized,
                     systemImage: "person.crop.circle",
                     isSelected: selectedAgentName == agent.name
                 )
@@ -1371,7 +1432,7 @@ struct ProjectNewChatSheet: View, Equatable {
             }
 
         case .agent:
-            selectedAgentName = optionID == "default" ? nil : optionID
+            selectedAgentName = viewModel.selectableAgents.first { "agent:\($0.name)" == optionID }?.name
 
         case .reasoning:
             selectedReasoningVariant = optionID == "default" ? nil : optionID
@@ -1392,7 +1453,9 @@ struct ProjectNewChatSheet: View, Equatable {
     }
 
     private var agentTitle: String {
-        selectedAgentName?.capitalized ?? String(localized: "Default")
+        guard let selectedAgentName else { return String(localized: "Default") }
+        return viewModel.selectableAgents.first { $0.name == selectedAgentName }?.displayName
+            ?? selectedAgentName.capitalized
     }
 
     private var modelTitle: String {
@@ -1453,6 +1516,7 @@ struct ProjectNewChatSheet: View, Equatable {
     }
 
     private var canStartChat: Bool {
+        guard !showsFullAccessConfirmation else { return false }
         guard let selectedProject, viewModel.isReady(for: request) else { return false }
         guard viewModel.globalForms.pending(for: newChatFormLocation).isEmpty else { return false }
         guard workspaceSelection == .createNew else { return true }
@@ -1481,6 +1545,9 @@ struct ProjectNewChatSheet: View, Equatable {
 
     private func initializeComposerSettingsIfNeeded() {
         guard !hasInitializedComposerSettings else {
+            if let selectedAgentName, !viewModel.selectableAgents.contains(where: { $0.name == selectedAgentName }) {
+                self.selectedAgentName = nil
+            }
             syncReasoningSelection()
             return
         }
@@ -1540,6 +1607,24 @@ struct ProjectNewChatSheet: View, Equatable {
         workspaceSelection = .main
     }
 
+    private var fullAccessBinding: Binding<Bool> {
+        Binding(get: { fullAccess }, set: { enabled in
+            guard viewModel.supportsSessionPermissions, !isStartingChat, startingSnapshot == nil else { return }
+            if enabled {
+                fullAccessContextID = viewModel.connectionContextID
+                showsFullAccessConfirmation = true
+            } else {
+                resetSessionPermissions()
+            }
+        })
+    }
+
+    private func resetSessionPermissions() {
+        fullAccess = false
+        showsFullAccessConfirmation = false
+        fullAccessContextID = nil
+    }
+
     private func startChat() {
         guard canStartChat, let selectedProject else { return }
         guard !isStartingChat, startingSnapshot == nil else { return }
@@ -1551,6 +1636,10 @@ struct ProjectNewChatSheet: View, Equatable {
         let messageID = OpenCodeIdentifier.message()
         let partID = OpenCodeIdentifier.part()
         let context = viewModel.connectionContextID
+        // Capture the explicit permission choice with this submission, not later in the task.
+        let permissionPreset: BackendSessionPermissionPreset? = viewModel.supportsSessionPermissions
+            ? (fullAccess && fullAccessContextID == context ? .fullAccess : .workspaceWrite)
+            : nil
         let destinationParent = workspaceSelection == .createNew && viewModel.supportsWorktreeDestinationParent
             ? viewModel.worktreeDestinationParent(for: selectedProject) : nil
 
@@ -1587,7 +1676,8 @@ struct ProjectNewChatSheet: View, Equatable {
                 composerSelection: NewProjectChatComposerSelection(
                     agentName: selectedAgentName,
                     modelReference: selectedModelReference,
-                    reasoningVariant: showsReasoningPicker ? selectedReasoningVariant : nil
+                    reasoningVariant: showsReasoningPicker ? selectedReasoningVariant : nil,
+                    permissionPreset: permissionPreset
                 ),
                 projectID: selectedProject.id,
                 workspaceDirectory: workspaceDirectory,

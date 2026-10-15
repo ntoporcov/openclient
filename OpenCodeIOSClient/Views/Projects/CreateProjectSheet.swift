@@ -11,6 +11,7 @@ struct CreateProjectSheet: View {
                 searchRoot: snapshot.defaultSearchRoot, directories: snapshot.results,
                 selectedDirectory: snapshot.selectedDirectory, isLoading: snapshot.isLoading,
                 errorMessage: snapshot.errorMessage,
+                requiresDSHBrowseConfiguration: snapshot.requiresDSHBrowseConfiguration,
                 actionTitle: snapshot.isLoading ? "Selecting..." : "Select",
                 displayPath: facade.createProjectResultPath,
                 onBrowse: { directory in Task { await facade.selectCreateProjectDirectory(directory) } },

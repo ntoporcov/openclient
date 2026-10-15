@@ -60,6 +60,14 @@ enum ChatBubbleStyle: String, Codable, CaseIterable, Identifiable {
 enum AppAccentColor: String, Codable, CaseIterable, Identifiable {
     case blue, indigo, purple, pink, red, orange, green, teal, clear, inverted
 
+    static var appDefault: Self {
+#if DSH_CLIENT
+        .purple
+#else
+        .blue
+#endif
+    }
+
     var id: Self { self }
     var title: LocalizedStringResource {
         switch self {
@@ -103,7 +111,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
 
     init(
         chatBubbleStyle: ChatBubbleStyle = .glass,
-        accentColor: AppAccentColor = .blue,
+        accentColor: AppAccentColor = .appDefault,
         showsChatActivityShimmer: Bool = true,
         showsToolCalls: Bool = true,
         groupsToolCalls: Bool = true,
@@ -155,7 +163,7 @@ struct AppCustomizationPreferences: Codable, Equatable {
         chatBubbleStyle = try container.decodeIfPresent(String.self, forKey: .chatBubbleStyle)
             .flatMap(ChatBubbleStyle.init(rawValue:)) ?? .glass
         let storedAccent = try container.decodeIfPresent(String.self, forKey: .accentColor)
-        accentColor = storedAccent == "gray" ? .clear : storedAccent.flatMap(AppAccentColor.init(rawValue:)) ?? .blue
+        accentColor = storedAccent == "gray" ? .clear : storedAccent.flatMap(AppAccentColor.init(rawValue:)) ?? .appDefault
         showsChatActivityShimmer = try container.decodeIfPresent(Bool.self, forKey: .showsChatActivityShimmer) ?? true
         showsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .showsToolCalls) ?? true
         groupsToolCalls = try container.decodeIfPresent(Bool.self, forKey: .groupsToolCalls) ?? true

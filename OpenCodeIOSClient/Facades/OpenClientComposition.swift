@@ -12,6 +12,7 @@ final class OpenClientComposition: ObservableObject {
     let imageContent: OpenClientImageContentCoordinator
     let videoStreams: OpenClientVideoStreamCoordinator
     let liveActivityBackgroundBridge: LiveActivityBackgroundBridge
+    let dshConnection: DSHConnectionCoordinator?
 
     var connection: ConnectionFacade { viewModel.connectionFacade }
     var appShell: AppShellFacade { viewModel.appShellFacade }
@@ -33,8 +34,23 @@ final class OpenClientComposition: ObservableObject {
         backendFactory: (any BackendFactory)? = nil
     ) {
         precondition(viewModel == nil || backendFactory == nil, "Inject a view model or a backend factory, not both")
-        let viewModel = viewModel ?? AppViewModel(backendFactory: backendFactory)
+        var resolvedFactory = backendFactory
+#if DSH_CLIENT
+        // A DSH app must never fall back to an OpenCode connection, including Release.
+        let dsh = viewModel == nil && backendFactory == nil ? DSHConnectionCoordinator() : nil
+        self.dshConnection = dsh
+        if let dsh { resolvedFactory = dsh }
+#elseif DEBUG
+        self.dshConnection = nil
+        let prototype = viewModel == nil && backendFactory == nil ? DSHPrototypeFactory.fromEnvironment() : nil
+        if let prototype { resolvedFactory = prototype }
+#else
+        self.dshConnection = nil
+#endif
+        let viewModel = viewModel ?? AppViewModel(backendFactory: resolvedFactory)
         self.viewModel = viewModel
+        dshConnection?.attach(viewModel.connectionFacade)
+        viewModel.connectionFacade.dshConnection = dshConnection
         let liveActivityBackgroundBridge = LiveActivityBackgroundBridge()
         self.liveActivityBackgroundBridge = liveActivityBackgroundBridge
         self.whatsNew = whatsNew ?? OpenClientWhatsNewStore(
@@ -124,5 +140,10 @@ final class OpenClientComposition: ObservableObject {
         // The OpenCode device bridge negotiates separately and must not contact a saved server
         // when composition was built around another harness.
         if viewModel.backendFactory == nil { bridgeCoordinator.start() }
+#if DEBUG && !DSH_CLIENT
+        if prototype != nil {
+            Task { [weak viewModel] in await viewModel?.connectionFacade.connect() }
+        }
+#endif
     }
 }

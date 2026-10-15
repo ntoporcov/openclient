@@ -2142,6 +2142,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
     let onAddAttachments: ([OpenCodeComposerAttachment]) -> Void
     let onOpenBrowser: (() -> Void)?
     let glassNamespace: Namespace.ID
+    var allowsMCP = true
+    var managedMCPFacade: MCPFacade? = nil
     var agentTitle: String = ""
     var selectableAgents: [OpenCodeAgent] = []
     var modelTitle: String = ""
@@ -2199,6 +2201,8 @@ private struct EquatableMessageComposerHost: View, Equatable {
             onOpenBrowser: onOpenBrowser,
             glassNamespace: glassNamespace,
             blocksNewInput: snapshot.blocksNewInput,
+            allowsMCP: allowsMCP,
+            managedMCPFacade: managedMCPFacade,
             agentTitle: agentTitle,
             selectableAgents: selectableAgents,
             modelTitle: modelTitle,
@@ -2526,7 +2530,7 @@ struct ChatView: View {
     }
 
     private var contextMetrics: OpenCodeSessionContextMetrics {
-        cachedContextMetrics ?? Self.emptyContextMetrics
+        chatFacade.serverContextMetrics(for: sessionID) ?? cachedContextMetrics ?? Self.emptyContextMetrics
     }
 
     private var shouldAnimateStreamingText: Bool {
@@ -3092,6 +3096,12 @@ struct ChatView: View {
     }
 
     private func refreshCachedContextMetrics() {
+        // Server metadata is cheap and live; do not rebuild transcript estimates for DSH.
+        guard chatFacade.serverContextMetrics(for: sessionID) == nil else {
+            taskStore.contextMetricsTask?.cancel()
+            cachedContextMetrics = nil
+            return
+        }
         refreshCachedContextMetrics(
             messages: sessionScopedFallbackMessages,
             providers: modelConfigurationStore.availableProviders
@@ -3117,11 +3127,15 @@ struct ChatView: View {
         providers: [OpenCodeProvider]
     ) {
         taskStore.contextMetricsTask?.cancel()
+        let contextID = chatFacade.promptContextID
+        let requestedSessionID = sessionID
         taskStore.contextMetricsTask = Task { @MainActor in
             let metrics = await Task.detached(priority: .utility) {
                 OpenCodeSessionContextMetricsBuilder.metrics(messages: messages, providers: providers)
             }.value
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, requestedSessionID == sessionID,
+                  contextID == chatFacade.promptContextID,
+                  chatFacade.serverContextMetrics(for: sessionID) == nil else { return }
             cachedContextMetrics = metrics
         }
     }
@@ -3668,6 +3682,8 @@ struct ChatView: View {
             },
             onOpenBrowser: browserAction,
             glassNamespace: composerGlassNamespace,
+            allowsMCP: chatFacade.isMCPAvailable,
+            managedMCPFacade: chatFacade.mcpFacade,
             agentTitle: toolbarSnapshot.agentTitle,
             selectableAgents: toolbarSnapshot.selectableAgents,
             modelTitle: toolbarSnapshot.modelTitle,
@@ -5783,36 +5799,45 @@ struct SessionContextUsageToolbarButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel("View context usage")
         .accessibilityValue(accessibilityValue)
+        .accessibilityIdentifier("chat.contextUsage")
     }
 
-    private var progress: Double {
-        guard let usage = context?.usage else { return 0 }
+    private var progress: Double? {
+        guard let usage = context?.usage else { return nil }
         return min(1, max(0, Double(usage) / 100))
     }
 
     private var accessibilityValue: String {
-        guard let context else { return String(localized: "No token usage yet") }
+        guard let context else { return String(localized: "Context usage unavailable") }
         if let usage = context.usage {
             return String(localized: "\(usage)% used, \(context.total) tokens")
         }
-        return String(localized: "\(context.total) tokens")
+        return String(localized: "\(context.total) tokens; context limit unavailable")
     }
 }
 
-private struct ContextUsageRing: View {
-    let progress: Double
+struct ContextUsageRing: View {
+    let progress: Double?
     let tint: Color
     let lineWidth: CGFloat
 
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.secondary.opacity(0.2), lineWidth: lineWidth)
-            Circle()
-                .trim(from: 0, to: progress)
-                .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+                .stroke(Color.secondary.opacity(0.2), style: StrokeStyle(lineWidth: lineWidth, dash: progress == nil ? [2, 3] : []))
+            if let progress {
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            } else {
+                Image(systemName: "questionmark")
+                    .font(.system(size: lineWidth * 2.2, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
         }
+        .accessibilityIdentifier(progress == nil ? "chat.contextRing.unknown" : "chat.contextRing.known")
     }
 }
 
@@ -5824,63 +5849,78 @@ private struct SessionContextMetricsSheet: View {
 
     var body: some View {
         Form {
-            Section {
-                summaryHeader
-            }
-
-            Section("Context") {
-                if let context = metrics.context {
-                    LabeledContent("Provider", value: context.providerLabel)
-                    LabeledContent("Model", value: context.modelLabel)
-                    LabeledContent("Context Limit", value: number(context.limit))
-                    LabeledContent("Total Tokens", value: number(context.total))
-                    LabeledContent("Usage", value: percent(context.usage))
-                    LabeledContent("Input Tokens", value: number(context.input))
-                    LabeledContent("Output Tokens", value: number(context.output))
-                    LabeledContent("Reasoning Tokens", value: number(context.reasoning))
-                    LabeledContent("Cache Tokens", value: "\(number(context.cacheRead)) / \(number(context.cacheWrite))")
-                    LabeledContent("Last Activity", value: time(context.messageCreatedAt))
-                } else {
-                    Text("Context usage appears after the model returns token metrics for this chat.")
-                        .foregroundStyle(.secondary)
+            if let sections = metrics.metadataSections {
+                Section {
+                    SessionServerContextSummaryView(context: metrics.context)
                 }
-            }
+                SessionMetadataSectionsView(sections: sections)
+            } else {
+                Section {
+                    summaryHeader
+                }
 
-            Section("Session") {
-                LabeledContent("Session", value: session.title?.nilIfEmpty ?? session.id)
-                LabeledContent("Messages", value: number(metrics.messageCount))
-                LabeledContent("User Messages", value: number(metrics.userMessageCount))
-                LabeledContent("Assistant Messages", value: number(metrics.assistantMessageCount))
-                LabeledContent("Total Cost", value: currency(metrics.totalCost))
-            }
+                Section("Context") {
+                    if let context = metrics.context {
+                        LabeledContent("Provider", value: context.providerLabel)
+                        LabeledContent("Model", value: context.modelLabel)
+                        LabeledContent("Context Limit", value: number(context.limit))
+                        LabeledContent("Total Tokens", value: number(context.total))
+                        LabeledContent("Usage", value: percent(context.usage))
+                        LabeledContent("Input Tokens", value: number(context.input))
+                        LabeledContent("Output Tokens", value: number(context.output))
+                        LabeledContent("Reasoning Tokens", value: number(context.reasoning))
+                        LabeledContent("Cache Read Tokens", value: number(context.cacheRead))
+                        LabeledContent("Cache Write Tokens", value: number(context.cacheWrite))
+                        LabeledContent("Last Activity", value: time(context.messageCreatedAt))
+                    } else {
+                        Text("Context usage appears after the model returns token metrics for this chat.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
-            if !metrics.breakdown.isEmpty {
-                Section("Estimated Input Breakdown") {
-                    ContextBreakdownBar(segments: metrics.breakdown)
-                        .frame(height: 10)
-                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                Section {
+                    LabeledContent("Session", value: session.title?.nilIfEmpty ?? session.id)
+                    LabeledContent("Messages", value: number(metrics.messageCount))
+                    LabeledContent("User Messages", value: number(metrics.userMessageCount))
+                    LabeledContent("Assistant Messages", value: number(metrics.assistantMessageCount))
+                    LabeledContent("Total Cost", value: currency(metrics.totalCost))
+                } header: {
+                    Text("Session")
+                } footer: {
+                    Text("Message counts and cost cover loaded history.")
+                }
 
-                    ForEach(metrics.breakdown) { segment in
-                        LabeledContent {
-                            Text("\(segment.percent.formatted(.number.precision(.fractionLength(0 ... 1))))%")
-                                .foregroundStyle(.secondary)
-                        } label: {
-                            HStack(spacing: 8) {
-                                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                    .fill(breakdownColor(for: segment.kind))
-                                    .frame(width: 10, height: 10)
-                                Text(breakdownLabel(for: segment.kind))
+                SessionMetadataSectionsView(sections: metrics.responseMetadataSections)
+                SessionMetadataSectionsView(sections: [OpenCodeResponseMetadataBuilder.sessionSection(session)])
+
+                if !metrics.breakdown.isEmpty {
+                    Section("Estimated Input Breakdown") {
+                        ContextBreakdownBar(segments: metrics.breakdown)
+                            .frame(height: 10)
+                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+
+                        ForEach(metrics.breakdown) { segment in
+                            LabeledContent {
+                                Text("\(segment.percent.formatted(.number.precision(.fractionLength(0 ... 1))))%")
+                                    .foregroundStyle(.secondary)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                        .fill(breakdownColor(for: segment.kind))
+                                        .frame(width: 10, height: 10)
+                                    Text(breakdownLabel(for: segment.kind))
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if let systemPrompt = metrics.systemPrompt {
-                Section("System Prompt") {
-                    Text(systemPrompt)
-                        .font(.footnote)
-                        .textSelection(.enabled)
+                if let systemPrompt = metrics.systemPrompt {
+                    Section("System Prompt") {
+                        Text(systemPrompt)
+                            .font(.footnote)
+                            .textSelection(.enabled)
+                    }
                 }
             }
         }
@@ -5923,8 +5963,8 @@ private struct SessionContextMetricsSheet: View {
         .padding(.vertical, 4)
     }
 
-    private var progress: Double {
-        guard let usage = metrics.context?.usage else { return 0 }
+    private var progress: Double? {
+        guard let usage = metrics.context?.usage else { return nil }
         return min(1, max(0, Double(usage) / 100))
     }
 
@@ -5945,9 +5985,10 @@ private struct SessionContextMetricsSheet: View {
         return "\(value.formatted(.number))%"
     }
 
-    private func currency(_ value: Double) -> String {
+    private func currency(_ value: Double?) -> String {
+        guard let value else { return String(localized: "Unavailable") }
         let fractionDigits = value > 0 && value < 0.01 ? 4 : 2
-        return "$" + String(format: "%.*f", fractionDigits, value)
+        return value.formatted(.currency(code: "USD").precision(.fractionLength(fractionDigits)))
     }
 
     private func time(_ value: Double?) -> String {

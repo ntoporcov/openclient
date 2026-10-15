@@ -5,7 +5,13 @@ extension AppAccentColor {
         switch self {
         case .blue: .blue
         case .indigo: .indigo
-        case .purple: .purple
+        case .purple:
+#if DSH_CLIENT
+            // Keep the persisted default choice, but resolve it to DSH's brand palette.
+            Color("DSHAccentColor")
+#else
+            .purple
+#endif
         case .pink: Color(.sRGB, red: 0.94, green: 0.16, blue: 0.57, opacity: 1) // Hot pink, rather than the system's coral pink.
         case .red: .red
         case .orange: .orange

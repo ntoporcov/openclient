@@ -42,7 +42,7 @@ packages:
     url: https://github.com/Lakr233/libghostty-spm
     revision: 87085605587b3b38807381d06e0858fc3910f37a
 targets:
-  OpenCodeIOSClient:
+  OpenCodeIOSClient: &sharedAppTarget
     type: application
     productName: OpenClient
     platform: iOS
@@ -121,7 +121,7 @@ targets:
           ruby "$SRCROOT/scripts/lint-localizations.rb" --stringsdata-root "$(dirname "$TARGET_TEMP_DIR")"
     info:
       path: OpenCodeIOSClient/Generated-Info.plist
-      properties:
+      properties: &sharedAppInfo
         CFBundleDisplayName: OpenClient
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -168,7 +168,7 @@ targets:
             CFBundleURLSchemes:
               - openclient
     settings:
-      base:
+      base: &sharedAppSettings
         PRODUCT_BUNDLE_IDENTIFIER: com.ntoporcov.openclient
         PRODUCT_NAME: OpenClient
         SUPPORTED_PLATFORMS: iphoneos iphonesimulator macosx
@@ -189,6 +189,104 @@ targets:
       testTargets:
         - OpenCodeIOSClientTests
         - OpenCodeIOSClientUITests
+  # Separate DSH app; bundle identifier confirmed against ASC.
+  DSHClient:
+    <<: *sharedAppTarget
+    productName: DSHClient
+    supportedDestinations: [iOS]
+    sources:
+      - path: OpenCodeIOSClient
+        excludes:
+          - OpenCodeMacApp.swift
+          - Info.plist
+          - Generated-Info.plist
+          - InfoPlist.xcstrings
+          - AGENTS.md
+          - "**/AGENTS.md"
+      - path: OpenCodeShared
+        excludes: [AGENTS.md, "**/AGENTS.md"]
+      - path: DSHClient
+        excludes: [Info.plist, DSHClient.entitlements]
+      - path: DshIcon.icon
+        buildPhase: resources
+        group: DSHClient
+      - path: Resources/ExcalidrawWeb
+        type: folder
+        buildPhase: resources
+      - path: Resources/WhatsNew
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: HighlighterSwift
+        product: Highlighter
+      - package: GhosttyKit
+        product: GhosttyTerminal
+    preBuildScripts:
+      - name: Validate DSH bundle identifier
+        script: |
+          if [ "$PRODUCT_BUNDLE_IDENTIFIER" != "com.ntoporcov.dshclient" ]; then
+            echo "error: Unexpected DSH bundle identifier '$PRODUCT_BUNDLE_IDENTIFIER'. Update project.yml when assigning the final app identity."
+            exit 1
+          fi
+    info:
+      path: DSHClient/Info.plist
+      properties:
+        <<: *sharedAppInfo
+        CFBundleDisplayName: OpenClient
+        CFBundleName: OpenClient
+        NSSupportsLiveActivities: false
+        OpenCodeSharedKeychainAccessGroup: $(AppIdentifierPrefix)com.ntoporcov.dshclient
+        ProviderUsagePrivateKeychainAccessGroup: $(AppIdentifierPrefix)com.ntoporcov.dshclient
+        NSLocalNetworkUsageDescription: OpenClient connects to your DSH server on your local network.
+        NSMicrophoneUsageDescription: OpenClient uses the microphone for dictation and voice conversations.
+        NSPersonalVoiceUsageDescription: OpenClient uses your Personal Voice to read AI responses aloud when you select it.
+        NSPhotoLibraryUsageDescription: OpenClient uses your photo library to show recent photos and attach selected images to messages.
+        NSSpeechRecognitionUsageDescription: OpenClient uses speech recognition to transcribe dictation and voice conversations.
+        OpenClientAlternateIconPreviewFiles: {}
+        OpenClientAlternateIconDisplayNames: {}
+        OpenClientProLifetimeIconNames: []
+        CFBundleURLTypes: []
+    settings:
+      base:
+        <<: *sharedAppSettings
+        PRODUCT_BUNDLE_IDENTIFIER: com.ntoporcov.dshclient
+        PRODUCT_NAME: DSHClient
+        PRODUCT_MODULE_NAME: DSHClient
+        CURRENT_PROJECT_VERSION: 2
+        MARKETING_VERSION: 0.1.0
+        SUPPORTED_PLATFORMS: iphoneos iphonesimulator
+        SUPPORTS_MACCATALYST: NO
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) DSH_CLIENT
+        ASSETCATALOG_COMPILER_APPICON_NAME: DshIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: DSHAccentColor
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: ""
+        CODE_SIGN_ENTITLEMENTS: DSHClient/DSHClient.entitlements
+    scheme:
+      gatherCoverageData: false
+      testTargets:
+        - DSHClientUITests
+
+  DSHClientUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    supportedDestinations: [iOS]
+    deploymentTarget: "17.0"
+    sources:
+      - path: OpenCodeIOSClientUITests/DSHPrototypeUITests.swift
+    dependencies:
+      - target: DSHClient
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ntoporcov.dshclient.uitests
+        PRODUCT_NAME: DSHClientUITests
+        PRODUCT_MODULE_NAME: DSHClientUITests
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) DSH_CLIENT
+        SUPPORTED_PLATFORMS: iphoneos iphonesimulator
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: DSHClient
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: 1,2
+
   OpenCodeChatActivityExtension:
     type: app-extension
     platform: iOS

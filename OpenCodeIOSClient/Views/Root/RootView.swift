@@ -89,12 +89,16 @@ struct RootView<ChatDestination: View>: View {
         .sheet(item: primarySheet) { sheet in
             switch sheet {
             case .connection:
-                ConnectionSheetView(
-                    facade: shell.connection,
-                    commerce: shell.commerce,
-                    whatsNew: whatsNew,
-                    bridge: bridge
-                )
+                if let dsh = shell.connection.dshConnection {
+                    DSHConnectionView(coordinator: dsh)
+                } else {
+                    ConnectionSheetView(
+                        facade: shell.connection,
+                        commerce: shell.commerce,
+                        whatsNew: whatsNew,
+                        bridge: bridge
+                    )
+                }
             case .createSession:
                 CreateSessionSheet(facade: shell.sessions)
             case let .newProjectChat(request):
@@ -171,7 +175,11 @@ struct RootView<ChatDestination: View>: View {
                 return
             }
 #endif
-            isWaitingForAutomaticConnection = shell.connection.startAutomaticConnectionIfConfigured()
+            if let dsh = shell.connection.dshConnection {
+                await dsh.connectAutomatically()
+            } else {
+                isWaitingForAutomaticConnection = shell.connection.startAutomaticConnectionIfConfigured()
+            }
         }
     }
 
@@ -495,7 +503,8 @@ struct ChatRouteView<Destination: View>: View, Equatable {
     }
 }
 
-private struct ConnectionSheetBackdrop: View {
+struct ConnectionSheetBackdrop: View {
+    var motionDuration: Double = 12
     @State private var phase = false
 
     var body: some View {
@@ -519,7 +528,7 @@ private struct ConnectionSheetBackdrop: View {
         .blur(radius: 18)
         .saturation(1.15)
         .onAppear {
-            withAnimation(.easeInOut(duration: 12).repeatForever(autoreverses: true)) {
+            withAnimation(.easeInOut(duration: motionDuration).repeatForever(autoreverses: true)) {
                 phase = true
             }
         }

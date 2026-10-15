@@ -116,6 +116,38 @@ private final class ActivityPreloadChatBackend: BackendChatService {
 
 @MainActor
 final class ActivityFacadeTests: XCTestCase {
+    func testNativeBackendActivityUsesCoreTranscriptsAndLiveStatusWithoutOpenCode() async throws {
+        let backend = HomeTestBackend()
+        let viewModel = AppViewModel(backendFactory: backend)
+        viewModel.backendConnection = BackendConnection(descriptor: .init(id: "native-activity", name: "DSH", version: "test"),
+            projects: backend, sessions: backend, chat: backend, models: backend, events: backend,
+            sessionActivity: NativeActivityStatusFixture())
+        viewModel.connectionStore.applySuccessfulServerConnection(version: "test", healthy: true)
+        viewModel.projects = try await backend.projectsSnapshot().projects
+        defer { viewModel.disconnect() }
+        XCTAssertTrue(viewModel.activityFacade.isAvailable)
+        await viewModel.activityFacade.prepareForPresentation()
+        let row = try XCTUnwrap(viewModel.activityFacade.snapshot.workingRows.first { $0.recent.session.id == "home-session" })
+        await viewModel.activityFacade.hydrateIfNeeded(row)
+        XCTAssertEqual(viewModel.activityFacade.snapshot.workingRows.first?.latestAssistantText, "Backend preview")
+        XCTAssertNil(viewModel.selectedSession)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        let idle = expectation(description: "Live idle status leaves Working")
+        let observation = viewModel.activityFacade.$snapshot.dropFirst()
+            .filter { !$0.workingRows.contains { $0.recent.session.id == "home-session" } }
+            .prefix(1).sink { _ in idle.fulfill() }
+        viewModel.handleBackendEvent(.mutation(directory: "/home-project", event: .sessionStatus(sessionID: "home-session", status: "idle")))
+        await fulfillment(of: [idle], timeout: 2)
+        withExtendedLifetime(observation) {}
+        let removed = expectation(description: "Removed session does not linger in Recent")
+        let removalObservation = viewModel.activityFacade.$snapshot.dropFirst()
+            .filter { !$0.recentRows.contains { $0.recent.session.id == "home-session" } }
+            .prefix(1).sink { _ in removed.fulfill() }
+        viewModel.handleBackendEvent(.mutation(directory: "/home-project", event: .sessionDeleted(row.recent.session)))
+        await fulfillment(of: [removed], timeout: 2)
+        withExtendedLifetime(removalObservation) {}
+    }
+
     func testInjectedBackendDoesNotAdvertiseActivityWithoutStatusService() async throws {
         let viewModel = AppViewModel(backendFactory: HomeTestBackend())
         await viewModel.connectionFacade.connect()
@@ -1739,5 +1771,12 @@ final class ActivityFacadeTests: XCTestCase {
                 ),
             ]
         )
+    }
+}
+
+@MainActor
+private struct NativeActivityStatusFixture: BackendSessionActivityService {
+    func sessionStatuses(scope: BackendScope) async throws -> [String: String] {
+        scope.directory == "/home-project" ? ["home-session": "busy"] : [:]
     }
 }

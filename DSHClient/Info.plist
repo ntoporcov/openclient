@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>OpenClient</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>pt-BR</string>
+		<string>it</string>
+	</array>
+	<key>CFBundleName</key>
+	<string>OpenClient</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array/>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>OpenClient connects to your DSH server on your local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>OpenClient uses the microphone for dictation and voice conversations.</string>
+	<key>NSPersonalVoiceUsageDescription</key>
+	<string>OpenClient uses your Personal Voice to read AI responses aloud when you select it.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>OpenClient uses your photo library to show recent photos and attach selected images to messages.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>OpenClient uses speech recognition to transcribe dictation and voice conversations.</string>
+	<key>NSSupportsLiveActivities</key>
+	<false/>
+	<key>OpenClientAlternateIconDisplayNames</key>
+	<dict/>
+	<key>OpenClientAlternateIconPreviewFiles</key>
+	<dict/>
+	<key>OpenClientProLifetimeIconNames</key>
+	<array/>
+	<key>OpenCodeSharedKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)com.ntoporcov.dshclient</string>
+	<key>ProviderUsagePrivateKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)com.ntoporcov.dshclient</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>

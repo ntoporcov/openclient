@@ -7,6 +7,7 @@ struct ServerDirectoryPickerContent: View {
     let selectedDirectory: String?
     let isLoading: Bool
     let errorMessage: String?
+    var requiresDSHBrowseConfiguration = false
     var selectionEnabled = true
     var actionTitle: LocalizedStringResource = "Select"
     var systemImage = "folder.badge.plus"
@@ -26,6 +27,14 @@ struct ServerDirectoryPickerContent: View {
             }
             if let errorMessage {
                 Section { Text(verbatim: errorMessage).foregroundStyle(.red) }
+            }
+            if requiresDSHBrowseConfiguration {
+                Section("Enable Remote Folder Browsing") {
+                    Text("DSH is using a folder chooser on the server’s display. Enter an absolute server path in the Directory field to add a workspace.")
+                    Text("To browse folders remotely, ask the server administrator to replace the automatic or native directory-picker plugin with @deepseek-ai/dsh-host-directory-picker-browse in the host composition, then restart DSH and reopen this screen. Do not enable both plugins together.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("directory.dshBrowseGuidance")
             }
             if let selectedDirectory {
                 Section("Selected Directory") {

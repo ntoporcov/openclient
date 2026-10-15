@@ -4,6 +4,9 @@ struct MCPListView: View {
     @ObservedObject var facade: MCPFacade
 
     var body: some View {
+        if facade.snapshot.managed != nil {
+            ManagedMCPListView(facade: facade)
+        } else {
         MCPListContent(
             snapshot: facade.snapshot,
             onLoad: {
@@ -13,6 +16,7 @@ struct MCPListView: View {
                 await facade.toggleServer(name: name)
             }
         )
+        }
     }
 }
 

@@ -99,6 +99,10 @@ struct OpenCodeSession: Codable, Identifiable, Hashable, Sendable {
     var time: OpenCodeMessageTime? = nil
     var agent: String? = nil
     var model: OpenCodeMessageModelReference? = nil
+    /// Normalized metadata supplied by backends with session-level permission presets.
+    var permissions: BackendSessionPermissionState? = nil
+    /// Backend-supplied canonical projections; nil preserves the legacy OpenCode metrics path.
+    var backendMetadata: BackendSessionMetadata? = nil
 
     var isRootSession: Bool {
         parentID == nil
@@ -162,6 +166,8 @@ struct OpenCodeSession: Codable, Identifiable, Hashable, Sendable {
         session.time = incoming.time ?? time
         session.agent = incoming.agent ?? agent
         session.model = incoming.model ?? model
+        session.permissions = incoming.permissions ?? permissions
+        session.backendMetadata = incoming.backendMetadata ?? backendMetadata
         return session
     }
 }
@@ -1154,6 +1160,9 @@ struct OpenCodeAgent: Codable, Identifiable, Hashable, Sendable {
     let model: OpenCodeModelReference?
     let variant: String?
 
+    /// Optional backend display metadata; `name` remains the stable selection identity.
+    var displayName: String? = nil
+    var displayTitle: String { displayName ?? name }
     var id: String { name }
 }
 
@@ -1278,13 +1287,16 @@ struct OpenCodeProvider: Codable, Identifiable, Hashable, Sendable {
 }
 
 struct OpenCodeSessionContextMetrics: Hashable, Sendable {
-    let totalCost: Double
-    let messageCount: Int
-    let userMessageCount: Int
-    let assistantMessageCount: Int
+    let totalCost: Double?
+    let messageCount: Int?
+    let userMessageCount: Int?
+    let assistantMessageCount: Int?
     let context: OpenCodeSessionContextSnapshot?
     let breakdown: [OpenCodeSessionContextBreakdownSegment]
     let systemPrompt: String?
+    /// Prepared backend sections replace legacy transcript-derived details when present.
+    var metadataSections: [SessionMetadataSection]? = nil
+    var responseMetadataSections: [SessionMetadataSection] = []
 }
 
 struct OpenCodeSessionContextSnapshot: Hashable, Sendable {
@@ -1293,11 +1305,11 @@ struct OpenCodeSessionContextSnapshot: Hashable, Sendable {
     let providerLabel: String
     let modelLabel: String
     let limit: Int?
-    let input: Int
-    let output: Int
-    let reasoning: Int
-    let cacheRead: Int
-    let cacheWrite: Int
+    let input: Int?
+    let output: Int?
+    let reasoning: Int?
+    let cacheRead: Int?
+    let cacheWrite: Int?
     let total: Int
     let usage: Int?
 }
@@ -1320,10 +1332,12 @@ struct OpenCodeSessionContextBreakdownSegment: Identifiable, Hashable, Sendable 
 
 enum OpenCodeSessionContextMetricsBuilder {
     static func metrics(messages: [OpenCodeMessageEnvelope], providers: [OpenCodeProvider]) -> OpenCodeSessionContextMetrics {
-        let totalCost = messages.reduce(0) { sum, message in
-            guard message.info.role?.lowercased() == "assistant" else { return sum }
-            return sum + (message.info.cost ?? 0)
+        let costs = messages.compactMap { message -> Double? in
+            guard message.info.role?.lowercased() == "assistant", let cost = message.info.cost,
+                  cost.isFinite, cost >= 0 else { return nil }
+            return cost
         }
+        let totalCost: Double? = costs.isEmpty ? nil : costs.reduce(0, +)
         let messageCount = messages.count
         let userMessageCount = messages.filter { $0.info.role?.lowercased() == "user" }.count
         let assistantMessageCount = messages.filter { $0.info.role?.lowercased() == "assistant" }.count
@@ -1338,7 +1352,8 @@ enum OpenCodeSessionContextMetricsBuilder {
                 assistantMessageCount: assistantMessageCount,
                 context: nil,
                 breakdown: [],
-                systemPrompt: systemPrompt
+                systemPrompt: systemPrompt,
+                responseMetadataSections: OpenCodeResponseMetadataBuilder.sections(messages: messages, providers: providers)
             )
         }
 
@@ -1373,7 +1388,8 @@ enum OpenCodeSessionContextMetricsBuilder {
             assistantMessageCount: assistantMessageCount,
             context: context,
             breakdown: estimateBreakdown(messages: messages, input: tokens.input, systemPrompt: systemPrompt),
-            systemPrompt: systemPrompt
+            systemPrompt: systemPrompt,
+            responseMetadataSections: OpenCodeResponseMetadataBuilder.sections(messages: messages, providers: providers)
         )
     }
 

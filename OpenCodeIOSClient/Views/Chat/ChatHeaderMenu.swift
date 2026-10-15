@@ -94,6 +94,7 @@ private struct ChatHeaderPanel: View {
             ChatHeaderPopover(facade: facade, scope: scope, title: $panel.title)
                 .tabItem { Label("Chat", systemImage: "bubble.left") }
                 .tag(ChatHeaderPanelState.Tab.chat)
+            if facade.isMCPAvailable && facade.isCurrentHeaderScope(scope) {
             NavigationStack {
                 MCPListView(facade: facade.mcpFacade)
                     .navigationTitle("MCP")
@@ -101,6 +102,7 @@ private struct ChatHeaderPanel: View {
             }
             .tabItem { Label("MCP", systemImage: OpenClientProjectContentTab.mcp.systemImage) }
             .tag(ChatHeaderPanelState.Tab.mcp)
+            }
             NavigationStack {
                 GitStatusView(facade: facade.headerFilesFacade) { panel.showsFile = true }
                     .navigationTitle("Files")
@@ -206,36 +208,55 @@ private struct ChatHeaderPopover: View {
                         .accessibilityIdentifier("chat.header.move")
                     }
                 }
-                Section("Agents") {
-                    ForEach(snapshot.selectableAgents, id: \.name) { agent in
-                        Button {
-                            facade.selectHeaderAgent(named: agent.name, scope: scope)
-                            dismiss()
-                        } label: {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(verbatim: agent.name)
-                                        .font(.body)
-                                    if let description = agent.description, !description.isEmpty {
-                                        Text(verbatim: description)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
+                if facade.supportsHeaderPermissions(scope) {
+                    ChatHeaderPermissionsSection(facade: facade, scope: scope)
+                }
+                if snapshot.isAgentReadOnly {
+                    Section("Agent") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(verbatim: snapshot.agentTitle)
+                                .font(.body)
+                            if let description = snapshot.agentDescription, !description.isEmpty {
+                                Text(verbatim: description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("chat.header.agent.current")
+                    }
+                } else {
+                    Section("Agents") {
+                        ForEach(snapshot.selectableAgents, id: \.name) { agent in
+                            Button {
+                                facade.selectHeaderAgent(named: agent.name, scope: scope)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(verbatim: agent.name)
+                                            .font(.body)
+                                        if let description = agent.description, !description.isEmpty {
+                                            Text(verbatim: description)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                    }
+                                    Spacer()
+                                    if agent.name == snapshot.agentTitle {
+                                        Image(systemName: "checkmark")
                                     }
                                 }
-                                Spacer()
-                                if agent.name == snapshot.agentTitle {
-                                    Image(systemName: "checkmark")
-                                }
+                                .foregroundStyle(.primary)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
                             }
-                            .foregroundStyle(.primary)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .disabled(!allowsAgentSelection)
+                            .accessibilityIdentifier("chat.header.agent.\(agent.name)")
+                            .accessibilityAddTraits(agent.name == snapshot.agentTitle ? .isSelected : [])
                         }
-                        .buttonStyle(.plain)
-                        .disabled(!allowsAgentSelection)
-                        .accessibilityIdentifier("chat.header.agent.\(agent.name)")
-                        .accessibilityAddTraits(agent.name == snapshot.agentTitle ? .isSelected : [])
                     }
                 }
                 if let error = facade.presentationErrorMessage {
@@ -284,6 +305,101 @@ private struct ChatHeaderPopover: View {
             guard facade.isCurrentHeaderScope(scope) else { return }
             withAnimation(.snappy(duration: 0.2)) { saving = false }
             if facade.selectedSession?.title == submittedTitle { dismiss() }
+        }
+    }
+}
+
+private struct ChatHeaderPermissionsSection: View {
+    @ObservedObject var facade: ChatFacade
+    let scope: ChatFacade.HeaderScope
+    @State private var loading = true
+    @State private var changing = false
+    @State private var confirmsFullAccess = false
+
+    private var currentPreset: String? { facade.headerPermissions(scope)?.currentPreset }
+    private var canChange: Bool {
+        !loading && !changing && currentPreset != nil && facade.supportsHeaderPermissions(scope)
+    }
+
+    var body: some View {
+        Section("Permissions") {
+            Toggle("Full Access", isOn: Binding(
+                get: { currentPreset == BackendSessionPermissionPreset.fullAccess.rawValue },
+                set: { enabled in
+                    guard canChange else { return }
+                    if enabled { confirmsFullAccess = true }
+                    else { change(to: .workspaceWrite) }
+                }
+            ))
+            .disabled(!canChange)
+            .accessibilityIdentifier("chat.header.permissions.fullAccess")
+            HStack {
+                Text("Current mode")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                switch currentPreset {
+                case BackendSessionPermissionPreset.fullAccess.rawValue: Text("Full Access")
+                case BackendSessionPermissionPreset.workspaceWrite.rawValue: Text("Workspace Write")
+                case "auto": Text("Auto")
+                case "custom": Text("Custom")
+                case let value?: Text(verbatim: value)
+                case nil: Text("Unknown")
+                }
+            }
+            .accessibilityIdentifier("chat.header.permissions.current")
+            if loading || changing {
+                ProgressView()
+                    .accessibilityLabel("Updating permissions")
+            } else if currentPreset == nil {
+                Button("Retry") { refresh() }
+                    .accessibilityIdentifier("chat.header.permissions.retry")
+            } else if currentPreset != BackendSessionPermissionPreset.workspaceWrite.rawValue,
+                      currentPreset != BackendSessionPermissionPreset.fullAccess.rawValue {
+                Button("Use Workspace Write") { change(to: .workspaceWrite) }
+                    .disabled(!canChange)
+                    .accessibilityIdentifier("chat.header.permissions.workspaceWrite")
+            }
+            if currentPreset == BackendSessionPermissionPreset.fullAccess.rawValue {
+                Text("This session can access the host's entire filesystem and run commands without approval prompts.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let error = facade.presentationErrorMessage {
+                Text(verbatim: error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("chat.header.permissions.error")
+            }
+        }
+        .task(id: scope.id) {
+            loading = true
+            _ = await facade.refreshHeaderPermissions(scope)
+            loading = false
+        }
+        .alert("Enable Full Access?", isPresented: $confirmsFullAccess) {
+            Button("Cancel", role: .cancel) {}
+            Button("Enable Full Access", role: .destructive) { change(to: .fullAccess) }
+                .accessibilityIdentifier("chat.header.permissions.confirm")
+        } message: {
+            Text("Full Access lets this session access the host's entire filesystem and run commands without approval prompts. Only enable it for a host and agent you trust.")
+        }
+    }
+
+    private func refresh() {
+        guard !loading && !changing, facade.supportsHeaderPermissions(scope) else { return }
+        loading = true
+        Task {
+            _ = await facade.refreshHeaderPermissions(scope)
+            loading = false
+        }
+    }
+
+    private func change(to preset: BackendSessionPermissionPreset) {
+        guard canChange, currentPreset != preset.rawValue else { return }
+        changing = true
+        Task {
+            _ = await facade.setHeaderPermissions(preset, scope: scope)
+            changing = false
         }
     }
 }

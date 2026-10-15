@@ -3,6 +3,7 @@ import Foundation
 struct BackendDirectorySearch: Equatable, Sendable {
     var directories: [String]
     var selectedDirectory: String?
+    var requiresDSHBrowseConfiguration = false
 }
 
 struct BackendProjectResolution: Sendable {

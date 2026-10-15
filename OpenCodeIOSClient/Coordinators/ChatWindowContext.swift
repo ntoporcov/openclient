@@ -15,12 +15,19 @@ final class ChatWindowContext: ObservableObject {
     private let parentContext: ChatWindowContext?
     private let parentNavigationRevision: UInt?
     lazy var mcpFacade = MCPFacade(store: mcpStore, clientProvider: { [weak self] in
-        guard let self, self.isCurrent else { return nil }
+        guard let self, self.isCurrent, self.model.connectionStore.backendMode != .cachedServer,
+              self.model.connectionStore.backendMode != .appleIntelligence else { return nil }
         return try? self.connection.requireOpenCodeClient(for: .mcp)
     }, directoryProvider: { [weak self] in self?.session.directory },
        apiProfileProvider: { [weak self] in self?.connection.openCodeCompatibility?.profile },
        workspaceIDProvider: { [weak self] in self?.session.workspaceID },
-       contextIDProvider: { [weak self] in self?.contextID })
+       contextIDProvider: { [weak self] in self?.contextID },
+       connectionProvider: { [weak self] in
+           guard let self, self.isCurrent, self.model.connectionStore.backendMode != .cachedServer,
+                 self.model.connectionStore.backendMode != .appleIntelligence else { return nil }
+           return self.connection
+       },
+       contextChanges: objectWillChange.eraseToAnyPublisher())
     let commandHoldMonitor = OpenClientCommandHoldMonitor()
     @Published private(set) var session: OpenCodeSession
     @Published private(set) var owner: DirectoryStore

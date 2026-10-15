@@ -26299,7 +26299,1772 @@
           }
         }
       }
-    }
+    },
+    "Pending": { "localizations": {
+      "it": { "stringUnit": { "state": "translated", "value": "In attesa" } },
+      "pt-BR": { "stringUnit": { "state": "translated", "value": "Pendente" } }
+    } },
+    "MCP inventory could not be refreshed. Try again.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile aggiornare l’inventario MCP. Riprova."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível atualizar o inventário MCP. Tente novamente."
+          }
+        }
+      }
+    },
+    "Another MCP setting is being updated. Wait for it to finish.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "È in corso l’aggiornamento di un’altra impostazione MCP. Attendi il completamento."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outra configuração MCP está sendo atualizada. Aguarde a conclusão."
+          }
+        }
+      }
+    },
+    "MCP inventory could not be verified. No setting was changed.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile verificare l’inventario MCP. Nessuna impostazione è stata modificata."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível verificar o inventário MCP. Nenhuma configuração foi alterada."
+          }
+        }
+      }
+    },
+    "This MCP declaration is read-only or is no longer available.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questa dichiarazione MCP è di sola lettura o non è più disponibile."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta declaração MCP é somente leitura ou não está mais disponível."
+          }
+        }
+      }
+    },
+    "The MCP change could not be confirmed. Inventory was requested again.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile confermare la modifica MCP. L’inventario è stato richiesto di nuovo."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível confirmar a alteração MCP. O inventário foi solicitado novamente."
+          }
+        }
+      }
+    },
+    "The MCP setting was saved, but the DSH host must restart to apply it.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’impostazione MCP è stata salvata, ma è necessario riavviare l’host DSH per applicarla."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A configuração MCP foi salva, mas é necessário reiniciar o host DSH para aplicá-la."
+          }
+        }
+      }
+    },
+    "The MCP setting is overridden by another configuration layer.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’impostazione MCP è sovrascritta da un altro livello di configurazione."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A configuração MCP foi substituída por outra camada de configuração."
+          }
+        }
+      }
+    },
+    "DSH could not apply the MCP setting. Review the server configuration.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DSH non ha potuto applicare l’impostazione MCP. Controlla la configurazione del server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O DSH não pôde aplicar a configuração MCP. Revise a configuração do servidor."
+          }
+        }
+      }
+    },
+    "The MCP change was cancelled by the server.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La modifica MCP è stata annullata dal server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A alteração MCP foi cancelada pelo servidor."
+          }
+        }
+      }
+    },
+    "MCP setting applied. Plugin phase is not a network connection status.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impostazione MCP applicata. La fase del plugin non indica lo stato della connessione di rete."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configuração MCP aplicada. A fase do plugin não indica o estado da conexão de rede."
+          }
+        }
+      }
+    },
+    "DSH reported the MCP change, but the effective setting does not match. Refresh to verify.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DSH ha segnalato la modifica MCP, ma l’impostazione effettiva non corrisponde. Aggiorna per verificare."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O DSH informou a alteração MCP, mas a configuração efetiva não corresponde. Atualize para verificar."
+          }
+        }
+      }
+    },
+    "MCP inventory could not be read after the change. The outcome is unknown; refresh before trying again.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile leggere l’inventario MCP dopo la modifica. L’esito è sconosciuto; aggiorna prima di riprovare."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível ler o inventário MCP após a alteração. O resultado é desconhecido; atualize antes de tentar novamente."
+          }
+        }
+      }
+    },
+    "Server Profile MCP": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP del profilo server"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP do perfil do servidor"
+          }
+        }
+      }
+    },
+    "Changes affect all projects, chats, and users on this DSH server profile.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le modifiche riguardano tutti i progetti, le chat e gli utenti di questo profilo server DSH."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As alterações afetam todos os projetos, chats e usuários deste perfil do servidor DSH."
+          }
+        }
+      }
+    },
+    "Enabled is the effective plugin setting, including parent configuration. Plugin lifecycle does not indicate MCP connection health.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attivo indica l’impostazione effettiva del plugin, inclusa la configurazione principale. Il ciclo di vita del plugin non indica lo stato della connessione MCP."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativado indica a configuração efetiva do plugin, incluindo a configuração pai. O ciclo de vida do plugin não indica a integridade da conexão MCP."
+          }
+        }
+      }
+    },
+    "This lists stock MCP plugin declarations exposed by the profile, not the effective tool list for this chat.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo elenco mostra le dichiarazioni dei plugin MCP standard esposte dal profilo, non gli strumenti effettivamente disponibili in questa chat."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta lista mostra as declarações de plugins MCP padrão expostas pelo perfil, não as ferramentas efetivamente disponíveis neste chat."
+          }
+        }
+      }
+    },
+    "Loading MCP settings": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caricamento delle impostazioni MCP"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carregando configurações MCP"
+          }
+        }
+      }
+    },
+    "Notice": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avviso"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aviso"
+          }
+        }
+      }
+    },
+    "MCP settings unavailable. Refresh to load this server profile.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impostazioni MCP non disponibili. Aggiorna per caricare questo profilo server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurações MCP indisponíveis. Atualize para carregar este perfil do servidor."
+          }
+        }
+      }
+    },
+    "Profile Plugins": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin del profilo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugins do perfil"
+          }
+        }
+      }
+    },
+    "No MCP plugin declarations exposed by this profile": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessuna dichiarazione di plugin MCP esposta da questo profilo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma declaração de plugin MCP exposta por este perfil"
+          }
+        }
+      }
+    },
+    "Agent Preset Declarations": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dichiarazioni dei profili agente"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Declarações das predefinições de agente"
+          }
+        }
+      }
+    },
+    "Preset declarations are read-only here and may depend on runtime conditions. They do not describe a running MCP connection in this chat.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le dichiarazioni dei profili sono di sola lettura e possono dipendere da condizioni di esecuzione. Non descrivono una connessione MCP attiva in questa chat."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As declarações das predefinições são somente leitura aqui e podem depender de condições de execução. Elas não descrevem uma conexão MCP em execução neste chat."
+          }
+        }
+      }
+    },
+    "Refresh MCP Settings": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aggiorna impostazioni MCP"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atualizar configurações MCP"
+          }
+        }
+      }
+    },
+    "Change server-profile MCP setting?": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modificare l’impostazione MCP del profilo server?"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alterar a configuração MCP do perfil do servidor?"
+          }
+        }
+      }
+    },
+    "Enable for Entire Profile": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attiva per l’intero profilo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativar para todo o perfil"
+          }
+        }
+      }
+    },
+    "Disable for Entire Profile": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disattiva per l’intero profilo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desativar para todo o perfil"
+          }
+        }
+      }
+    },
+    "Conditional": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Condizionale"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Condicional"
+          }
+        }
+      }
+    },
+    "Plugin Lifecycle": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ciclo di vita del plugin"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ciclo de vida do plugin"
+          }
+        }
+      }
+    },
+    "Updating MCP setting": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aggiornamento dell’impostazione MCP"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atualizando configuração MCP"
+          }
+        }
+      }
+    },
+    "Unloading": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scaricamento"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descarregando"
+          }
+        }
+      }
+    },
+    "Plugin management is unavailable on this server.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La gestione dei plugin non è disponibile su questo server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O gerenciamento de plugins não está disponível neste servidor."
+          }
+        }
+      }
+    },
+    "This declaration cannot be changed through the management API.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questa dichiarazione non può essere modificata tramite l’API di gestione."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta declaração não pode ser alterada pela API de gerenciamento."
+          }
+        }
+      }
+    },
+    "Agent preset declarations are read-only.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le dichiarazioni dei profili agente sono di sola lettura."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As declarações das predefinições de agente são somente leitura."
+          }
+        }
+      }
+    },
+    "This changes \"%@\" for all projects, chats, and users on this DSH server profile, not just this chat. A server restart may be required.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questa modifica riguarda “%@” per tutti i progetti, le chat e gli utenti di questo profilo server DSH, non solo questa chat. Potrebbe essere necessario riavviare il server."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isso altera “%@” para todos os projetos, chats e usuários deste perfil do servidor DSH, não apenas este chat. Pode ser necessário reiniciar o servidor."
+          }
+        }
+      }
+    },
+    "Message counts and cost cover loaded history.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Il conteggio dei messaggi e il costo si riferiscono alla cronologia caricata." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "A contagem de mensagens e o custo incluem o histórico carregado." } } } },
+    "Archived": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Archiviata" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Arquivada" } } } },
+    "Completed Responses": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Risposte completate" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Respostas concluídas" } } } },
+    "Cost": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Costo" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Custo" } } } },
+    "Finish Reason": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Motivo di completamento" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Motivo da conclusão" } } } },
+    "First Token": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Primo token" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Primeiro token" } } } },
+    "Input Limit": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Limite di input" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Limite de entrada" } } } },
+    "Latest Model Response": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Ultima risposta del modello" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Última resposta do modelo" } } } },
+    "Output Limit": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Limite di output" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Limite de saída" } } } },
+    "Project ID": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "ID progetto" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "ID do projeto" } } } },
+    "Response Time": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tempo di risposta" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Tempo de resposta" } } } },
+    "Responses with Usage": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Risposte con dati di utilizzo" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Respostas com dados de uso" } } } },
+    "Session Details": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Dettagli della sessione" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Detalhes da sessão" } } } },
+    "Time to First Token": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tempo al primo token" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Tempo até o primeiro token" } } } },
+    "Variant": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Variante" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Variante" } } } },
+    "Totals cover loaded assistant responses, excluding compaction summaries. They are separate from current context usage.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "I totali comprendono le risposte dell’assistente caricate, esclusi i riepiloghi di compattazione. Sono separati dall’utilizzo attuale del contesto." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Os totais incluem as respostas carregadas do assistente, exceto resumos de compactação. São separados do uso atual do contexto." } } } },
+    "Performance uses server timestamps for completed responses in loaded history. Decode speed includes output and reasoning tokens, measured from first stream to completion.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Le prestazioni usano i timestamp del server per le risposte completate nella cronologia caricata. La velocità di decodifica include i token di output e ragionamento, misurati dall’inizio dello streaming al completamento." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "O desempenho usa os horários do servidor para respostas concluídas no histórico carregado. A velocidade de decodificação inclui tokens de saída e raciocínio, medidos do início da transmissão até a conclusão." } } } },
+    "Current Context Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token del contesto attuale"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens do contexto atual"
+          }
+        }
+      }
+    },
+    "Projected Context Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token del contesto stimati"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens de contexto projetados"
+          }
+        }
+      }
+    },
+    "Last Reported Input Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ultimi token di input riportati"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Últimos tokens de entrada informados"
+          }
+        }
+      }
+    },
+    "Context uses DSH's current projection, not cumulative token usage. Projected tokens include an estimate of changes since the last reported input.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il contesto usa la proiezione attuale di DSH, non l’utilizzo cumulativo dei token. I token stimati includono le modifiche dall’ultimo input riportato."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O contexto usa a projeção atual do DSH, não o uso acumulado de tokens. Os tokens projetados incluem uma estimativa das mudanças desde a última entrada informada."
+          }
+        }
+      }
+    },
+    "Estimated Context Composition": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Composizione stimata del contesto"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Composição estimada do contexto"
+          }
+        }
+      }
+    },
+    "System Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token di sistema"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens do sistema"
+          }
+        }
+      }
+    },
+    "Tool Definition Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token delle definizioni degli strumenti"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens de definição de ferramentas"
+          }
+        }
+      }
+    },
+    "Message Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token dei messaggi"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens das mensagens"
+          }
+        }
+      }
+    },
+    "These are approximate composition counts. Their sum is not the measured context usage.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questi conteggi di composizione sono approssimativi. La loro somma non corrisponde all’utilizzo misurato del contesto."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estas contagens de composição são aproximadas. A soma não corresponde ao uso medido do contexto."
+          }
+        }
+      }
+    },
+    "Last Used Model": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ultimo modello utilizzato"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Último modelo usado"
+          }
+        }
+      }
+    },
+    "Next Model": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prossimo modello"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Próximo modelo"
+          }
+        }
+      }
+    },
+    "Session Configuration": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurazione della sessione"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configuração da sessão"
+          }
+        }
+      }
+    },
+    "Agent Preset": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profilo dell’agente"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Predefinição do agente"
+          }
+        }
+      }
+    },
+    "Plan Mode": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modalità pianificazione"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modo de planejamento"
+          }
+        }
+      }
+    },
+    "Plan Mode Change Pending": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cambio di modalità pianificazione in attesa"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mudança do modo de planejamento pendente"
+          }
+        }
+      }
+    },
+    "Projection": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proiezione"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projeção"
+          }
+        }
+      }
+    },
+    "Additional Server Metadata": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metadati aggiuntivi del server"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metadados adicionais do servidor"
+          }
+        }
+      }
+    },
+    "Recorded Token Usage": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilizzo dei token registrato"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uso de tokens registrado"
+          }
+        }
+      }
+    },
+    "Uncached Input Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token di input non in cache"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens de entrada fora do cache"
+          }
+        }
+      }
+    },
+    "Cache Read Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token letti dalla cache"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens lidos do cache"
+          }
+        }
+      }
+    },
+    "Cache Write Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token scritti nella cache"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens gravados no cache"
+          }
+        }
+      }
+    },
+    "Total Input Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token di input totali"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total de tokens de entrada"
+          }
+        }
+      }
+    },
+    "Total Recorded Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token registrati totali"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total de tokens registrados"
+          }
+        }
+      }
+    },
+    "Cache Read Share": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota di lettura dalla cache"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proporção de leitura do cache"
+          }
+        }
+      }
+    },
+    "Cumulative assistant usage is separate from current context. Output includes reasoning; compaction summaries are not included. DSH does not report session cost.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’utilizzo cumulativo dell’assistente è separato dal contesto attuale. L’output include il ragionamento, ma non i riepiloghi di compattazione. DSH non riporta il costo della sessione."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O uso acumulado do assistente é separado do contexto atual. A saída inclui o raciocínio, mas não os resumos de compactação. O DSH não informa o custo da sessão."
+          }
+        }
+      }
+    },
+    "Session Performance": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prestazioni della sessione"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desempenho da sessão"
+          }
+        }
+      }
+    },
+    "Turns": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turni"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turnos"
+          }
+        }
+      }
+    },
+    "Steps": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passaggi"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Etapas"
+          }
+        }
+      }
+    },
+    "Model Time": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo del modello"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo do modelo"
+          }
+        }
+      }
+    },
+    "Tool Time": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo degli strumenti"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo das ferramentas"
+          }
+        }
+      }
+    },
+    "Total Time to First Token": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo totale al primo token"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo total até o primeiro token"
+          }
+        }
+      }
+    },
+    "First Token Samples": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Campioni del primo token"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Amostras do primeiro token"
+          }
+        }
+      }
+    },
+    "Average Time to First Token": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo medio al primo token"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo médio até o primeiro token"
+          }
+        }
+      }
+    },
+    "Decode Time": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo di decodifica"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempo de decodificação"
+          }
+        }
+      }
+    },
+    "Decode Tokens": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token di decodifica"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens de decodificação"
+          }
+        }
+      }
+    },
+    "Decode Tokens per Second": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token decodificati al secondo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tokens decodificados por segundo"
+          }
+        }
+      }
+    },
+    "Server-reported totals for completed steps, independent of loaded history.": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Totali riportati dal server per i passaggi completati, indipendenti dalla cronologia caricata."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Totais informados pelo servidor para etapas concluídas, independentemente do histórico carregado."
+          }
+        }
+      }
+    },
+    "Reasoning Effort": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Livello di ragionamento"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esforço de raciocínio"
+          }
+        }
+      }
+    },
+    "Working Directory": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directory di lavoro"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diretório de trabalho"
+          }
+        }
+      }
+    },
+    "Parent Session": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessione principale"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessão pai"
+          }
+        }
+      }
+    },
+    "Origin": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Origine"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Origem"
+          }
+        }
+      }
+    },
+    "Forked History": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cronologia derivata"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Histórico bifurcado"
+          }
+        }
+      }
+    },
+    "Delegation Depth": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profondità di delega"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profundidade de delegação"
+          }
+        }
+      }
+    },
+    "Session Format Version": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Versione del formato della sessione"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Versão do formato da sessão"
+          }
+        }
+      }
+    },
+    "Created": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Creata"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Criada"
+          }
+        }
+      }
+    },
+    "Last Prompt": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ultimo prompt"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Último prompt"
+          }
+        }
+      }
+    },
+    "Blank Session": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessione vuota"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessão vazia"
+          }
+        }
+      }
+    },
+    "Live Metadata": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metadati in tempo reale"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metadados em tempo real"
+          }
+        }
+      }
+    },
+    "Goal": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obiettivo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Objetivo"
+          }
+        }
+      }
+    },
+    "Objective": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obiettivo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Objetivo"
+          }
+        }
+      }
+    },
+    "Phase": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fase"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fase"
+          }
+        }
+      }
+    },
+    "Rounds Started": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cicli avviati"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rodadas iniciadas"
+          }
+        }
+      }
+    },
+    "Maximum Rounds": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Numero massimo di cicli"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Máximo de rodadas"
+          }
+        }
+      }
+    },
+    "Goal ID": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ID dell’obiettivo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ID do objetivo"
+          }
+        }
+      }
+    },
+    "Revision": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisione"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisão"
+          }
+        }
+      }
+    },
+    "Blocked Reason Code": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codice del motivo del blocco"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Código do motivo do bloqueio"
+          }
+        }
+      }
+    },
+    "Blocked Reason": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Motivo del blocco"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Motivo do bloqueio"
+          }
+        }
+      }
+    },
+    "Updated": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aggiornata"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atualizada"
+          }
+        }
+      }
+    },
+    "Context usage unavailable": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilizzo del contesto non disponibile"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uso do contexto indisponível"
+          }
+        }
+      }
+    },
+    "Context limit unavailable": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limite del contesto non disponibile"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limite de contexto indisponível"
+          }
+        }
+      }
+    },
+    "%lld tokens; context limit unavailable": {
+      "localizations": {
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld token; limite del contesto non disponibile"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld tokens; limite de contexto indisponível"
+          }
+        }
+      }
+    },
+    "Permissions" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Autorizzazioni" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Permissões" } }
+    } },
+    "Current mode" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Modalità attuale" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Modo atual" } }
+    } },
+    "Workspace Write" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Scrittura nell’area di lavoro" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Escrita no espaço de trabalho" } }
+    } },
+    "Auto" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Automatico" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Automático" } }
+    } },
+    "Updating permissions" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Aggiornamento delle autorizzazioni" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Atualizando permissões" } }
+    } },
+    "Use Workspace Write" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Usa scrittura nell’area di lavoro" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Usar escrita no espaço de trabalho" } }
+    } },
+    "Session permissions could not be confirmed. Refresh before trying again." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Non è stato possibile confermare le autorizzazioni della sessione. Aggiorna prima di riprovare." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Não foi possível confirmar as permissões da sessão. Atualize antes de tentar novamente." } }
+    } },
+    "Session permissions are already being updated." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Le autorizzazioni della sessione sono già in fase di aggiornamento." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "As permissões da sessão já estão sendo atualizadas." } }
+    } },
+    "Full Access" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Accesso completo" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Acesso total" } }
+    } },
+    "Enable Full Access?" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Abilitare l’accesso completo?" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Ativar acesso total?" } }
+    } },
+    "Enable Full Access" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Abilita accesso completo" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Ativar acesso total" } }
+    } },
+    "This session can access the host's entire filesystem and run commands without approval prompts." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Questa sessione può accedere all’intero file system dell’host ed eseguire comandi senza richieste di approvazione." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Esta sessão pode acessar todo o sistema de arquivos do host e executar comandos sem solicitar aprovação." } }
+    } },
+    "Off explicitly uses Workspace Write, even if the server default is Full Access." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Se disattivato, usa esplicitamente la scrittura nell’area di lavoro, anche se il server usa l’accesso completo come impostazione predefinita." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Desativado usa explicitamente a escrita no espaço de trabalho, mesmo se o padrão do servidor for acesso total." } }
+    } },
+    "Full Access lets this session access the host's entire filesystem and run commands without approval prompts. Only enable it for a host and agent you trust." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "L’accesso completo consente a questa sessione di accedere all’intero file system dell’host ed eseguire comandi senza richieste di approvazione. Abilitalo solo per un host e un agente di cui ti fidi." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "O acesso total permite que esta sessão acesse todo o sistema de arquivos do host e execute comandos sem solicitar aprovação. Ative apenas para um host e um agente em que você confia." } }
+    } },
+    "Open the existing chat to change its permissions." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Apri la chat esistente per modificarne le autorizzazioni." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Abra a conversa existente para alterar as permissões." } }
+    } },
+    "The server does not offer the requested session permissions." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Il server non offre le autorizzazioni di sessione richieste." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "O servidor não oferece as permissões de sessão solicitadas." } }
+    } },
+    "Session %@ was created, but its permissions could not be confirmed. No prompt was sent." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "La sessione %@ è stata creata, ma non è stato possibile confermarne le autorizzazioni. Nessun prompt è stato inviato." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "A sessão %@ foi criada, mas não foi possível confirmar suas permissões. Nenhum prompt foi enviado." } }
+    } },
+    "Connections" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Connessioni" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Conexões" } }
+    } },
+    "Edit Connection" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Modifica connessione" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Editar conexão" } }
+    } },
+    "Add Connection" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Aggiungi connessione" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Adicionar conexão" } }
+      }
+    },
+    "URL token" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Token URL" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Token da URL" } }
+      }
+    },
+    "Token" : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Token" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Token" } }
+      }
+    },
+    "The default for dsh web. Use the token from your server’s launch URL." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "L’opzione predefinita di dsh web. Usa il token dell’URL di avvio del server." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "O padrão do dsh web. Use o token da URL de inicialização do servidor." } }
+      }
+    },
+    "Requires the dsh-auth-gate plugin configured for password login." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Richiede il plugin dsh-auth-gate configurato per l’accesso con password." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Requer o plugin dsh-auth-gate configurado para login com senha." } }
+      }
+    },
+    "Enter the token above, or paste the full launch URL into Server URL. Your login is saved securely in Keychain." : {
+      "localizations" : {
+        "it" : { "stringUnit" : { "state" : "translated", "value" : "Inserisci il token qui sopra o incolla l’URL di avvio completo in URL del server. Le credenziali sono salvate in modo sicuro nel Portachiavi." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Insira o token acima ou cole a URL de inicialização completa em URL do servidor. Seu login é salvo com segurança nas Chaves." } }
+      }
+    },
+    "Login method" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Metodo di accesso" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Método de login" } }
+    } },
+    "Launch URL" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "URL di avvio" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "URL de inicialização" } }
+    } },
+    "Username and password" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Nome utente e password" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Usuário e senha" } }
+    } },
+    "Enter a server URL, username, and password. Use the server URL without a token or query string." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Inserisci URL del server, nome utente e password. Usa l’URL del server senza token o parametri di query." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Insira a URL do servidor, o usuário e a senha. Use a URL do servidor sem token ou parâmetros de consulta." } }
+    } },
+    "DSH password login failed. Check your credentials and auth-gate configuration. Use the browser for accounts requiring a verification code or password change." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Accesso a DSH con password non riuscito. Controlla le credenziali e la configurazione di auth-gate. Usa il browser per gli account che richiedono un codice di verifica o un cambio di password." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Falha no login do DSH com senha. Verifique suas credenciais e a configuração do auth-gate. Use o navegador para contas que exigem um código de verificação ou alteração de senha." } }
+    } },
+    "Requires dsh-auth-gate in password mode. Your credentials are saved securely in Keychain and reused when reconnecting. Verification codes and required password changes are not supported in the app yet." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Richiede dsh-auth-gate in modalità password. Le credenziali vengono salvate in modo sicuro nel Portachiavi e riutilizzate alla riconnessione. L’app non supporta ancora i codici di verifica e i cambi di password obbligatori." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Requer dsh-auth-gate no modo de senha. Suas credenciais são salvas com segurança nas Chaves e reutilizadas ao reconectar. O app ainda não oferece suporte a códigos de verificação e alterações obrigatórias de senha." } }
+    } },
+    "Enable Remote Folder Browsing" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Abilita la navigazione delle cartelle remote" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Ativar navegação de pastas remotas" } }
+    } },
+    "DSH is using a folder chooser on the server’s display. Enter an absolute server path in the Directory field to add a workspace." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "DSH usa un selettore di cartelle sullo schermo del server. Inserisci un percorso assoluto del server nel campo Directory per aggiungere uno spazio di lavoro." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "O DSH está usando um seletor de pastas na tela do servidor. Insira um caminho absoluto do servidor no campo Diretório para adicionar um espaço de trabalho." } }
+    } },
+    "To browse folders remotely, ask the server administrator to replace the automatic or native directory-picker plugin with @deepseek-ai/dsh-host-directory-picker-browse in the host composition, then restart DSH and reopen this screen. Do not enable both plugins together." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Per esplorare le cartelle da remoto, chiedi all’amministratore del server di sostituire il plugin directory-picker automatico o nativo con @deepseek-ai/dsh-host-directory-picker-browse nella composizione dell’host, quindi riavvia DSH e riapri questa schermata. Non abilitare entrambi i plugin insieme." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Para navegar pelas pastas remotamente, peça ao administrador do servidor para substituir o plugin directory-picker automático ou nativo por @deepseek-ai/dsh-host-directory-picker-browse na composição do host, reiniciar o DSH e reabrir esta tela. Não ative os dois plugins juntos." } }
+    } },
+    "Connect to DSH" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Connetti a DSH" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Conectar ao DSH" } }
+    } },
+    "DSH launch URL" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "URL di avvio di DSH" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "URL de inicialização do DSH" } }
+    } },
+    "Saved DSH server" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Server DSH salvato" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Servidor DSH salvo" } }
+    } },
+    "Reconnect" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Riconnetti" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Reconectar" } }
+    } },
+    "Sign Out" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Esci" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Sair" } }
+    } },
+    "Connecting…" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Connessione…" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Conectando…" } }
+    } },
+    "Paste the launch URL printed by dsh web, including its token. Use a server address reachable from this device. Your login is saved securely in Keychain." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Incolla l'URL di avvio mostrato da dsh web, incluso il token. Usa un indirizzo del server raggiungibile da questo dispositivo. L'accesso viene salvato in modo sicuro nel Portachiavi." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Cole a URL de inicialização exibida por dsh web, incluindo o token. Use um endereço de servidor acessível neste dispositivo. Seu acesso é salvo com segurança nas Chaves." } }
+    } },
+    "Model provider login" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Accesso al fornitore del modello" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Login do provedor de modelos" } }
+    } },
+    "Sign in to your Codex subscription in the DSH web interface. This app connects to that server and uses its configured providers." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Accedi al tuo abbonamento Codex nell'interfaccia web di DSH. Questa app si connette a quel server e usa i fornitori configurati." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Entre na sua assinatura do Codex pela interface web do DSH. Este app se conecta a esse servidor e usa os provedores configurados nele." } }
+    } },
+    "Open DSH in Browser" : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Apri DSH nel browser" } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Abrir DSH no navegador" } }
+    } },
+    "Paste the full DSH launch URL, including its token." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Incolla l'URL di avvio completo di DSH, incluso il token." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Cole a URL de inicialização completa do DSH, incluindo o token." } }
+    } },
+    "This DSH login has expired or is invalid. Paste a fresh launch URL from your server." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Questo accesso a DSH è scaduto o non è valido. Incolla un nuovo URL di avvio dal tuo server." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Este acesso ao DSH expirou ou é inválido. Cole uma nova URL de inicialização do seu servidor." } }
+    } },
+    "Could not connect to DSH. Check the server address, network, and Tailscale connection, then try again." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Impossibile connettersi a DSH. Controlla l'indirizzo del server, la rete e la connessione Tailscale, poi riprova." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Não foi possível conectar ao DSH. Verifique o endereço do servidor, a rede e a conexão do Tailscale e tente novamente." } }
+    } },
+    "Could not access the saved DSH login in Keychain. Unlock your device and try again." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Impossibile accedere alle credenziali DSH salvate nel Portachiavi. Sblocca il dispositivo e riprova." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Não foi possível acessar o login do DSH salvo nas Chaves. Desbloqueie o dispositivo e tente novamente." } }
+    } },
+    "This connection uses unencrypted HTTP." : { "localizations" : {
+      "it" : { "stringUnit" : { "state" : "translated", "value" : "Questa connessione usa HTTP non crittografato." } },
+      "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Esta conexão usa HTTP sem criptografia." } }
+    } }
   },
   "version" : "1.0"
 }

@@ -17,6 +17,7 @@ final class ProjectStore: ObservableObject {
     @Published var createProjectQuery: String
     @Published var createProjectResults: [String]
     @Published var createProjectSelectedDirectory: String?
+    @Published var requiresDSHBrowseConfiguration = false
     @Published private var listPreferencesByScope: [String: ListPreferences]
     @Published private(set) var worktreeInventories: [BackendWorktreeInventoryKey: [BackendWorktree]] = [:]
     @Published var worktreeDestinationParents: [BackendWorktreeInventoryKey: String] = [:]
@@ -28,6 +29,15 @@ final class ProjectStore: ObservableObject {
     private(set) var canonicalProjectDirectories: [BackendWorktreeInventoryKey: String] = [:]
     private var selectedProjectDirectories: [BackendWorktreeInventoryKey: String] = [:]
     var directorySearchRequestID: UUID?
+
+    func applyBackendSnapshot(_ snapshot: BackendProjectsSnapshot) {
+        var seen = Set<String>()
+        projects = snapshot.projects.filter { seen.insert($0.id).inserted }
+        defaultServerDirectory = snapshot.defaultDirectory
+        if let id = currentProject?.id, let updated = projects.first(where: { $0.id == id }) {
+            currentProject = updated
+        }
+    }
 
     func rememberProjectResolution(_ resolution: BackendProjectResolution, connectionID: UUID) {
         let key = BackendWorktreeInventoryKey(connectionID: connectionID, projectID: resolution.project.id)

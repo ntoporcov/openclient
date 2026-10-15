@@ -790,29 +790,6 @@ private struct DebugEntitlementSection: View {
 #endif
 
 private struct ServerConnectionSections: View {
-    @Environment(\.appAccentColor) private var appAccentColor
-    private struct ConnectionIconOption: Identifiable {
-        let symbolName: String
-        let title: LocalizedStringResource
-
-        var id: String { symbolName }
-    }
-
-    private static let iconOptions: [ConnectionIconOption] = [
-        ConnectionIconOption(symbolName: "server.rack", title: "Server"),
-        ConnectionIconOption(symbolName: "desktopcomputer", title: "Desktop"),
-        ConnectionIconOption(symbolName: "laptopcomputer", title: "Laptop"),
-        ConnectionIconOption(symbolName: "display", title: "Display"),
-        ConnectionIconOption(symbolName: "iphone", title: "iPhone"),
-        ConnectionIconOption(symbolName: "ipad.landscape", title: "iPad"),
-        ConnectionIconOption(symbolName: "terminal", title: "Terminal"),
-        ConnectionIconOption(symbolName: "network", title: "Network"),
-        ConnectionIconOption(symbolName: "cloud.fill", title: "Cloud"),
-        ConnectionIconOption(symbolName: "internaldrive", title: "Drive"),
-        ConnectionIconOption(symbolName: "house", title: "Home"),
-        ConnectionIconOption(symbolName: "cube.box.fill", title: "Lab"),
-    ]
-
     @ObservedObject var facade: ConnectionFacade
     @State private var acknowledgesInsecureConnection = ProcessInfo.processInfo.environment["OPENCODE_UI_TEST_MODE"] == "1"
 
@@ -878,15 +855,10 @@ private struct ServerConnectionSections: View {
             }
 
             Section("Icon") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(Self.iconOptions) { option in
-                            connectionIconButton(for: option)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
-                }
+                ConnectionIconPicker(selection: Binding(
+                    get: { facade.config.displayIconName },
+                    set: { facade.config.iconName = $0 }
+                ))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
@@ -916,39 +888,6 @@ private struct ServerConnectionSections: View {
         }
     }
 
-    @ViewBuilder
-    private func connectionIconButton(for option: ConnectionIconOption) -> some View {
-        let isSelected = facade.config.displayIconName == option.symbolName
-
-        Button {
-            facade.config.iconName = option.symbolName
-        } label: {
-            VStack(spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(isSelected ? appAccentColor.opacity(0.16) : OpenCodePlatformColor.secondaryGroupedBackground)
-
-                    Image(systemName: option.symbolName)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(isSelected ? appAccentColor : .primary)
-                }
-                .frame(height: 54)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(isSelected ? appAccentColor : Color.primary.opacity(0.08), lineWidth: isSelected ? 1.5 : 1)
-                }
-
-                Text(option.title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(width: 76)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("connection.icon.\(option.symbolName)")
-        .accessibilityLabel(Text(option.title))
-    }
 }
 
 private struct ConnectionListStyleModifier: ViewModifier {

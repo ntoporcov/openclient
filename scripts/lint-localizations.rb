@@ -11,6 +11,9 @@ CATALOGS = [
   { path: "OpenCodeIOSClient/Localizable.xcstrings", target: "OpenCodeIOSClient", table: "Localizable" },
   { path: "OpenCodeIOSClient/AppShortcuts.xcstrings", target: "OpenCodeIOSClient", table: "AppShortcuts" },
   { path: "OpenCodeIOSClient/InfoPlist.xcstrings", info_target: "OpenCodeIOSClient" },
+  { path: "DSHClient/InfoPlist.xcstrings", info_target: "DSHClient" },
+  { path: "OpenCodeIOSClient/Localizable.xcstrings", target: "DSHClient", table: "Localizable" },
+  { path: "OpenCodeIOSClient/AppShortcuts.xcstrings", target: "DSHClient", table: "AppShortcuts" },
   { path: "OpenCodeChatActivityExtension/Localizable.xcstrings", target: "OpenCodeChatActivityExtension", table: "Localizable" },
   { path: "OpenCodeChatActivityExtension/InfoPlist.xcstrings", info_target: "OpenCodeChatActivityExtension" },
   { path: "OpenCodeShareExtension/Localizable.xcstrings", target: "OpenCodeShareExtension", table: "Localizable" },
@@ -219,6 +222,13 @@ end
 def validate_extraction(stringsdata_root, loaded_catalogs, errors)
   CATALOGS.each do |spec|
     next unless spec[:target] && spec[:table]
+    # The standalone DSH scheme does not build the OpenClient app/extensions.
+    # The existing shipping-app lane continues to require their extraction.
+    if ENV["TARGET_NAME"] == "DSHClient"
+      next unless spec[:target] == "DSHClient"
+    else
+      next if spec[:target] == "DSHClient"
+    end
 
     emitted = emitted_entries(stringsdata_root, spec[:target], spec[:table], errors)
     catalog = loaded_catalogs[spec[:path]]

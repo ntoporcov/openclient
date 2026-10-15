@@ -1,8 +1,22 @@
 import XCTest
+import UIKit
 @testable import OpenClient
 
 @MainActor
 final class AppCustomizationStoreTests: XCTestCase {
+    func testDSHBrandAssetMatchesReferenceWithoutChangingOpenCodeDefault() throws {
+        XCTAssertEqual(AppAccentColor.appDefault, .blue)
+        let color = try XCTUnwrap(UIColor(named: "DSHAccentColor"))
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            XCTAssertTrue(color.resolvedColor(with: UITraitCollection(userInterfaceStyle: style)).getRed(&r, green: &g, blue: &b, alpha: &a))
+            XCTAssertEqual(r, 77.0 / 255, accuracy: 0.0001)
+            XCTAssertEqual(g, 107.0 / 255, accuracy: 0.0001)
+            XCTAssertEqual(b, 1, accuracy: 0.0001)
+            XCTAssertEqual(a, 1, accuracy: 0.0001)
+        }
+    }
+
     func testAnnouncementChoicesPersistWithoutResettingExistingOptIn() throws {
         let name = "AnnouncementPreferences.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

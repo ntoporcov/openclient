@@ -157,9 +157,23 @@ final class AppViewModel: ObservableObject {
     let mcpStore = MCPStore()
     lazy var mcpFacade = MCPFacade(
         store: mcpStore,
-        clientProvider: { [weak self] in self?.compatibilityClient(for: .mcp) },
+        clientProvider: { [weak self] in
+            guard let self, self.connectionStore.backendMode != .cachedServer,
+                  self.connectionStore.backendMode != .appleIntelligence else { return nil }
+            return self.compatibilityClient(for: .mcp)
+        },
         directoryProvider: { [weak self] in self?.effectiveSelectedDirectory },
-        apiProfileProvider: { [weak self] in self?.connectionStore.apiProfile }
+        apiProfileProvider: { [weak self] in self?.connectionStore.apiProfile },
+        contextIDProvider: { [weak self] in
+            guard let self else { return nil }
+            return "\(self.directoryStoreRegistry.generation)|\(self.sessionNavigationGeneration)|\(self.directoryStoreRegistry.activeKey)"
+        },
+        connectionProvider: { [weak self] in
+            guard let self, self.connectionStore.isConnected, self.connectionStore.backendMode != .cachedServer,
+                  self.connectionStore.backendMode != .appleIntelligence else { return nil }
+            return self.backendConnection
+        },
+        contextChanges: Publishers.Merge(objectWillChange, connectionStore.objectWillChange).eraseToAnyPublisher()
     )
     let terminalStore = TerminalStore()
     lazy var terminalFacade = TerminalFacade(

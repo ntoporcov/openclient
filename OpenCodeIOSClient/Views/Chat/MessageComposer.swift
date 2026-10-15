@@ -183,6 +183,8 @@ struct MessageComposer: View {
     var blocksNewInput = false
     var allowsTextTools = true
     var allowsSessionTools = true
+    var allowsMCP = true
+    var managedMCPFacade: MCPFacade? = nil
     var autoFocus = false
     var agentTitle: String = ""
     var selectableAgents: [OpenCodeAgent] = []
@@ -1768,6 +1770,7 @@ struct MessageComposer: View {
                             )
                         }
 
+                        if allowsMCP {
                         AccessoryMenuAction(
                             title: "MCP",
                             subtitle: "Toggle servers",
@@ -1780,6 +1783,7 @@ struct MessageComposer: View {
                                 accessoryNavigationPath.append(.mcp)
                             }
                         )
+                        }
                     }
 
                     if allowsTextTools {
@@ -1903,6 +1907,9 @@ struct MessageComposer: View {
                             }
                         )
                     case .mcp:
+                        if let managedMCPFacade, managedMCPFacade.snapshot.managed != nil {
+                            ManagedMCPListView(facade: managedMCPFacade)
+                        } else if allowsMCP {
                         ComposerMCPListView(
                             servers: mcpServers,
                             connectedCount: connectedMCPServerCount,
@@ -1912,6 +1919,7 @@ struct MessageComposer: View {
                             onLoad: onLoadMCP,
                             onToggle: onToggleMCP
                         )
+                        }
                     }
                 }
         }

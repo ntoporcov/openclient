@@ -249,6 +249,9 @@ extension AppViewModel {
 
     func handleBackendEvent(_ event: BackendEvent) {
         switch event {
+        case let .projectsSnapshot(snapshot):
+            guard isConnected else { return }
+            projectFacade.applyBackendSnapshot(snapshot)
         case let .status(status):
             if status.hasPrefix("stream open") { globalFormsFacade.reconnect() }
             debugLastEventSummary = status
@@ -279,6 +282,9 @@ extension AppViewModel {
             globalFormsFacade.receive(location: location, event: event)
         case let .mutation(directory, typed):
             guard isConnected else { return }
+            if case let .sessionDeleted(session) = typed {
+                _ = sessionListStore.removeRecentSession(sessionID: session.id)
+            }
             do {
                 let managed = try BackendMutationBridge.managed(directory: directory, event: typed)
                 let targets = directorySyncFacade.targetStores(for: managed, selectedSessionID: selectedSession?.id,

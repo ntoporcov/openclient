@@ -125,6 +125,8 @@ final class ChatFacade: ObservableObject {
         let selectedModelReference: OpenCodeModelReference?
         let selectedReasoningVariant: String?
         let agentTitle: String
+        let agentDescription: String?
+        let isAgentReadOnly: Bool
         let modelTitle: String
         let displayedModelReference: OpenCodeModelReference?
         let modelProviderName: String?
@@ -204,6 +206,7 @@ final class ChatFacade: ObservableObject {
     let foregroundChatRefreshCoordinator = ForegroundChatRefreshCoordinator()
     private var v2CommandCallbacks: Set<String> = []
     let windowContext: ChatWindowContext?
+    private let windowUsesServerContextMetrics: Bool
 
     var selectedSession: OpenCodeSession? {
         if let windowContext {
@@ -365,6 +368,7 @@ final class ChatFacade: ObservableObject {
     init(viewModel: AppViewModel, windowContext: ChatWindowContext? = nil) {
         self.viewModel = viewModel
         self.windowContext = windowContext
+        windowUsesServerContextMetrics = windowContext != nil && viewModel.backendConnection?.capabilities.contains(.sessionMetadata) == true
         connectionStore = viewModel.connectionStore
         speechVoiceStore = viewModel.speechVoiceStore
         projectStore = viewModel.projectStore
@@ -385,7 +389,7 @@ final class ChatFacade: ObservableObject {
             viewModel.funAndGamesStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.sessionInteractionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.chatPresentationStore.objectWillChange.eraseToAnyPublisher(),
-            mcpStore.objectWillChange.eraseToAnyPublisher(),
+            mcpFacade.objectWillChange.eraseToAnyPublisher(),
         ])
         .receive(on: DispatchQueue.main)
         .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -429,6 +433,26 @@ final class ChatFacade: ObservableObject {
             )
         }
         return viewModel.directoryStoreRegistry.activeStore
+    }
+
+    /// DSH metrics come from canonical live projections, even while a turn is busy.
+    /// A nonnil unavailable result deliberately suppresses legacy transcript estimates.
+    func serverContextMetrics(for sessionID: String) -> OpenCodeSessionContextMetrics? {
+        let owner = directoryStore(forSessionID: sessionID)
+        let canonical = owner.sessions.first { $0.id == sessionID }
+        let selected = selectedSession
+        let isDSH = windowUsesServerContextMetrics
+            || viewModel.backendConnection?.capabilities.contains(.sessionMetadata) == true
+            || canonical?.backendMetadata != nil
+            || (selected?.id == sessionID && selected?.backendMetadata != nil)
+            || (windowContext?.session.id == sessionID && windowContext?.session.backendMetadata != nil)
+        guard isDSH else { return nil }
+        guard windowContext?.isCurrent ?? true,
+              connectionStore.isConnected, let connection = viewModel.backendConnection, !connection.isClosed,
+              let selected, selected.id == sessionID, let canonical,
+              selected.directory == canonical.directory, selected.workspaceID == canonical.workspaceID,
+              selected.projectID == canonical.projectID else { return .unavailableServerMetrics }
+        return DSHSessionContextMetricsBuilder.metrics(session: canonical, providers: modelConfigurationStore.availableProviders)
     }
 
     func windowRoute(for session: OpenCodeSession) -> OpenClientChatWindowRoute {
@@ -889,7 +913,7 @@ final class ChatFacade: ObservableObject {
         let mcpSnapshot = mcpFacade.snapshot
         let mcpSignature = mcpSnapshot.servers
             .map { "\($0.name):\($0.status.status):\($0.status.error ?? "")" }
-            .joined(separator: "|") + "|loading=\(mcpSnapshot.isLoading)|toggling=\(mcpSnapshot.togglingServerNames.sorted().joined(separator: ","))|error=\(mcpSnapshot.errorMessage ?? "")"
+            .joined(separator: "|") + "|loading=\(mcpSnapshot.isLoading)|toggling=\(mcpSnapshot.togglingServerNames.sorted().joined(separator: ","))|error=\(mcpSnapshot.errorMessage ?? "")|managed=\(String(reflecting: mcpSnapshot.managed))|available=\(isMCPAvailable)"
         let actionSignature = [
             session.id,
             session.directory ?? "",
@@ -1281,6 +1305,8 @@ final class ChatFacade: ObservableObject {
             return false
         }
     }
+
+    var isMCPAvailable: Bool { !isReadOnly && mcpFacade.isAvailable }
 
     func loadMCPStatusIfNeeded() async {
         guard !isReadOnly else { return }
@@ -1688,10 +1714,14 @@ final class ChatFacade: ObservableObject {
     func toolbarSnapshot(for session: OpenCodeSession) -> ToolbarSnapshot {
         let store = viewModel.modelConfigurationStore
         let lastUserMessage = lastUserMessage(for: session)
-        let selectedAgentName = store.selectedAgentName(for: session.id)
+        let isAgentReadOnly = viewModel.backendConnection?.agentSelectionPolicy == .creationOnly
+        // Creation-only backends own the agent identity. Remembered composer choices
+        // and message metadata cannot override the session's canonical projection.
+        let selectedAgentName = isAgentReadOnly ? session.agent : store.selectedAgentName(for: session.id)
+        let currentAgent = selectedAgentName.flatMap { name in store.availableAgents.first { $0.name == name } }
         let selectedModelReference = store.selectedModelReference(for: session.id)
         let selectedReasoningVariant = store.selectedVariant(for: session.id)
-        let isAgentLoading = isAgentToolbarLoading(
+        let isAgentLoading = !isAgentReadOnly && isAgentToolbarLoading(
             for: session,
             selectedAgentName: selectedAgentName,
             lastUserMessage: lastUserMessage
@@ -1720,12 +1750,16 @@ final class ChatFacade: ObservableObject {
             selectedAgentName: selectedAgentName,
             selectedModelReference: selectedModelReference,
             selectedReasoningVariant: selectedReasoningVariant,
-            agentTitle: agentToolbarTitle(
-                for: session,
-                selectedAgentName: selectedAgentName,
-                lastUserMessage: lastUserMessage,
-                isLoading: isAgentLoading
-            ),
+            agentTitle: isAgentReadOnly
+                ? currentAgent?.displayTitle ?? selectedAgentName ?? String(localized: "Default")
+                : agentToolbarTitle(
+                    for: session,
+                    selectedAgentName: selectedAgentName,
+                    lastUserMessage: lastUserMessage,
+                    isLoading: isAgentLoading
+                ),
+            agentDescription: currentAgent?.description,
+            isAgentReadOnly: isAgentReadOnly,
             modelTitle: displayedModel.title,
             displayedModelReference: displayedModel.reference,
             modelProviderName: displayedModel.reference.map { store.provider(id: $0.providerID)?.name ?? $0.providerID },
@@ -1800,6 +1834,88 @@ final class ChatFacade: ObservableObject {
             && connectionStore.isConnected && viewModel.backendConnection?.isClosed == false
     }
 
+    func supportsHeaderPermissions(_ scope: HeaderScope) -> Bool {
+        isCurrentHeaderScope(scope) && !isReadOnly && connectionStore.isConnected
+            && viewModel.backendConnection?.isClosed == false
+            && viewModel.backendConnection?.capabilities.contains(.sessionPermissions) == true
+            && viewModel.backendConnection?.sessionPermissions != nil
+    }
+
+    /// Read the canonical directory owner, never the snapshot captured when opening the menu.
+    func headerPermissions(_ scope: HeaderScope) -> BackendSessionPermissionState? {
+        guard supportsHeaderPermissions(scope) else { return nil }
+        return directoryStore(forSessionID: scope.session.id).sessions.first { $0.id == scope.session.id }?.permissions
+    }
+
+    @discardableResult
+    func refreshHeaderPermissions(_ scope: HeaderScope) async -> Bool {
+        guard supportsHeaderPermissions(scope), let connection = viewModel.backendConnection,
+              let service = connection.sessionPermissions,
+              let session = directoryStore(forSessionID: scope.session.id).sessions.first(where: { $0.id == scope.session.id }) else { return false }
+        let location = BackendScope(projectID: session.projectID, directory: session.directory, workspaceID: session.workspaceID)
+        do {
+            let refreshed = try await service.refreshPermissions(sessionID: session.id, scope: location)
+            return applyHeaderPermissions(refreshed, scope: scope, connection: connection)
+        } catch {
+            guard !Task.isCancelled, supportsHeaderPermissions(scope), viewModel.isCurrentBackendConnection(connection) else { return false }
+            invalidateHeaderPermissions(scope)
+            reportHeaderPermissionError(error, scope: scope)
+            return false
+        }
+    }
+
+    @discardableResult
+    func setHeaderPermissions(_ preset: BackendSessionPermissionPreset, scope: HeaderScope) async -> Bool {
+        guard supportsHeaderPermissions(scope), headerPermissions(scope)?.currentPreset != nil,
+              let connection = viewModel.backendConnection, let service = connection.sessionPermissions,
+              let session = directoryStore(forSessionID: scope.session.id).sessions.first(where: { $0.id == scope.session.id }) else { return false }
+        let location = BackendScope(projectID: session.projectID, directory: session.directory, workspaceID: session.workspaceID)
+        do {
+            let updated = try await service.setPermissions(sessionID: session.id, preset: preset, scope: location)
+            guard updated.permissions?.currentPreset == preset.rawValue else { throw URLError(.cannotParseResponse) }
+            return applyHeaderPermissions(updated, scope: scope, connection: connection)
+        } catch {
+            guard !Task.isCancelled, supportsHeaderPermissions(scope), viewModel.isCurrentBackendConnection(connection) else { return false }
+            // A lost reply is not proof of rejection. Read server truth before presenting
+            // the failure, and never roll back to the pre-request toggle value.
+            do {
+                let refreshed = try await service.refreshPermissions(sessionID: session.id, scope: location)
+                _ = applyHeaderPermissions(refreshed, scope: scope, connection: connection)
+            } catch {
+                guard !Task.isCancelled, supportsHeaderPermissions(scope), viewModel.isCurrentBackendConnection(connection) else { return false }
+                invalidateHeaderPermissions(scope)
+            }
+            guard !Task.isCancelled, supportsHeaderPermissions(scope), viewModel.isCurrentBackendConnection(connection) else { return false }
+            reportHeaderPermissionError(error, scope: scope)
+            return false
+        }
+    }
+
+    private func applyHeaderPermissions(_ returned: OpenCodeSession, scope: HeaderScope, connection: BackendConnection) -> Bool {
+        guard !Task.isCancelled, supportsHeaderPermissions(scope), viewModel.isCurrentBackendConnection(connection),
+              returned.id == scope.session.id, returned.directory == scope.session.directory,
+              returned.workspaceID == scope.session.workspaceID, returned.projectID == scope.session.projectID,
+              returned.parentID == scope.session.parentID,
+              var current = directoryStore(forSessionID: returned.id).sessions.first(where: { $0.id == returned.id }) else { return false }
+        // Do not overwrite unrelated metadata that may have advanced while awaiting the RPC.
+        current.permissions = returned.permissions ?? .init(currentPreset: nil)
+        directoryStore(forSessionID: returned.id).upsertSessions([current])
+        return true
+    }
+
+    private func invalidateHeaderPermissions(_ scope: HeaderScope) {
+        let store = directoryStore(forSessionID: scope.session.id)
+        guard var session = store.sessions.first(where: { $0.id == scope.session.id }) else { return }
+        session.permissions = .init(currentPreset: nil)
+        store.upsertSessions([session])
+    }
+
+    private func reportHeaderPermissionError(_ error: Error, scope: HeaderScope) {
+        guard isCurrentHeaderScope(scope) else { return }
+        if let windowContext { windowContext.errorMessage = error.localizedDescription }
+        else { connectionStore.errorMessage = error.localizedDescription }
+    }
+
     func supportsSessionTools(_ scope: HeaderScope) -> Bool {
         isCurrentHeaderScope(scope) && !isReadOnly && connectionStore.isConnected
             && viewModel.backendConnection?.isClosed == false
@@ -1867,6 +1983,7 @@ final class ChatFacade: ObservableObject {
         let snapshot = toolbarSnapshot(for: scope.session)
         return isCurrentHeaderScope(scope) && !isReadOnly
             && connectionStore.isConnected && viewModel.backendConnection?.isClosed == false
+            && !snapshot.isAgentReadOnly
             && snapshot.showsAgentMenu && !snapshot.selectableAgents.isEmpty && !snapshot.isLoading && !isLoadingPresentation
             && (!isV2Connection || (allowsV2TextPromptAdmission && viewModel.backendConnection?.openCodeCompatibility?.profile == .v2))
     }
@@ -1901,7 +2018,7 @@ final class ChatFacade: ObservableObject {
     }
 
     func selectAgent(named name: String?, for session: OpenCodeSession) {
-        guard !isReadOnly else { return }
+        guard !isReadOnly, viewModel.backendConnection?.agentSelectionPolicy != .creationOnly else { return }
         if isV2Connection {
             guard let agent = name ?? viewModel.effectiveAgentName(for: session) else { return }
             queueV2Configuration(sessionID: session.id, operation: { client in

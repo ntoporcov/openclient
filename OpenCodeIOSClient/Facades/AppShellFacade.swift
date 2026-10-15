@@ -323,7 +323,7 @@ final class AppShellFacade: ObservableObject {
                 case .terminal:
                     return isTerminalAvailable
                 case .mcp:
-                    return !isReadOnly && viewModel.compatibilityClient(for: .mcp) != nil
+                    return !isReadOnly && mcp.isAvailable
                 case .sessions:
                     return true
                 }

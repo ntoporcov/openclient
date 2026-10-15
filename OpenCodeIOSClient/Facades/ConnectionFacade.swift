@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor
 final class ConnectionFacade: ObservableObject {
+    weak var dshConnection: DSHConnectionCoordinator?
     private unowned let viewModel: AppViewModel
     private weak var liveActivityBackgroundBridge: LiveActivityBackgroundBridge?
     private var observations: Set<AnyCancellable> = []

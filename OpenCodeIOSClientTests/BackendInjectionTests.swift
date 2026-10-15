@@ -103,6 +103,53 @@ final class BackendInjectionTests: XCTestCase {
         XCTAssertTrue(viewModel.chatFacade.commands(forSessionID: existing.id, canFork: true).isEmpty)
     }
 
+    func testNewChatForwardsExplicitSessionPermissionsOnlyWhenSupported() async throws {
+        for supported in [false, true] {
+            let factory = InjectionTestFactory()
+            if supported { factory.capabilities = [.sessionPermissions] }
+            let viewModel = AppViewModel(backendFactory: factory)
+            viewModel.commerceFacade.store.debugEntitlementOverride = .unlocked
+            await viewModel.connectionFacade.connect()
+            defer { viewModel.disconnect() }
+            let facade = viewModel.newProjectChatFacade
+            XCTAssertEqual(facade.supportsSessionPermissions, supported)
+            let accepted = await facade.startNewChat(title: "Permissions", prompt: "Hello",
+                agentMentions: [], attachments: [], messageID: "permission-input", partID: "permission-part",
+                composerSelection: .init(agentName: "harness-agent", modelReference: nil, reasoningVariant: nil,
+                                         permissionPreset: .fullAccess),
+                projectID: "harness-project", workspaceDirectory: "/harness", workspaceSelection: .main, newWorkspaceName: "")
+            let harness = try XCTUnwrap(factory.harnesses.last)
+            XCTAssertEqual(accepted, supported)
+            if supported {
+                XCTAssertEqual(harness.creations.last?.permissionPreset, .fullAccess)
+                XCTAssertEqual(harness.submissions.count, 1)
+            } else {
+                XCTAssertTrue(harness.creations.isEmpty)
+                XCTAssertTrue(harness.submissions.isEmpty)
+            }
+            viewModel.disconnect()
+            XCTAssertFalse(facade.supportsSessionPermissions)
+        }
+    }
+
+    func testFailedSessionPermissionSetupNeverSubmitsInitialPrompt() async throws {
+        let factory = InjectionTestFactory()
+        factory.capabilities = [.sessionPermissions]
+        let viewModel = AppViewModel(backendFactory: factory)
+        viewModel.commerceFacade.store.debugEntitlementOverride = .unlocked
+        await viewModel.connectionFacade.connect()
+        defer { viewModel.disconnect() }
+        let harness = try XCTUnwrap(factory.harnesses.last)
+        harness.creationError = DSHSessionCreationWorkflow.Failure.permissionsUnconfirmed(sessionID: "blank")
+        let accepted = await viewModel.startNewProjectChat(prompt: "Never send",
+            composerSelection: .init(agentName: nil, modelReference: nil, reasoningVariant: nil, permissionPreset: .workspaceWrite),
+            projectID: "harness-project")
+        XCTAssertFalse(accepted)
+        XCTAssertEqual(harness.creations.last?.permissionPreset, .workspaceWrite)
+        XCTAssertTrue(harness.submissions.isEmpty)
+        XCTAssertNotNil(viewModel.errorMessage)
+    }
+
     func testUnsupportedOptionalFeaturesCannotResolveAnOpenCodeClient() async throws {
         let viewModel = AppViewModel(backendFactory: InjectionTestFactory())
         await viewModel.connectionFacade.connect()
@@ -613,6 +660,7 @@ private final class InjectionTestHarness: BackendProjectsService, BackendSession
     var listScopes: [BackendScope] = []
     var catalogScopes: [BackendScope] = []
     var creations: [BackendSessionCreation] = []
+    var creationError: Error?
     var submissions: [BackendSubmission] = []
     var beforeTranscript: (@MainActor () async -> Void)?
     var beforeSubmission: (@MainActor () async throws -> Void)?
@@ -633,6 +681,7 @@ private final class InjectionTestHarness: BackendProjectsService, BackendSession
 
     func createSession(_ request: BackendSessionCreation) async throws -> OpenCodeSession {
         creations.append(request)
+        if let creationError { throw creationError }
         let session = OpenCodeSession(id: "harness-session", title: request.title, workspaceID: request.scope.workspaceID,
             directory: request.scope.directory, projectID: request.scope.projectID, parentID: nil)
         storedSessions.append(session)
@@ -694,4 +743,93 @@ private final class InjectionUsageStore: OpenClientUsagePersisting {
     var meter = OpenClientUsageMeter(promptDay: OpenClientUsageMeter.dayString(for: Date()), dailyPromptCount: 3, createdSessionCount: 0)
     func load() -> OpenClientUsageMeter { meter }
     func save(_ meter: OpenClientUsageMeter) { self.meter = meter }
+}
+
+@MainActor
+extension BackendInjectionTests {
+    func testDSHLoginPersistsOnlyAfterBootstrapAndSignOutRemovesIt() async throws {
+        let storage = DSHMemoryCredentials()
+        let factory = InjectionTestFactory()
+        let login = DSHConnectionCoordinator(credentials: storage, makeConnection: { _ in try await factory.connect() })
+        let model = AppViewModel(backendFactory: login)
+        login.attach(model.connectionFacade)
+        defer { model.disconnect() }
+        login.store.launchURLInput = "https://dsh.test/?token=private-token"
+        await login.connectFromInput()
+        XCTAssertTrue(model.isConnected)
+        XCTAssertEqual(storage.value?.token, "private-token")
+        XCTAssertEqual(login.store.serverAddress, "https://dsh.test/")
+        XCTAssertTrue(login.store.launchURLInput.isEmpty)
+        model.disconnect()
+        await login.reconnect()
+        XCTAssertTrue(model.isConnected)
+        login.signOut()
+        XCTAssertFalse(model.isConnected)
+        XCTAssertNil(storage.value)
+        XCTAssertNil(login.store.serverAddress)
+    }
+
+    func testDSHInvalidAndExpiredLoginDoNotReplaceSavedCredentials() async throws {
+        let storage = DSHMemoryCredentials()
+        storage.value = try DSHCredential(launchURL: "https://old.test/?token=old")
+        let login = DSHConnectionCoordinator(credentials: storage, makeConnection: { _ in throw URLError(.userAuthenticationRequired) })
+        let model = AppViewModel(backendFactory: login)
+        login.attach(model.connectionFacade)
+        defer { model.disconnect() }
+        login.store.launchURLInput = "https://new.test/"
+        await login.connectFromInput()
+        XCTAssertEqual(login.store.errorMessage, DSHLoginError.invalidLink.localizedDescription)
+        login.store.launchURLInput = "https://new.test/?token=expired"
+        await login.connectFromInput()
+        XCTAssertEqual(login.store.errorMessage, DSHLoginError.authentication.localizedDescription)
+        XCTAssertEqual(storage.value?.token, "old")
+        XCTAssertFalse(model.isConnected)
+    }
+
+    func testDSHSignOutDuringConnectionCannotRestoreLogin() async throws {
+        let storage = DSHMemoryCredentials()
+        let factory = InjectionTestFactory()
+        var resume: CheckedContinuation<Void, Never>?
+        let started = expectation(description: "Factory suspended")
+        let login = DSHConnectionCoordinator(credentials: storage, makeConnection: { _ in
+            await withCheckedContinuation { resume = $0; started.fulfill() }
+            return try await factory.connect()
+        })
+        let model = AppViewModel(backendFactory: login)
+        login.attach(model.connectionFacade)
+        login.store.launchURLInput = "https://dsh.test/?token=token"
+        let task = Task { await login.connectFromInput() }
+        await fulfillment(of: [started], timeout: 2)
+        login.signOut()
+        resume?.resume()
+        await task.value
+        XCTAssertNil(storage.value)
+        XCTAssertFalse(model.isConnected)
+        XCTAssertFalse(login.store.isBusy)
+    }
+
+    func testDSHKeychainFailureDisconnectsInsteadOfPretendingLoginWasSaved() async {
+        let storage = DSHMemoryCredentials()
+        storage.failSave = true
+        let factory = InjectionTestFactory()
+        let login = DSHConnectionCoordinator(credentials: storage, makeConnection: { _ in try await factory.connect() })
+        let model = AppViewModel(backendFactory: login)
+        login.attach(model.connectionFacade)
+        login.store.launchURLInput = "https://dsh.test/?token=token"
+        await login.connectFromInput()
+        XCTAssertFalse(model.isConnected)
+        XCTAssertNil(storage.value)
+        XCTAssertEqual(login.store.errorMessage, DSHLoginError.storage.localizedDescription)
+    }
+}
+
+private final class DSHMemoryCredentials: DSHCredentialPersisting {
+    var value: DSHCredential?
+    var failSave = false
+    func load() throws -> DSHCredential? { value }
+    func save(_ credential: DSHCredential) throws {
+        if failSave { throw DSHLoginError.storage }
+        value = credential
+    }
+    func delete() throws { value = nil }
 }

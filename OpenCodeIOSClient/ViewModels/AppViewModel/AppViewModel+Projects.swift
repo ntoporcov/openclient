@@ -21,6 +21,7 @@ struct NewProjectChatComposerSelection: Equatable, Sendable {
     let agentName: String?
     let modelReference: OpenCodeModelReference?
     let reasoningVariant: String?
+    var permissionPreset: BackendSessionPermissionPreset? = nil
 }
 
 struct NewProjectChatInitialContent: Equatable, Sendable {
@@ -252,12 +253,14 @@ extension AppViewModel {
                   createProjectQuery == query else { return }
             createProjectSelectedDirectory = result.selectedDirectory
             createProjectResults = result.directories
+            projectStore.requiresDSHBrowseConfiguration = result.requiresDSHBrowseConfiguration
             errorMessage = nil
         } catch {
             guard isCurrentBackendConnection(connection), projectStore.directorySearchRequestID == requestID,
                   createProjectQuery == query else { return }
             createProjectSelectedDirectory = nil
             createProjectResults = []
+            projectStore.requiresDSHBrowseConfiguration = false
             errorMessage = error.localizedDescription
         }
     }
@@ -272,7 +275,8 @@ extension AppViewModel {
     }
 
     func createProjectResultPath(_ absolute: String) -> String {
-        projectCoordinator.createProjectResultPath(
+        guard backendConnection?.openCodeCompatibility != nil else { return absolute }
+        return projectCoordinator.createProjectResultPath(
             absolute,
             query: createProjectQuery,
             defaultSearchRoot: defaultSearchRoot
@@ -755,6 +759,7 @@ extension AppViewModel {
                 modelReference: newSessionDefaultModelReference(),
                 reasoningVariant: newSessionDefaults.reasoningVariant
             )
+            if selection.permissionPreset != nil { try connection.require(.sessionPermissions) }
             let session: OpenCodeSession
             if let created = checkpoint?.session {
                 session = created
@@ -765,7 +770,8 @@ extension AppViewModel {
                     scope: executionScope,
                     agent: selection.agentName,
                     model: selection.modelReference,
-                    variant: selection.reasoningVariant
+                    variant: selection.reasoningVariant,
+                    permissionPreset: selection.permissionPreset
                 ))
                 checkpoint?.session = session
                 checkpoint?.appliedSelection = selection
