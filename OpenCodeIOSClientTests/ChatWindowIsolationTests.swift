@@ -328,6 +328,30 @@ final class ChatWindowIsolationTests: XCTestCase {
         XCTAssertTrue(model.activeLiveActivitySessionIDs.isEmpty)
     }
 
+    func testHeaderDeletionTargetsCapturedWindowSessionAndPreservesRoot() async {
+        let (model, backend) = fixture()
+        model.connectionStore.applySuccessfulV2Connection(version: "next", healthy: true)
+        defer { model.disconnect() }
+        let a = facade(model, id: "a")
+        let b = facade(model, id: "b", directory: "/other", workspace: "workspace-b")
+        defer { a.windowContext?.close(); b.windowContext?.close() }
+        model.selectedSession = a.selectedSession
+        model.composerStore.draftMessage = "root draft"
+        let scope = b.headerScope(for: b.selectedSession!)
+
+        let deleted = await b.deleteHeaderSession(scope)
+
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(backend.deletions, ["b"])
+        XCTAssertEqual(backend.scopes.last, .init(projectID: "project", directory: "/other", workspaceID: "workspace-b"))
+        XCTAssertEqual(model.selectedSession?.id, "a")
+        XCTAssertEqual(model.composerStore.draftMessage, "root draft")
+        XCTAssertTrue(model.directoryStoreRegistry.isV2SessionDeleted("b"))
+        let repeated = await b.deleteHeaderSession(scope)
+        XCTAssertFalse(repeated)
+        XCTAssertEqual(backend.deletions, ["b"])
+    }
+
     func testHeaderRejectsUnknownDeadReadOnlyAndReplacedSelection() async {
         let (model, backend) = fixture()
         defer { model.disconnect() }
@@ -335,14 +359,21 @@ final class ChatWindowIsolationTests: XCTestCase {
         let scope = b.headerScope(for: b.selectedSession!)
         let unknown = b.headerScope(for: .init(id: "unknown", title: "Unknown", workspaceID: nil, directory: "/repo", projectID: "project", parentID: nil))
         await b.renameHeaderSession(unknown, title: "Invalid")
+        let unknownDeleted = await b.deleteHeaderSession(unknown)
+        XCTAssertFalse(unknownDeleted)
         model.connectionStore.backendMode = .cachedServer
         XCTAssertFalse(b.allowsHeaderAgentSelection(scope))
         await b.renameHeaderSession(scope, title: "Read only")
+        let readOnlyDeleted = await b.deleteHeaderSession(scope)
+        XCTAssertFalse(readOnlyDeleted)
         model.connectionStore.backendMode = .server
         b.windowContext?.close()
         await b.renameHeaderSession(scope, title: "Closed")
+        let closedDeleted = await b.deleteHeaderSession(scope)
+        XCTAssertFalse(closedDeleted)
         XCTAssertFalse(b.isCurrentHeaderScope(scope))
         XCTAssertTrue(backend.renames.isEmpty)
+        XCTAssertTrue(backend.deletions.isEmpty)
     }
 
     func testHeaderRenameFailureIsWindowLocalAndLateReplacementDoesNotSetNewErrors() async {
@@ -400,6 +431,7 @@ private final class WindowBackend: BackendChatService, BackendSessionsService, B
     var submissions: [BackendSubmission] = []
     var formReplies = 0
     var renames: [String] = []
+    var deletions: [String] = []
     var beforeRename: (() async -> Void)?
     var renameFails = false
     var children: ((String?) async throws -> BackendSessionPage)?
@@ -438,7 +470,10 @@ private final class WindowBackend: BackendChatService, BackendSessionsService, B
         if renameFails { throw BackendError.invalidScope }
         return .init(id: id, title: title, workspaceID: scope.workspaceID, directory: scope.directory, projectID: scope.projectID, parentID: nil)
     }
-    func deleteSession(id: String, scope: BackendScope) async throws {}
+    func deleteSession(id: String, scope: BackendScope) async throws {
+        deletions.append(id)
+        scopes.append(scope)
+    }
     func searchSessions(query: String, scope: BackendScope, limit: Int) async throws -> [OpenCodeSession] { [] }
     func pendingForms(sessionID: String, scope: BackendScope) async throws -> [BackendForm] { [] }
     func readForm(_ reference: BackendFormReference) async throws -> BackendForm { throw BackendSessionFormsError.unavailable }

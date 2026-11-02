@@ -5553,6 +5553,15 @@ struct ChatView: View {
                 .accessibilityIdentifier("chat.toolbar.context")
             }
         }
+        #elseif targetEnvironment(macCatalyst)
+        ToolbarItem(placement: .opencodeLeading) {
+            // Keep a custom-view container at the toolbar boundary. Catalyst's
+            // native toolbar button adaptation otherwise extracts only the image.
+            HStack(spacing: 0) {
+                CatalystChatTitleMenu(facade: chatFacade, session: liveSession,
+                    maximumWidth: min(320, max(120, chatViewportWidth - 340)))
+            }
+        }
         #else
         ToolbarItem(placement: .principal) {
             ChatNavigationTitle(snapshot: headerSnapshot)
@@ -5579,6 +5588,14 @@ struct ChatView: View {
                     .accessibilityLabel("Loading chat controls")
             }
         } else if !chatFacade.isReadOnly {
+            #if targetEnvironment(macCatalyst)
+            ToolbarItem(placement: .opencodeTrailing) {
+                CatalystChatHeaderActions(facade: chatFacade, session: liveSession,
+                    onSideQuestion: {
+                        presentSideQuestion(prompt: OpenClientChatCommands.sideQuestionPrompt(from: composerDraftStore.text) ?? composerDraftStore.text)
+                    })
+            }
+            #endif
             #if !targetEnvironment(macCatalyst)
             if !usesAssistantHeaderLayout {
                 #if os(macOS)

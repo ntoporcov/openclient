@@ -3837,7 +3837,14 @@ private extension View {
 
     @ViewBuilder
     func accessoryOptionButtonStyle() -> some View {
-        #if os(iOS) || targetEnvironment(macCatalyst)
+        #if targetEnvironment(macCatalyst)
+        // SwiftUI's glass FlexInteractionGesture requests a nonaccelerated
+        // delta that some Catalyst mouse-wheel events do not carry, triggering
+        // UIScrollEvent's assertion before the scroll view handles the event.
+        buttonStyle(.bordered)
+            .tint(.primary)
+            .buttonBorderShape(.roundedRectangle(radius: 18))
+        #elseif os(iOS)
         if #available(iOS 26.1, *) {
             buttonStyle(.glass(.regular))
                 .buttonBorderShape(.roundedRectangle(radius: 18))

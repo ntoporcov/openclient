@@ -1,5 +1,169 @@
 import SwiftUI
 
+#if targetEnvironment(macCatalyst)
+struct CatalystChatTitleMenu: View {
+    @ObservedObject var facade: ChatFacade
+    let session: OpenCodeSession
+    let maximumWidth: CGFloat
+    @State private var scope: ChatFacade.HeaderScope?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(verbatim: facade.headerSnapshot(for: session).navigationTitle)
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .frame(minWidth: 120, idealWidth: maximumWidth, maxWidth: maximumWidth, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
+        .contentShape(Capsule())
+        // Render the title outside the button label: Catalyst adapts toolbar
+        // button labels to image-only even when they contain a custom HStack.
+        .overlay {
+            Button {
+                scope = facade.headerScope(for: session)
+            } label: {
+                Color.clear
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(verbatim: facade.headerSnapshot(for: session).navigationTitle))
+            .accessibilityIdentifier("chat.header")
+        }
+        .foregroundStyle(.primary)
+        .popover(item: $scope, attachmentAnchor: .rect(.bounds), arrowEdge: .top) { scope in
+            CatalystChatTitlePanel(facade: facade, scope: scope)
+        }
+        .onChange(of: facade.promptContextID) { scope = nil }
+        .onChange(of: facade.promptConnectionID) { scope = nil }
+        .onChange(of: facade.selectedSession?.id) { scope = nil }
+        .onChange(of: facade.connectionStore.isConnected) { if !facade.connectionStore.isConnected { scope = nil } }
+    }
+}
+
+private struct CatalystChatTitlePanel: View {
+    @ObservedObject var facade: ChatFacade
+    let scope: ChatFacade.HeaderScope
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var saving = false
+    @State private var deleting = false
+
+    init(facade: ChatFacade, scope: ChatFacade.HeaderScope) {
+        self.facade = facade
+        self.scope = scope
+        _title = State(initialValue: scope.session.title ?? "")
+    }
+
+    private var canSave: Bool {
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !saving && !deleting && facade.allowsHeaderActions(scope)
+            && !value.isEmpty && value != (facade.selectedSession ?? scope.session).title
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename Session").font(.headline)
+            TextField("Title", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(save)
+                .disabled(saving || deleting || !facade.allowsHeaderActions(scope))
+                .accessibilityIdentifier("chat.header.rename.title")
+            HStack {
+                Button(role: .destructive) {
+                    deleting = true
+                    Task {
+                        let deleted = await facade.deleteHeaderSession(scope)
+                        deleting = false
+                        if deleted { dismiss() }
+                    }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(saving || deleting || !facade.allowsHeaderActions(scope))
+                .accessibilityIdentifier("chat.header.delete")
+                Spacer()
+                if saving || deleting { ProgressView().controlSize(.small) }
+                Button("Save", action: save)
+                    .disabled(!canSave)
+                    .accessibilityIdentifier("chat.header.rename.save")
+            }
+            .buttonStyle(.bordered)
+        }
+        .tint(.primary)
+        .padding(20)
+        .frame(width: 360)
+    }
+
+    private func save() {
+        guard canSave else { return }
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        saving = true
+        Task {
+            await facade.renameHeaderSession(scope, title: value)
+            saving = false
+            if facade.isCurrentHeaderScope(scope), facade.selectedSession?.title == value { dismiss() }
+        }
+    }
+}
+
+struct CatalystChatHeaderActions: View {
+    @ObservedObject var facade: ChatFacade
+    let session: OpenCodeSession
+    let onSideQuestion: () -> Void
+    @State private var mcpScope: ChatFacade.HeaderScope?
+
+    var body: some View {
+        let available = facade.headerActionAvailability(for: session)
+        HStack(spacing: 4) {
+            Button {
+                mcpScope = facade.headerScope(for: session)
+            } label: {
+                Image(systemName: "server.rack").frame(width: 36, height: 36)
+            }
+            .disabled(!available.mcp)
+            .help("MCP")
+            .accessibilityLabel("MCP")
+            .accessibilityIdentifier("chat.toolbar.mcp")
+            .popover(item: $mcpScope, attachmentAnchor: .rect(.bounds), arrowEdge: .top) { scope in
+                NavigationStack {
+                    MCPListView(facade: facade.mcpFacade)
+                        .navigationTitle("MCP")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+                .id(scope.id)
+                .frame(width: 400, height: 440)
+            }
+            Button(action: onSideQuestion) {
+                Image(systemName: SideQuestionAppearance.symbolName).frame(width: 36, height: 36)
+            }
+            .disabled(!available.sideQuestion)
+            .help("Side Question")
+            .accessibilityLabel("Side Question")
+            .accessibilityIdentifier("chat.toolbar.sideQuestion")
+            Button { facade.presentForkSessionSheet() } label: {
+                Image(systemName: "arrow.triangle.branch").frame(width: 36, height: 36)
+            }
+            .disabled(!available.fork)
+            .help("Fork")
+            .accessibilityLabel("Fork")
+            .accessibilityIdentifier("chat.toolbar.fork")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .onChange(of: facade.promptContextID) { mcpScope = nil }
+        .onChange(of: facade.promptConnectionID) { mcpScope = nil }
+        .onChange(of: facade.selectedSession?.id) { mcpScope = nil }
+        .onChange(of: facade.connectionStore.isConnected) { if !facade.connectionStore.isConnected { mcpScope = nil } }
+    }
+}
+#endif
+
 #if os(iOS) && !targetEnvironment(macCatalyst)
 struct ChatHeaderMenu: View {
     @Environment(\.colorScheme) private var colorScheme

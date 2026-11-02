@@ -1925,6 +1925,29 @@ final class ChatFacade: ObservableObject {
         await viewModel.renameSession(session, title: title, windowContext: windowContext)
     }
 
+    func deleteHeaderSession(_ scope: HeaderScope) async -> Bool {
+        guard allowsHeaderActions(scope),
+              let session = directoryStore(forSessionID: scope.session.id).sessions.first(where: { $0.id == scope.session.id }) else { return false }
+        return await viewModel.deleteSession(session)
+    }
+
+    struct HeaderActionAvailability {
+        let mcp: Bool
+        let sideQuestion: Bool
+        let fork: Bool
+    }
+
+    func headerActionAvailability(for session: OpenCodeSession) -> HeaderActionAvailability {
+        let ready = isCurrentHeaderScope(headerScope(for: session)) && !isReadOnly
+            && connectionStore.isConnected && !isLoadingPresentation
+            && viewModel.backendConnection?.isClosed == false
+        return HeaderActionAvailability(
+            mcp: ready && viewModel.compatibilityClient(for: .mcp) != nil,
+            sideQuestion: ready && canAskSideQuestion,
+            fork: ready && viewModel.compatibilityClient(for: .fork) != nil && !forkSessionSnapshot.messages.isEmpty
+        )
+    }
+
     func supportsHeaderLiveActivity(_ scope: HeaderScope) -> Bool {
         allowsHeaderActions(scope) && viewModel.liveActivityFacade.supportsLiveActivities
     }
