@@ -446,7 +446,7 @@ struct ProviderLogo: View {
     }
 
     private var assetName: String {
-        "ProviderIcon_\(providerID)"
+        "ProviderIcon_\(["claude-code", "claude-agent"].contains(providerID) ? "anthropic" : providerID)"
     }
 
     private var brand: ProviderLogoBrand {
@@ -467,7 +467,7 @@ private struct ProviderLogoBrand {
             foreground = .white
             shadow = .black
             usesLightStroke = true
-        case "anthropic":
+        case "anthropic", "claude-code", "claude-agent":
             background = Color(red: 0.86, green: 0.45, blue: 0.22)
             foreground = Color(red: 0.12, green: 0.08, blue: 0.05)
             shadow = background

@@ -1056,6 +1056,34 @@ final class OpenCodeAPIClientTests: XCTestCase {
     }
 
     @MainActor
+    func testClaudeCodeUnknownReleaseDateKeepsModelsVisibleAndProviderIdentity() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let body: String
+            switch request.url?.path {
+            case "/api/provider":
+                body = #"{"data":[{"id":"claude-code","name":"Claude Code","activation":"enabled"}]}"#
+            case "/api/model":
+                body = #"{"data":[{"id":"claude-opus-5[1m]","providerID":"claude-code","name":"Opus 5","capabilities":{"tools":true,"input":["text","image","pdf"],"output":["text"]},"variants":[{"id":"high"},{"id":"max"}],"time":{"released":0},"cost":[],"status":"active","enabled":true,"limit":{"context":1000000,"input":900000,"output":128000}}]}"#
+            default:
+                throw URLError(.unsupportedURL)
+            }
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
+        }
+        let providers = try await makeProbeClient().listV2Providers(directory: "/repo")
+        let provider = try XCTUnwrap(providers.first)
+        let model = try XCTUnwrap(provider.models["claude-opus-5[1m]"])
+        XCTAssertNil(model.releaseDate)
+        XCTAssertEqual(model.providerID, "claude-code")
+        XCTAssertEqual(model.catalogVariantIDs, ["high", "max"])
+        XCTAssertEqual(ProviderIcon.assetName(for: provider.id), "ProviderIcon_anthropic")
+        XCTAssertEqual(ProviderIcon.assetName(for: "claude-agent"), "ProviderIcon_anthropic")
+        let store = ModelConfigurationStore()
+        store.applyComposerOptions(agents: [], providers: providers, defaults: [:])
+        XCTAssertTrue(store.validModelReferences.contains(.init(providerID: "claude-code", modelID: model.id)))
+        XCTAssertEqual(store.visibleModels(for: provider).map(\.id), [model.id])
+    }
+
+    @MainActor
     func testV2TextOnlyCatalogVariantsReachStoreAndChatToolbarWithoutClaimingReasoning() async throws {
         // Model fields captured from next-17155 /api/model, not inferred from output modalities.
         let model = #"""

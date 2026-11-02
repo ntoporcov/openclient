@@ -24,8 +24,8 @@ struct ProviderIcon: View {
     }
 
     static func assetName(for providerID: String) -> String? {
-        // Match upstream's exact provider identity, including routing and custom providers.
-        ["ProviderIcon_\(providerID)", "ProviderIcon_synthetic"].first { name in
+        let brandID = ["claude-code", "claude-agent"].contains(providerID) ? "anthropic" : providerID
+        return ["ProviderIcon_\(brandID)", "ProviderIcon_synthetic"].first { name in
             #if canImport(UIKit)
             UIImage(named: name) != nil
             #elseif canImport(AppKit)

@@ -253,8 +253,10 @@ private struct OpenCodeV2Model: Decodable, Sendable {
         let baseCost = cost.first { $0["tier"] == nil }.flatMap {
             try? JSONDecoder().decode(OpenCodeModelCost.self, from: JSONEncoder().encode($0))
         }
-        let releaseDate = time.map {
-            Date(timeIntervalSince1970: $0.released / 1000)
+        let releaseDate = time.flatMap { time -> String? in
+            // Dynamically discovered models use zero for an unknown release date.
+            guard time.released > 0 else { return nil }
+            return Date(timeIntervalSince1970: time.released / 1000)
                 .ISO8601Format(.init(includingFractionalSeconds: true))
         }
         return OpenCodeModel(

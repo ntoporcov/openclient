@@ -4,7 +4,7 @@ import Foundation
 @MainActor
 final class ModelConfigurationStore: ObservableObject {
     static let preferredFallbackModelReference = OpenCodeModelReference(providerID: "opencode", modelID: "minimax-m2.5-free")
-    static let popularProviderIDs = ["opencode", "opencode-go", "anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
+    static let popularProviderIDs = ["opencode", "opencode-go", "anthropic", "claude-code", "claude-agent", "github-copilot", "openai", "google", "openrouter", "vercel"]
     private static let visibilityDefaultsKey = "opencode.modelVisibility.v1"
 
     @Published var availableAgents: [OpenCodeAgent]
