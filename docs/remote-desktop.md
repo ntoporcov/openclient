@@ -11,6 +11,14 @@ The desktop must be the same interactive desktop used by the agent. A separate v
 
 ## Setup (first working version)
 
+### Toolbar personalization and loading game
+
+Long-press the Projects Remote Desktop button to choose a persistent toolbar icon or forget the current computer's saved credentials. Credential deletion resolves the authenticated host's current target and removes only its server/account/target-scoped Keychain entry.
+
+While connecting, only Close remains in the viewer toolbar. Once landscape layout is established, the loading screen offers a reaction game: tap randomly positioned icons as they appear. The fastest positive reaction time is retained locally across launches. Rotation out of landscape or backgrounding stops the round. The first stream frame immediately replaces the game and reveals the desktop controls; credential prompts and connection errors also take precedence.
+
+Validation: record persistence/invalid-result unit coverage and the landscape start → target tap → best-score restore UI flow passed on iPhone 18 Pro Max (iOS 27.0), iPad Pro 13-inch M5 (iOS 27.0), and iPhone Duo (iOS 27.1). Duo fold transitions and live toolbar-menu/credential-removal behavior still require manual checks. Device build and full localization extraction passed; installed and launched on Nic iPhone.
+
 ### Native client prototype
 
 In-chat handoffs use a prominent full-width **Open Remote Desktop** button. In the viewer, an info toolbar button opens the AI's instructions in a compact popover. The blue Done checkmark closes the viewer and prepares “I’ve finished the desktop task. Please continue.” in the originating chat's composer, without sending it. Existing text is preserved and the follow-up appended once; mentions and attachments remain intact. Drafts use the existing window/session-scoped persistence flow. The card remains reopenable after app/host restarts because its payload is part of the completed tool result (`mode: "draft"`), not transient tool progress or an in-memory pending request. There is no separate Cancel request action. The desktop title disappears after the first frame. While the keyboard is visible, a dedicated dismiss button remains beside the function-key row above it.

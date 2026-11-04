@@ -15,6 +15,12 @@ final class OpenClientRemoteDesktopCoordinator {
         self.credentials = credentials
     }
 
+    static func forgetSavedCredentials(access: OpenClientDesktopAccess?) async throws {
+        guard let access else { throw OpenClientDesktopAccess.AccessError.unavailable }
+        let ticket = try await access.open()
+        try OpenClientDesktopCredentialStore().delete(scope: access.client.config.recentServerID + ":" + ticket.targetID)
+    }
+
     func authenticate(username: String, password: String, save: Bool) {
         submittedManualCredentials = true
         pendingCredentials = save ? OpenClientDesktopCredentials(username: username, password: password) : nil

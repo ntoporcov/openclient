@@ -143,6 +143,10 @@ final class OpenClientBridgeFacade: ObservableObject {
         forceConnectAction()
     }
 
+    func forgetDesktopCredentials() async throws {
+        try await OpenClientRemoteDesktopCoordinator.forgetSavedCredentials(access: desktopAccess)
+    }
+
     func setupNotifications() async {
         await setupNotificationsAction()
     }

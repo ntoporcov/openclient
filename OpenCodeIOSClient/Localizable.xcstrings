@@ -1,6 +1,18 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Button icon": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Icona del pulsante" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Ícone do botão" } } } },
+    "Keyboard": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tastiera" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Teclado" } } } },
+    "Pointer": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Puntatore" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Ponteiro" } } } },
+    "Game controller": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Controller di gioco" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Controle de jogo" } } } },
+    "Change icon": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Cambia icona" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Alterar ícone" } } } },
+    "Could not forget credentials": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Impossibile eliminare le credenziali" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Não foi possível esquecer as credenciais" } } } },
+    "Connecting to desktop…": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Connessione al desktop…" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Conectando à área de trabalho…" } } } },
+    "Best: %lld ms": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Record: %lld ms" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Melhor: %lld ms" } } } },
+    "Last: %lld ms": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Ultimo: %lld ms" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Último: %lld ms" } } } },
+    "Tap the icon as soon as it appears.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tocca l’icona appena appare." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque no ícone assim que ele aparecer." } } } },
+    "Play while connecting": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Gioca durante la connessione" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Jogar enquanto conecta" } } } },
+    "Tap the target": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tocca il bersaglio" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque no alvo" } } } },
     "I’ve finished the desktop task. Please continue.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Ho completato l’attività sul desktop. Puoi continuare." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Concluí a tarefa na área de trabalho. Pode continuar." } } } },
     "Open Remote Desktop": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Apri desktop remoto" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Abrir área de trabalho remota" } } } },
     "View instructions": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Mostra istruzioni" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Ver instruções" } } } },

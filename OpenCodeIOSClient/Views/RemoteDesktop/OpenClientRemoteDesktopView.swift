@@ -24,6 +24,9 @@ struct OpenClientRemoteDesktopButton: View {
     @ObservedObject var bridge: OpenClientBridgeFacade
     var handoff: OpenClientDesktopHandoff? = nil
     @State private var isPresented = false
+    @AppStorage("remoteDesktop.toolbarIcon") private var toolbarIcon = "desktopcomputer"
+    @State private var isForgettingCredentials = false
+    @State private var credentialError: String?
     @Environment(\.appAccentColor) private var accent
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.desktopChat) private var desktopChat
@@ -35,10 +38,38 @@ struct OpenClientRemoteDesktopButton: View {
                     Label("Open Remote Desktop", systemImage: "desktopcomputer")
                         .frame(maxWidth: .infinity)
                 } else {
-                    Label("Remote Desktop", systemImage: "desktopcomputer")
+                    Label("Remote Desktop", systemImage: toolbarIcon)
                 }
             }
             .accessibilityIdentifier("remote-desktop.open")
+            .contextMenu {
+                if handoff == nil {
+                    Menu {
+                        Picker("Button icon", selection: $toolbarIcon) {
+                            Label("Desktop", systemImage: "desktopcomputer").tag("desktopcomputer")
+                            Label("Laptop", systemImage: "laptopcomputer").tag("laptopcomputer")
+                            Label("Display", systemImage: "display").tag("display")
+                            Label("Keyboard", systemImage: "keyboard").tag("keyboard")
+                            Label("Pointer", systemImage: "cursorarrow").tag("cursorarrow")
+                            Label("Game controller", systemImage: "gamecontroller").tag("gamecontroller")
+                        }
+                    } label: { Label("Change icon", systemImage: "square.and.pencil") }
+                    Button("Forget saved computer credentials", role: .destructive) {
+                        isForgettingCredentials = true
+                        Task {
+                            defer { isForgettingCredentials = false }
+                            do { try await bridge.forgetDesktopCredentials() }
+                            catch { credentialError = error.localizedDescription }
+                        }
+                    }
+                    .disabled(isForgettingCredentials)
+                }
+            }
+            .alert("Could not forget credentials", isPresented: Binding(
+                get: { credentialError != nil }, set: { if !$0 { credentialError = nil } }
+            )) {
+                Button("OK", role: .cancel) { credentialError = nil }
+            } message: { Text(verbatim: credentialError ?? "") }
             #if os(iOS)
             .fullScreenCover(isPresented: $isPresented) {
                 DesktopLandscapeContainer {
@@ -135,7 +166,7 @@ private struct OpenClientRemoteDesktopView: View {
                         }
                     }
                 } else if store.isBusy || store.isConnected {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    DesktopLoadingGame()
                 } else {
                     Form {
                         Button("Connect") { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
@@ -173,6 +204,8 @@ private struct OpenClientRemoteDesktopView: View {
             }
             .navigationTitle(store.frame == nil ? Text("Remote Desktop") : Text(verbatim: ""))
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                if store.frame != nil && !store.needsCredentials {
                 #if os(iOS)
                 ToolbarItem(placement: .bottomBar) {
                     Toggle(isOn: $clickEnabled) {
@@ -197,7 +230,6 @@ private struct OpenClientRemoteDesktopView: View {
                     .disabled(!store.isConnected)
                 }
                 #endif
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 if let handoff {
                     ToolbarItem(placement: .opencodeTrailing) {
                         DesktopHandoffInstructions(reason: handoff.reason)
@@ -227,6 +259,7 @@ private struct OpenClientRemoteDesktopView: View {
                     } label: { Image(systemName: "ellipsis.circle") }
                     .accessibilityLabel("Remote desktop options")
                     .disabled(store.isBusy)
+                }
                 }
             }
         }

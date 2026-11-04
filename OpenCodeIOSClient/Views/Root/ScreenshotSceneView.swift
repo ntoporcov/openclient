@@ -92,7 +92,18 @@ struct ScreenshotSceneView: View {
             }
         case .chat:
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            if #available(iOS 18.0, *), ProcessInfo.processInfo.environment["OPENCLIENT_NATIVE_HARNESS_LOOP"] == "1" {
+            if let suite = ProcessInfo.processInfo.environment["OPENCLIENT_DESKTOP_GAME_TEST_SUITE"],
+               let defaults = UserDefaults(suiteName: suite) {
+                DesktopLandscapeContainer {
+                    DesktopLoadingGame(defaults: defaults)
+                        .background(.black)
+                        .overlay(alignment: .topLeading) {
+                            Color.clear.frame(width: 1, height: 1)
+                                .accessibilityElement()
+                                .accessibilityIdentifier("screenshot.scene.desktop-game")
+                        }
+                }
+            } else if #available(iOS 18.0, *), ProcessInfo.processInfo.environment["OPENCLIENT_NATIVE_HARNESS_LOOP"] == "1" {
                 NativeHarnessLoopFixture()
             } else if #available(iOS 18.0, *), ProcessInfo.processInfo.environment["OPENCLIENT_GLASS_PILL_PREVIEW"] == "1" {
                 GlassThinkingPillPreview()
