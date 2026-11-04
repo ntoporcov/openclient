@@ -33,17 +33,14 @@ struct OpenClientRemoteDesktopButton: View {
 
     var body: some View {
         if let endpoint = bridge.remoteDesktopEndpoint {
-            Button { isPresented = true } label: {
+            Group {
                 if handoff != nil {
-                    Label("Open Remote Desktop", systemImage: "desktopcomputer")
-                        .frame(maxWidth: .infinity)
+                    Button { isPresented = true } label: {
+                        Label("Open Remote Desktop", systemImage: "desktopcomputer")
+                            .frame(maxWidth: .infinity)
+                    }
                 } else {
-                    Label("Remote Desktop", systemImage: toolbarIcon)
-                }
-            }
-            .accessibilityIdentifier("remote-desktop.open")
-            .contextMenu {
-                if handoff == nil {
+                    Menu {
                     Menu {
                         Picker("Button icon", selection: $toolbarIcon) {
                             Label("Desktop", systemImage: "desktopcomputer").tag("desktopcomputer")
@@ -63,8 +60,14 @@ struct OpenClientRemoteDesktopButton: View {
                         }
                     }
                     .disabled(isForgettingCredentials)
+                    } label: {
+                        Label("Remote Desktop", systemImage: toolbarIcon)
+                    } primaryAction: {
+                        isPresented = true
+                    }
                 }
             }
+            .accessibilityIdentifier("remote-desktop.open")
             .alert("Could not forget credentials", isPresented: Binding(
                 get: { credentialError != nil }, set: { if !$0 { credentialError = nil } }
             )) {
