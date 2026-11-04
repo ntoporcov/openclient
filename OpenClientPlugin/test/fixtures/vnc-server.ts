@@ -1,7 +1,8 @@
 import { createServer, type Socket } from "node:net"
+import { getDiffieHellman, createDecipheriv, createHash } from "node:crypto"
 
 /** Minimal RFB 3.8 desktop for transport/renderer tests; never connects to a real desktop. */
-export async function startVNCFixture() {
+export async function startVNCFixture(credentials?: { username: string; password: string }) {
   const events: Array<{ type: string; key?: number; down?: boolean; x?: number; y?: number; buttons?: number }> = []
   const clients = new Set<Socket>()
   const server = createServer((socket) => {
@@ -11,6 +12,8 @@ export async function startVNCFixture() {
     socket.write("RFB 003.008\n")
     let buffer = Buffer.alloc(0)
     let phase = 0
+    const dh = credentials ? getDiffieHellman("modp14") : undefined
+    const publicKey = dh?.generateKeys()
     let redShift = 16, greenShift = 8, blueShift = 0
     socket.on("data", (data) => {
       buffer = Buffer.concat([buffer, data])
@@ -18,10 +21,37 @@ export async function startVNCFixture() {
         if (phase === 0) {
           if (buffer.length < 12) return
           buffer = buffer.subarray(12)
-          socket.write(Buffer.from([1, 1])) // One security type: None, fixture only.
+          socket.write(Buffer.from([1, credentials ? 30 : 1]))
           phase = 1
         } else if (phase === 1) {
           buffer = buffer.subarray(1)
+          if (dh && publicKey) {
+            const header = Buffer.alloc(4)
+            header.writeUInt16BE(2, 0)
+            header.writeUInt16BE(publicKey.length, 2)
+            socket.write(Buffer.concat([header, dh.getPrime(), publicKey]))
+            phase = 4
+            continue
+          }
+          socket.write(Buffer.alloc(4))
+          phase = 2
+        } else if (phase === 4 && dh && publicKey && credentials) {
+          if (buffer.length < 128 + publicKey.length) return
+          const secret = dh.computeSecret(buffer.subarray(128, 128 + publicKey.length))
+          const key = createHash("md5").update(secret).digest()
+          const decipher = createDecipheriv("aes-128-ecb", key, null).setAutoPadding(false)
+          const clear = Buffer.concat([decipher.update(buffer.subarray(0, 128)), decipher.final()])
+          const field = (offset: number) => clear.subarray(offset, offset + 64).toString().split("\0")[0]
+          const accepted = field(0) === credentials.username && field(64) === credentials.password
+          events.push({ type: accepted ? "authenticated" : "authentication-failed" })
+          buffer = buffer.subarray(128 + publicKey.length)
+          if (!accepted) {
+            const reason = Buffer.from("Fixture credentials rejected")
+            const result = Buffer.alloc(8)
+            result.writeUInt32BE(1, 0); result.writeUInt32BE(reason.length, 4)
+            socket.end(Buffer.concat([result, reason]))
+            return
+          }
           socket.write(Buffer.alloc(4))
           phase = 2
         } else if (phase === 2) {

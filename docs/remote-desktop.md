@@ -15,6 +15,10 @@ Build the plugin with `npm run build` in `OpenClientPlugin/`. Its packaged `dist
 
 The viewer pins noVNC 1.5.0. The npm 1.6.0 CommonJS distribution contains a transitive top-level `await` that Bun cannot bundle; upgrades must be checked with the browser build and a real renderer smoke test.
 
+On HTTP LAN/VPN origins, WebKit omits WebCrypto. The viewer uses `@noble/ciphers` for ARD's required AES-128-ECB credential encryption on those origins, retaining noVNC's implementation when WebCrypto is available. Asynchronous viewer failures now show an error instead of leaving “Connecting…” indefinitely.
+
+The authentication fix passed 87 plugin tests and a Safari smoke test through the VPN HTTP address with WebCrypto unavailable: synthetic ARD credentials were decrypted/validated by the fixture server and its framebuffer rendered correctly. An injected asynchronous failure displayed the localized retry message. The live bridge's viewer bundle was verified byte-for-byte against the new build; no host restart or iOS reinstall is needed for this fix. Real Mac login remains a user verification step.
+
 Configure the environment of the OpenCode process that loads this plugin:
 
 For managed hosts, prefer explicit plugin options (the token stays in a separate mode-600 file):

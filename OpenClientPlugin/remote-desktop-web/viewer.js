@@ -1,12 +1,15 @@
 import RFBModule from "@novnc/novnc/lib/rfb.js"
+import LegacyCryptoModule from "@novnc/novnc/lib/crypto/crypto.js"
+import { installARDEncryptionFallback } from "../src/remote-desktop-crypto.ts"
 
 const RFB = RFBModule.default ?? RFBModule
+installARDEncryptionFallback(LegacyCryptoModule.default ?? LegacyCryptoModule, Boolean(window.crypto?.subtle))
 
 const language = new URLSearchParams(location.hash.slice(1)).get("language") ?? navigator.language
 const translations = {
-  en: ["Connecting…", "Connected", "Disconnected. Close and reopen to reconnect.", "Desktop authentication failed.", "Username", "Password", "Sign in", "Type here", "Missing access ticket."],
-  it: ["Connessione…", "Connesso", "Disconnesso. Chiudi e riapri per riconnetterti.", "Autenticazione del desktop non riuscita.", "Nome utente", "Password", "Accedi", "Scrivi qui", "Ticket di accesso mancante."],
-  pt: ["Conectando…", "Conectado", "Desconectado. Feche e reabra para reconectar.", "Falha na autenticação do desktop.", "Nome de usuário", "Senha", "Entrar", "Digite aqui", "Ticket de acesso ausente."],
+  en: ["Connecting…", "Connected", "Disconnected. Close and reopen to reconnect.", "Desktop authentication failed.", "Username", "Password", "Sign in", "Type here", "Missing access ticket.", "Unable to connect to the desktop. Close and reopen to retry."],
+  it: ["Connessione…", "Connesso", "Disconnesso. Chiudi e riapri per riconnetterti.", "Autenticazione del desktop non riuscita.", "Nome utente", "Password", "Accedi", "Scrivi qui", "Ticket di accesso mancante.", "Impossibile connettersi al desktop. Chiudi e riapri per riprovare."],
+  pt: ["Conectando…", "Conectado", "Desconectado. Feche e reabra para reconectar.", "Falha na autenticação do desktop.", "Nome de usuário", "Senha", "Entrar", "Digite aqui", "Ticket de acesso ausente.", "Não foi possível conectar à área de trabalho. Feche e reabra para tentar novamente."],
 }
 const strings = translations[language.split("-")[0]] ?? translations.en
 const $ = (id) => document.getElementById(id)
@@ -20,17 +23,32 @@ $("text").placeholder = strings[7]
 $("text").setAttribute("aria-label", strings[7])
 $("status").textContent = ticket ? strings[0] : strings[8]
 
+let activeRFB
+let failed = false
+const fail = () => {
+  failed = true
+  $("status").textContent = strings[9]
+  $("password").value = ""
+  $("credentials").hidden = true
+  activeRFB?.disconnect()
+}
+// noVNC's asynchronous authentication can reject outside its event callbacks.
+// Never leave the user on Connecting or expose exception/credential details.
+window.addEventListener("unhandledrejection", fail)
+window.addEventListener("error", fail)
+
 if (ticket) {
   const url = new URL("socket", location.href)
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:"
   url.searchParams.set("ticket", ticket)
   const rfb = new RFB($("screen"), url.href, { shared: true })
+  activeRFB = rfb
   rfb.scaleViewport = true
   rfb.resizeSession = false
   rfb.background = "#121212"
   rfb.addEventListener("connect", () => { $("status").textContent = strings[1] })
-  rfb.addEventListener("disconnect", () => { $("status").textContent = strings[2]; $("credentials").hidden = true })
-  rfb.addEventListener("securityfailure", () => { $("status").textContent = strings[3] })
+  rfb.addEventListener("disconnect", () => { if (!failed) $("status").textContent = strings[2]; $("credentials").hidden = true })
+  rfb.addEventListener("securityfailure", () => { failed = true; $("status").textContent = strings[3] })
   rfb.addEventListener("credentialsrequired", (event) => {
     $("credentials").hidden = false
     const username = event.detail.types.includes("username")

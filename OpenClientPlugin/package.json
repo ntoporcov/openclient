@@ -57,6 +57,7 @@
     "test": "npm run build:notifications && npm run build:remote-desktop && bun test"
   },
   "dependencies": {
+    "@noble/ciphers": "2.4.0",
     "@novnc/novnc": "1.5.0",
     "@opencode-ai/plugin": "1.18.5",
     "@opencode/plugin": "2.0.16",
