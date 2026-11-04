@@ -167,19 +167,22 @@ struct OpenClientBridgeHealth: Decodable, Equatable, Sendable {
     let port: Int
     let openCodePort: Int
     let notifications: OpenClientBridgeNotificationsAdvertisement?
+    let remoteDesktop: OpenClientRemoteDesktopAdvertisement?
 
     init(
         service: String,
         protocol: Int,
         port: Int,
         openCodePort: Int,
-        notifications: OpenClientBridgeNotificationsAdvertisement? = nil
+        notifications: OpenClientBridgeNotificationsAdvertisement? = nil,
+        remoteDesktop: OpenClientRemoteDesktopAdvertisement? = nil
     ) {
         self.service = service
         self.protocol = `protocol`
         self.port = port
         self.openCodePort = openCodePort
         self.notifications = notifications
+        self.remoteDesktop = remoteDesktop
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -188,6 +191,7 @@ struct OpenClientBridgeHealth: Decodable, Equatable, Sendable {
         case port
         case openCodePort
         case notifications
+        case remoteDesktop
     }
 
     init(from decoder: Decoder) throws {
@@ -200,6 +204,19 @@ struct OpenClientBridgeHealth: Decodable, Equatable, Sendable {
             OpenClientBridgeNotificationsAdvertisement.self,
             forKey: .notifications
         )) ?? nil
+        remoteDesktop = try? container.decodeIfPresent(OpenClientRemoteDesktopAdvertisement.self, forKey: .remoteDesktop)
+    }
+}
+
+/// Detection alone does not establish an authenticated, controllable desktop.
+struct OpenClientRemoteDesktopAdvertisement: Decodable, Equatable, Sendable {
+    let version: Int
+    let state: String
+    let transport: String
+    let protocolVersion: String?
+
+    var isVNCDetected: Bool {
+        version == 1 && transport == "rfb" && state == "detected"
     }
 }
 

@@ -1,4 +1,5 @@
 import { networkInterfaces } from "node:os"
+import { RemoteDesktopDiscovery } from "./remote-desktop.js"
 import { OpenClientBridge } from "./bridge.js"
 import { parseClientMessage, protocolVersion } from "./protocol.js"
 import { mintNotificationSetupTicket, notificationCapability, type SetupDraft } from "./notifications.js"
@@ -41,10 +42,12 @@ export type BridgeServerOptions = {
   onLog?: (level: "info" | "warn" | "error", message: string) => void
   image?: ImageResourceManagerOptions
   video?: VideoResourceManagerOptions
+  remoteDesktopURL?: string
 }
 
 export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
   const bridge = new OpenClientBridge()
+  const remoteDesktop = new RemoteDesktopDiscovery(options.remoteDesktopURL ?? process.env.OPENCLIENT_VNC_URL)
   const imageResources = new ImageResourceManager({
     ...options.image,
     registryPath: options.image?.registryPath ?? defaultImageRegistryPath(options.openCodePort),
@@ -71,6 +74,7 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
            port,
            openCodePort: options.openCodePort,
            notifications: notificationCapability(),
+           remoteDesktop: await remoteDesktop.capability(),
           })
         }
         if (url.pathname === notificationSetupPath) {

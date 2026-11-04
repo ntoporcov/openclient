@@ -34,6 +34,7 @@ describe("bridge port selection", () => {
     const temporary = await mkdtemp(join(tmpdir(), "openclient-server-test-"))
     const server = startBridgeServer({
       openCodePort,
+      remoteDesktopURL: "",
       image: {
         registryPath: join(temporary, "state", "image-resources.json"),
       },
@@ -50,6 +51,7 @@ describe("bridge port selection", () => {
         port: server.port,
         openCodePort,
         notifications: { version: 1, state: "unconfigured" },
+        remoteDesktop: { version: 1, transport: "rfb", state: "unconfigured" },
       })
 
       const WebSocketWithOptions = WebSocket as unknown as {

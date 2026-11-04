@@ -13,6 +13,7 @@ struct OpenClientBridgeEndpoint: Equatable, Sendable {
     let openCodePort: Int
     let notifications: OpenClientBridgeNotificationsCapability
     let notificationPairingLauncher: OpenClientNotificationPairingLauncher?
+    let remoteDesktop: OpenClientRemoteDesktopAdvertisement?
 
     init(
         healthURL: URL,
@@ -20,7 +21,8 @@ struct OpenClientBridgeEndpoint: Equatable, Sendable {
         port: Int,
         openCodePort: Int,
         notifications: OpenClientBridgeNotificationsCapability = .missing,
-        notificationPairingLauncher: OpenClientNotificationPairingLauncher? = nil
+        notificationPairingLauncher: OpenClientNotificationPairingLauncher? = nil,
+        remoteDesktop: OpenClientRemoteDesktopAdvertisement? = nil
     ) {
         self.healthURL = healthURL
         self.webSocketURL = webSocketURL
@@ -28,6 +30,7 @@ struct OpenClientBridgeEndpoint: Equatable, Sendable {
         self.openCodePort = openCodePort
         self.notifications = notifications
         self.notificationPairingLauncher = notificationPairingLauncher
+        self.remoteDesktop = remoteDesktop
     }
 }
 
@@ -392,7 +395,8 @@ enum OpenClientBridgeEndpointDiscovery {
             port: candidate.port,
             openCodePort: candidate.openCodePort,
             notifications: OpenClientBridgeNotificationsCapability(advertisement: health.notifications),
-            notificationPairingLauncher: health.notifications?.pairing.flatMap { $0.isTrustedShape ? $0 : nil }
+            notificationPairingLauncher: health.notifications?.pairing.flatMap { $0.isTrustedShape ? $0 : nil },
+            remoteDesktop: health.remoteDesktop
         )
     }
 }
