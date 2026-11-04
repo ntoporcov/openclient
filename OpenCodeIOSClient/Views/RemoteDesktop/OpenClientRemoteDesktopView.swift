@@ -105,7 +105,6 @@ private struct OpenClientRemoteDesktopView: View {
     @State private var clickEnabled = false
     @State private var keyboardVisible = false
     @State private var clickToast: Bool?
-    @Environment(\.appAccentColor) private var accent
 
     var body: some View {
         NavigationStack {
@@ -181,7 +180,6 @@ private struct OpenClientRemoteDesktopView: View {
                     }
                     .toggleStyle(.button)
                     .labelStyle(.iconOnly)
-                    .tint(accent)
                     .accessibilityIdentifier("remote-desktop.click-mode")
                     .disabled(!store.isConnected)
                 }
@@ -232,6 +230,11 @@ private struct OpenClientRemoteDesktopView: View {
                 }
             }
         }
+        // Presentation inherits the card's environment; keep desktop controls native.
+        .tint(nil)
+        .foregroundStyle(.primary)
+        .buttonStyle(.automatic)
+        .toggleStyle(.automatic)
         .task { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
         .onChange(of: clickEnabled) { _, enabled in clickToast = enabled }
         .task(id: clickToast) {
