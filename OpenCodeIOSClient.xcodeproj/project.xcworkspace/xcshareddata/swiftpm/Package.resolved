@@ -1,6 +1,24 @@
 {
-  "originHash" : "001a20301ad7f54133fb8bb59125b6a748db11ab11c25d131cb6db1517193f87",
+  "originHash" : "64886ec1650aac937062f9f76be7fa513bc62371d6007f272acb7d01bf9be26f",
   "pins" : [
+    {
+      "identity" : "cryptoswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/royalapplications/CryptoSwift.git",
+      "state" : {
+        "branch" : "foundationessentials",
+        "revision" : "a59b4d91ebb22011656c830f874fe7152e183a57"
+      }
+    },
+    {
+      "identity" : "cstb",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/troughton/Cstb",
+      "state" : {
+        "revision" : "a47f4ecf3a139ac2f53ed27a984853c9f98097f1",
+        "version" : "1.0.6"
+      }
+    },
     {
       "identity" : "highlighterswift",
       "kind" : "remoteSourceControl",
@@ -25,6 +43,14 @@
       "state" : {
         "revision" : "1ba3e769b734e456317fa7e45321fa7f53eefb67",
         "version" : "2.1.0"
+      }
+    },
+    {
+      "identity" : "royalvnc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/royalapplications/royalvnc",
+      "state" : {
+        "revision" : "090b96eddeee183e9fec293c5cd881d302a4349d"
       }
     }
   ],

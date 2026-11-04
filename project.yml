@@ -45,6 +45,9 @@ schemes:
       targets:
         - OpenCodeIOSClientUITests
 packages:
+  RoyalVNCKit:
+    url: https://github.com/royalapplications/royalvnc
+    revision: 090b96eddeee183e9fec293c5cd881d302a4349d
   HighlighterSwift:
     url: https://github.com/smittytone/HighlighterSwift
     from: 3.0.3
@@ -109,6 +112,7 @@ targets:
         destinationFilters: [iOS]
       - package: HighlighterSwift
         product: Highlighter
+      - package: RoyalVNCKit
       - package: GhosttyKit
         product: GhosttyTerminal
     preBuildScripts:
@@ -329,6 +333,7 @@ targets:
     dependencies:
       - package: HighlighterSwift
         product: Highlighter
+      - package: RoyalVNCKit
     scheme:
       gatherCoverageData: false
       testTargets:

@@ -1,6 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Enter the remote access token configured on your host. You’ll sign in to your Mac next.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Inserisci il token di accesso remoto configurato sull’host. Poi accederai al Mac." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Insira o token de acesso remoto configurado no host. Em seguida, entre no Mac." } } } },
+    "Sign in to your Mac": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Accedi al Mac" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Entre no Mac" } } } },
+    "Sign in": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Accedi" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Entrar" } } } },
+    "Esc": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Esc" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Esc" } } } },
+    "Tab": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tab" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Tab" } } } },
+    "Type here": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Scrivi qui" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Digite aqui" } } } },
     "Connect": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Connetti" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Conectar" } } } },
     "Remote Desktop": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Desktop remoto" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Área de trabalho remota" } } } },
     "Your help is needed": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Serve il tuo aiuto" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Precisamos da sua ajuda" } } } },

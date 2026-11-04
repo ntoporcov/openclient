@@ -11,6 +11,26 @@ The desktop must be the same interactive desktop used by the agent. A separate v
 
 ## Setup (first working version)
 
+### Native client prototype
+
+The iOS client now uses RoyalVNCKit (pinned to `090b96eddeee183e9fec293c5cd881d302a4349d`) rather than loading the noVNC webpage. Authentication fields, errors, framebuffer presentation, text entry, Escape/Tab/Delete, and direct pointer down/drag/up are native. Projects and human handoffs share this same presentation.
+
+RoyalVNCKit exposes a TCP client but no public custom-transport injection. `OpenClientDesktopTunnel` binds an ephemeral IPv4 loopback port, accepts one local connection, closes the listener, and forwards binary traffic over a URLSession WebSocket with the existing single-use ticket and Origin validation. Each direction waits for its write completion before reading more data. No VNC destination or credentials are added to the plugin API. Closing/backgrounding cancels authentication, disconnects the library, and tears down the tunnel.
+
+`OpenClientNativeDesktopSession` owns protocol operations and bridges SDK callbacks to the main-actor store. SwiftUI consumes the store and forwards user intent. Credentials are held only for the authentication attempt, and clipboard synchronization is disabled.
+
+This first native version fits the full desktop to the available area. Pinch zoom/pan, richer modifier/hardware-keyboard handling, cursor rendering, accessibility navigation within the remote desktop, and sustained-frame performance tuning remain follow-up work. Real Mac login and shared-session selection still need user validation.
+
+Native integration fixture: run `bun test/fixtures/native-desktop.ts` from `OpenClientPlugin`, then run `NativeRemoteDesktopTests` on a simulator. The fixture uses fake credentials and never connects to the real Mac desktop.
+
+Native validation: the authentication/framebuffer/input/reconnect integration test passed without skips on iPhone 18 Pro Max (iOS 27.0), iPad Pro 13-inch M5 (iOS 27.0), and iPhone Duo (iOS 27.1). It verifies successful ARD authentication, a 320×180 framebuffer, keyboard/pointer delivery, rejected credentials, and a fresh successful connection afterward. This is protocol integration coverage, not visual layout or Duo fold-transition coverage. Physical-device UI automation is currently unavailable in the tool session; final Mac login and interaction feel require hands-on verification.
+
+The native signed iPhone build and full localization lane passed. Installed on Nic iPhone; automatic launch was blocked by the device lock screen. Open the installed app manually after unlocking, then use Projects → Remote Desktop with the existing access token.
+
+### Legacy webpage compatibility
+
+The plugin still serves its webpage for older installed app builds. The following noVNC notes describe that compatibility path, not the native client.
+
 Build the plugin with `npm run build` in `OpenClientPlugin/`. Its packaged `dist/` includes the viewer, noVNC license, and corresponding source. This branch has not been published to npm.
 
 The viewer pins noVNC 1.5.0. The npm 1.6.0 CommonJS distribution contains a transitive top-level `await` that Bun cannot bundle; upgrades must be checked with the browser build and a real renderer smoke test.

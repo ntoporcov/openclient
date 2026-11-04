@@ -1,5 +1,5 @@
 import SwiftUI
-import WebKit
+import RoyalVNCKit
 
 private struct DesktopBridgeKey: EnvironmentKey {
     static let defaultValue: OpenClientBridgeFacade? = nil
@@ -78,17 +78,26 @@ private struct OpenClientRemoteDesktopView: View {
                 if let error = store.errorMessage {
                     Text(verbatim: error).foregroundStyle(.red).padding()
                 }
-                if let url = store.viewerURL {
-                    DesktopWebView(url: url).id(url)
+                if store.needsCredentials {
+                    DesktopCredentialsForm(requiresUsername: store.requiresUsername) { username, password in
+                        coordinator.native.authenticate(username: username, password: password)
+                    }
+                } else if let frame = store.frame {
+                    NativeDesktopCanvas(frame: frame, session: coordinator.native)
+                } else if store.isBusy || store.isConnected {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Form {
                         Section {
                             SecureField("Remote access token", text: $token)
                                 .autocorrectionDisabled()
+                                #if canImport(UIKit)
+                                .textInputAutocapitalization(.never)
+                                #endif
                             Button("Connect") { coordinator.open(endpoint: endpoint, token: token, store: store) }
                                 .disabled(token.isEmpty || store.isBusy)
                         } footer: {
-                            Text("Enter the OPENCLIENT_REMOTE_DESKTOP_TOKEN configured on your host. Desktop login happens inside the viewer.")
+                            Text("Enter the remote access token configured on your host. You’ll sign in to your Mac next.")
                         }
                         if store.isBusy { ProgressView() }
                     }
@@ -129,47 +138,77 @@ private struct DesktopHandoffActions: View {
     }
 }
 
-@MainActor
-private final class DesktopWebNavigation: NSObject, WKNavigationDelegate {
-    let url: URL
-    init(url: URL) { self.url = url }
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-        let target = action.request.url
-        return target?.scheme == url.scheme && target?.host == url.host
-            && target?.port == url.port && target?.path == url.path ? .allow : .cancel
+private struct DesktopCredentialsForm: View {
+    let requiresUsername: Bool
+    let submit: (String, String) -> Void
+    @State private var username = ""
+    @State private var password = ""
+
+    var body: some View {
+        Form {
+            Section("Sign in to your Mac") {
+                if requiresUsername {
+                    TextField("Username", text: $username).autocorrectionDisabled()
+                        #if canImport(UIKit)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .accessibilityIdentifier("remote-desktop.username")
+                }
+                SecureField("Password", text: $password)
+                    .accessibilityIdentifier("remote-desktop.password")
+                Button("Sign in") {
+                    submit(username, password)
+                    password = ""
+                }
+                .disabled(password.isEmpty || (requiresUsername && username.isEmpty))
+                .accessibilityIdentifier("remote-desktop.sign-in")
+            }
+        }
     }
 }
 
-#if canImport(UIKit)
-private struct DesktopWebView: UIViewRepresentable {
-    let url: URL
-    func makeCoordinator() -> DesktopWebNavigation { DesktopWebNavigation(url: url) }
-    func makeUIView(context: Context) -> WKWebView { makeDesktopWebView(url: url, delegate: context.coordinator) }
-    func updateUIView(_ view: WKWebView, context: Context) {}
-    static func dismantleUIView(_ view: WKWebView, coordinator: DesktopWebNavigation) {
-        view.navigationDelegate = nil
-        view.loadHTMLString("", baseURL: nil)
-    }
-}
-#else
-private struct DesktopWebView: NSViewRepresentable {
-    let url: URL
-    func makeCoordinator() -> DesktopWebNavigation { DesktopWebNavigation(url: url) }
-    func makeNSView(context: Context) -> WKWebView { makeDesktopWebView(url: url, delegate: context.coordinator) }
-    func updateNSView(_ view: WKWebView, context: Context) {}
-    static func dismantleNSView(_ view: WKWebView, coordinator: DesktopWebNavigation) {
-        view.navigationDelegate = nil
-        view.loadHTMLString("", baseURL: nil)
-    }
-}
-#endif
+private struct NativeDesktopCanvas: View {
+    let frame: CGImage
+    let session: OpenClientNativeDesktopSession
+    @State private var text = ""
 
-@MainActor
-private func makeDesktopWebView(url: URL, delegate: DesktopWebNavigation) -> WKWebView {
-    let configuration = WKWebViewConfiguration()
-    configuration.websiteDataStore = .nonPersistent()
-    let view = WKWebView(frame: .zero, configuration: configuration)
-    view.navigationDelegate = delegate
-    view.load(URLRequest(url: url))
-    return view
+    var body: some View {
+        VStack(spacing: 0) {
+            GeometryReader { geometry in
+                let scale = min(geometry.size.width / CGFloat(frame.width), geometry.size.height / CGFloat(frame.height))
+                Image(decorative: frame, scale: 1)
+                    .resizable().interpolation(.medium)
+                    .frame(width: CGFloat(frame.width) * scale, height: CGFloat(frame.height) * scale)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            session.pointer(x: UInt16(max(0, min(CGFloat(frame.width - 1), value.location.x / scale))),
+                                            y: UInt16(max(0, min(CGFloat(frame.height - 1), value.location.y / scale))), down: true)
+                        }
+                        .onEnded { value in
+                            session.pointer(x: UInt16(max(0, min(CGFloat(frame.width - 1), value.location.x / scale))),
+                                            y: UInt16(max(0, min(CGFloat(frame.height - 1), value.location.y / scale))), down: false)
+                        })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .background(.black)
+            .accessibilityLabel("Remote Desktop")
+            .accessibilityIdentifier("remote-desktop.canvas")
+            HStack {
+                Button("Esc") { session.key(.escape) }
+                Button("Tab") { session.key(.tab) }
+                TextField("Type here", text: $text)
+                    .autocorrectionDisabled()
+                    #if canImport(UIKit)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .onSubmit { session.key(.return) }
+                    .onChange(of: text) { _, value in
+                        if !value.isEmpty { session.type(value); text = "" }
+                    }
+                Button { session.key(.delete) } label: { Image(systemName: "delete.left") }
+                    .accessibilityLabel("Delete")
+            }.padding()
+        }
+    }
 }
