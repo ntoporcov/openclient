@@ -1,10 +1,4 @@
-A little less clutter.
-
-• Clean up conversations across your server by age or project, in a dedicated sheet.
-• Review chats individually: swipe right to keep, left to queue for deletion, and undo a choice before confirming.
-• Open read-only transcripts before deciding what to delete. Running chats and conversations with active child agents are excluded from cleanup.
-• Follow live subagent activity and open agent conversations from the new agent sheet.
-• Enjoy responsive native chat navigation on iPhone and iPad.
-• Tables keep their columns aligned after replies finish, with sideways scrolling for wide tables.
+• Fixed an issue that could make OpenClient stop responding when opening a chat on iOS 26 and iPadOS 26.
+• Improved support for OpenCode’s Claude subscription providers, including claude-agent, with recognizable provider icons and better model discovery when release dates are unavailable.
 
 OpenClient supports OpenCode v1 and v2.

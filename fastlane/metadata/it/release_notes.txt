@@ -1,10 +1,4 @@
-Un po’ più di ordine.
-
-• Fai pulizia nelle conversazioni del server per anzianità o progetto, in un pannello dedicato.
-• Rivedi le chat singolarmente: scorri a destra per conservarle, a sinistra per metterle in coda per l’eliminazione e annulla una scelta prima di confermare.
-• Apri le trascrizioni in sola lettura prima di decidere cosa eliminare. Le chat in esecuzione e le conversazioni con sottoagenti attivi sono escluse dalla pulizia.
-• Segui l’attività dei sottoagenti in tempo reale e apri le loro conversazioni dal nuovo pannello degli agenti.
-• Navigazione nativa e reattiva tra le chat su iPhone e iPad.
-• Le tabelle mantengono le colonne allineate al termine delle risposte, con scorrimento orizzontale per quelle più larghe.
+• Risolto un problema che poteva bloccare OpenClient all’apertura di una chat su iOS 26 e iPadOS 26.
+• Migliorato il supporto ai provider di OpenCode per gli abbonamenti Claude, incluso claude-agent, con icone riconoscibili e una migliore gestione dei modelli senza data di rilascio.
 
 OpenClient supporta OpenCode v1 e v2.

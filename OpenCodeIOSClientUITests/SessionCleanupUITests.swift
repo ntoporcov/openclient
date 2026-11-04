@@ -134,6 +134,50 @@ final class SessionNavigationUITests: XCTestCase {
     private let firstSession = "session-screenshot-release"
     private let secondSession = "session-screenshot-followup"
 
+    func testChatDraftSurvivesSessionSwitching() {
+        let app = launch()
+        defer { app.terminate() }
+        openProject(app)
+        let input = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'navigation.chat.'")).firstMatch
+        tap(app, "session.row.\(secondSession)")
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        let marker = "Preserved draft \(UUID().uuidString)"
+        input.typeText(marker)
+        let draft = input.value as? String
+        XCTAssertTrue(draft?.contains(marker) == true)
+        showSessionList(app, sessionID: secondSession)
+        tap(app, "session.row.\(firstSession)")
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        showSessionList(app, sessionID: firstSession)
+        tap(app, "session.row.\(secondSession)")
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        XCTAssertEqual(input.value as? String, draft)
+    }
+
+    func testChatOpeningTypingAndActivityNavigationRemainResponsive() {
+        let app = launch()
+        defer { app.terminate() }
+        openProject(app)
+        tap(app, "session.row.\(firstSession)")
+        // The navigation fixture's route identifier propagates to the UIKit composer.
+        let input = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH %@", "navigation.chat.")).firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        XCTAssertTrue(input.isHittable)
+        input.tap()
+        let marker = "Navigation regression \(UUID().uuidString)"
+        input.typeText(marker)
+        XCTAssertTrue((input.value as? String)?.contains(marker) == true)
+        showSessionList(app, sessionID: firstSession)
+        showProjects(app)
+        tap(app, "projects.activity")
+        tap(app, "activity.session.\(secondSession)")
+        XCTAssertTrue(element(app, "navigation.chat.\(secondSession)").waitForExistence(timeout: 10))
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        XCTAssertTrue(input.isHittable)
+        showProjects(app)
+    }
+
     func testSessionSwitchingAndBackDoNotBounceOrRemount() {
         let app = launch()
         defer { app.terminate() }
@@ -291,7 +335,14 @@ final class SessionNavigationUITests: XCTestCase {
         XCTAssertLessThanOrEqual(appearances, 1, "Chat remounted: \(changes)")
         if requiresAppearance { XCTAssertEqual(appearances, 1, "Expected the selected chat: \(changes)") }
         XCTAssertFalse(changes.contains("disappear:\(sessionID)"), "Selected chat left the screen: \(changes)")
-        XCTAssertFalse(changes.contains("unmount:\(sessionID)"), "Selected chat was replaced during navigation: \(changes)")
+        // iOS 26 can reparent an offscreen split detail, calling onDisappear/onAppear
+        // while preserving its State. Reject unmounts after UIKit confirms visibility,
+        // rather than treating those pre-presentation callbacks as lost chat identity.
+        if let visible = changes.firstIndex(of: "appear:\(sessionID)") {
+            XCTAssertFalse(changes[visible...].contains("unmount:\(sessionID)"), "Visible chat was replaced: \(changes)")
+        } else {
+            XCTAssertFalse(changes.contains("unmount:\(sessionID)"), "Presented chat was replaced: \(changes)")
+        }
         XCTAssertLessThanOrEqual(changes.filter { $0 == "column:detail" }.count, 1, "Repeated detail presentation: \(changes)")
     }
 

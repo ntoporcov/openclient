@@ -1,10 +1,4 @@
-Um pouco mais de organização.
-
-• Limpe conversas do servidor por tempo de inatividade ou projeto, em um painel dedicado.
-• Revise as conversas individualmente: deslize para a direita para manter, para a esquerda para marcar para exclusão e desfaça uma escolha antes de confirmar.
-• Abra transcrições somente leitura antes de decidir o que excluir. Conversas em execução e conversas com subagentes ativos são excluídas da limpeza.
-• Acompanhe a atividade dos subagentes em tempo real e abra suas conversas pelo novo painel de agentes.
-• Navegação nativa e ágil entre conversas no iPhone e iPad.
-• As tabelas mantêm as colunas alinhadas após o fim das respostas, com rolagem horizontal para tabelas largas.
+• Corrigido um problema que podia fazer o OpenClient parar de responder ao abrir uma conversa no iOS 26 e no iPadOS 26.
+• Melhorado o suporte aos provedores do OpenCode para assinaturas Claude, incluindo claude-agent, com ícones reconhecíveis e melhor descoberta de modelos sem data de lançamento.
 
 O OpenClient oferece suporte ao OpenCode v1 e v2.

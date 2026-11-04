@@ -2370,7 +2370,6 @@ struct ChatView: View {
     private let onDismissChildSession: (() -> Void)?
     private let isDedicatedWindow: Bool
     private let usesSheetNavigation: Bool
-    @Environment(\.dismiss) private var dismiss
     private let onOpenSheetSession: ((String) -> Void)?
     @StateObject private var agentNavigation = AgentNavigationStore()
 
@@ -3923,9 +3922,12 @@ struct ChatView: View {
                     .buttonStyle(.bordered)
                     .tint(.purple)
                     .accessibilityLabel("Close subagent thread")
+            } else if usesSheetNavigation {
+                ChatSheetBackButton()
+                    .buttonStyle(.bordered)
+                    .tint(.purple)
             } else {
                 Button("Back") {
-                    if usesSheetNavigation { dismiss(); return }
                     guard let parentSession = headerSnapshot.parentSession else { return }
                     Task { await chatFacade.selectSession(parentSession) }
                 }
@@ -5932,6 +5934,16 @@ struct ContextUsageRing: View {
                 .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
+    }
+}
+
+/// Keep sheet dismissal scoped to the control that uses it. Observing dismiss
+/// on the entire chat causes a continuous invalidation loop in iOS 26 split navigation.
+private struct ChatSheetBackButton: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Button("Back") { dismiss() }
     }
 }
 
