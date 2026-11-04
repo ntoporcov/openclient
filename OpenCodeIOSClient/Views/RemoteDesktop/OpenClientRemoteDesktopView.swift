@@ -22,7 +22,12 @@ struct OpenClientRemoteDesktopButton: View {
     var body: some View {
         if let endpoint = bridge.remoteDesktopEndpoint {
             Button { isPresented = true } label: {
-                Label("Remote Desktop", systemImage: "desktopcomputer")
+                if handoff != nil {
+                    Label("Open Remote Desktop", systemImage: "desktopcomputer")
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Label("Remote Desktop", systemImage: "desktopcomputer")
+                }
             }
             .accessibilityIdentifier("remote-desktop.open")
             #if os(iOS)
@@ -59,6 +64,10 @@ struct OpenClientDesktopHandoffCard: View {
             if pending {
                 if let bridge {
                     OpenClientRemoteDesktopButton(bridge: bridge, handoff: handoff)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .labelStyle(.titleAndIcon)
+                        .font(.headline)
                 } else {
                     Text("Connect the OpenClient plugin to open the desktop.").font(.caption)
                 }
@@ -89,9 +98,6 @@ private struct OpenClientRemoteDesktopView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if let handoff {
-                    Text(verbatim: handoff.reason).font(.callout).padding()
-                }
                 if let error = store.errorMessage {
                     Text(verbatim: error).foregroundStyle(.red).padding()
                 }
@@ -104,18 +110,25 @@ private struct OpenClientRemoteDesktopView: View {
                     }
                 } else if store.frame != nil {
                     Spacer()
-                    if keyboardVisible { DesktopFunctionRow(session: coordinator.native) }
+                    if keyboardVisible {
+                        HStack(spacing: 8) {
+                            DesktopFunctionRow(session: coordinator.native)
+                            Button { keyboardVisible = false } label: {
+                                Image(systemName: "keyboard.chevron.compact.down")
+                                    .frame(width: 38, height: 38)
+                            }
+                            .opencodeActionGlass(size: 38, in: Circle())
+                            .accessibilityLabel("Dismiss Keyboard")
+                            .accessibilityIdentifier("remote-desktop.keyboard.dismiss")
+                            .padding(.trailing)
+                        }
+                    }
                 } else if store.isBusy || store.isConnected {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Form {
                         Button("Connect") { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
                             .disabled(store.isBusy)
-                    }
-                }
-                if let handoff {
-                    DesktopHandoffActions(isBusy: store.isBusy) { outcome in
-                        coordinator.complete(handoff, outcome: outcome, endpoint: endpoint, access: bridge.desktopAccess, store: store)
                     }
                 }
             }
@@ -147,7 +160,7 @@ private struct OpenClientRemoteDesktopView: View {
                         .accessibilityIdentifier("remote-desktop.mode-toast")
                 }
             }
-            .navigationTitle("Remote Desktop")
+            .navigationTitle(store.frame == nil ? Text("Remote Desktop") : Text(verbatim: ""))
             .toolbar {
                 #if os(iOS)
                 ToolbarItem(placement: .bottomBar) {
@@ -175,6 +188,18 @@ private struct OpenClientRemoteDesktopView: View {
                 }
                 #endif
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                if let handoff {
+                    ToolbarItem(placement: .opencodeTrailing) {
+                        DesktopHandoffInstructions(reason: handoff.reason)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        DesktopHandoffDoneButton {
+                            coordinator.complete(handoff, outcome: "done", endpoint: endpoint,
+                                                 access: bridge.desktopAccess, store: store)
+                        }
+                        .disabled(store.isBusy || store.completed)
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Text("Using iPhone Duo? Unfold it to use the inner display.")
@@ -205,16 +230,48 @@ private struct OpenClientRemoteDesktopView: View {
     }
 }
 
-private struct DesktopHandoffActions: View {
-    let isBusy: Bool
-    let complete: (String) -> Void
+private struct DesktopHandoffInstructions: View {
+    let reason: String
+    @State private var isPresented = false
+
     var body: some View {
-        HStack {
-            Button("Cancel request", role: .destructive) { complete("cancelled") }
-            Spacer()
-            Button("Done — continue") { complete("done") }.buttonStyle(.borderedProminent)
+        Button { isPresented = true } label: {
+            Label("View instructions", systemImage: "info.circle")
         }
-        .padding().disabled(isBusy)
+        .accessibilityIdentifier("remote-desktop.instructions")
+        .popover(isPresented: $isPresented) {
+            ScrollView {
+                Text(verbatim: reason)
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .frame(idealWidth: 320, maxWidth: 360, idealHeight: 180, maxHeight: 360)
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+}
+
+private struct DesktopHandoffDoneButton: View {
+    let complete: () -> Void
+
+    var body: some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            Button(role: .confirm, action: complete) {
+                Label("Done", systemImage: "checkmark")
+            }
+            .labelStyle(.iconOnly)
+            .tint(.blue)
+            .accessibilityIdentifier("remote-desktop.handoff.done")
+        } else {
+            Button(action: complete) {
+                Label("Done", systemImage: "checkmark")
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderedProminent)
+            .tint(.blue)
+            .accessibilityIdentifier("remote-desktop.handoff.done")
+        }
     }
 }
 

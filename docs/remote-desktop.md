@@ -4,7 +4,7 @@
 
 Two entry points share one host-scoped desktop viewer:
 
-- A plugin tool requests human help, presenting a transcript card with the reason and an Open Remote Desktop action. Its execution remains pending until the user explicitly chooses Done or Cancel. Closing the viewer does not complete the tool.
+- A plugin tool requests human help, presenting a transcript card with the reason and an Open Remote Desktop action. Its execution remains pending until the user chooses Done or stops the session in chat (subject to the host timeout). Closing the viewer does not complete the tool.
 - Projects exposes Remote Desktop when the connected plugin supports a usable viewer session. Manual access is independent of chat execution.
 
 The desktop must be the same interactive desktop used by the agent. A separate virtual login session does not satisfy a login handoff.
@@ -12,6 +12,8 @@ The desktop must be the same interactive desktop used by the agent. A separate v
 ## Setup (first working version)
 
 ### Native client prototype
+
+In-chat handoffs use a prominent full-width **Open Remote Desktop** button. In the viewer, an info toolbar button opens the AI's instructions in a compact popover, and a blue confirmation-role checkmark at the top right explicitly completes the handoff. There is no separate Cancel request action in the viewer; Close leaves the handoff pending so the user can return to chat and stop the session. The desktop title disappears after the first frame. While the keyboard is visible, a dedicated dismiss button remains beside the function-key row above it.
 
 Viewer controls: Remote Desktop is a separate Projects toolbar group beside the plugin connection button. On iOS, the bottom toolbar has a glass tap-to-click toggle (off by default) and a keyboard show/hide action. Two-finger pan and pinch zoom remain available in either mode. With click mode off, one-finger panning also works; with it on, single taps send a complete click at the transformed framebuffer coordinate. Letterbox taps are ignored. A two-second bottom toast confirms click-mode changes. The keyboard row shares the terminal's glass key styling, with paste, Escape, Tab, Control/Alt, punctuation, interrupt, arrows, Delete, and Return. Modifier keys are released when the row closes. Close/options remain in the top toolbar; handoff completion remains explicit. Keyboard resizing preserves zoom and the framebuffer point at the viewport center, clamping only at the desktop edges.
 
@@ -104,7 +106,7 @@ iOS preserves this advertisement on its discovered bridge endpoint. Older plugin
 - The bridge proxies only the host-configured VNC target, with bounded buffering and at most eight pending/active viewer sessions. Streams expire after one hour and close on viewer dismissal or plugin shutdown. VNC credentials are negotiated by RoyalVNCKit (or legacy noVNC) with the VNC server, not stored by the plugin.
 - The native viewer supports touch pointer gestures, software text entry, and Escape/Tab/Delete. It scales the desktop to fit without changing the host display resolution. Reconnect mints a new ticket. Backgrounding the iOS app closes its viewer stream.
 - `openclient_request_remote_access(reason)` is registered for OpenCode v1 and v2. V2 disables Code Mode wrapping so the live transcript retains the native renderer payload. The tool publishes the request ID, originating session/message and reason, then awaits the human response.
-- Native Done/Cancel calls the authenticated handoff endpoint. Responses must match the request's session/message. Closing the sheet does not resolve the request. Tool abort removes the pending request; shutdown or a 30-minute timeout cancels it. Pending requests are memory-only and cannot survive a plugin restart.
+- Native Done calls the authenticated handoff endpoint. Responses must match the request's session/message. Closing the viewer does not resolve the request. Tool abort removes the pending request; shutdown or a 30-minute timeout cancels it. Pending requests are memory-only and cannot survive a plugin restart. The endpoint retains cancellation support for older clients.
 
 ## Remaining validation / follow-up
 

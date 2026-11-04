@@ -1,6 +1,8 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Open Remote Desktop": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Apri desktop remoto" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Abrir área de trabalho remota" } } } },
+    "View instructions": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Mostra istruzioni" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Ver instruções" } } } },
     "Tap to click enabled": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tocco per fare clic attivato" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque para clicar ativado" } } } },
     "Tap to click disabled": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tocco per fare clic disattivato" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque para clicar desativado" } } } },
     "Show Keyboard": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Mostra tastiera" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Mostrar teclado" } } } },
