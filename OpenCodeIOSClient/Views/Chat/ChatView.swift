@@ -8,6 +8,15 @@ import RealityKit
 import UIKit
 #endif
 
+/// Defer each large modifier layer to its own SwiftUI body evaluation. Chaining
+/// these as computed properties eagerly builds every layer on the same stack;
+/// on physical iPhones the Debug chat/composer path exhausted the 1 MB stack.
+private struct ChatRenderSection<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View { content() }
+}
+
 private struct ChatSessionReadObserver: View {
     @ObservedObject var facade: ChatFacade
     @Environment(\.scenePhase) private var scenePhase
@@ -2700,12 +2709,12 @@ struct ChatView: View {
                 .ignoresSafeArea()
                 .transition(.identity)
         } else {
-            chatObservedContent
+            ChatRenderSection { chatObservedContent }
                 .environment(\.desktopChat, chatFacade)
                 .transition(.identity)
         }
         #else
-        chatObservedContent
+        ChatRenderSection { chatObservedContent }
             .environment(\.desktopChat, chatFacade)
         #endif
     }
@@ -2854,7 +2863,7 @@ struct ChatView: View {
     }
 
     private var chatPresentationContent: some View {
-        chatTranscriptContent
+        ChatRenderSection { chatTranscriptContent }
         .safeAreaInset(edge: .top, spacing: 0) {
             if !showsImmersiveConversation {
                 AgentActivityBar(facade: chatFacade, parent: liveSession, isPresented: $showingAgents)
@@ -3064,7 +3073,7 @@ struct ChatView: View {
     }
 
     private var chatTranscriptObservedContent: some View {
-        chatPresentationContent
+        ChatRenderSection { chatPresentationContent }
         .onChange(of: accessoryPresenceSignature) { _, _ in
             let overlaySnapshot = composerOverlaySnapshot
             if overlaySnapshot.attachments.isEmpty || overlaySnapshot.todos.allSatisfy(\.isComplete) {
@@ -3100,7 +3109,7 @@ struct ChatView: View {
     }
 
     private var chatObservedContent: some View {
-        chatTranscriptObservedContent
+        ChatRenderSection { chatTranscriptObservedContent }
         .onReceive(modelConfigurationStore.$availableProviders.dropFirst()) { _ in
             guard !isSessionBusy else { return }
             refreshCachedContextMetrics()
