@@ -26350,6 +26350,23 @@
         }
       }
     },
+    "Worktree: %@" : {
+      "comment" : "Session card label identifying the checkout containing this session.",
+      "localizations" : {
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Worktree: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Worktree: %@"
+          }
+        }
+      }
+    },
     "Worktree name (optional)" : {
       "localizations" : {
         "it" : {

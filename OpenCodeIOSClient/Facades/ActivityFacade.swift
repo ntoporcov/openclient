@@ -36,6 +36,7 @@ final class ActivityFacade: ObservableObject {
         let isLiveActivityActive: Bool
         let isHydrating: Bool
         let hydrationGeneration: Int
+        var worktreeLabel: String? = nil
 
         var id: String { recent.id }
     }
@@ -244,13 +245,12 @@ final class ActivityFacade: ObservableObject {
     private var recentChatRows: [RowSnapshot] {
         let now = Date()
         let calendar = Calendar.autoupdatingCurrent
-        let hiddenIDs = viewModel.hiddenProjectActionSessionIDs
         var seenIDs = Set<String>()
         return snapshot.recentRows.filter {
             ActivityRecentBucket.bucket(for: $0.updatedAt, now: now, calendar: calendar) == .recent
         }.filter { row in
             let session = row.recent.session
-            return session.isRootSession && !session.isArchived && !hiddenIDs.contains(session.id)
+            return session.isRootSession
                 && !viewModel.directoryStoreRegistry.isV2SessionDeleted(session.id)
                 && seenIDs.insert(session.id).inserted
         }
@@ -264,7 +264,7 @@ final class ActivityFacade: ObservableObject {
             viewModel.directoryStoreRegistry.session(matching: id) ?? row.recent.session,
             preservingAttributionFrom: row.recent.session
         )
-        guard target.isRootSession, !target.isArchived, !viewModel.isActionSession(target) else { return nil }
+        guard target.isRootSession else { return nil }
         return target
     }
 
@@ -330,6 +330,7 @@ final class ActivityFacade: ObservableObject {
 
         Publishers.MergeMany([
             viewModel.sessionListStore.objectWillChange.eraseToAnyPublisher(),
+            viewModel.directoryStoreRegistry.objectWillChange.eraseToAnyPublisher(),
             viewModel.projectActionStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.projectStore.objectWillChange.eraseToAnyPublisher(),
             viewModel.connectionStore.objectWillChange.eraseToAnyPublisher(),
@@ -412,7 +413,15 @@ final class ActivityFacade: ObservableObject {
             bindMonitoredStores()
             refreshSnapshot()
 
-            for scope in viewModel.homeSessionScopes {
+            let discoveredScopes = candidates.map {
+                BackendScope(projectID: $0.session.projectID, directory: monitoringDirectory(for: $0.session),
+                    workspaceID: $0.session.workspaceID)
+            }
+            var seenDirectories = Set<String>()
+            let metadataScopes = (viewModel.homeSessionScopes + discoveredScopes).filter {
+                seenDirectories.insert(DirectoryStoreRegistry.key(for: $0.directory)).inserted
+            }
+            for scope in metadataScopes {
                 let store = viewModel.directoryStoreRegistry.store(for: scope.directory)
                 let statusRevision = store.statusRevision
                 let permissionRevision = store.permissionRevision
@@ -714,9 +723,7 @@ final class ActivityFacade: ObservableObject {
               !viewModel.directoryStoreRegistry.isV2SessionDeleted(session.id),
               viewModel.directoryStoreRegistry.key(for: store) != nil else { return }
         let currentSession = store.sessions.first { $0.id == session.id }
-        guard currentSession?.isArchived != true,
-              currentSession?.isRootSession != false,
-              !viewModel.hiddenProjectActionSessionIDs.contains(session.id),
+        guard currentSession?.isRootSession != false,
               previousSession == nil || currentSession != nil,
               currentSession?.directory == previousSession?.directory,
               currentSession?.workspaceID == previousSession?.workspaceID,
@@ -732,7 +739,6 @@ final class ActivityFacade: ObservableObject {
         if let canonicalSession = result.0, currentSession == previousSession, !isForeground {
             _ = store.upsertSessions([canonicalSession])
         }
-        guard result.0?.isArchived != true else { return }
         var appliedTranscript = false
         if let page = result.1, result.0 != nil, !isForeground,
            viewModel.chatStore.v2StreamRevision(sessionID: session.id) == streamRevision,
@@ -844,28 +850,26 @@ final class ActivityFacade: ObservableObject {
     }
 
     private func recentCandidates() -> [RecentProjectSession] {
-        let hiddenIDs = viewModel.hiddenProjectActionSessionIDs
         let recent = viewModel.sessionListStore.recentProjectSessions(
-            projects: viewModel.projects,
+            projects: viewModel.projectStore.projects,
             previews: viewModel.sessionPreviews,
             statuses: [:],
-            hiddenActionSessionIDs: hiddenIDs,
+            includesArchived: true,
             limit: Int.max
         )
         var candidates = Dictionary(recent.map { ($0.session.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for scope in viewModel.homeSessionScopes {
-            guard let store = viewModel.directoryStoreRegistry.existingStore(for: scope.directory),
-                  let project = viewModel.projects.first(where: { $0.id == scope.projectID }) else { continue }
-            for session in store.sessions where session.isRootSession && !session.isArchived {
+        for store in viewModel.directoryStoreRegistry.allStores {
+            for session in store.sessions where session.isRootSession {
                 let attributed = candidates[session.id].map { self.session(session, preservingAttributionFrom: $0.session) } ?? session
-                candidates[session.id] = RecentProjectSession(session: attributed, projectTitle: projectTitle(self.project(for: attributed) ?? project),
+                let title = project(for: attributed).map(projectTitle)
+                    ?? attributed.directory.map { URL(fileURLWithPath: $0).lastPathComponent }
+                    ?? String(localized: "Global")
+                candidates[session.id] = RecentProjectSession(session: attributed, projectTitle: title,
                     preview: viewModel.sessionPreviews[session.id], isBusy: false)
             }
         }
         return candidates.values.filter {
-            !hiddenIDs.contains($0.session.id) && !viewModel.directoryStoreRegistry.isV2SessionDeleted($0.session.id)
-                && !viewModel.projectStore.isProjectIgnored($0.session.projectID, scopeKey: viewModel.config.recentServerID)
-                && !viewModel.projectStore.isDirectoryIgnored($0.session.directory, scopeKey: viewModel.config.recentServerID)
+            !viewModel.directoryStoreRegistry.isV2SessionDeleted($0.session.id)
         }
     }
 
@@ -876,6 +880,7 @@ final class ActivityFacade: ObservableObject {
     private func buildSnapshot() -> Snapshot {
         let owners = viewModel.directoryStoreRegistry.ownerStoresBySessionID()
         let rows = recentCandidates().map { makeRow($0, owner: owners[$0.session.id]) }
+            .filter { $0.recent.session.isRootSession }
         let sessionIDs = Set(rows.map { $0.recent.session.id })
         cachedPreviews = cachedPreviews.filter { sessionIDs.contains($0.key.sessionID) }
         cachedInteractionCounts = cachedInteractionCounts.filter { sessionIDs.contains($0.key.sessionID) }
@@ -954,12 +959,19 @@ final class ActivityFacade: ObservableObject {
             todoCount: todos.count,
             isLiveActivityActive: viewModel.liveActivityFacade.isActive(sessionID: session.id),
             isHydrating: hydratingSessionIDs.contains(session.id),
-            hydrationGeneration: hydrationGeneration
+            hydrationGeneration: hydrationGeneration,
+            worktreeLabel: worktreeLabel(for: session, project: project)
         )
     }
 
+    private func worktreeLabel(for session: OpenCodeSession, project: OpenCodeProject?) -> String? {
+        guard let project, project.id != "global",
+              let directory = session.directory, directory != project.worktree else { return nil }
+        return URL(fileURLWithPath: directory).lastPathComponent
+    }
+
     private func projectFilters(rows: [RowSnapshot]) -> [ProjectFilterSnapshot] {
-        var filters = viewModel.projects.map { project in
+        var filters = viewModel.projectStore.projects.map { project in
             ProjectFilterSnapshot(
                 id: project.id,
                 title: projectTitle(project),
@@ -995,25 +1007,26 @@ final class ActivityFacade: ObservableObject {
     }
 
     private func project(for session: OpenCodeSession) -> OpenCodeProject? {
+        let projects = viewModel.projectStore.projects
         if session.projectID == "global" {
-            return viewModel.projects.first { $0.id == "global" }
+            return projects.first { $0.id == "global" }
         }
         if let directory = session.directory,
-           let project = viewModel.projects.first(where: { $0.id == session.projectID && $0.worktree == directory }) {
+           let project = projects.first(where: { $0.id == session.projectID && $0.worktree == directory }) {
             return project
         }
         if let directory = session.directory,
-           let project = viewModel.projects.first(where: { $0.worktree == directory }) {
+           let project = projects.first(where: { $0.worktree == directory }) {
             return project
         }
         if let projectID = session.projectID,
-           let project = viewModel.projects.first(where: { $0.id == projectID }) {
+           let project = projects.first(where: { $0.id == projectID }) {
             return project
         }
         guard let directory = session.directory else {
-            return viewModel.projects.first(where: { $0.id == "global" })
+            return projects.first(where: { $0.id == "global" })
         }
-        return viewModel.projects.first { ($0.sandboxes ?? []).contains(directory) }
+        return projects.first { ($0.sandboxes ?? []).contains(directory) }
     }
 
     private func monitoringDirectory(for session: OpenCodeSession) -> String? {

@@ -2,6 +2,21 @@ import Foundation
 
 @MainActor
 enum ActivityWorkflowCoordinator {
+    /// Activity includes all root sessions, including quiet sessions beyond the first page.
+    static func rootSessions(service: any BackendSessionsService, scope: BackendScope) async throws -> [OpenCodeSession] {
+        var sessions: [String: OpenCodeSession] = [:]
+        var cursor: String?
+        var visited = Set<String>()
+        repeat {
+            try Task.checkCancellation()
+            let page = try await service.sessions(scope: scope, cursor: cursor, limit: 100, roots: true)
+            for session in page.sessions where session.isRootSession { sessions[session.id] = session }
+            cursor = page.nextCursor
+            if let cursor, !visited.insert(cursor).inserted { throw OpenCodeV2TransportError.invalidTimelineRecord }
+        } while cursor != nil
+        return sessions.values.sorted { $0.id < $1.id }
+    }
+
     /// Enumerate every page, not just Activity's visible/recent window or project filter.
     static func sessions(connection: BackendConnection, scopes: [BackendScope]) async throws -> [OpenCodeSession] {
         guard !connection.isClosed else { throw BackendError.disconnected }

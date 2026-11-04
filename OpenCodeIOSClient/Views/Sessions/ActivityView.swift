@@ -739,6 +739,7 @@ struct ActivitySessionRow: View, Equatable {
                 ActivitySessionSummaryContent(
                     title: title,
                     projectTitle: row.recent.projectTitle,
+                    worktreeLabel: row.worktreeLabel,
                     projectIcon: row.projectIcon,
                     usesGlobalProjectAvatar: row.usesGlobalProjectAvatar,
                     updatedAt: row.updatedAt
@@ -817,6 +818,15 @@ struct ActivitySessionRow: View, Equatable {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let worktreeLabel = row.worktreeLabel {
+                    Label(worktreeLabel, systemImage: "arrow.triangle.branch")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .accessibilityLabel(Text("Worktree: \(worktreeLabel)"))
+                }
             }
         }
     }
@@ -911,6 +921,7 @@ struct ActivitySessionRow: View, Equatable {
 private struct ActivitySessionSummaryContent: View {
     let title: String
     let projectTitle: String
+    let worktreeLabel: String?
     let projectIcon: OpenCodeProject.Icon?
     let usesGlobalProjectAvatar: Bool
     let updatedAt: Date?
@@ -935,6 +946,15 @@ private struct ActivitySessionSummaryContent: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let worktreeLabel {
+                    Label(worktreeLabel, systemImage: "arrow.triangle.branch")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .accessibilityLabel(Text("Worktree: \(worktreeLabel)"))
+                }
             }
 
             Spacer(minLength: 8)

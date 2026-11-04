@@ -518,12 +518,17 @@ extension AppViewModel {
             let directory = DirectoryStoreRegistry.directory(forKey: key)
             let snapshot = directoryStoreRegistry.v2LifecycleSnapshot
             let sessionsBeforeRequest = store.sessions
+            let directorySessionsBeforeRequest = Dictionary(uniqueKeysWithValues: directoryStoreRegistry.allStores.map {
+                (ObjectIdentifier($0), $0.sessions)
+            })
             // Directory inventories discover pending actions without N per-session reads.
             async let permissions = try? client.listV2PendingPermissions(directory: directory)
             async let forms = try? client.listV2PendingForms(directory: directory)
             do {
-                let projectID = key == DirectoryStoreRegistry.globalKey ? "global" : store.sessions.first?.projectID ?? "global"
-                let page = try await client.listV2Sessions(projectID: projectID, directory: directory, roots: false)
+                let selectedProjectID = store === directoryStoreRegistry.activeStore ? currentProject?.id : nil
+                let projectID = selectedProjectID ?? (key == DirectoryStoreRegistry.globalKey ? "global" : store.sessions.first?.projectID ?? "global")
+                let page = try await client.listV2Sessions(projectID: projectID,
+                    directory: selectedProjectID == nil ? directory : nil, roots: false)
                 guard !Task.isCancelled, directoryStoreRegistry.generation == generation else { return }
                 let unchanged = directoryStoreRegistry.unchangedV2Sessions(page.sessions, since: snapshot)
                 var discovered: [OpenCodeSession] = []
@@ -537,7 +542,15 @@ extension AppViewModel {
                         discovered.append(session)
                     }
                 }
-                store.applyV2DiscoveredSessions(discovered, ifUnchangedSince: sessionsBeforeRequest)
+                if let selectedProjectID, selectedProjectID != "global" {
+                    for (directory, sessions) in Dictionary(grouping: discovered, by: { DirectoryStoreRegistry.key(for: $0.directory) }) {
+                        let owner = directoryStoreRegistry.store(for: DirectoryStoreRegistry.directory(forKey: directory))
+                        owner.applyV2DiscoveredSessions(sessions,
+                            ifUnchangedSince: directorySessionsBeforeRequest[ObjectIdentifier(owner)] ?? [])
+                    }
+                } else {
+                    store.applyV2DiscoveredSessions(discovered, ifUnchangedSince: sessionsBeforeRequest)
+                }
                 for session in unchanged {
                     guard isCurrentBackendConnection(connection), directoryStoreRegistry.generation == generation else { return }
                     await funAndGamesFacade.reconcileSetup(for: session.id)

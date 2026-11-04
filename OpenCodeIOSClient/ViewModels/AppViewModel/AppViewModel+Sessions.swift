@@ -318,6 +318,10 @@ extension AppViewModel {
         await loadWorkspaceSessionsIfNeeded()
     }
 
+    var v2SessionListStore: DirectoryStore {
+        directoryStoreRegistry.store(for: currentProject?.id == "global" ? nil : currentProject?.worktree ?? effectiveSelectedDirectory)
+    }
+
     func reloadV2Sessions(
         replacing: Bool,
         cursor: String? = nil
@@ -325,7 +329,7 @@ extension AppViewModel {
         guard connectionStore.apiProfile == .v2, let projectID = currentProject?.id else { return }
         let connection = try requireBackendConnection()
         let client = try connection.requireOpenCodeClient(for: .interactions)
-        let directory = projectID == "global" ? nil : effectiveSelectedDirectory
+        let directory = projectID == "global" ? nil : currentProject?.worktree ?? effectiveSelectedDirectory
         let targetKey = DirectoryStoreRegistry.key(for: directory)
         let targetStore = directoryStoreRegistry.store(for: directory)
         let targetGeneration = directoryStoreRegistry.generation
@@ -337,10 +341,16 @@ extension AppViewModel {
         let sessionRevision = targetStore.v2SessionRevision
         let statusSnapshot = directoryStoreRegistry.v2StatusSnapshot
         targetStore.isLoadingSessions = true
-        defer { targetStore.isLoadingSessions = false }
+        sessionListFacade.invalidateWorkspaceSnapshot()
+        defer {
+            targetStore.isLoadingSessions = false
+            sessionListFacade.invalidateWorkspaceSnapshot()
+        }
 
         async let activeStatuses = client.listV2SessionStatuses()
-        let page = try await connection.sessions.sessions(scope: .init(projectID: projectID, directory: directory),
+        // A V2 move changes location, not project membership. The flat project list
+        // must include its other checkouts; workspace sections keep directory pages.
+        let page = try await connection.sessions.sessions(scope: .init(projectID: projectID),
             cursor: cursor, limit: openCodeV2SessionPageLimit, roots: true)
         let statuses = try await activeStatuses
         guard isCurrentBackendConnection(connection), connectionStore.apiProfile == .v2, config == client.config,
@@ -353,13 +363,25 @@ extension AppViewModel {
             return
         }
 
+        // The project owns the cursor; each checkout still owns its live chat state.
+        // Keeping copies of worktree sessions in the root store would route Activity
+        // previews and pending interactions to the wrong owner.
+        let localSessions = projectID == "global" ? page.sessions : page.sessions.filter { $0.directory == directory }
         targetStore.applyV2SessionPage(
-            OpenCodeV2SessionPage(sessions: page.sessions, nextCursor: page.nextCursor),
+            OpenCodeV2SessionPage(sessions: localSessions, nextCursor: page.nextCursor),
             replacing: replacing,
             requestedCursor: cursor,
             limit: openCodeV2SessionPageLimit
         )
-        directoryStoreRegistry.applyV2ActiveSnapshot(statuses, snapshot: statusSnapshot)
+        if projectID != "global" {
+            for session in page.sessions where session.directory != directory {
+                directoryStoreRegistry.store(for: session.directory).applyV2DiscoveredSessions([session])
+            }
+        }
+        let newOwners = directoryStoreRegistry.allStores.filter { store in
+            !statusSnapshot.contains { $0.0 === store }
+        }.map { ($0, UInt(0)) }
+        directoryStoreRegistry.applyV2ActiveSnapshot(statuses, snapshot: statusSnapshot + newOwners)
         persistDirectoryToLocalCache(targetStore, directory: directory)
         scheduleWidgetSnapshotPublication()
         if let selectedSessionID = targetStore.selectedSession?.id {
@@ -912,9 +934,10 @@ extension AppViewModel {
     }
 
     func loadMoreSessions() async {
-        guard !isBrowsingLocalCache, directoryStore.hasMoreSessions, !isLoadingSessions else { return }
+        let listStore = connectionStore.apiProfile == .v2 ? v2SessionListStore : directoryStore
+        guard !isBrowsingLocalCache, listStore.hasMoreSessions, !listStore.isLoadingSessions else { return }
         if connectionStore.apiProfile == .v2 {
-            guard let cursor = directoryStore.nextSessionCursor else { return }
+            guard let cursor = listStore.nextSessionCursor else { return }
             let generation = directoryStoreRegistry.generation
             let owner = directoryStore
             do {

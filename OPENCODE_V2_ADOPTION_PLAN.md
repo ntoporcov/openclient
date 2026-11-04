@@ -81,7 +81,8 @@ These paths are implemented. Contract fixtures, isolated-server tests, and UI co
 
 | Surface | Current behavior |
 | --- | --- |
-| Navigation | Location/project discovery and selection; directory-scoped session listing, creation, cursor pagination, and active status hydration. |
+| Navigation | Location/project discovery and selection; project-wide session listing (including moved worktree sessions), directory-scoped workspace sections and creation, cursor pagination, and active status hydration. |
+| Activity | Project-wide, fully paginated root-session discovery independent of worktree inventory. Root action and archived sessions remain candidates; subagent sessions are excluded. Cards retain project identity and show a separate worktree label. |
 | Chat | Projected transcript/older pages, exact next-17155 input/assistant events, typed files/mentions and pinned inbox handling. General recovery covers Legacy and v2. Normal-mode scripted core UI verifies streaming, interruption, Photos media, background catch-up and cold transcript relaunch; not paid inference. Canonical reconciliation remains authoritative. |
 | Composer configuration | Attachment URI/name encoding, agent mentions, model/variant and agent selection, catalog loading, commands with arguments/files, and session compaction. Session selection mutations are coordinated before sends. |
 | Permissions | Directory/session hydration and session-scoped `once`, `always`, or `reject` replies. |

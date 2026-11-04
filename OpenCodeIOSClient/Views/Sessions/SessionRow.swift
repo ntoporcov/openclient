@@ -317,11 +317,12 @@ struct SessionRow: View, Equatable {
 
             VStack(alignment: .leading, spacing: 3) {
                 if let workspaceOverline, !workspaceOverline.isEmpty {
-                    Text(workspaceOverline)
+                    Label(workspaceOverline, systemImage: "arrow.triangle.branch")
+                        .labelStyle(.titleAndIcon)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
                         .lineLimit(1)
+                        .accessibilityLabel(Text("Worktree: \(workspaceOverline)"))
                 }
 
                 HStack(spacing: 8) {

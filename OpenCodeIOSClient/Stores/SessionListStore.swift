@@ -401,6 +401,7 @@ final class SessionListStore: ObservableObject {
         previews: [String: SessionPreview],
         statuses: [String: String],
         hiddenActionSessionIDs: Set<String> = [],
+        includesArchived: Bool = false,
         limit: Int = 15
     ) -> [RecentProjectSession] {
         var projectsByID: [String: OpenCodeProject] = [:]
@@ -410,7 +411,7 @@ final class SessionListStore: ObservableObject {
         var seen = Set<String>()
 
         let candidates = deduplicatedRecentSessions()
-            .filter { $0.isRootSession && !$0.isArchived && !hiddenActionSessionIDs.contains($0.id) }
+            .filter { $0.isRootSession && (includesArchived || !$0.isArchived) && !hiddenActionSessionIDs.contains($0.id) }
         // Sort small keys rather than whole sessions: this rebuilds on every Activity
         // refresh during streaming, and moving large structs dominated the sort cost.
         let orderedIndices = candidates.indices
