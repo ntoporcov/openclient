@@ -120,10 +120,6 @@ struct ProjectListView: View {
                     mode: providerUsage.displayStore.displayMode
                 )
 
-                if let bridge {
-                    OpenClientRemoteDesktopButton(bridge: bridge)
-                }
-
                 Section {
                     if displayedProjects.isEmpty, !isEditingProjects {
                         Text(emptyProjectsMessage)
@@ -356,6 +352,16 @@ struct ProjectListView: View {
         .navigationTitle("Projects")
         .toolbar {
             if let bridge, facade.allowsBridge {
+                if bridge.remoteDesktopEndpoint != nil {
+                    ToolbarItem(placement: .opencodeTrailing) {
+                        OpenClientRemoteDesktopButton(bridge: bridge)
+                    }
+                    #if os(iOS)
+                    if #available(iOS 26.0, *) {
+                        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                    }
+                    #endif
+                }
                 ToolbarItem(placement: .opencodeTrailing) {
                     OpenClientBridgeToolbarButton(bridge: bridge) {
                         isShowingBridgeStatus = true

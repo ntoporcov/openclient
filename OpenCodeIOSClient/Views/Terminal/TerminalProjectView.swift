@@ -319,20 +319,7 @@ private struct TerminalModifierBar: View {
         accessibilityIdentifier: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(.callout, design: .monospaced).weight(.medium))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 13)
-                .frame(height: 38)
-                .opencodeConcentricGlassSurface(
-                    tint: isActive ? appAccentColor.opacity(0.22) : nil,
-                    isInteractive: true,
-                    minimumCornerRadius: 19,
-                    in: Capsule()
-                )
-        }
-        .buttonStyle(.plain)
+        DesktopKeyboardButton(title: title, isActive: isActive, action: action)
         .accessibilityIdentifier(accessibilityIdentifier ?? "terminal.modifier.\(title)")
     }
 

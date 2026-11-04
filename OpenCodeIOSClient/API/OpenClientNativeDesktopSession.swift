@@ -49,6 +49,10 @@ final class OpenClientNativeDesktopSession: NSObject {
 
     func key(_ key: VNCKeyCode) { connection?.keyDown(key); connection?.keyUp(key) }
 
+    func modifier(_ key: VNCKeyCode, pressed: Bool) {
+        if pressed { connection?.keyDown(key) } else { connection?.keyUp(key) }
+    }
+
     func pointer(x: UInt16, y: UInt16, down: Bool) {
         if down { connection?.mouseButtonDown(.left, x: x, y: y) }
         else { connection?.mouseButtonUp(.left, x: x, y: y) }
