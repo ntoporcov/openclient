@@ -63,7 +63,6 @@ struct OpenClientRemoteDesktopButton: View {
 
 struct OpenClientDesktopHandoffCard: View {
     @Environment(\.desktopBridge) private var bridge
-    @Environment(\.appAccentColor) private var accent
     let handoff: OpenClientDesktopHandoff
     let pending: Bool
 
@@ -76,7 +75,7 @@ struct OpenClientDesktopHandoffCard: View {
                 if let bridge {
                     OpenClientRemoteDesktopButton(bridge: bridge, handoff: handoff)
                         .buttonStyle(.borderedProminent)
-                        .tint(accent)
+                        .modifier(AppAccentActionModifier())
                         .controlSize(.large)
                         .labelStyle(.titleAndIcon)
                         .font(.headline)
