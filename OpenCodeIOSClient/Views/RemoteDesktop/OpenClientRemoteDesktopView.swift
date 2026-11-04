@@ -40,31 +40,21 @@ struct OpenClientRemoteDesktopButton: View {
                             .frame(maxWidth: .infinity)
                     }
                 } else {
-                    Menu {
-                    Menu {
-                        Picker("Button icon", selection: $toolbarIcon) {
-                            Label("Desktop", systemImage: "desktopcomputer").tag("desktopcomputer")
-                            Label("Laptop", systemImage: "laptopcomputer").tag("laptopcomputer")
-                            Label("Display", systemImage: "display").tag("display")
-                            Label("Keyboard", systemImage: "keyboard").tag("keyboard")
-                            Label("Pointer", systemImage: "cursorarrow").tag("cursorarrow")
-                            Label("Game controller", systemImage: "gamecontroller").tag("gamecontroller")
+                    DesktopToolbarMenu(
+                        icon: toolbarIcon, isForgetting: isForgettingCredentials,
+                        bridgeID: ObjectIdentifier(bridge),
+                        selectIcon: { toolbarIcon = $0 },
+                        open: { isPresented = true },
+                        forget: {
+                            isForgettingCredentials = true
+                            Task {
+                                defer { isForgettingCredentials = false }
+                                do { try await bridge.forgetDesktopCredentials() }
+                                catch { credentialError = error.localizedDescription }
+                            }
                         }
-                    } label: { Label("Change icon", systemImage: "square.and.pencil") }
-                    Button("Forget saved computer credentials", role: .destructive) {
-                        isForgettingCredentials = true
-                        Task {
-                            defer { isForgettingCredentials = false }
-                            do { try await bridge.forgetDesktopCredentials() }
-                            catch { credentialError = error.localizedDescription }
-                        }
-                    }
-                    .disabled(isForgettingCredentials)
-                    } label: {
-                        Label("Remote Desktop", systemImage: toolbarIcon)
-                    } primaryAction: {
-                        isPresented = true
-                    }
+                    )
+                    .equatable()
                 }
             }
             .accessibilityIdentifier("remote-desktop.open")
@@ -91,6 +81,42 @@ struct OpenClientRemoteDesktopButton: View {
             .onChange(of: bridge.remoteDesktopEndpoint) { _, value in
                 if value != endpoint { isPresented = false }
             }
+        }
+    }
+}
+
+/// Bridge notifications do not change this menu's contents. Keep its subtree
+/// stable while a submenu is open, but update for actual selection/busy changes.
+private struct DesktopToolbarMenu: View, Equatable {
+    let icon: String
+    let isForgetting: Bool
+    let bridgeID: ObjectIdentifier
+    let selectIcon: (String) -> Void
+    let open: () -> Void
+    let forget: () -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.icon == rhs.icon && lhs.isForgetting == rhs.isForgetting && lhs.bridgeID == rhs.bridgeID
+    }
+
+    var body: some View {
+        Menu {
+            Menu {
+                Picker("Button icon", selection: Binding(get: { icon }, set: selectIcon)) {
+                    Label("Desktop", systemImage: "desktopcomputer").tag("desktopcomputer")
+                    Label("Laptop", systemImage: "laptopcomputer").tag("laptopcomputer")
+                    Label("Display", systemImage: "display").tag("display")
+                    Label("Keyboard", systemImage: "keyboard").tag("keyboard")
+                    Label("Pointer", systemImage: "cursorarrow").tag("cursorarrow")
+                    Label("Game controller", systemImage: "gamecontroller").tag("gamecontroller")
+                }
+            } label: { Label("Change icon", systemImage: "square.and.pencil") }
+            Button("Forget credentials", role: .destructive, action: forget)
+                .disabled(isForgetting)
+        } label: {
+            Label("Remote Desktop", systemImage: icon)
+        } primaryAction: {
+            open()
         }
     }
 }
@@ -255,7 +281,7 @@ private struct OpenClientRemoteDesktopView: View {
                     Menu {
                         Text("Using iPhone Duo? Unfold it to use the inner display.")
                         Button("Reconnect") { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
-                        Button("Forget saved computer credentials", role: .destructive) {
+                        Button("Forget credentials", role: .destructive) {
                             coordinator.forgetCredentials(store: store)
                             coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store)
                         }

@@ -1,6 +1,7 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Forget credentials": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Dimentica credenziali" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Esquecer credenciais" } } } },
     "Button icon": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Icona del pulsante" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Ícone do botão" } } } },
     "Keyboard": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tastiera" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Teclado" } } } },
     "Pointer": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Puntatore" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Ponteiro" } } } },
