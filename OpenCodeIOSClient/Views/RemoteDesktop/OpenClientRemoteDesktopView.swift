@@ -26,12 +26,13 @@ struct OpenClientRemoteDesktopButton: View {
             }
             .accessibilityIdentifier("remote-desktop.open")
             #if os(iOS)
-            .background {
-                DesktopFullscreenPresenter(isPresented: $isPresented) {
+            .fullScreenCover(isPresented: $isPresented) {
+                DesktopLandscapeContainer {
                     OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff) { isPresented = false }
                         .environment(\.appAccentColor, accent)
                         .environment(\.scenePhase, scenePhase)
                 }
+                .ignoresSafeArea()
             }
             #else
             .sheet(isPresented: $isPresented) {

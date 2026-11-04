@@ -151,76 +151,23 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
     }
 }
 
-/// A real full-screen controller owns the orientation mask. Requesting geometry
-/// from a SwiftUI background alone does not constrain its presenting controller.
-struct DesktopFullscreenPresenter<Content: View>: UIViewControllerRepresentable {
-    @Binding var isPresented: Bool
+/// SwiftUI owns modal presentation; this visible controller applies orientation
+/// after the cover has appeared, rather than presenting from a toolbar background.
+struct DesktopLandscapeContainer<Content: View>: UIViewControllerRepresentable {
     @ViewBuilder let content: () -> Content
-
-    func makeUIViewController(context: Context) -> Presenter { Presenter() }
-    func updateUIViewController(_ controller: Presenter, context: Context) {
-        controller.content = content
-        controller.wantsPresentation = isPresented
-        controller.updatePresentation()
+    func makeUIViewController(context: Context) -> LandscapeHost {
+        LandscapeHost(rootView: content())
     }
-    static func dismantleUIViewController(_ controller: Presenter, coordinator: ()) {
-        controller.wantsPresentation = false
-        controller.updatePresentation()
+    func updateUIViewController(_ controller: LandscapeHost, context: Context) {
+        controller.rootView = content()
     }
-
-    final class Presenter: UIViewController {
-        var content: (() -> Content)?
-        var wantsPresentation = false
-        private var host: LandscapeHost?
-        private var transitioning = false
-        private var original: UIInterfaceOrientation?
-
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            updatePresentation()
-        }
-
-        func updatePresentation() {
-            guard !transitioning else { return }
-            if wantsPresentation, host == nil, view.window != nil, let content {
-                original = view.window?.windowScene?.effectiveGeometry.interfaceOrientation
-                let host = LandscapeHost(rootView: content())
-                host.modalPresentationStyle = .fullScreen
-                self.host = host
-                transitioning = true
-                present(host, animated: true) { [weak self] in
-                    self?.transitioning = false
-                    self?.updatePresentation()
-                }
-            } else if !wantsPresentation, let host {
-                transitioning = true
-                let scene = view.window?.windowScene
-                host.dismiss(animated: true) { [weak self] in
-                    guard let self else { return }
-                    self.host = nil
-                    transitioning = false
-                    if let original, scene?.traitCollection.userInterfaceIdiom == .phone {
-                        let mask: UIInterfaceOrientationMask = switch original {
-                        case .portrait: .portrait
-                        case .portraitUpsideDown: .portraitUpsideDown
-                        case .landscapeLeft: .landscapeLeft
-                        case .landscapeRight: .landscapeRight
-                        default: .all
-                        }
-                        scene?.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-                        scene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
-                    }
-                    updatePresentation()
-                }
-            } else if wantsPresentation, let host, let content {
-                // Preserve SwiftUI identity while forwarding environment changes
-                // (notably scene backgrounding) from the presenting app scene.
-                host.rootView = content()
-            }
-        }
+    static func dismantleUIViewController(_ controller: LandscapeHost, coordinator: ()) {
+        controller.restoreOrientation()
     }
 
     final class LandscapeHost: UIHostingController<Content> {
+        private weak var owningScene: UIWindowScene?
+        private var original: UIInterfaceOrientation?
         override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
             traitCollection.userInterfaceIdiom == .phone ? .landscape : .all
         }
@@ -229,9 +176,30 @@ struct DesktopFullscreenPresenter<Content: View>: UIViewControllerRepresentable 
         }
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            guard traitCollection.userInterfaceIdiom == .phone else { return }
+            guard traitCollection.userInterfaceIdiom == .phone,
+                  let scene = view.window?.windowScene else { return }
+            if owningScene == nil {
+                owningScene = scene
+                original = scene.effectiveGeometry.interfaceOrientation
+            }
             setNeedsUpdateOfSupportedInterfaceOrientations()
-            view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+            parent?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+        }
+
+        func restoreOrientation() {
+            guard let scene = owningScene, let original else { return }
+            let mask: UIInterfaceOrientationMask = switch original {
+            case .portrait: .portrait
+            case .portraitUpsideDown: .portraitUpsideDown
+            case .landscapeLeft: .landscapeLeft
+            case .landscapeRight: .landscapeRight
+            default: .all
+            }
+            DispatchQueue.main.async {
+                scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+            }
         }
     }
 }
