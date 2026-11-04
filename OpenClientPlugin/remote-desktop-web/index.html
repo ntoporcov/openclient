@@ -1,0 +1,7 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><title>OpenClient</title>
+<style>
+html,body{margin:0;height:100%;background:#121212;color:white;font:16px system-ui}body{display:flex;flex-direction:column}#screen{flex:1;min-height:0;overflow:hidden}#bar{display:flex;gap:8px;padding:8px;align-items:center;flex-wrap:wrap}button,input{font:inherit;padding:9px;border-radius:8px;border:1px solid #666;max-width:100%;box-sizing:border-box}button{background:#333;color:white}#status{font-size:13px;flex:1}#credentials{padding:16px}#credentials form{display:grid;gap:12px;max-width:360px;margin:auto}#text{width:140px}[hidden]{display:none!important}
+</style><script defer src="viewer.js"></script></head>
+<body><div id="bar"><span id="status"></span><button id="escape">Esc</button><button id="tab">Tab</button><button id="control">Ctrl</button><button id="alt">Alt</button><button id="meta">⌘</button><input id="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
+<div id="credentials" hidden><form><label id="userLabel" for="username"></label><input id="username" autocomplete="off"><label id="passwordLabel" for="password"></label><input id="password" type="password" autocomplete="off"><button id="login" type="submit"></button></form></div><div id="screen"></div></body></html>

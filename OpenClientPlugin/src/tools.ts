@@ -13,13 +13,29 @@ import {
 import { type ImageResourceManager, imageToolID } from "./image.js"
 import { isJsonObject } from "./protocol.js"
 import { type VideoResourceManager, videoToolID } from "./video.js"
+import type { RemoteDesktopSessions } from "./remote-desktop-session.js"
 
 export function createOpenClientTools(
   bridge: OpenClientBridge,
   videoResources: VideoResourceManager,
   imageResources: ImageResourceManager,
+  remoteDesktop?: RemoteDesktopSessions,
 ) {
   return {
+    openclient_request_remote_access: tool({
+      description: "Ask the user to complete a task on the host desktop, such as signing in. Shows an Open Remote Desktop card in OpenClient and waits for explicit Done or Cancel. Never request passwords in chat. Requires configured remote desktop access.",
+      args: { reason: tool.schema.string().min(1).max(2000).describe("What the user needs to do on the desktop.") },
+      async execute(args, context) {
+        if (!remoteDesktop || !(await remoteDesktop.capability()).viewerAvailable) throw new Error("Remote desktop access is not configured or available on this host")
+        const { request, result } = remoteDesktop.handoffs.request({
+          reason: args.reason, sessionID: context.sessionID, messageID: context.messageID,
+        }, context.abort)
+        context.metadata({ title: "Your help is needed", metadata: { renderer: "openclient.remote-desktop", payload: request } })
+        const outcome = await result
+        return { title: "Remote desktop handoff", output: JSON.stringify({ outcome }),
+          metadata: { renderer: "openclient.remote-desktop", payload: { ...request, outcome } } }
+      },
+    }),
     openclient_get_tool_list: tool({
       description: "Ask connected or recently disconnected OpenClient iOS apps for the tools they support. Tool availability is independent of which chat the app is displaying.",
       args: {

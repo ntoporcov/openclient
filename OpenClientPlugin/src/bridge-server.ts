@@ -1,5 +1,5 @@
 import { networkInterfaces } from "node:os"
-import { RemoteDesktopDiscovery } from "./remote-desktop.js"
+import { RemoteDesktopSessions, type DesktopSocketData } from "./remote-desktop-session.js"
 import { OpenClientBridge } from "./bridge.js"
 import { parseClientMessage, protocolVersion } from "./protocol.js"
 import { mintNotificationSetupTicket, notificationCapability, type SetupDraft } from "./notifications.js"
@@ -26,12 +26,13 @@ const videoAssetRoute = /^\/openclient\/v1\/video\/streams\/([A-Za-z0-9_-]{32})\
 
 type SocketData = {
   connectionID: string
-}
+} | DesktopSocketData
 
 export type BridgeServer = {
   bridge: OpenClientBridge
   imageResources: ImageResourceManager
   videoResources: VideoResourceManager
+  remoteDesktop: RemoteDesktopSessions
   port: number
   advertisedURLs: string[]
   stop(): Promise<void>
@@ -43,11 +44,15 @@ export type BridgeServerOptions = {
   image?: ImageResourceManagerOptions
   video?: VideoResourceManagerOptions
   remoteDesktopURL?: string
+  remoteDesktopToken?: string
 }
 
 export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
   const bridge = new OpenClientBridge()
-  const remoteDesktop = new RemoteDesktopDiscovery(options.remoteDesktopURL ?? process.env.OPENCLIENT_VNC_URL)
+  const remoteDesktop = new RemoteDesktopSessions(
+    options.remoteDesktopURL ?? process.env.OPENCLIENT_VNC_URL,
+    options.remoteDesktopToken ?? process.env.OPENCLIENT_REMOTE_DESKTOP_TOKEN,
+  )
   const imageResources = new ImageResourceManager({
     ...options.image,
     registryPath: options.image?.registryPath ?? defaultImageRegistryPath(options.openCodePort),
@@ -66,7 +71,52 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
     hostname: "::",
     port,
     async fetch(request, bunServer) {
-      const url = new URL(request.url)
+       const url = new URL(request.url)
+       const desktopRoot = "/openclient/v1/desktop"
+       const handoffMatch = /^\/openclient\/v1\/desktop\/handoffs\/([a-f0-9-]{36})$/.exec(url.pathname)
+       if (handoffMatch) {
+         if (request.method !== "POST") return new Response(null, { status: 405 })
+         if (!remoteDesktop.authorized(request)) return new Response(null, { status: 401 })
+         if (Number(request.headers.get("content-length")) > 4096) return new Response(null, { status: 413 })
+         try {
+           const text = await request.text()
+           if (text.length > 4096) return new Response(null, { status: 413 })
+           const body = JSON.parse(text)
+           if (!body || typeof body.sessionID !== "string" || typeof body.messageID !== "string"
+             || !["done", "cancelled"].includes(body.outcome)) return new Response(null, { status: 400 })
+           const completed = remoteDesktop.handoffs.complete(handoffMatch[1]!, body.sessionID, body.messageID, body.outcome)
+           return new Response(null, { status: completed ? 204 : 404 })
+         } catch { return new Response(null, { status: 400 }) }
+       }
+       if (url.pathname === `${desktopRoot}/sessions`) {
+         if (request.method !== "POST") return new Response(null, { status: 405 })
+         if (!remoteDesktop.authorized(request)) return new Response(null, { status: 401 })
+         const ticket = await remoteDesktop.ticket()
+         return ticket ? Response.json({ ticket }, { headers: { "Cache-Control": "no-store" } })
+           : new Response(null, { status: 503 })
+       }
+       if (url.pathname === `${desktopRoot}/socket`) {
+         // Tickets are single-use, expire after 30 seconds and are never VNC credentials.
+         if (request.headers.get("origin") !== url.origin) return new Response(null, { status: 403 })
+         if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response(null, { status: 426 })
+         const ticket = url.searchParams.get("ticket") ?? ""
+         if (!remoteDesktop.consume(ticket)) return new Response(null, { status: 401 })
+         return bunServer.upgrade(request, { data: { desktopTicket: ticket } })
+           ? undefined : new Response(null, { status: 400 })
+       }
+       if (url.pathname === `${desktopRoot}/viewer` || url.pathname === `${desktopRoot}/viewer.js`) {
+         if (request.method !== "GET") return new Response(null, { status: 405 })
+         const name = url.pathname.endsWith(".js") ? "viewer.js" : "index.html"
+         const file = Bun.file(new URL(`../dist/remote-desktop-web/${name}`, import.meta.url))
+         if (!await file.exists()) return new Response(null, { status: 503 })
+         return new Response(file, { headers: {
+           "Content-Type": name === "viewer.js" ? "text/javascript" : "text/html",
+           "Cache-Control": "no-store",
+           "Referrer-Policy": "no-referrer",
+           "X-Content-Type-Options": "nosniff",
+           "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+         } })
+       }
        if (url.pathname === healthPath) {
          return Response.json({
            service: "openclient-plugin",
@@ -181,12 +231,14 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
     idleTimeout: 30,
     websocket: {
       open(socket) {
+        if ("desktopTicket" in socket.data) { remoteDesktop.open(socket as Bun.ServerWebSocket<DesktopSocketData>); return }
         const timer = setTimeout(() => {
           socket.close(4002, "Registration timed out")
         }, 10_000)
         registrationTimers.set(socket.data.connectionID, timer)
       },
       message(socket, payload) {
+        if ("desktopTicket" in socket.data) { remoteDesktop.message(socket as Bun.ServerWebSocket<DesktopSocketData>, payload); return }
         if (typeof payload !== "string") {
           socket.close(1003, "Only text messages are supported")
           return
@@ -205,14 +257,18 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
         }
       },
       close(socket) {
+        if ("desktopTicket" in socket.data) { remoteDesktop.close(socket as Bun.ServerWebSocket<DesktopSocketData>); return }
         const timer = registrationTimers.get(socket.data.connectionID)
         if (timer) clearTimeout(timer)
         registrationTimers.delete(socket.data.connectionID)
         bridge.disconnect(socket.data.connectionID)
       },
+      drain(socket) {
+        if ("desktopTicket" in socket.data) remoteDesktop.drain(socket as Bun.ServerWebSocket<DesktopSocketData>)
+      },
       idleTimeout: 120,
       maxPayloadLength: 1_048_576,
-      backpressureLimit: 1_048_576,
+      backpressureLimit: 16_777_216,
       closeOnBackpressureLimit: true,
       sendPings: true,
       perMessageDeflate: false,
@@ -238,12 +294,14 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
     bridge,
     imageResources,
     videoResources,
+    remoteDesktop,
     port,
     advertisedURLs,
     async stop() {
       for (const timer of registrationTimers.values()) clearTimeout(timer)
       registrationTimers.clear()
       bridge.stop()
+      remoteDesktop.stop()
       server.stop(true)
       await Promise.all([imageResources.stopAll(), videoResources.stopAll()])
     },

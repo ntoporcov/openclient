@@ -7,6 +7,7 @@ import { createOpenClientTools } from "./tools.js"
 import type { OpenClientBridge } from "./bridge.js"
 import type { ImageResourceManager } from "./image.js"
 import type { VideoResourceManager } from "./video.js"
+import type { RemoteDesktopSessions } from "./remote-desktop-session.js"
 
 const executionPermission = "openclient_execute_tool"
 
@@ -16,8 +17,9 @@ export async function registerV2Tools(
   videoResources: VideoResourceManager,
   imageResources: ImageResourceManager,
   lifetimeSignal = new AbortController().signal,
+  remoteDesktop?: RemoteDesktopSessions,
 ): Promise<Registration> {
-  const legacy = createOpenClientTools(bridge, videoResources, imageResources)
+  const legacy = createOpenClientTools(bridge, videoResources, imageResources, remoteDesktop)
 
   return ctx.tool.transform((editor) => {
     editor.add({
@@ -48,6 +50,14 @@ export async function registerV2Tools(
         ctx,
         lifetimeSignal,
       ),
+    })
+    editor.add({
+      name: "openclient_request_remote_access",
+      description: legacy.openclient_request_remote_access.description,
+      input: toolSchema(legacy.openclient_request_remote_access.args),
+      output: { type: "string" },
+      options: { codemode: false },
+      execute: (input, context) => executeLegacy(legacy.openclient_request_remote_access, input, context, ctx, lifetimeSignal),
     })
   })
 }

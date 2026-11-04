@@ -120,6 +120,10 @@ struct ProjectListView: View {
                     mode: providerUsage.displayStore.displayMode
                 )
 
+                if let bridge {
+                    OpenClientRemoteDesktopButton(bridge: bridge)
+                }
+
                 Section {
                     if displayedProjects.isEmpty, !isEditingProjects {
                         Text(emptyProjectsMessage)

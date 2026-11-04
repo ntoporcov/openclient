@@ -43,6 +43,7 @@ describe("v2 OpenClient tools", () => {
     expect(registered.map((tool) => tool.name)).toEqual([
       "openclient_get_tool_list",
       "openclient_execute_tool",
+      "openclient_request_remote_access",
     ])
     expect(registered[1]?.options).toEqual({ permission: "openclient_execute_tool", codemode: false })
     expect(registered[0]?.output).toEqual({ type: "string" })

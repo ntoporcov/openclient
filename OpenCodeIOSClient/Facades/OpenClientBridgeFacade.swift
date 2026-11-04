@@ -88,6 +88,10 @@ struct OpenClientBridgeSnapshot: Equatable {
 
 @MainActor
 final class OpenClientBridgeFacade: ObservableObject {
+    var remoteDesktopEndpoint: OpenClientBridgeEndpoint? {
+        guard case .connected = store.phase, store.endpoint?.remoteDesktop?.canOpenViewer == true else { return nil }
+        return store.endpoint
+    }
     private let store: OpenClientBridgeStore
     private let forceConnectAction: @MainActor () -> Void
     private let setupNotificationsAction: @MainActor () async -> Void

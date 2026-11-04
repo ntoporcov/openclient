@@ -44,6 +44,7 @@ const OpenClientPlugin = async (input: Parameters<Plugin>[0], options: OpenClien
       lease.server.bridge,
       lease.server.videoResources,
       lease.server.imageResources,
+      lease.server.remoteDesktop,
     )
     return {
       event: async ({ event }: { event: unknown }) => {

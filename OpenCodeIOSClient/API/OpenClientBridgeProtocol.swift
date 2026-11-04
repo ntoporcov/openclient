@@ -214,10 +214,13 @@ struct OpenClientRemoteDesktopAdvertisement: Decodable, Equatable, Sendable {
     let state: String
     let transport: String
     let protocolVersion: String?
+    let viewerAvailable: Bool?
 
     var isVNCDetected: Bool {
         version == 1 && transport == "rfb" && state == "detected"
     }
+
+    var canOpenViewer: Bool { isVNCDetected && viewerAvailable == true }
 }
 
 struct OpenClientBridgeNotificationsAdvertisement: Decodable, Equatable, Sendable {

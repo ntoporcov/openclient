@@ -190,6 +190,7 @@ struct RootView<ChatDestination: View>: View {
 #endif
             isWaitingForAutomaticConnection = shell.connection.startAutomaticConnectionIfConfigured()
         }
+        .environment(\.desktopBridge, bridge)
     }
 
     @ViewBuilder

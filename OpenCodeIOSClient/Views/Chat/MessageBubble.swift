@@ -606,6 +606,8 @@ struct MessageBubble: View {
             EmptyView()
         } else if let attachment = attachment(for: part) {
             AttachmentBubblePart(attachment: attachment, isUser: isUser)
+        } else if let handoff = OpenClientDesktopHandoff(part: part) {
+            OpenClientDesktopHandoffCard(handoff: handoff, pending: OpenCodeToolActivityPolicy.isRunning(part))
         } else if let imageActivity = OpenClientVisualImageActivity(
             part: part,
             sessionID: currentSessionID,
@@ -725,6 +727,7 @@ struct MessageBubble: View {
             || OpenClientVisualMapActivity(part: part) != nil
             || OpenClientVisualChartActivity(part: part) != nil
             || OpenClientVisualHTMLActivity(part: part) != nil
+            || OpenClientDesktopHandoff(part: part) != nil
             || OpenClientVisualImageActivity(part: part) != nil
             || OpenClientVisualVideoActivity(part: part) != nil
     }
@@ -955,6 +958,7 @@ struct MessageBubble: View {
             if OpenCodeToolActivityPolicy.isOpenClientTool(part) { return true }
             if part.timelineContextType != nil { return true }
             if attachment(for: part) != nil { return true }
+            if OpenClientDesktopHandoff(part: part) != nil { return true }
             if OpenClientVisualImageActivity(part: part) != nil { return true }
             if OpenClientVisualVideoActivity(part: part) != nil { return true }
             if OpenClientVisualMapActivity(part: part) != nil { return true }

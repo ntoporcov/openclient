@@ -58,7 +58,7 @@ export async function setupV2(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
   const controller = new AbortController()
   let registration: Awaited<ReturnType<typeof registerV2Tools>> | undefined
   try {
-    registration = await registerV2Tools(ctx, bridge.server.bridge, bridge.server.videoResources, bridge.server.imageResources, controller.signal)
+    registration = await registerV2Tools(ctx, bridge.server.bridge, bridge.server.videoResources, bridge.server.imageResources, controller.signal, bridge.server.remoteDesktop)
     void notifications?.source?.advertise()
     // Public events span all locations. Each location instance owns only its events.
     const iterator = ctx.event.subscribe({ signal: controller.signal })[Symbol.asyncIterator]()

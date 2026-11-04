@@ -4,6 +4,58 @@ import WebKit
 @testable import OpenClient
 
 final class OpenClientBridgeTests: XCTestCase {
+    func testRemoteDesktopCapabilitiesRemainBackwardCompatible() throws {
+        let base = #"{"service":"openclient-plugin","protocol":1,"port":4070,"openCodePort":4096"#
+        for suffix in ["}", #", "remoteDesktop": {"unexpected":true}}"#] {
+            let health = try JSONDecoder().decode(OpenClientBridgeHealth.self, from: Data((base + suffix).utf8))
+            XCTAssertNil(health.remoteDesktop)
+        }
+        let detected = #", "remoteDesktop":{"version":1,"transport":"rfb","state":"detected","protocolVersion":"003.889"}}"#
+        let health = try JSONDecoder().decode(OpenClientBridgeHealth.self, from: Data((base + detected).utf8))
+        XCTAssertEqual(health.remoteDesktop?.isVNCDetected, true)
+        XCTAssertEqual(health.remoteDesktop?.canOpenViewer, false)
+        let ready = #", "remoteDesktop":{"version":1,"transport":"rfb","state":"detected","viewerAvailable":true}}"#
+        let readyHealth = try JSONDecoder().decode(OpenClientBridgeHealth.self, from: Data((base + ready).utf8))
+        XCTAssertEqual(readyHealth.remoteDesktop?.canOpenViewer, true)
+    }
+
+    func testRemoteDesktopTicketUsesAuthenticatedPostAndFragmentOnly() async throws {
+        let token = "test-token"
+        let ticket = String(repeating: "a", count: 43)
+        OpenClientNotificationMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/openclient/v1/desktop/sessions")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(token)")
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data("{\"ticket\":\"\(ticket)\"}".utf8))
+        }
+        let session = URLSession(configuration: Self.notificationSessionConfiguration())
+        defer { session.invalidateAndCancel() }
+        let endpoint = OpenClientBridgeEndpointDiscovery.candidateEndpoints(config: OpenCodeServerConfig(baseURL: "http://localhost:4096"))[0]
+        let url = try await OpenClientRemoteDesktopClient(endpoint: endpoint, session: session).open(token: token)
+        XCTAssertEqual(url.path, "/openclient/v1/desktop/viewer")
+        XCTAssertNil(url.query)
+        XCTAssertTrue(url.fragment?.contains("ticket=\(ticket)") == true)
+        XCTAssertFalse(url.absoluteString.contains(token))
+    }
+
+    func testRemoteDesktopRejectsInvalidTicketsAndAuthenticationFailure() async throws {
+        let endpoint = OpenClientBridgeEndpointDiscovery.candidateEndpoints(config: OpenCodeServerConfig(baseURL: "http://localhost:4096"))[0]
+        let session = URLSession(configuration: Self.notificationSessionConfiguration())
+        defer { session.invalidateAndCancel() }
+        for status in [200, 401] {
+            OpenClientNotificationMockURLProtocol.requestHandler = { request in
+                (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, Data(#"{"ticket":"../bad"}"#.utf8))
+            }
+            do {
+                _ = try await OpenClientRemoteDesktopClient(endpoint: endpoint, session: session).open(token: "test")
+                XCTFail("Expected invalid session to fail")
+            } catch {
+                XCTAssertTrue(error is OpenClientRemoteDesktopClient.DesktopError)
+            }
+        }
+    }
+
     override func setUp() {
         super.setUp()
         OpenClientImageMockURLProtocol.requestHandler = nil

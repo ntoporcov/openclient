@@ -3,6 +3,17 @@
 Connect OpenCode to the OpenClient iOS app for native tools, declarative
 visuals, in-app browser automation, and optional OC Notify notifications.
 
+## Remote desktop (unreleased)
+
+The development branch adds a shared VNC viewer for manual access from Projects
+and agent-requested human handoffs through `openclient_request_remote_access`.
+It requires `OPENCLIENT_VNC_URL` and a host-configured
+`OPENCLIENT_REMOTE_DESKTOP_TOKEN` (at least 32 characters), plus a private/VPN
+connection to the plugin bridge. Desktop credentials are entered in the viewer.
+
+See [remote desktop setup and validation](../docs/remote-desktop.md). The published
+`0.4.2` package does not yet include this feature.
+
 ## Install
 
 Version `0.4.2` supports OpenCode **V1 1.18.29+** and **V2**. Both hosts load

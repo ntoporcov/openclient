@@ -51,7 +51,7 @@ describe("bridge port selection", () => {
         port: server.port,
         openCodePort,
         notifications: { version: 1, state: "unconfigured" },
-        remoteDesktop: { version: 1, transport: "rfb", state: "unconfigured" },
+        remoteDesktop: { version: 1, transport: "rfb", state: "unconfigured", viewerAvailable: false },
       })
 
       const WebSocketWithOptions = WebSocket as unknown as {

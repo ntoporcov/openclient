@@ -46,16 +46,18 @@
     "browser-automation"
   ],
   "scripts": {
-    "build": "tsc && npm run build:notifications",
+    "build": "tsc && npm run build:notifications && npm run build:remote-desktop",
+    "build:remote-desktop": "node scripts/build-remote-desktop.mjs",
     "build:notifications": "node scripts/build-notifications.mjs",
     "check": "tsc --noEmit && tsc --project tsconfig.test.json --noEmit",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "distribute": "NPM_TOKEN=\"$(security find-generic-password -s openclient-npm-publish -w)\" npm publish",
     "pack:check": "npm pack --dry-run",
     "prepack": "npm run clean && npm run check && npm test && npm run build",
-    "test": "npm run build:notifications && bun test"
+    "test": "npm run build:notifications && npm run build:remote-desktop && bun test"
   },
   "dependencies": {
+    "@novnc/novnc": "1.5.0",
     "@opencode-ai/plugin": "1.18.5",
     "@opencode/plugin": "2.0.16",
     "web-push": "3.6.7"

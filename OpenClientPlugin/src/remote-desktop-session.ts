@@ -1,0 +1,93 @@
+import { randomBytes, timingSafeEqual } from "node:crypto"
+import { createConnection, type Socket } from "node:net"
+import type { ServerWebSocket } from "bun"
+import { parseVNCTarget, RemoteDesktopDiscovery } from "./remote-desktop.js"
+import { RemoteDesktopHandoffs } from "./remote-desktop-handoff.js"
+
+export type DesktopSocketData = { desktopTicket: string }
+type Peer = ServerWebSocket<DesktopSocketData>
+
+/** Host-scoped, binary transport. The browser negotiates VNC authentication end-to-end. */
+export class RemoteDesktopSessions {
+  readonly discovery: RemoteDesktopDiscovery
+  readonly handoffs = new RemoteDesktopHandoffs()
+  private readonly tickets = new Map<string, number>()
+  private readonly connections = new Map<Peer, { tcp: Socket; expiry: ReturnType<typeof setTimeout> }>()
+
+  constructor(private readonly targetURL?: string, private readonly token?: string) {
+    this.discovery = new RemoteDesktopDiscovery(targetURL)
+  }
+
+  get enabled() { return Boolean(this.targetURL && this.token && this.token.length >= 32) }
+
+  authorized(request: Request): boolean {
+    if (!this.enabled || request.headers.has("origin")) return false
+    const actual = Buffer.from(request.headers.get("authorization") ?? "")
+    const expected = Buffer.from(`Bearer ${this.token}`)
+    return actual.length === expected.length && timingSafeEqual(actual, expected)
+  }
+
+  async capability() {
+    const detected = await this.discovery.capability()
+    return { ...detected, viewerAvailable: this.enabled && detected.state === "detected" }
+  }
+
+  async ticket(): Promise<string | undefined> {
+    const now = Date.now()
+    for (const [key, expiry] of this.tickets) if (expiry <= now) this.tickets.delete(key)
+    if (this.tickets.size + this.connections.size >= 8 || !(await this.capability()).viewerAvailable) return
+    // Recheck after the async probe so concurrent requests cannot exceed the bound.
+    if (this.tickets.size + this.connections.size >= 8) return
+    const ticket = randomBytes(32).toString("base64url")
+    this.tickets.set(ticket, Date.now() + 30_000)
+    return ticket
+  }
+
+  consume(ticket: string): boolean {
+    const expiry = this.tickets.get(ticket)
+    this.tickets.delete(ticket)
+    return expiry !== undefined && expiry > Date.now()
+  }
+
+  open(peer: Peer) {
+    if (!this.enabled || this.connections.size >= 8) { peer.close(1013, "Unavailable"); return }
+    let target
+    try { target = parseVNCTarget(this.targetURL!) } catch { peer.close(1011, "Unavailable"); return }
+    const tcp = createConnection({ host: target.host, port: target.port })
+    const expiry = setTimeout(() => peer.close(1000, "Session expired"), 60 * 60_000)
+    this.connections.set(peer, { tcp, expiry })
+    tcp.setTimeout(10_000, () => peer.close(1011, "Desktop unavailable"))
+    tcp.once("connect", () => tcp.setTimeout(0))
+    tcp.on("data", (data) => {
+      const sent = peer.sendBinary(data)
+      if (sent === -1) tcp.pause()
+      else if (sent === 0) peer.close(1011, "Desktop stream closed")
+    })
+    tcp.on("error", () => peer.close(1011, "Desktop unavailable"))
+    tcp.on("close", () => peer.close(1000, "Desktop disconnected"))
+  }
+
+  message(peer: Peer, payload: string | Buffer) {
+    const connection = this.connections.get(peer)
+    if (!connection || typeof payload === "string") { peer.close(1003, "Binary data required"); return }
+    if (connection.tcp.writableLength + payload.length > 1_048_576) {
+      peer.close(1009, "Input limit exceeded")
+      return
+    }
+    connection.tcp.write(payload)
+  }
+
+  drain(peer: Peer) { this.connections.get(peer)?.tcp.resume() }
+
+  close(peer: Peer) {
+    const connection = this.connections.get(peer)
+    this.connections.delete(peer)
+    if (connection) { clearTimeout(connection.expiry); connection.tcp.destroy() }
+  }
+
+  stop() {
+    this.handoffs.stop()
+    this.tickets.clear()
+    for (const peer of this.connections.keys()) { peer.close(1001, "Server stopped"); this.close(peer) }
+  }
+}

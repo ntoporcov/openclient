@@ -128,6 +128,7 @@ struct OpenCodeIOSClientApp: App {
                 dedicatedChatWindow(route: route)
 #endif
             }
+            .environment(\.desktopBridge, composition.bridge)
             .modifier(ConnectionAppearanceScopeModifier(facade: composition.connection))
         }
     }

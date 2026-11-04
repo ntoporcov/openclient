@@ -60,6 +60,7 @@ describe("v2 setup lifecycle", () => {
       expect(registered.map((tool) => tool.name)).toEqual([
         "openclient_get_tool_list",
         "openclient_execute_tool",
+        "openclient_request_remote_access",
       ])
       expect((await fetch(`http://127.0.0.1:${port}/openclient/v1/health`)).status).toBe(200)
     } finally {
