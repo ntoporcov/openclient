@@ -152,7 +152,7 @@ final class ActivityFacadeTests: XCTestCase {
         await viewModel.activityFacade.prepareForPresentation()
 
         XCTAssertTrue(backend.listScopes.contains(.init(projectID: "global", directory: nil)))
-        XCTAssertTrue(backend.listScopes.contains(.init(projectID: "home-project", directory: "/home-sandbox")))
+        XCTAssertTrue(backend.listScopes.contains(.init(projectID: "home-project")))
         XCTAssertEqual(viewModel.activityFacade.snapshot.workingRows.map(\.recent.session.id), ["home-session"])
         XCTAssertEqual(viewModel.activityFacade.snapshot.needsInputRows.map(\.recent.session.id), ["sandbox-session"])
         XCTAssertEqual(viewModel.activityFacade.snapshot.needsInputRows.first?.pendingInteractionCount, 1)
@@ -197,7 +197,7 @@ final class ActivityFacadeTests: XCTestCase {
 
         XCTAssertEqual(chat.requests.count, recent.count, "All offscreen Recent cards must preload, not just the first five")
         XCTAssertEqual(Set(chat.requests.map(\.sessionID)), Set(recent.map(\.id)))
-        XCTAssertEqual(backend.listScopes.count, 3)
+        XCTAssertEqual(backend.listScopes.count, 2)
         XCTAssertTrue(chat.requests.allSatisfy { $0.cursor == nil && $0.limit == 20 },
             "Preloading must fetch only the initial page even when an older cursor is returned")
         let snapshot = viewModel.activityFacade.snapshot
@@ -254,7 +254,7 @@ final class ActivityFacadeTests: XCTestCase {
         }
         await fulfillment(of: [joined], timeout: 1)
         XCTAssertEqual(chat.requests.count, 1)
-        XCTAssertEqual(backend.listScopes.count, 3)
+        XCTAssertEqual(backend.listScopes.count, 2)
 
         chat.release()
         await preparation.value
@@ -265,7 +265,7 @@ final class ActivityFacadeTests: XCTestCase {
         await viewModel.activityFacade.hydrateIfNeeded(hydratedRow)
 
         XCTAssertEqual(chat.requests.count, 1)
-        XCTAssertEqual(backend.listScopes.count, 3)
+        XCTAssertEqual(backend.listScopes.count, 2)
         XCTAssertEqual(hydratedRow.latestAssistantText, "Preloaded \(target.id)")
         XCTAssertFalse(hydratedRow.isHydrating)
     }
@@ -543,7 +543,7 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertEqual(chat.requests.count, 2)
         await viewModel.activityFacade.hydrateIfNeeded(retriedRow)
         XCTAssertEqual(chat.requests.count, 2)
-        XCTAssertEqual(backend.listScopes.count, 3)
+        XCTAssertEqual(backend.listScopes.count, 2)
         XCTAssertNil(viewModel.chatStore.preparedSessionID)
         XCTAssertTrue(viewModel.messages.isEmpty)
         XCTAssertNil(viewModel.errorMessage)
@@ -788,6 +788,29 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertTrue(viewModel.messages.isEmpty)
     }
 
+    func testActivityIncludesArchivedRootsAndObservesNewUnlistedWorktrees() async throws {
+        let model = AppViewModel()
+        let project = makeProject(id: "project", directory: "/repo")
+        model.projects = [project]
+        var archived = makeSession(id: "archived-root", title: "Archived", directory: "/repo", projectID: project.id, updated: 1)
+        archived.time = OpenCodeMessageTime(created: 1, updated: 1, archived: 2)
+        model.sessionListStore.setRecentSessions([archived], for: "/repo")
+        let facade = ActivityFacade(viewModel: model)
+        XCTAssertEqual(facade.snapshot.recentRows.map(\.recent.session.id), [archived.id])
+
+        let discovered = expectation(description: "Root from a new worktree appears without a workspace inventory refresh")
+        let observation = facade.$snapshot.filter { $0.recentRows.contains { $0.recent.session.id == "new-root" } }
+            .prefix(1).sink { _ in discovered.fulfill() }
+        let root = makeSession(id: "new-root", title: "New root", directory: "/copies/new", projectID: project.id, updated: 3)
+        let child = OpenCodeSession(id: "child", title: "Subagent", workspaceID: nil, directory: "/copies/new", projectID: project.id, parentID: root.id)
+        let owner = model.directoryStoreRegistry.store(for: root.directory)
+        _ = owner.upsertSessions([root, child])
+        await fulfillment(of: [discovered], timeout: 2)
+        withExtendedLifetime(observation) {}
+        XCTAssertEqual(Set(facade.snapshot.recentRows.map(\.recent.session.id)), [archived.id, root.id])
+        XCTAssertNotNil(facade.snapshot.recentRows.first { $0.recent.session.id == root.id }?.worktreeLabel)
+    }
+
     func testSnapshotPlacesWorkingSessionsFirstAndUsesPerDirectoryTranscripts() {
         let viewModel = AppViewModel()
         viewModel.config.apiPreference = .legacy
@@ -906,14 +929,14 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertEqual(facade.snapshot.workingRows.map(\.recent.session.id), [working.id])
         XCTAssertEqual(facade.snapshot.needsInputRows.map(\.recent.session.id), [blocked.id])
         XCTAssertTrue(older.allSatisfy { session in facade.snapshot.recentRows.contains { $0.recent.session.id == session.id } })
-        XCTAssertEqual(facade.sessionSwitcherCandidates, recent)
-        XCTAssertEqual(facade.sessionSwitcherCandidates.map(\.id), facade.snapshot.recentRows
+        XCTAssertEqual(Set(facade.sessionSwitcherCandidates.map(\.id)), Set(recent.map(\.id) + [archived.id]))
+        XCTAssertEqual(facade.sessionSwitcherCandidates.map(\.id).filter { $0.hasPrefix("recent-") }, facade.snapshot.recentRows
             .map(\.recent.session.id).filter { $0.hasPrefix("recent-") })
         XCTAssertEqual(facade.sessionSwitcherTarget(id: working.id), working)
         XCTAssertEqual(facade.sessionSwitcherTarget(id: blocked.id), blocked)
         XCTAssertEqual(facade.sessionSwitcherTarget(id: older[0].id), older[0])
         XCTAssertNil(facade.sessionSwitcherTarget(id: deleted.id))
-        XCTAssertNil(facade.sessionSwitcherTarget(id: archived.id))
+        XCTAssertEqual(facade.sessionSwitcherTarget(id: archived.id), archived)
         XCTAssertNil(facade.sessionSwitcherTarget(id: child.id))
     }
 
@@ -1055,7 +1078,7 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertNil(facade.sessionSwitcherTarget(id: hidden.id))
     }
 
-    func testSessionSwitcherCandidatesExcludeHiddenActionsBeforeSnapshotRefresh() throws {
+    func testActivityIncludesRootActionsWhileProjectSwitcherStillHidesThem() throws {
         let journalKey = "openclient.project-action-journal.v1"
         let savedJournal = UserDefaults.standard.data(forKey: journalKey)
         addTeardownBlock {
@@ -1094,9 +1117,9 @@ final class ActivityFacadeTests: XCTestCase {
             $0.state = .succeeded
         }
 
-        XCTAssertEqual(activity.sessionSwitcherCandidates, [ordinary])
+        XCTAssertEqual(Set(activity.sessionSwitcherCandidates.map(\.id)), [ordinary.id, actionSession.id])
         XCTAssertEqual(sessions.sessionSwitcherCandidates, [ordinary])
-        XCTAssertNil(activity.sessionSwitcherTarget(id: actionSession.id))
+        XCTAssertEqual(activity.sessionSwitcherTarget(id: actionSession.id), actionSession)
         XCTAssertNil(sessions.sessionSwitcherTarget(id: actionSession.id))
     }
 
@@ -1198,7 +1221,7 @@ final class ActivityFacadeTests: XCTestCase {
             directory: project.worktree, projectID: project.id, parentID: "parent")
         for invalid in [archived, child] {
             viewModel.allSessions = [invalid]
-            XCTAssertNil(activity.sessionSwitcherTarget(id: original.id))
+            XCTAssertEqual(activity.sessionSwitcherTarget(id: original.id), invalid.isRootSession ? invalid : nil)
             XCTAssertNil(sessions.sessionSwitcherTarget(id: original.id))
         }
         for moved in [
@@ -1333,7 +1356,7 @@ final class ActivityFacadeTests: XCTestCase {
         XCTAssertEqual(target?.time, updated.time)
         updated.time = .init(created: 2_000, updated: 3_000, archived: 4_000)
         globalStore.sessions = [updated]
-        XCTAssertNil(viewModel.activityFacade.sessionSwitcherTarget(id: canonical.id))
+        XCTAssertEqual(viewModel.activityFacade.sessionSwitcherTarget(id: canonical.id)?.time?.archived, 4_000)
     }
 
     func testNeedsInputSectionTakesPrecedenceOverWorking() {

@@ -6,6 +6,7 @@ import XCTest
 final class HomeTestBackend: BackendFactory, BackendProjectsService, BackendSessionsService, BackendChatService, BackendModelsService, BackendEventSource {
     var projectLoads = 0
     var listScopes: [BackendScope] = []
+    var listCursors: [String?] = []
     var searchScopes: [BackendScope] = []
     var beforeSearch: (@MainActor () async -> Void)?
     var beforeSessionFetch: (@MainActor () async -> Void)?
@@ -34,7 +35,16 @@ final class HomeTestBackend: BackendFactory, BackendProjectsService, BackendSess
 
     func sessions(scope: BackendScope, cursor: String?, limit: Int, roots: Bool) async throws -> BackendSessionPage {
         listScopes.append(scope)
-        return .init(sessions: Array(storedSessions.filter { $0.directory == scope.directory }.prefix(limit)))
+        listCursors.append(cursor)
+        let matching = storedSessions.filter { session in
+            (scope.directory.map { directory in session.directory == directory }
+                ?? (scope.projectID == nil || session.projectID == scope.projectID))
+                && (!roots || session.isRootSession)
+        }
+        let offset = cursor.flatMap(Int.init) ?? 0
+        let page = Array(matching.dropFirst(offset).prefix(limit))
+        let next = offset + page.count
+        return .init(sessions: page, nextCursor: next < matching.count ? String(next) : nil)
     }
 
     func session(id: String, scope: BackendScope) async throws -> OpenCodeSession {

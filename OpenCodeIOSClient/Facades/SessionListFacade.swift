@@ -65,7 +65,8 @@ final class SessionListFacade: ObservableObject {
                 todoCount: todoCount,
                 isLiveActivityActive: hasLiveActivity,
                 isHydrating: false,
-                hydrationGeneration: 0
+                hydrationGeneration: 0,
+                worktreeLabel: workspaceOverline
             )
         }
     }
@@ -354,7 +355,14 @@ final class SessionListFacade: ObservableObject {
         }
         var sessions: [OpenCodeSession] = []
         var sessionIndexByID: [String: Int] = [:]
-        for session in viewModel.sessions {
+        let visibleSessions: [OpenCodeSession]
+        if viewModel.connectionStore.apiProfile == .v2, let projectID = viewModel.currentProject?.id {
+            visibleSessions = viewModel.directoryStoreRegistry.v2ProjectSessions(projectID: projectID)
+                .filter { $0.isRootSession && !viewModel.isActionSession($0) }
+        } else {
+            visibleSessions = viewModel.sessions
+        }
+        for session in visibleSessions {
             if let index = sessionIndexByID[session.id] {
                 sessions[index] = sessions[index].merged(with: session)
             } else {
@@ -386,17 +394,20 @@ final class SessionListFacade: ObservableObject {
                 sessionsByID[session.id] = canonicalSessionByID[session.id] ?? session
             }
         }
-        let permissionRootIDs = SessionInteractionStore.sessionTreeRootIDsWithRequests(
-            sessions: viewModel.allSessions,
-            requestsBySessionID: viewModel.directoryStore.syncState.permissionsBySessionID
-        )
+        let permissionStores = viewModel.connectionStore.apiProfile == .v2
+            ? viewModel.directoryStoreRegistry.allStores : [viewModel.directoryStore]
+        let permissionRootIDs = permissionStores.reduce(into: Set<String>()) { result, store in
+            result.formUnion(SessionInteractionStore.sessionTreeRootIDsWithRequests(
+                sessions: store.sessions, requestsBySessionID: store.syncState.permissionsBySessionID))
+        }
         let pinnedSessions = pinnedIDs.compactMap { sessionsByID[$0] }
         let pinnedIDSet = Set(pinnedIDs)
         let unpinnedSessions = showsWorkspaces ? [] : sessions.filter { !pinnedIDSet.contains($0.id) }
+        let listStore = viewModel.connectionStore.apiProfile == .v2 ? viewModel.v2SessionListStore : viewModel.directoryStore
 
         return Snapshot(
-            isLoadingEmpty: viewModel.isLoadingSessions && sessions.isEmpty,
-            isLoadingMoreSessions: viewModel.isLoadingSessions && !sessions.isEmpty,
+            isLoadingEmpty: listStore.isLoadingSessions && sessions.isEmpty,
+            isLoadingMoreSessions: listStore.isLoadingSessions && !sessions.isEmpty,
             isEmpty: sessions.isEmpty,
             selectedSessionID: viewModel.selectedSession?.id,
             pinnedRows: pinnedSessions.map {
@@ -417,7 +428,7 @@ final class SessionListFacade: ObservableObject {
                 ? workspaceSections(directories: workspaceDirectories, excluding: pinnedIDSet,
                     ownerBySessionID: ownerBySessionID, canonicalSessionByID: canonicalSessionByID)
                 : [],
-            hasMoreSessions: !showsWorkspaces && viewModel.directoryStore.hasMoreSessions,
+            hasMoreSessions: !showsWorkspaces && listStore.hasMoreSessions,
             errorMessage: isScreenshotScene ? nil : viewModel.errorMessage,
             hasProUnlock: viewModel.commerceFacade.hasProUnlock,
             isReadOnly: isReadOnly,
@@ -827,8 +838,8 @@ final class SessionListFacade: ObservableObject {
     ) -> RowSnapshot {
         let generatedTitle = session.defaultGeneratedTitleDisplayName
         let showsActivity = viewModel.appearanceStore.sessionCardStyle == .activity
-        let isBusy = viewModel.sessionStatuses[session.id] == "busy"
         let owner = ownerBySessionID[session.id]
+        let isBusy = (owner?.sessionStatuses[session.id] ?? viewModel.sessionStatuses[session.id]) == "busy"
         let preview = viewModel.sessionPreviews[session.id]
         let prefersCanonicalPreview = viewModel.selectedSession?.id == session.id
         let messages = showsActivity || preview == nil || prefersCanonicalPreview
@@ -872,7 +883,7 @@ final class SessionListFacade: ObservableObject {
             session: session,
             isSelected: viewModel.selectedSession?.id == session.id,
             showsPinnedBadge: showsPinnedBadge,
-            workspaceOverline: workspaceOverline,
+            workspaceOverline: workspaceOverline ?? worktreeLabel(for: session),
             style: .regular,
             preview: rowPreview,
             isBusy: isBusy,
@@ -900,6 +911,13 @@ final class SessionListFacade: ObservableObject {
             completedTodoCount: todos.lazy.filter { $0.status == "completed" }.count,
             todoCount: todos.count
         )
+    }
+
+    private func worktreeLabel(for session: OpenCodeSession) -> String? {
+        guard viewModel.connectionStore.apiProfile == .v2,
+              let project = viewModel.currentProject, project.id != "global",
+              let directory = session.directory, directory != project.worktree else { return nil }
+        return URL(fileURLWithPath: directory).lastPathComponent
     }
 
     private func projectTitle(_ project: OpenCodeProject?) -> String {

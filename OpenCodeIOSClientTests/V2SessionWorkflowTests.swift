@@ -38,6 +38,118 @@ final class V2SessionWorkflowTests: XCTestCase {
         XCTAssertEqual(model.directoryStore.syncState.permissionsBySessionID[session.id]?.map(\.id), ["b"])
     }
 
+    func testProjectListDiscoversWorktreeSessionsWithoutDirectoryFilter() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        model.currentProject = OpenCodeProject(id: "proj_repo", worktree: "/repo", vcs: nil, name: nil, sandboxes: nil, icon: nil, time: nil)
+        V2SessionWorkflowURLProtocol.handler = { request in
+            if request.url?.path == "/api/session/active" { return (200, #"{"data":{"ses_copy":{"type":"running"}}}"#) }
+            XCTAssertEqual(request.url?.path, "/api/session")
+            let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            XCTAssertEqual(query.first { $0.name == "project" }?.value, "proj_repo")
+            XCTAssertNil(query.first { $0.name == "directory" })
+            XCTAssertEqual(query.first { $0.name == "parentID" }?.value, "null")
+            return (200, #"{"data":[{"id":"ses_copy","projectID":"proj_repo","location":{"directory":"/copies/feature"},"time":{"created":1,"updated":2}}]}"#)
+        }
+        try await model.reloadV2Sessions(replacing: true)
+        let snapshot = model.sessionListFacade.makeSnapshot()
+        let row = try XCTUnwrap(snapshot.unpinnedRows.first { $0.id == "ses_copy" })
+        XCTAssertEqual(row.session.directory, "/copies/feature")
+        XCTAssertNotNil(row.workspaceOverline)
+        XCTAssertTrue(row.workspaceOverline?.contains("feature") == true)
+        XCTAssertEqual(row.activityRow.worktreeLabel, row.workspaceOverline)
+        XCTAssertTrue(row.isBusy)
+        XCTAssertFalse(model.v2SessionListStore.sessions.contains { $0.id == "ses_copy" })
+        XCTAssertTrue(model.directoryStoreRegistry.existingStore(for: "/copies/feature")?.sessions.contains { $0.id == "ses_copy" } == true)
+    }
+
+    func testActivityDiscoversEveryRootPageWithoutKnowingWorktreeDirectories() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        model.projects = [OpenCodeProject(id: "proj_repo", worktree: "/repo", vcs: "git", name: "Repository", sandboxes: nil, icon: nil, time: nil)]
+        var continuations = 0
+        V2SessionWorkflowURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/session")
+            let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            XCTAssertNil(query.first { $0.name == "directory" })
+            if query.contains(where: { $0.name == "cursor" }) {
+                continuations += 1
+                return (200, #"{"data":[{"id":"ses_old","projectID":"proj_repo","location":{"directory":"/copies/unlisted"},"time":{"created":1,"updated":1}},{"id":"ses_child","parentID":"ses_old","projectID":"proj_repo","location":{"directory":"/copies/unlisted"},"time":{"created":1,"updated":1}}]}"#)
+            }
+            XCTAssertEqual(query.first { $0.name == "project" }?.value, "proj_repo")
+            XCTAssertEqual(query.first { $0.name == "parentID" }?.value, "null")
+            let rows = (0..<100).map { index in
+                #"{"id":"ses_\#(index)","projectID":"proj_repo","location":{"directory":"/repo"},"time":{"created":2,"updated":2}}"#
+            }.joined(separator: ",")
+            return (200, #"{"data":[\#(rows)],"cursor":{"next":"older"}}"#)
+        }
+        await model.loadRecentProjectSessionsAcrossProjects()
+        let snapshot = model.activityFacade.snapshot
+        XCTAssertEqual(snapshot.recentRows.count, 101)
+        XCTAssertFalse(snapshot.recentRows.contains { $0.recent.session.id == "ses_child" })
+        let moved = try XCTUnwrap(snapshot.recentRows.first { $0.recent.session.id == "ses_old" })
+        XCTAssertEqual(moved.recent.projectTitle, "Repository")
+        XCTAssertTrue(moved.worktreeLabel?.contains("unlisted") == true)
+        XCTAssertGreaterThanOrEqual(continuations, 1)
+    }
+
+    func testActivityLoadsProjectsSharingOneCanonicalDirectory() async throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        model.projects = ["old-project", "new-project"].map {
+            OpenCodeProject(id: $0, worktree: "/shared", vcs: "git", name: $0, sandboxes: nil, icon: nil, time: nil)
+        }
+        let sessions = model.projects.map {
+            var session = OpenCodeSession(id: "ses_\($0.id)", title: nil, workspaceID: nil, directory: "/shared", projectID: $0.id, parentID: nil)
+            session.time = .init(created: 1, updated: 1)
+            return session
+        }
+        model.directoryStoreRegistry.store(for: "/shared").sessions = sessions
+        model.sessionListStore.setRecentSessions(sessions, for: "/shared")
+        var requestedProjects = Set<String>()
+        V2SessionWorkflowURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/session")
+            let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let project = try XCTUnwrap(query.first { $0.name == "project" }?.value)
+            requestedProjects.insert(project)
+            return (200, #"{"data":[{"id":"ses_\#(project)","projectID":"\#(project)","location":{"directory":"/shared"},"time":{"created":1,"updated":1}}]}"#)
+        }
+        await model.loadRecentProjectSessionsAcrossProjects()
+        XCTAssertEqual(requestedProjects, ["old-project", "new-project"])
+        XCTAssertEqual(Set(model.sessionListStore.recentSessionsByDirectory["/shared", default: []].map(\.id)), Set(sessions.map(\.id)))
+        XCTAssertEqual(Set(model.activityFacade.snapshot.recentRows.map(\.recent.session.id)), Set(sessions.map(\.id)))
+    }
+
+    func testProjectCardsKeepBackgroundMovedSessionAndExcludeOtherProjects() throws {
+        let model = makeModel()
+        defer { model.stopEventStream() }
+        model.currentProject = OpenCodeProject(id: "proj_repo", worktree: "/repo", vcs: nil, name: nil, sandboxes: nil, icon: nil, time: nil)
+        let root = OpenCodeSession(id: "ses_root", title: nil, workspaceID: nil, directory: "/repo", projectID: "proj_repo", parentID: nil)
+        let moving = OpenCodeSession(id: "ses_moving", title: nil, workspaceID: nil, directory: "/repo", projectID: "proj_repo", parentID: nil)
+        model.directoryStore.insertV2Session(root)
+        model.directoryStore.insertV2Session(moving)
+        model.directoryStoreRegistry.store(for: "/other").insertV2Session(
+            OpenCodeSession(id: "ses_other", title: nil, workspaceID: nil, directory: "/other", projectID: "other", parentID: nil))
+        let event = try XCTUnwrap(OpenCodeEventManager.decodeV2Event(from:
+            #"{"type":"session.moved","location":{"directory":"/repo"},"data":{"sessionID":"ses_moving","location":{"directory":"/copies/feature"},"projectID":"proj_repo"}}"#))
+        model.handleV2Event(event)
+        model.directoryStoreRegistry.store(for: "/copies/feature").applySessionStatus("busy", forSessionID: moving.id)
+        let rows = model.sessionListFacade.makeSnapshot().unpinnedRows
+        XCTAssertEqual(Set(rows.map(\.id)), [root.id, moving.id])
+        XCTAssertNil(rows.first { $0.id == root.id }?.workspaceOverline)
+        XCTAssertEqual(rows.first { $0.id == moving.id }?.session.directory, "/copies/feature")
+        XCTAssertNotNil(rows.first { $0.id == moving.id }?.workspaceOverline)
+        XCTAssertEqual(rows.first { $0.id == moving.id }?.isBusy, true)
+        // Opening the moved chat must not replace project pagination with the
+        // destination owner's (unloaded) directory cursor.
+        model.v2SessionListStore.applyV2SessionPage(.init(sessions: [root], nextCursor: "next-project-page"),
+            replacing: true, requestedCursor: nil, limit: 50)
+        model.directoryStoreRegistry.activate("/copies/feature")
+        let movedSnapshot = model.sessionListFacade.makeSnapshot()
+        XCTAssertEqual(Set(movedSnapshot.unpinnedRows.map(\.id)), [root.id, moving.id])
+        XCTAssertTrue(movedSnapshot.hasMoreSessions)
+    }
+
     func testMarkReadAcknowledgesObservedCompletionAndKeepsNewerCompletionUnread() async throws {
         let model = makeModel()
         defer { model.stopEventStream() }

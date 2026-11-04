@@ -91,6 +91,25 @@ final class DirectoryStoreRegistry: ObservableObject {
 
     var allStores: [DirectoryStore] { Array(storesByKey.values) }
 
+    /// Project-list membership survives relocation to another directory owner.
+    func v2ProjectSessions(projectID: String) -> [OpenCodeSession] {
+        let owners = ownerStoresBySessionID()
+        var sessions: [String: OpenCodeSession] = [:]
+        for store in allStores {
+            for session in store.sessions where session.projectID == projectID
+                && !isV2SessionDeleted(session.id) {
+                if sessions[session.id] == nil || owners[session.id] === store {
+                    sessions[session.id] = session
+                }
+            }
+        }
+        return sessions.values.sorted {
+            let lhs = $0.time?.updated ?? $0.time?.created ?? 0
+            let rhs = $1.time?.updated ?? $1.time?.created ?? 0
+            return lhs == rhs ? $0.id < $1.id : lhs > rhs
+        }
+    }
+
     var v2StatusSnapshot: [(DirectoryStore, UInt)] {
         _ = store(for: nil)
         return allStores.map { ($0, $0.statusRevision) }

@@ -13,6 +13,7 @@ struct ProjectImageCandidate: Identifiable, Hashable {
 }
 
 private struct RecentSessionLoadResult: Sendable {
+    let projectID: String?
     let directory: String?
     let sessions: [OpenCodeSession]
 }
@@ -611,7 +612,7 @@ extension AppViewModel {
                 group.addTask { @Sendable [sessionsService, scope, query] in
                     do {
                         let sessions = try await sessionsService.searchSessions(query: query, scope: scope, limit: 100)
-                        return RecentSessionLoadResult(directory: scope.directory, sessions: sessions)
+                        return RecentSessionLoadResult(projectID: scope.projectID, directory: scope.directory, sessions: sessions)
                     } catch {
                         return nil
                     }
@@ -947,13 +948,18 @@ extension AppViewModel {
             return
         }
 
-        let scopes = homeSessionScopes
+        let isV2 = connection.openCodeCompatibility?.profile == .v2
+        // Keep cache ownership per project root, but discover V2 sessions by project
+        // identity rather than requiring a current worktree inventory.
+        let scopes = isV2 ? projectStore.projects.map {
+            BackendScope(projectID: $0.id, directory: $0.id == "global" ? nil : $0.worktree)
+        } : homeSessionScopes
         guard !scopes.isEmpty else { return }
         let lifecycleSnapshot = directoryStoreRegistry.v2LifecycleSnapshot
         let registryGeneration = directoryStoreRegistry.generation
-        let sessionSnapshots = Dictionary(uniqueKeysWithValues: scopes.map { scope in
+        let sessionSnapshots = Dictionary(scopes.map { scope in
             (DirectoryStoreRegistry.key(for: scope.directory), directoryStoreRegistry.existingStore(for: scope.directory)?.sessions ?? [])
-        })
+        }, uniquingKeysWith: { first, _ in first })
 
         objectWillChange.send()
         sessionListStore.isLoadingRecentProjectSessions = true
@@ -968,8 +974,9 @@ extension AppViewModel {
             for scope in scopes {
                 group.addTask { @Sendable [sessionsService, scope] in
                     do {
-                        let page = try await sessionsService.sessions(scope: scope, cursor: nil, limit: 100, roots: true)
-                        return RecentSessionLoadResult(directory: scope.directory, sessions: page.sessions)
+                        let requestScope = isV2 ? BackendScope(projectID: scope.projectID) : scope
+                        let sessions = try await ActivityWorkflowCoordinator.rootSessions(service: sessionsService, scope: requestScope)
+                        return RecentSessionLoadResult(projectID: scope.projectID, directory: scope.directory, sessions: sessions)
                     } catch {
                         return nil
                     }
@@ -991,8 +998,20 @@ extension AppViewModel {
                 let sessions = directoryStoreRegistry.unchangedV2Sessions(result.sessions, since: lifecycleSnapshot).filter { session in
                     owner.sessions.first(where: { $0.id == session.id }) == previousSessions.first(where: { $0.id == session.id })
                 } + liveSessions
-                sessionListStore.setRecentSessions(sessions, for: result.directory)
-                _ = owner.upsertSessions(sessions)
+                if isV2 {
+                    // Distinct project identities can share a canonical directory.
+                    // Replace only this project's cache slice, not its neighbours.
+                    let incomingIDs = Set(sessions.map(\.id))
+                    let cached = sessionListStore.recentSessionsByDirectory[SessionListStore.recentDirectoryKey(result.directory)] ?? []
+                    let retained = cached.filter { $0.projectID != result.projectID && !incomingIDs.contains($0.id) }
+                    sessionListStore.setRecentSessions(retained + sessions, for: result.directory)
+                    for session in sessions {
+                        _ = directoryStoreRegistry.store(for: session.directory).upsertSessions([session])
+                    }
+                } else {
+                    sessionListStore.setRecentSessions(sessions, for: result.directory)
+                    _ = owner.upsertSessions(sessions)
+                }
             }
         }
     }
