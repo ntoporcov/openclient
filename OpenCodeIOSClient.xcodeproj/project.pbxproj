@@ -463,6 +463,7 @@
 		98A0BD3C96CC4122E3ACDB50 /* ToolGroupingFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17CB353C17B97F197BA1E847 /* ToolGroupingFixture.swift */; };
 		98F51C8BD3AC5CB1093C2E14 /* OpenCodeLiveActivityActionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC220CA26635182C3304FB1D /* OpenCodeLiveActivityActionClient.swift */; };
 		98F8C787EF60BB5A93BB8A84 /* ProjectContentTabSelectorPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B92A6AF2F468C80FC3840F04 /* ProjectContentTabSelectorPreviews.swift */; };
+		99995B7C8B1E5FD13D54933E /* RoyalVNCKit in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 8661F376F2BBC2C408EB2F81 /* RoyalVNCKit */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		99A14763F4DA31DF2A5BEA33 /* OpenCodeCredentialImportClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D61F99378584E9E550C50AA /* OpenCodeCredentialImportClient.swift */; };
 		9A284533948D41CCC24F0D4F /* TalkSessionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 011079AA86A3958CE5C23C06 /* TalkSessionCoordinatorTests.swift */; };
 		9AB99999C87838F02899AB86 /* ProviderUsageCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B704D06C3C26254DF754157 /* ProviderUsageCoordinator.swift */; };
@@ -484,6 +485,7 @@
 		9F3EB56E42FCFCF89A2F5B90 /* OpenCodeV2Configuration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3847274542059166F4260C36 /* OpenCodeV2Configuration.swift */; };
 		9FB2B5C53FE636C3A921E4B5 /* ExcalidrawDrawingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90F376AA42D496CBD68290E /* ExcalidrawDrawingSheet.swift */; };
 		9FF72BD173261120DDD43A5A /* AppShortcuts.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 0F8EF9B77118356D45BBA49D /* AppShortcuts.xcstrings */; };
+		A01D275D632596304526AA29 /* RoyalVNCKit in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 10FAF4CED8FEAF90829CC47D /* RoyalVNCKit */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A0C570C7BB7E115713757FBD /* SpeechVoiceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D13DAF3408800F31B1421A0 /* SpeechVoiceStore.swift */; };
 		A119A7549A7A67D9F43E4FD7 /* AppViewModel+FunAndGames.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9304D56786D6480F97A8713 /* AppViewModel+FunAndGames.swift */; };
 		A2FD9DF366ED8232B74A5100 /* ConnectionAppearanceRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D073AD443E85BE52D279626D /* ConnectionAppearanceRegistry.swift */; };
@@ -791,6 +793,28 @@
 				3877B2A2FE5000CB5F8297BF /* OpenCodeShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3A170A2DD7046EDCBAF62FD /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				99995B7C8B1E5FD13D54933E /* RoyalVNCKit in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F3A8FA067EF4FB502493D211 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				A01D275D632596304526AA29 /* RoyalVNCKit in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -2043,6 +2067,7 @@
 				DF7A6786D4A062F33767D5FC /* Sources */,
 				6CEC8D4F8CCC066407022CFD /* Resources */,
 				5843D404D5C75969D9A0C777 /* Frameworks */,
+				B3A170A2DD7046EDCBAF62FD /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -2084,6 +2109,7 @@
 				B6B7731CA168C3FE565F519C /* Resources */,
 				8306078AA9B84F4923BF679E /* Frameworks */,
 				815710558F7D34A8CD9D6961 /* Embed Foundation Extensions */,
+				F3A8FA067EF4FB502493D211 /* Embed Frameworks */,
 				8EF66B636943C6CD1785D9F4 /* Remove unsupported web fonts */,
 				9D5A625581243768375C83D8 /* Lint localizations */,
 			);
@@ -3155,6 +3181,7 @@
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				INFOPLIST_FILE = "OpenCodeIOSClient/Generated-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MACCATALYST_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient;
 				PRODUCT_NAME = OpenClient;
@@ -3274,6 +3301,7 @@
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				INFOPLIST_FILE = "OpenCodeIOSClient/Generated-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MACCATALYST_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient;
 				PRODUCT_NAME = OpenClient;
@@ -3336,6 +3364,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = OpenCodeIOSClient/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenClient;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.macos;
 				PRODUCT_NAME = OpenCodeMacClient;
@@ -3355,6 +3384,7 @@
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				INFOPLIST_FILE = "OpenCodeIOSClient/Generated-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MACCATALYST_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient;
 				PRODUCT_NAME = OpenClient;
@@ -3389,6 +3419,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = OpenCodeIOSClient/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenClient;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.macos;
 				PRODUCT_NAME = OpenCodeMacClient;
@@ -3466,6 +3497,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = OpenCodeIOSClient/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenClient;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ntoporcov.openclient.macos;
 				PRODUCT_NAME = OpenCodeMacClient;

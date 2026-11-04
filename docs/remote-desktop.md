@@ -27,6 +27,8 @@ Native validation: the authentication/framebuffer/input/reconnect integration te
 
 The native signed iPhone build and full localization lane passed. Installed on Nic iPhone; automatic launch was blocked by the device lock screen. Open the installed app manually after unlocking, then use Projects → Remote Desktop with the existing access token.
 
+Launch packaging correction: RoyalVNCKit is a dynamic package product and must be explicitly embedded and signed in both app targets. The app targets also need framework runtime search paths. Without these, physical-device launch failed in dyld even though simulator integration tests passed using the Mac build directory. After correcting `project.yml`, the signed framework was verified inside the iPhone app bundle, the fresh build was installed and launched on Nic iPhone, and the app process remained running.
+
 ### Legacy webpage compatibility
 
 The plugin still serves its webpage for older installed app builds. The following noVNC notes describe that compatibility path, not the native client.
