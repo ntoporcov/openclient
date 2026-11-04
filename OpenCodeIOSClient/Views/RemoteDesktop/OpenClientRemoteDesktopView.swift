@@ -16,6 +16,8 @@ struct OpenClientRemoteDesktopButton: View {
     @ObservedObject var bridge: OpenClientBridgeFacade
     var handoff: OpenClientDesktopHandoff? = nil
     @State private var isPresented = false
+    @Environment(\.appAccentColor) private var accent
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         if let endpoint = bridge.remoteDesktopEndpoint {
@@ -24,12 +26,16 @@ struct OpenClientRemoteDesktopButton: View {
             }
             .accessibilityIdentifier("remote-desktop.open")
             #if os(iOS)
-            .fullScreenCover(isPresented: $isPresented) {
-                OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff)
+            .background {
+                DesktopFullscreenPresenter(isPresented: $isPresented) {
+                    OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff) { isPresented = false }
+                        .environment(\.appAccentColor, accent)
+                        .environment(\.scenePhase, scenePhase)
+                }
             }
             #else
             .sheet(isPresented: $isPresented) {
-                OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff)
+                OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff) { isPresented = false }
             }
             #endif
             .onChange(of: bridge.remoteDesktopEndpoint) { _, value in
@@ -70,12 +76,13 @@ private struct OpenClientRemoteDesktopView: View {
     let endpoint: OpenClientBridgeEndpoint
     @ObservedObject var bridge: OpenClientBridgeFacade
     let handoff: OpenClientDesktopHandoff?
-    @Environment(\.dismiss) private var dismiss
+    let dismiss: () -> Void
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = OpenClientRemoteDesktopStore()
     @State private var coordinator = OpenClientRemoteDesktopCoordinator()
     @State private var clickEnabled = false
     @State private var keyboardVisible = false
+    @State private var clickToast: Bool?
     @Environment(\.appAccentColor) private var accent
 
     var body: some View {
@@ -127,8 +134,18 @@ private struct OpenClientRemoteDesktopView: View {
             }
             #if os(iOS)
             .toolbarBackground(.hidden, for: .navigationBar, .bottomBar)
-            .background { DesktopPresentationOrientation().allowsHitTesting(false) }
             #endif
+            .overlay(alignment: .bottom) {
+                if let clickToast {
+                    Text(clickToast ? "Tap to click enabled" : "Tap to click disabled")
+                        .font(.callout.weight(.medium))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.bottom, 12)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("remote-desktop.mode-toast")
+                }
+            }
             .navigationTitle("Remote Desktop")
             .toolbar {
                 #if os(iOS)
@@ -172,6 +189,12 @@ private struct OpenClientRemoteDesktopView: View {
             }
         }
         .task { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
+        .onChange(of: clickEnabled) { _, enabled in clickToast = enabled }
+        .task(id: clickToast) {
+            guard clickToast != nil else { return }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            clickToast = nil
+        }
         .onChange(of: store.completed) { _, completed in if completed { dismiss() } }
         .onChange(of: store.isConnected) { _, connected in if !connected { keyboardVisible = false } }
         .onChange(of: scenePhase) { _, phase in

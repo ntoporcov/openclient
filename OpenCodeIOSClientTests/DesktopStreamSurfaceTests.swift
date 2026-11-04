@@ -29,18 +29,42 @@ final class DesktopStreamSurfaceTests: XCTestCase {
         XCTAssertEqual(Int(mapped.1), Int(expected.y), accuracy: 1)
     }
 
-    func testFrameUpdatesPreserveZoomAndRotationRefits() throws {
+    func testKeyboardResizePreservesZoomAndFramebufferCenter() throws {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 80)).image { _ in }.cgImage!
         let surface = DesktopScrollSurface(frame: CGRect(x: 0, y: 0, width: 600, height: 300))
         surface.setFrame(image)
         surface.layoutIfNeeded()
         let zoom = surface.minimumZoomScale * 2
         surface.zoomScale = zoom
+        surface.contentOffset = CGPoint(x: 150, y: 120)
         surface.setFrame(image)
         surface.layoutIfNeeded()
+        let center = surface.image.convert(CGPoint(x: surface.bounds.midX, y: surface.bounds.midY), from: surface)
         XCTAssertEqual(surface.zoomScale, zoom, accuracy: 0.001)
-        surface.frame.size = CGSize(width: 300, height: 600)
+        surface.frame.size = CGSize(width: 600, height: 160)
         surface.layoutIfNeeded()
-        XCTAssertEqual(surface.zoomScale, surface.minimumZoomScale, accuracy: 0.001)
+        XCTAssertEqual(surface.zoomScale, zoom, accuracy: 0.001)
+        var newCenter = surface.image.convert(CGPoint(x: surface.bounds.midX, y: surface.bounds.midY), from: surface)
+        XCTAssertEqual(newCenter.x, center.x, accuracy: 0.01)
+        XCTAssertEqual(newCenter.y, center.y, accuracy: 0.01)
+        surface.frame.size = CGSize(width: 600, height: 300)
+        surface.layoutIfNeeded()
+        newCenter = surface.image.convert(CGPoint(x: surface.bounds.midX, y: surface.bounds.midY), from: surface)
+        XCTAssertEqual(newCenter.x, center.x, accuracy: 0.01)
+        XCTAssertEqual(newCenter.y, center.y, accuracy: 0.01)
+    }
+
+    func testClickModeKeepsTwoFingerNavigationAvailable() {
+        let surface = DesktopScrollSurface()
+        surface.setClickEnabled(true)
+        XCTAssertTrue(surface.click.isEnabled)
+        XCTAssertEqual(surface.click.numberOfTouchesRequired, 1)
+        XCTAssertTrue(surface.panGestureRecognizer.isEnabled)
+        XCTAssertEqual(surface.panGestureRecognizer.minimumNumberOfTouches, 2)
+        XCTAssertEqual(surface.pinchGestureRecognizer?.isEnabled, true)
+        surface.setClickEnabled(false)
+        XCTAssertFalse(surface.click.isEnabled)
+        XCTAssertEqual(surface.panGestureRecognizer.minimumNumberOfTouches, 1)
+        XCTAssertEqual(surface.pinchGestureRecognizer?.isEnabled, true)
     }
 }

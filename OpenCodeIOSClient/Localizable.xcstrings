@@ -1,6 +1,8 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Tap to click enabled": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tocco per fare clic attivato" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque para clicar ativado" } } } },
+    "Tap to click disabled": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tocco per fare clic disattivato" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque para clicar desativado" } } } },
     "Show Keyboard": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Mostra tastiera" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Mostrar teclado" } } } },
     "Using iPhone Duo? Unfold it to use the inner display.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Usi iPhone Duo? Aprilo per usare lo schermo interno." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Usando o iPhone Duo? Abra-o para usar a tela interna." } } } },
     "Tap to click": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tocca per fare clic" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque para clicar" } } } },
