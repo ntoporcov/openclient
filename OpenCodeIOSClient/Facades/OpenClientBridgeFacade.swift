@@ -88,6 +88,8 @@ struct OpenClientBridgeSnapshot: Equatable {
 
 @MainActor
 final class OpenClientBridgeFacade: ObservableObject {
+    var desktopAccess: OpenClientDesktopAccess? { desktopAccessProvider() }
+    private let desktopAccessProvider: @MainActor () -> OpenClientDesktopAccess?
     var remoteDesktopEndpoint: OpenClientBridgeEndpoint? {
         guard case .connected = store.phase, store.endpoint?.remoteDesktop?.canOpenViewer == true else { return nil }
         return store.endpoint
@@ -108,9 +110,11 @@ final class OpenClientBridgeFacade: ObservableObject {
         setupNotifications: @escaping @MainActor () async -> Void = {},
         configureNotifications: @escaping @MainActor () async throws -> Bool = { false },
         notificationOpenRequest: @escaping @MainActor () -> OpenClientNotificationOpenRequest? = { nil },
-        notificationBrowserOpenFailed: @escaping @MainActor (OpenClientNotificationOpenRequest) -> Void = { _ in }
+        notificationBrowserOpenFailed: @escaping @MainActor (OpenClientNotificationOpenRequest) -> Void = { _ in },
+        desktopAccess: @escaping @MainActor () -> OpenClientDesktopAccess? = { nil }
     ) {
         self.store = store
+        desktopAccessProvider = desktopAccess
         forceConnectAction = forceConnect
         setupNotificationsAction = setupNotifications
         configureNotificationsAction = configureNotifications

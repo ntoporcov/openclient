@@ -99,6 +99,7 @@ function fakeContext(options: ContextOptions): Plugin.Context {
     location: options.location,
     session: { get: async () => ({ id: "session", projectID: "project", location: { directory: "/session" } }) },
     event: { subscribe: () => ({ [Symbol.asyncIterator]: () => iterator }) },
+    rpc: { register: async () => ({ dispose: async () => {} }) },
     tool: {
       transform: async (callback: (editor: { add(tool: { name?: string }): void }) => void) => {
         if (options.transform) return options.transform({ add: (tool) => options.registered.push(tool) }) as never

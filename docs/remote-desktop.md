@@ -13,11 +13,17 @@ The desktop must be the same interactive desktop used by the agent. A separate v
 
 ### Native client prototype
 
+Current native authentication uses OpenCode V2's authenticated plugin RPC (`openclient.desktop.open` and `.complete`). The app reuses its active OpenCode client credentials; it never asks for a separate desktop bridge token. The RPC returns a 30-second single-use WebSocket ticket and an opaque target identifier. The bridge's legacy HTTP control endpoints remain token-protected for older clients. Fresh V2 hosts only need the VNC URL; the token/token-file option is optional legacy compatibility. This native flow requires the updated V2 plugin.
+
+The Mac login form offers **Save computer credentials**, off by default. Credentials are saved only after a successful native connection, in an app-only `WhenUnlockedThisDeviceOnly` Keychain item scoped by OpenCode server/account and VNC target. Reopening the viewer automatically authenticates from Keychain. A failed saved attempt is not automatically retried within that viewer; reconnect presents manual login. The options menu can forget saved credentials and reconnect. No credentials are displayed from Keychain or sent through RPC, plugin metadata, or chat.
+
+Credential-flow verification: both native integration tests passed without skips on iPhone 18 Pro Max / iOS 27.0, iPad Pro 13-inch M5 / iOS 27.0, and iPhone Duo / iOS 27.1. Coverage includes rejected credentials not being saved, successful Keychain writes, automatic reconnect, scope isolation, stale saved passwords returning to manual entry, forgetting, opting out, and rejected OpenCode authorization. Live V2 RPC ticket issuance and handoff response shape were checked; anonymous calls return 401. Physical login UI and Duo fold transitions still require hands-on verification because native device UI automation is unavailable.
+
 The iOS client now uses RoyalVNCKit (pinned to `090b96eddeee183e9fec293c5cd881d302a4349d`) rather than loading the noVNC webpage. Authentication fields, errors, framebuffer presentation, text entry, Escape/Tab/Delete, and direct pointer down/drag/up are native. Projects and human handoffs share this same presentation.
 
 RoyalVNCKit exposes a TCP client but no public custom-transport injection. `OpenClientDesktopTunnel` binds an ephemeral IPv4 loopback port, accepts one local connection, closes the listener, and forwards binary traffic over a URLSession WebSocket with the existing single-use ticket and Origin validation. Each direction waits for its write completion before reading more data. No VNC destination or credentials are added to the plugin API. Closing/backgrounding cancels authentication, disconnects the library, and tears down the tunnel.
 
-`OpenClientNativeDesktopSession` owns protocol operations and bridges SDK callbacks to the main-actor store. SwiftUI consumes the store and forwards user intent. Credentials are held only for the authentication attempt, and clipboard synchronization is disabled.
+`OpenClientNativeDesktopSession` owns protocol operations and bridges SDK callbacks to the main-actor store. SwiftUI consumes the store and forwards user intent. In-memory credentials are cleared after the authentication attempt; opt-in persistence uses Keychain. Clipboard synchronization is disabled.
 
 This first native version fits the full desktop to the available area. Pinch zoom/pan, richer modifier/hardware-keyboard handling, cursor rendering, accessibility navigation within the remote desktop, and sustained-frame performance tuning remain follow-up work. Real Mac login and shared-session selection still need user validation.
 
@@ -25,7 +31,7 @@ Native integration fixture: run `bun test/fixtures/native-desktop.ts` from `Open
 
 Native validation: the authentication/framebuffer/input/reconnect integration test passed without skips on iPhone 18 Pro Max (iOS 27.0), iPad Pro 13-inch M5 (iOS 27.0), and iPhone Duo (iOS 27.1). It verifies successful ARD authentication, a 320×180 framebuffer, keyboard/pointer delivery, rejected credentials, and a fresh successful connection afterward. This is protocol integration coverage, not visual layout or Duo fold-transition coverage. Physical-device UI automation is currently unavailable in the tool session; final Mac login and interaction feel require hands-on verification.
 
-The native signed iPhone build and full localization lane passed. Installed on Nic iPhone; automatic launch was blocked by the device lock screen. Open the installed app manually after unlocking, then use Projects → Remote Desktop with the existing access token.
+The tokenless native signed iPhone build and full localization lane passed. Installed and launched on Nic iPhone, with the process confirmed running. Open Projects → Remote Desktop to sign in and optionally save computer credentials. The user previously confirmed real Mac login, streaming, and pointer focus with the native viewer.
 
 Launch packaging correction: RoyalVNCKit is a dynamic package product and must be explicitly embedded and signed in both app targets. The app targets also need framework runtime search paths. Without these, physical-device launch failed in dyld even though simulator integration tests passed using the Mac build directory. After correcting `project.yml`, the signed framework was verified inside the iPhone app bundle, the fresh build was installed and launched on Nic iPhone, and the app process remained running.
 
@@ -52,14 +58,14 @@ For managed hosts, prefer explicit plugin options (the token stays in a separate
 }
 ```
 
-Place this object alongside `serverURL` inside the plugin's `options`. A missing/unreadable token file disables viewer access rather than falling back to another token. Alternatively, hosts that forward environment variables can use:
+Place this object alongside `serverURL` inside the plugin's `options`. A missing/unreadable token file disables legacy HTTP control access rather than falling back to another token. For current V2/native clients, omit `tokenFile`; OpenCode RPC authorizes access. Alternatively, hosts that forward environment variables can use:
 
 ```sh
 export OPENCLIENT_VNC_URL=vnc://127.0.0.1:5900
 export OPENCLIENT_REMOTE_DESKTOP_TOKEN="$(openssl rand -hex 32)"
 ```
 
-Keep the generated token in your local secret configuration. Restart the plugin host, reconnect OpenClient, and open **Remote Desktop** in Projects. Enter that token in the native sheet; it stays in memory for that presentation. Then enter your desktop credentials in the viewer's login form. Neither credential is included in chat/tool metadata.
+For older clients, keep the generated token in your local secret configuration and enter it in their token prompt. Current native clients bypass this legacy flow. Neither credential is included in chat/tool metadata. OpenCode V2 watches plugin configuration; use its configuration reload when needed.
 
 This version uses the existing plugin bridge over a private LAN/VPN connection (for example Tailscale). It does not add an Internet relay or TLS termination. Do not expose the plain HTTP bridge to the public Internet; use an encrypted VPN/tunnel for remote connections.
 
@@ -83,20 +89,20 @@ The bridge health response includes an additive `remoteDesktop` field:
 
 States are `unconfigured`, `unavailable`, and `detected`. Detection reads the 12-byte RFB server greeting with a one-second deadline. It does not authenticate or send input. Results are cached for five seconds and concurrent probes coalesce. Target addresses and credentials are not advertised.
 
-iOS preserves this advertisement on its discovered bridge endpoint. Older plugins and malformed optional advertisements remain compatible. `detected` alone does not enable the button. `viewerAvailable` also requires an explicitly configured access token of at least 32 characters. The desktop may still request login or reject its credentials. Capability is refreshed when the plugin connection is discovered/reconnected, and checked again when opening a viewer session.
+iOS preserves this advertisement on its discovered bridge endpoint. Older plugins and malformed optional advertisements remain compatible. `detected` alone does not enable the button. `viewerAvailable` also requires V2 RPC authorization support or a legacy access token of at least 32 characters. The desktop may still request login or reject its credentials. Capability is refreshed when the plugin connection is discovered/reconnected, and checked again when opening a viewer session.
 
 ## Transport and lifecycle
 
-- `POST /openclient/v1/desktop/sessions` requires the host-configured bearer token and rejects browser-origin requests. It returns a random 30-second, single-use ticket.
-- The native viewer puts that ticket in the URL fragment, not a page query or transcript. The page consumes/removes the fragment and uses the ticket once to open the binary WebSocket. The upgrade requires a matching page Origin.
-- The bridge proxies only the host-configured VNC target, with bounded buffering and at most eight pending/active viewer sessions. Streams expire after one hour and close on viewer dismissal or plugin shutdown. VNC credentials are negotiated by noVNC with the VNC server, not stored by the plugin.
-- The viewer supports touch pointer gestures, software text entry, Escape/Tab and Control/Alt/Command modifiers, plus hardware keyboard input. It scales the desktop to fit without changing the host display resolution. Reconnect mints a new ticket. Backgrounding the iOS app closes its viewer stream.
+- Current native clients call `POST /api/rpc/openclient.desktop/open` on OpenCode using the existing server authentication. Legacy `POST /openclient/v1/desktop/sessions` requires the host-configured bearer token and rejects browser-origin requests. Both issue random 30-second, single-use tickets.
+- The native tunnel consumes the internal viewer URL fragment and uses the ticket once to open the binary WebSocket with the bridge Origin. No webpage is loaded. The legacy webpage consumes/removes its fragment similarly.
+- The bridge proxies only the host-configured VNC target, with bounded buffering and at most eight pending/active viewer sessions. Streams expire after one hour and close on viewer dismissal or plugin shutdown. VNC credentials are negotiated by RoyalVNCKit (or legacy noVNC) with the VNC server, not stored by the plugin.
+- The native viewer supports touch pointer gestures, software text entry, and Escape/Tab/Delete. It scales the desktop to fit without changing the host display resolution. Reconnect mints a new ticket. Backgrounding the iOS app closes its viewer stream.
 - `openclient_request_remote_access(reason)` is registered for OpenCode v1 and v2. V2 disables Code Mode wrapping so the live transcript retains the native renderer payload. The tool publishes the request ID, originating session/message and reason, then awaits the human response.
 - Native Done/Cancel calls the authenticated handoff endpoint. Responses must match the request's session/message. Closing the sheet does not resolve the request. Tool abort removes the pending request; shutdown or a 30-minute timeout cancels it. Pending requests are memory-only and cannot survive a plugin restart.
 
 ## Remaining validation / follow-up
 
-- Complete a real macOS desktop login on the iPhone and verify that the agent's already-open browser is visible. Authentication negotiation is confirmed; login and shared-session selection still need the user's credentials.
+- Verify the new opt-in saved-login UX on the real Mac. The user confirmed native Mac login, streaming, and pointer focus before this credential-saving change.
 - Exercise long-running sessions, cellular/VPN reconnects, drag/scroll and keyboard ergonomics on physical devices.
 - Integrate an authenticated encrypted cloud transport if access without a VPN becomes a product requirement.
 

@@ -6,6 +6,7 @@ import { registerV2Tools } from "./tools-v2.js"
 import type { OpenClientPluginOptions } from "./index.js"
 import { configuredServerURL } from "./server-url.js"
 import { remoteDesktopBridgeOptions } from "./remote-desktop.js"
+import { registerDesktopRPC } from "./remote-desktop-rpc.js"
 
 // V2 provides in-process domain APIs, but no server URL on its plugin context.
 // Use the host's explicit serve arguments (never guess based on the API version).
@@ -51,14 +52,16 @@ export async function setupV2(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
   })
   let bridge: Awaited<ReturnType<typeof acquireBridge>>
   try {
-    bridge = await acquireBridge({ ...await remoteDesktopBridgeOptions(options.remoteDesktop), openCodePort: Number(serverURL.port || (serverURL.protocol === "https:" ? 443 : 80)), onLog: log })
+    bridge = await acquireBridge({ ...await remoteDesktopBridgeOptions(options.remoteDesktop), remoteDesktopRPC: true, openCodePort: Number(serverURL.port || (serverURL.protocol === "https:" ? 443 : 80)), onLog: log })
   } catch (error) {
     await notifications?.release()
     throw error
   }
   const controller = new AbortController()
   let registration: Awaited<ReturnType<typeof registerV2Tools>> | undefined
+  let desktopRegistration: Awaited<ReturnType<typeof registerDesktopRPC>> | undefined
   try {
+    desktopRegistration = await registerDesktopRPC(ctx, bridge.server.remoteDesktop)
     registration = await registerV2Tools(ctx, bridge.server.bridge, bridge.server.videoResources, bridge.server.imageResources, controller.signal, bridge.server.remoteDesktop)
     void notifications?.source?.advertise()
     // Public events span all locations. Each location instance owns only its events.
@@ -96,13 +99,14 @@ export async function setupV2(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
       try {
         await iterator.return?.()
         await registration?.dispose()
+        await desktopRegistration?.dispose()
       } finally {
         try { await notifications?.release() } finally { await bridge.release() }
       }
     }
   } catch (error) {
     controller.abort()
-    try { await registration?.dispose() } finally {
+    try { await registration?.dispose(); await desktopRegistration?.dispose() } finally {
       try { await notifications?.release() } finally { await bridge.release() }
     }
     throw error

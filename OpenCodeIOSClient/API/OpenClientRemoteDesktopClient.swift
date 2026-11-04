@@ -26,10 +26,14 @@ struct OpenClientRemoteDesktopClient: Sendable {
 
     func open(token: String) async throws -> URL {
         let request = try request(path: "sessions", token: token)
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request, delegate: DesktopNoRedirects.shared)
         try validate(response)
         struct Ticket: Decodable { let ticket: String }
         let ticket = try JSONDecoder().decode(Ticket.self, from: data).ticket
+        return try viewerURL(ticket: ticket)
+    }
+
+    func viewerURL(ticket: String) throws -> URL {
         guard ticket.count == 43, ticket.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else {
             throw DesktopError.unavailable
         }
@@ -84,5 +88,58 @@ struct OpenClientRemoteDesktopClient: Sendable {
             case .expired: String(localized: "This remote desktop request is no longer pending.")
             }
         }
+    }
+}
+
+/// Uses the current OpenCode client to authorize control operations. Secrets and
+/// one-use tickets deliberately bypass transcript/debug response logging.
+struct OpenClientDesktopAccess: Sendable {
+    let client: OpenCodeAPIClient
+    let directory: String?
+    let workspaceID: String?
+    var session: URLSession = .shared
+
+    struct Ticket: Decodable { let ticket: String; let targetID: String }
+    private struct Response<Value: Decodable>: Decodable { let output: Value }
+
+    func open() async throws -> Ticket {
+        try await call("open", input: [:])
+    }
+
+    func complete(_ handoff: OpenClientDesktopHandoff, outcome: String) async throws {
+        struct Completion: Decodable { let completed: Bool }
+        let result: Completion = try await call("complete", input: [
+            "requestID": handoff.requestID, "sessionID": handoff.sessionID,
+            "messageID": handoff.messageID, "outcome": outcome,
+        ])
+        guard result.completed else { throw OpenClientRemoteDesktopClient.DesktopError.expired }
+    }
+
+    private func call<Value: Decodable>(_ method: String, input: [String: String]) async throws -> Value {
+        var request = try client.makeRequest(path: "/api/rpc/openclient.desktop/\(method)", method: "POST",
+            queryItems: client.v2LocationQueryItems(directory: directory, workspaceID: workspaceID), logRequest: false)
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["input": input])
+        let (data, response) = try await session.data(for: request, delegate: DesktopNoRedirects.shared)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw AccessError.unavailable
+        }
+        return try JSONDecoder().decode(Response<Value>.self, from: data).output
+    }
+
+    enum AccessError: LocalizedError {
+        case unavailable
+        var errorDescription: String? {
+            String(localized: "Could not authorize remote desktop through OpenCode. Check your connection and update the host plugin.")
+        }
+    }
+}
+
+private final class DesktopNoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = DesktopNoRedirects()
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }

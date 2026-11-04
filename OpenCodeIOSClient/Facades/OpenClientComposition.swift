@@ -99,6 +99,13 @@ final class OpenClientComposition: ObservableObject {
             },
             notificationBrowserOpenFailed: { [weak bridgeCoordinator] request in
                 bridgeCoordinator?.notificationBrowserOpenFailed(request: request)
+            },
+            desktopAccess: { [weak viewModel] in
+                guard let viewModel, viewModel.connectionStore.isConnected,
+                      let connection = viewModel.backendConnection, !connection.isClosed,
+                      let adapter = connection.openCodeCompatibility, adapter.profile == .v2 else { return nil }
+                return OpenClientDesktopAccess(client: adapter.client, directory: viewModel.effectiveTerminalDirectory,
+                                               workspaceID: viewModel.effectiveTerminalWorkspaceID)
             }
         )
         let backendContextPublisher: AnyPublisher<(UUID?, OpenCodeServerConfig?), Never> =

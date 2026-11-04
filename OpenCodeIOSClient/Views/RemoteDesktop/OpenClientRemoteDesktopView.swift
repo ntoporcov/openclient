@@ -24,7 +24,7 @@ struct OpenClientRemoteDesktopButton: View {
             }
             .accessibilityIdentifier("remote-desktop.open")
             .sheet(isPresented: $isPresented) {
-                OpenClientRemoteDesktopView(endpoint: endpoint, handoff: handoff)
+                OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff)
             }
             .onChange(of: bridge.remoteDesktopEndpoint) { _, value in
                 if value != endpoint { isPresented = false }
@@ -62,12 +62,12 @@ struct OpenClientDesktopHandoffCard: View {
 
 private struct OpenClientRemoteDesktopView: View {
     let endpoint: OpenClientBridgeEndpoint
+    @ObservedObject var bridge: OpenClientBridgeFacade
     let handoff: OpenClientDesktopHandoff?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = OpenClientRemoteDesktopStore()
     @State private var coordinator = OpenClientRemoteDesktopCoordinator()
-    @State private var token = ""
 
     var body: some View {
         NavigationStack {
@@ -78,9 +78,12 @@ private struct OpenClientRemoteDesktopView: View {
                 if let error = store.errorMessage {
                     Text(verbatim: error).foregroundStyle(.red).padding()
                 }
+                if let error = store.credentialStorageError {
+                    Text(verbatim: error).foregroundStyle(.red).padding()
+                }
                 if store.needsCredentials {
-                    DesktopCredentialsForm(requiresUsername: store.requiresUsername) { username, password in
-                        coordinator.native.authenticate(username: username, password: password)
+                    DesktopCredentialsForm(requiresUsername: store.requiresUsername) { username, password, save in
+                        coordinator.authenticate(username: username, password: password, save: save)
                     }
                 } else if let frame = store.frame {
                     NativeDesktopCanvas(frame: frame, session: coordinator.native)
@@ -88,23 +91,13 @@ private struct OpenClientRemoteDesktopView: View {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Form {
-                        Section {
-                            SecureField("Remote access token", text: $token)
-                                .autocorrectionDisabled()
-                                #if canImport(UIKit)
-                                .textInputAutocapitalization(.never)
-                                #endif
-                            Button("Connect") { coordinator.open(endpoint: endpoint, token: token, store: store) }
-                                .disabled(token.isEmpty || store.isBusy)
-                        } footer: {
-                            Text("Enter the remote access token configured on your host. You’ll sign in to your Mac next.")
-                        }
-                        if store.isBusy { ProgressView() }
+                        Button("Connect") { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
+                            .disabled(store.isBusy)
                     }
                 }
                 if let handoff {
-                    DesktopHandoffActions(isBusy: store.isBusy || token.isEmpty) { outcome in
-                        coordinator.complete(handoff, outcome: outcome, endpoint: endpoint, token: token, store: store)
+                    DesktopHandoffActions(isBusy: store.isBusy) { outcome in
+                        coordinator.complete(handoff, outcome: outcome, endpoint: endpoint, access: bridge.desktopAccess, store: store)
                     }
                 }
             }
@@ -112,11 +105,19 @@ private struct OpenClientRemoteDesktopView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Reconnect") { coordinator.open(endpoint: endpoint, token: token, store: store) }
-                        .disabled(token.isEmpty || store.isBusy)
+                    Menu {
+                        Button("Reconnect") { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
+                        Button("Forget saved computer credentials", role: .destructive) {
+                            coordinator.forgetCredentials(store: store)
+                            coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store)
+                        }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Remote desktop options")
+                    .disabled(store.isBusy)
                 }
             }
         }
+        .task { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
         .onChange(of: store.completed) { _, completed in if completed { dismiss() } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { coordinator.disconnect(store: store) }
@@ -140,9 +141,10 @@ private struct DesktopHandoffActions: View {
 
 private struct DesktopCredentialsForm: View {
     let requiresUsername: Bool
-    let submit: (String, String) -> Void
+    let submit: (String, String, Bool) -> Void
     @State private var username = ""
     @State private var password = ""
+    @State private var saveCredentials = false
 
     var body: some View {
         Form {
@@ -156,8 +158,10 @@ private struct DesktopCredentialsForm: View {
                 }
                 SecureField("Password", text: $password)
                     .accessibilityIdentifier("remote-desktop.password")
+                Toggle("Save computer credentials", isOn: $saveCredentials)
+                    .accessibilityIdentifier("remote-desktop.save-credentials")
                 Button("Sign in") {
-                    submit(username, password)
+                    submit(username, password, saveCredentials)
                     password = ""
                 }
                 .disabled(password.isEmpty || (requiresUsername && username.isEmpty))

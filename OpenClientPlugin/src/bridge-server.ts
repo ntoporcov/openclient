@@ -45,6 +45,7 @@ export type BridgeServerOptions = {
   video?: VideoResourceManagerOptions
   remoteDesktopURL?: string
   remoteDesktopToken?: string
+  remoteDesktopRPC?: boolean
 }
 
 export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
@@ -52,6 +53,7 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
   const remoteDesktop = new RemoteDesktopSessions(
     options.remoteDesktopURL ?? process.env.OPENCLIENT_VNC_URL,
     options.remoteDesktopToken ?? process.env.OPENCLIENT_REMOTE_DESKTOP_TOKEN,
+    options.remoteDesktopRPC,
   )
   const imageResources = new ImageResourceManager({
     ...options.image,

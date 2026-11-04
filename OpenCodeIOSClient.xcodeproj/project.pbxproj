@@ -100,6 +100,7 @@
 		1BD08904C2157DA2EDF59F91 /* GlobalFormsFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = 751A3F7CAF44666CF62F7634 /* GlobalFormsFacade.swift */; };
 		1C127306132AEEBFAC13B0AE /* OpenClientNativeDesktopSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F50A3CF0BE985987B163BA2 /* OpenClientNativeDesktopSession.swift */; };
 		1C43DBFCEE6094B8AEC32939 /* V2SessionWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8DD5753AFFCD54AA809C6CC /* V2SessionWorkflowTests.swift */; };
+		1C45E384DB827103FE2909E7 /* OpenClientDesktopCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 332400A225FFBDB3016BF11A /* OpenClientDesktopCredentialStore.swift */; };
 		1D34D8F5C4838E8594FFB0E9 /* ProviderUsageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5483CD438982E59A8E64FD18 /* ProviderUsageTests.swift */; };
 		1D79FD1899B7DCEEB96115B1 /* ConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FBF691A45B28DA836E7479A /* ConnectionView.swift */; };
 		1DAF5886350685FC0288B571 /* ProviderUsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99AA0ADA159AFDB491BFD61E /* ProviderUsageModels.swift */; };
@@ -484,6 +485,7 @@
 		9EDCCEDB503421A42E06BBF5 /* SwiftDataOpenCodeLocalCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF24BB3041853D62511A5D2 /* SwiftDataOpenCodeLocalCacheRepository.swift */; };
 		9F3EB56E42FCFCF89A2F5B90 /* OpenCodeV2Configuration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3847274542059166F4260C36 /* OpenCodeV2Configuration.swift */; };
 		9FB2B5C53FE636C3A921E4B5 /* ExcalidrawDrawingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90F376AA42D496CBD68290E /* ExcalidrawDrawingSheet.swift */; };
+		9FC141F29691B82BFE5499C0 /* OpenClientDesktopCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 332400A225FFBDB3016BF11A /* OpenClientDesktopCredentialStore.swift */; };
 		9FF72BD173261120DDD43A5A /* AppShortcuts.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 0F8EF9B77118356D45BBA49D /* AppShortcuts.xcstrings */; };
 		A01D275D632596304526AA29 /* RoyalVNCKit in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 10FAF4CED8FEAF90829CC47D /* RoyalVNCKit */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A0C570C7BB7E115713757FBD /* SpeechVoiceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D13DAF3408800F31B1421A0 /* SpeechVoiceStore.swift */; };
@@ -907,6 +909,7 @@
 		30E2F83A624D6CCFFF4870FD /* OpenCodeAPIClient+SessionTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeAPIClient+SessionTools.swift"; sourceTree = "<group>"; };
 		32365C3E04BA9CE086A166F1 /* ComposerSuggestionSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerSuggestionSelection.swift; sourceTree = "<group>"; };
 		32B13670114575969E8F55DD /* OpenClientNotificationConfigurationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientNotificationConfigurationCoordinator.swift; sourceTree = "<group>"; };
+		332400A225FFBDB3016BF11A /* OpenClientDesktopCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientDesktopCredentialStore.swift; sourceTree = "<group>"; };
 		336AA13CA174A57F5F0EB8E8 /* MessageComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageComposer.swift; sourceTree = "<group>"; };
 		33A5FD49298D0A6FCA6FB55E /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		3446998277ACD10BF1A2AD1B /* ComposerSuggestionSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerSuggestionSelectionTests.swift; sourceTree = "<group>"; };
@@ -1387,6 +1390,7 @@
 		3C2CE2EAFE77CF7AA14D7042 /* Persistence */ = {
 			isa = PBXGroup;
 			children = (
+				332400A225FFBDB3016BF11A /* OpenClientDesktopCredentialStore.swift */,
 				F5B11F0F3731892DA43FF7FC /* OpenCodeLocalCacheRepository.swift */,
 				CAF24BB3041853D62511A5D2 /* SwiftDataOpenCodeLocalCacheRepository.swift */,
 			);
@@ -2650,6 +2654,7 @@
 				18FF891DA524B338EA1BD648 /* OpenClientCommerce.swift in Sources */,
 				FC7A8F7A721CC355DB2F770D /* OpenClientComposition.swift in Sources */,
 				07316FB87EB08C952B407D76 /* OpenClientDebugEntitlementControls.swift in Sources */,
+				9FC141F29691B82BFE5499C0 /* OpenClientDesktopCredentialStore.swift in Sources */,
 				D6580242FAD2D95D64F7456C /* OpenClientDesktopTunnel.swift in Sources */,
 				A33B4BBF2CA068CD3277FBD4 /* OpenClientDeviceToolRegistry.swift in Sources */,
 				863E93DA29C0C40F696CFA24 /* OpenClientFeatureTypes.swift in Sources */,
@@ -2938,6 +2943,7 @@
 				6DB2469B41C37734C3F580EB /* OpenClientCommerce.swift in Sources */,
 				CE04BCD4856BB7F7EA1A79CA /* OpenClientComposition.swift in Sources */,
 				CEAEFC6A4167B123B2CA1BF9 /* OpenClientDebugEntitlementControls.swift in Sources */,
+				1C45E384DB827103FE2909E7 /* OpenClientDesktopCredentialStore.swift in Sources */,
 				7D2C8C957B37617F27E88B58 /* OpenClientDesktopTunnel.swift in Sources */,
 				AF8E6A335318A183AF3AE791 /* OpenClientDeviceToolRegistry.swift in Sources */,
 				9141289FC70FEF3A687571C5 /* OpenClientFeatureTypes.swift in Sources */,

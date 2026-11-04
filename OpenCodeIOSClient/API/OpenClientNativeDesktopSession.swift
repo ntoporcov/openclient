@@ -7,6 +7,9 @@ final class OpenClientNativeDesktopSession: NSObject {
     private var connection: VNCConnection?
     private var credentialReply: ((VNCCredential?) -> Void)?
     private weak var store: OpenClientRemoteDesktopStore?
+    var onCredentialsRequested: (() -> Void)?
+    var onConnected: (() -> Void)?
+    var onDisconnected: (() -> Void)?
 
     func start(port: UInt16, store: OpenClientRemoteDesktopStore) {
         self.store = store
@@ -61,10 +64,11 @@ extension OpenClientNativeDesktopSession: VNCConnectionDelegate {
     nonisolated func connection(_ connection: VNCConnection, stateDidChange state: VNCConnection.ConnectionState) {
         Task { @MainActor [weak self] in
             guard let self, self.connection === connection else { return }
-            if state.status == .connected { store?.connected() }
+            if state.status == .connected { store?.connected(); onConnected?() }
             if state.status == .disconnected {
                 if let error = state.error { store?.failed(error) }
                 else { store?.disconnect() }
+                onDisconnected?()
                 stop()
             }
         }
@@ -76,6 +80,7 @@ extension OpenClientNativeDesktopSession: VNCConnectionDelegate {
             guard let self, self.connection === connection else { reply.call(nil); return }
             credentialReply = reply.call
             store?.requestCredentials(requiresUsername: type.requiresUsername)
+            onCredentialsRequested?()
         }
     }
     nonisolated func connection(_ connection: VNCConnection, didCreateFramebuffer framebuffer: VNCFramebuffer) { publish(connection, framebuffer) }

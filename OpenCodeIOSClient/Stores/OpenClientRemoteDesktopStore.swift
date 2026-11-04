@@ -6,6 +6,8 @@ final class OpenClientRemoteDesktopStore: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var completed = false
+    @Published private(set) var credentialStorageError: String?
+    func credentialStorageFailed(_ error: Error) { credentialStorageError = error.localizedDescription }
     @Published private(set) var frame: CGImage?
     @Published private(set) var needsCredentials = false
     @Published private(set) var requiresUsername = true

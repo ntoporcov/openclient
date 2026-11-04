@@ -14,14 +14,17 @@ export class RemoteDesktopSessions {
   private readonly tickets = new Map<string, number>()
   private readonly connections = new Map<Peer, { tcp: Socket; expiry: ReturnType<typeof setTimeout> }>()
 
-  constructor(private readonly targetURL?: string, private readonly token?: string) {
+  constructor(private readonly targetURL?: string, private readonly token?: string, private readonly rpcEnabled = false) {
     this.discovery = new RemoteDesktopDiscovery(targetURL)
   }
 
-  get enabled() { return Boolean(this.targetURL && this.token && this.token.length >= 32) }
+  get enabled() { return Boolean(this.targetURL && (this.rpcEnabled || (this.token && this.token.length >= 32))) }
+  // Static so a hot-reloaded RPC can also address an existing bridge lease
+  // created by the previous plugin module generation.
+  static credentialScope(session: RemoteDesktopSessions) { return session.targetURL ?? "" }
 
   authorized(request: Request): boolean {
-    if (!this.enabled || request.headers.has("origin")) return false
+    if (!this.enabled || !this.token || this.token.length < 32 || request.headers.has("origin")) return false
     const actual = Buffer.from(request.headers.get("authorization") ?? "")
     const expected = Buffer.from(`Bearer ${this.token}`)
     return actual.length === expected.length && timingSafeEqual(actual, expected)
