@@ -23,9 +23,15 @@ struct OpenClientRemoteDesktopButton: View {
                 Label("Remote Desktop", systemImage: "desktopcomputer")
             }
             .accessibilityIdentifier("remote-desktop.open")
+            #if os(iOS)
+            .fullScreenCover(isPresented: $isPresented) {
+                OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff)
+            }
+            #else
             .sheet(isPresented: $isPresented) {
                 OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff)
             }
+            #endif
             .onChange(of: bridge.remoteDesktopEndpoint) { _, value in
                 if value != endpoint { isPresented = false }
             }
@@ -71,7 +77,6 @@ private struct OpenClientRemoteDesktopView: View {
     @State private var clickEnabled = false
     @State private var keyboardVisible = false
     @Environment(\.appAccentColor) private var accent
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         NavigationStack {
@@ -89,18 +94,9 @@ private struct OpenClientRemoteDesktopView: View {
                     DesktopCredentialsForm(requiresUsername: store.requiresUsername) { username, password, save in
                         coordinator.authenticate(username: username, password: password, save: save)
                     }
-                } else if let frame = store.frame {
-                    #if canImport(UIKit)
-                    DesktopStreamSurface(frame: frame, session: coordinator.native,
-                                         clickEnabled: clickEnabled, keyboardVisible: $keyboardVisible)
-                    #else
-                    NativeDesktopCanvas(frame: frame, session: coordinator.native)
-                    #endif
+                } else if store.frame != nil {
+                    Spacer()
                     if keyboardVisible { DesktopFunctionRow(session: coordinator.native) }
-                    if horizontalSizeClass == .compact && !keyboardVisible {
-                        Text("Using iPhone Duo? Unfold it to use the inner display.")
-                            .font(.caption).foregroundStyle(.secondary).padding(6)
-                    }
                 } else if store.isBusy || store.isConnected {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -115,26 +111,45 @@ private struct OpenClientRemoteDesktopView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                if let frame = store.frame, !store.needsCredentials {
+                    #if canImport(UIKit)
+                    DesktopStreamSurface(frame: frame, session: coordinator.native,
+                                         clickEnabled: clickEnabled, keyboardVisible: $keyboardVisible)
+                        .ignoresSafeArea(.container)
+                    #else
+                    NativeDesktopCanvas(frame: frame, session: coordinator.native)
+                    #endif
+                } else {
+                    Color.black.ignoresSafeArea()
+                }
+            }
+            #if os(iOS)
+            .toolbarBackground(.hidden, for: .navigationBar, .bottomBar)
+            .background { DesktopPresentationOrientation().allowsHitTesting(false) }
+            #endif
             .navigationTitle("Remote Desktop")
             .toolbar {
                 #if os(iOS)
                 ToolbarItem(placement: .bottomBar) {
-                    Button { clickEnabled.toggle() } label: {
-                        Image(systemName: "hand.tap")
-                            .frame(width: 38, height: 38)
-                            .opencodeConcentricGlassSurface(tint: clickEnabled ? accent.opacity(0.3) : nil,
-                                isInteractive: true, minimumCornerRadius: 19, in: Circle())
+                    Toggle(isOn: $clickEnabled) {
+                        Label("Tap to click", systemImage: "hand.tap")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Tap to click")
-                    .accessibilityValue(clickEnabled ? Text("On") : Text("Off"))
+                    .toggleStyle(.button)
+                    .labelStyle(.iconOnly)
+                    .tint(accent)
                     .accessibilityIdentifier("remote-desktop.click-mode")
                     .disabled(!store.isConnected)
                 }
                 ToolbarItem(placement: .bottomBar) { Spacer() }
                 ToolbarItem(placement: .bottomBar) {
                     Button { keyboardVisible.toggle() } label: {
-                        Image(systemName: keyboardVisible ? "keyboard.chevron.compact.down" : "keyboard.chevron.compact.up")
+                        HStack(spacing: 4) {
+                            Image(systemName: "keyboard")
+                            Image(systemName: keyboardVisible ? "chevron.down" : "chevron.up")
+                                .font(.caption2.weight(.semibold))
+                        }
                     }
                     .accessibilityLabel(keyboardVisible ? Text("Dismiss Keyboard") : Text("Show Keyboard"))
                     .accessibilityIdentifier("remote-desktop.keyboard")
@@ -144,6 +159,7 @@ private struct OpenClientRemoteDesktopView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        Text("Using iPhone Duo? Unfold it to use the inner display.")
                         Button("Reconnect") { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
                         Button("Forget saved computer credentials", role: .destructive) {
                             coordinator.forgetCredentials(store: store)

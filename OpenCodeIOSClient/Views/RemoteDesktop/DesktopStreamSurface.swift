@@ -28,7 +28,6 @@ struct DesktopStreamSurface: UIViewRepresentable {
     static func dismantleUIView(_ view: DesktopScrollSurface, coordinator: ()) {
         view.keyboardChanged = nil
         _ = view.resignFirstResponder()
-        view.restoreOrientation()
     }
 }
 
@@ -40,8 +39,6 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
     var keyboardChanged: ((Bool) -> Void)?
     private var pixelSize = CGSize.zero
     private var lastBounds = CGSize.zero
-    private weak var presentationScene: UIWindowScene?
-    private var originalOrientation: UIInterfaceOrientation?
     var hasText: Bool { true }
     var autocorrectionType: UITextAutocorrectionType = .no
     var autocapitalizationType: UITextAutocapitalizationType = .none
@@ -58,29 +55,6 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
         accessibilityLabel = String(localized: "Remote Desktop")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        guard let scene = window?.windowScene, presentationScene == nil,
-              traitCollection.userInterfaceIdiom == .phone,
-              traitCollection.horizontalSizeClass == .compact else { return }
-        presentationScene = scene
-        originalOrientation = scene.effectiveGeometry.interfaceOrientation
-        // Use the owning scene, never an arbitrary connected scene or global screen.
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
-    }
-
-    func restoreOrientation() {
-        guard let originalOrientation else { return }
-        let mask: UIInterfaceOrientationMask = switch originalOrientation {
-        case .portrait: .portrait
-        case .portraitUpsideDown: .portraitUpsideDown
-        case .landscapeLeft: .landscapeLeft
-        case .landscapeRight: .landscapeRight
-        default: .all
-        }
-        presentationScene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
-    }
 
     func setFrame(_ frame: CGImage) {
         image.image = UIImage(cgImage: frame)
@@ -138,6 +112,40 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
         let resigned = super.resignFirstResponder()
         if resigned { DispatchQueue.main.async { [weak self] in self?.keyboardChanged?(false) } }
         return resigned
+    }
+}
+
+/// Presentation lifetime, independent of authentication or framebuffer arrival.
+struct DesktopPresentationOrientation: UIViewRepresentable {
+    func makeUIView(context: Context) -> OrientationView { OrientationView() }
+    func updateUIView(_ view: OrientationView, context: Context) {}
+    static func dismantleUIView(_ view: OrientationView, coordinator: ()) { view.restore() }
+
+    final class OrientationView: UIView {
+        private weak var scene: UIWindowScene?
+        private var original: UIInterfaceOrientation?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard let owningScene = window?.windowScene, scene == nil,
+                  traitCollection.userInterfaceIdiom == .phone,
+                  traitCollection.horizontalSizeClass == .compact else { return }
+            scene = owningScene
+            original = owningScene.effectiveGeometry.interfaceOrientation
+            owningScene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+        }
+
+        func restore() {
+            guard let original else { return }
+            let mask: UIInterfaceOrientationMask = switch original {
+            case .portrait: .portrait
+            case .portraitUpsideDown: .portraitUpsideDown
+            case .landscapeLeft: .landscapeLeft
+            case .landscapeRight: .landscapeRight
+            default: .all
+            }
+            scene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+        }
     }
 }
 #endif
