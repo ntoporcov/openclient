@@ -5,6 +5,7 @@ import { normalizeV2NotificationEvent, normalizeV2Session } from "./notification
 import { registerV2Tools } from "./tools-v2.js"
 import type { OpenClientPluginOptions } from "./index.js"
 import { configuredServerURL } from "./server-url.js"
+import { remoteDesktopBridgeOptions } from "./remote-desktop.js"
 
 // V2 provides in-process domain APIs, but no server URL on its plugin context.
 // Use the host's explicit serve arguments (never guess based on the API version).
@@ -50,7 +51,7 @@ export async function setupV2(ctx: Plugin.Context): Promise<Plugin.Cleanup> {
   })
   let bridge: Awaited<ReturnType<typeof acquireBridge>>
   try {
-    bridge = await acquireBridge({ openCodePort: Number(serverURL.port || (serverURL.protocol === "https:" ? 443 : 80)), onLog: log })
+    bridge = await acquireBridge({ ...await remoteDesktopBridgeOptions(options.remoteDesktop), openCodePort: Number(serverURL.port || (serverURL.protocol === "https:" ? 443 : 80)), onLog: log })
   } catch (error) {
     await notifications?.release()
     throw error

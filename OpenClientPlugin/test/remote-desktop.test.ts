@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { createServer, type Socket } from "node:net"
-import { parseVNCTarget, probeVNC, RemoteDesktopDiscovery } from "../src/remote-desktop.js"
+import { parseVNCTarget, probeVNC, RemoteDesktopDiscovery, remoteDesktopBridgeOptions } from "../src/remote-desktop.js"
+import { mkdtemp, writeFile, rm } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 
 async function withServer(action: (socket: Socket) => void, run: (port: number) => Promise<void>) {
   const sockets = new Set<Socket>()
@@ -22,6 +25,18 @@ async function withServer(action: (socket: Socket) => void, run: (port: number) 
 }
 
 describe("VNC discovery", () => {
+  test("explicit host configuration reads a token file without exposing its contents", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "desktop-options-"))
+    try {
+      const tokenFile = join(directory, "token")
+      await writeFile(tokenFile, "test-token\n", { mode: 0o600 })
+      expect(await remoteDesktopBridgeOptions({ url: "vnc://localhost", tokenFile })).toEqual({
+        remoteDesktopURL: "vnc://localhost", remoteDesktopToken: "test-token",
+      })
+      expect((await remoteDesktopBridgeOptions({ tokenFile: join(directory, "missing") })).remoteDesktopToken).toBe("")
+      expect((await remoteDesktopBridgeOptions()).remoteDesktopToken).toBeUndefined()
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
   test("accepts hosts, explicit ports and IPv6", () => {
     expect(parseVNCTarget("vnc://localhost")).toEqual({ host: "localhost", port: 5900 })
     expect(parseVNCTarget("vnc://[::1]:5901")).toEqual({ host: "::1", port: 5901 })

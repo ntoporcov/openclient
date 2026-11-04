@@ -17,6 +17,17 @@ The viewer pins noVNC 1.5.0. The npm 1.6.0 CommonJS distribution contains a tran
 
 Configure the environment of the OpenCode process that loads this plugin:
 
+For managed hosts, prefer explicit plugin options (the token stays in a separate mode-600 file):
+
+```json
+"remoteDesktop": {
+  "url": "vnc://127.0.0.1:5900",
+  "tokenFile": "/absolute/path/to/remote-desktop-token"
+}
+```
+
+Place this object alongside `serverURL` inside the plugin's `options`. A missing/unreadable token file disables viewer access rather than falling back to another token. Alternatively, hosts that forward environment variables can use:
+
 ```sh
 export OPENCLIENT_VNC_URL=vnc://127.0.0.1:5900
 export OPENCLIENT_REMOTE_DESKTOP_TOKEN="$(openssl rand -hex 32)"

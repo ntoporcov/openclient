@@ -1,4 +1,17 @@
 import { createConnection } from "node:net"
+import { readFile } from "node:fs/promises"
+
+export type RemoteDesktopOptions = { url?: string; tokenFile?: string }
+
+/** Explicit options also work in managed hosts that filter process environment variables. */
+export async function remoteDesktopBridgeOptions(options?: RemoteDesktopOptions) {
+  let token: string | undefined
+  if (options?.tokenFile !== undefined) {
+    try { token = (await readFile(options.tokenFile, "utf8")).trim() }
+    catch { token = "" }
+  }
+  return { remoteDesktopURL: options?.url, remoteDesktopToken: token }
+}
 
 export type RemoteDesktopCapability = {
   version: 1

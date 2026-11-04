@@ -3,11 +3,13 @@ import { acquireBridge } from "./lifecycle.js"
 import { acquireNotifications, type NotificationsOptions } from "./notifications.js"
 import { createOpenClientTools } from "./tools.js"
 import { configuredServerURL } from "./server-url.js"
+import { remoteDesktopBridgeOptions, type RemoteDesktopOptions } from "./remote-desktop.js"
 
 export type OpenClientPluginOptions = {
   notifications?: NotificationsOptions
   /** OpenCode origin used by the app, including the external port when behind a proxy. */
   serverURL?: string
+  remoteDesktop?: RemoteDesktopOptions
 }
 
 const OpenClientPlugin = async (input: Parameters<Plugin>[0], options: OpenClientPluginOptions = {}) => {
@@ -29,6 +31,7 @@ const OpenClientPlugin = async (input: Parameters<Plugin>[0], options: OpenClien
   let lease: Awaited<ReturnType<typeof acquireBridge>>
   try {
     lease = await acquireBridge({
+      ...await remoteDesktopBridgeOptions(options.remoteDesktop),
       openCodePort: normalizedPort(serverURL),
       onLog: (level, message) => void log(level, message),
     })
