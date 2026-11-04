@@ -77,6 +77,14 @@ final class ComposerStore: ObservableObject {
         draftAttachments.append(contentsOf: newItems)
     }
 
+    /// Appends without shifting existing mention ranges or replacing attachments.
+    func textAppendingDesktopFollowup() -> String {
+        let followup = String(localized: "I’ve finished the desktop task. Please continue.")
+        if draftMessage.contains(followup) { return draftMessage }
+        if draftMessage.isEmpty { return followup }
+        return draftMessage + "\n\n" + followup
+    }
+
     func selectStreamingDelivery(_ delivery: OpenCodePromptDelivery) {
         streamingDeliveryOverride = delivery
     }

@@ -1,5 +1,5 @@
 import { tool, type ToolContext } from "@opencode-ai/plugin"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import type { OpenClientBridge } from "./bridge.js"
 import {
@@ -23,17 +23,18 @@ export function createOpenClientTools(
 ) {
   return {
     openclient_request_remote_access: tool({
-      description: "Ask the user to complete a task on the host desktop, such as signing in. Shows an Open Remote Desktop card in OpenClient and waits for explicit Done or Cancel. Never request passwords in chat. Requires configured remote desktop access.",
+      description: "Ask the user to complete a task on the host desktop, such as signing in. Returns an Open Remote Desktop card immediately; it does not wait for the user. End your turn after creating the card and wait for a new user message. Done prepares a follow-up draft but does not send it or confirm task completion. Never request passwords in chat. Requires configured remote desktop access.",
       args: { reason: tool.schema.string().min(1).max(2000).describe("What the user needs to do on the desktop.") },
       async execute(args, context) {
         if (!remoteDesktop || !(await remoteDesktop.capability()).viewerAvailable) throw new Error("Remote desktop access is not configured or available on this host")
-        const { request, result } = remoteDesktop.handoffs.request({
-          reason: args.reason, sessionID: context.sessionID, messageID: context.messageID,
-        }, context.abort)
-        context.metadata({ title: "Your help is needed", metadata: { renderer: "openclient.remote-desktop", payload: request } })
-        const outcome = await result
-        return { title: "Remote desktop handoff", output: JSON.stringify({ outcome }),
-          metadata: { renderer: "openclient.remote-desktop", payload: { ...request, outcome } } }
+        context.abort.throwIfAborted()
+        // The completed tool result is the durable card. No progress-only payload,
+        // pending promise, timer, or in-memory handoff survives this invocation.
+        const request = { requestID: randomUUID(), reason: args.reason,
+          sessionID: context.sessionID, messageID: context.messageID, mode: "draft" }
+        return { title: "Remote desktop handoff", output: JSON.stringify({
+          status: "awaiting_user", instruction: "The desktop card is ready. End your turn and wait for the user to send a follow-up. Done only fills their composer; do not assume they have completed the task.",
+        }), metadata: { renderer: "openclient.remote-desktop", payload: request } }
       },
     }),
     openclient_get_tool_list: tool({

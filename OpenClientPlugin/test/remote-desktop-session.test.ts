@@ -11,27 +11,24 @@ import type { DesktopHandoff } from "../src/remote-desktop-handoff.js"
 
 const token = "test-only-remote-desktop-token-32-characters"
 
-test("agent tool publishes a pending native card and returns only after explicit completion", async () => {
+test("agent tool returns a durable draft handoff immediately without progress or a waiting request", async () => {
   const desktop = new RemoteDesktopSessions("vnc://localhost", token)
   desktop.capability = async () => ({ version: 1, transport: "rfb", state: "detected", viewerAvailable: true })
   const tools = createOpenClientTools({} as never, {} as never, {} as never, desktop)
-  let publish!: (request: DesktopHandoff) => void
-  const published = new Promise<DesktopHandoff>((resolve) => { publish = resolve })
-  let finished = false
-  const execution = tools.openclient_request_remote_access.execute({ reason: "Sign in to the test application" }, {
+  desktop.handoffs.request = () => { throw new Error("Must not create a blocking handoff") }
+  const result = await tools.openclient_request_remote_access.execute({ reason: "Sign in to the test application" }, {
     sessionID: "session", messageID: "message", abort: new AbortController().signal,
-    metadata(update: { metadata: { renderer: string; payload: DesktopHandoff } }) {
-      expect(update.metadata.renderer).toBe("openclient.remote-desktop")
-      publish(update.metadata.payload)
-    },
-  } as never).then((value) => { finished = true; return value })
-  const request = await published
-  expect(finished).toBe(false)
+    metadata() { throw new Error("Card must be in final result, not transient progress") },
+  } as never) as { output: string; metadata: { renderer: string; payload: DesktopHandoff & { mode: string } } }
+  const request = result.metadata.payload
+  expect(result.metadata.renderer).toBe("openclient.remote-desktop")
+  expect(request.mode).toBe("draft")
+  expect(request.sessionID).toBe("session")
+  expect(request.messageID).toBe("message")
   expect(request.reason).toBe("Sign in to the test application")
-  desktop.handoffs.complete(request.requestID, request.sessionID, request.messageID, "done")
-  const result = await execution as { output: string }
-  expect(JSON.parse(result.output)).toEqual({ outcome: "done" })
-  expect(finished).toBe(true)
+  expect(JSON.parse(result.output).status).toBe("awaiting_user")
+  expect(JSON.parse(result.output).instruction).toContain("End your turn")
+  expect(JSON.parse(JSON.stringify(result)).metadata.payload).toEqual(request)
 })
 
 test("desktop auth requires explicit strong configuration and rejects browser-origin ticket minting", () => {

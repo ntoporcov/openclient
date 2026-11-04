@@ -607,7 +607,7 @@ struct MessageBubble: View {
         } else if let attachment = attachment(for: part) {
             AttachmentBubblePart(attachment: attachment, isUser: isUser)
         } else if let handoff = OpenClientDesktopHandoff(part: part) {
-            OpenClientDesktopHandoffCard(handoff: handoff, pending: OpenCodeToolActivityPolicy.isRunning(part))
+            OpenClientDesktopHandoffCard(handoff: handoff, pending: handoff.preparesFollowupDraft || OpenCodeToolActivityPolicy.isRunning(part))
         } else if let imageActivity = OpenClientVisualImageActivity(
             part: part,
             sessionID: currentSessionID,

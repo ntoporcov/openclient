@@ -5,7 +5,15 @@ private struct DesktopBridgeKey: EnvironmentKey {
     static let defaultValue: OpenClientBridgeFacade? = nil
 }
 
+private struct DesktopChatKey: EnvironmentKey {
+    static let defaultValue: ChatFacade? = nil
+}
+
 extension EnvironmentValues {
+    var desktopChat: ChatFacade? {
+        get { self[DesktopChatKey.self] }
+        set { self[DesktopChatKey.self] = newValue }
+    }
     var desktopBridge: OpenClientBridgeFacade? {
         get { self[DesktopBridgeKey.self] }
         set { self[DesktopBridgeKey.self] = newValue }
@@ -18,6 +26,7 @@ struct OpenClientRemoteDesktopButton: View {
     @State private var isPresented = false
     @Environment(\.appAccentColor) private var accent
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.desktopChat) private var desktopChat
 
     var body: some View {
         if let endpoint = bridge.remoteDesktopEndpoint {
@@ -36,6 +45,7 @@ struct OpenClientRemoteDesktopButton: View {
                     OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff) { isPresented = false }
                         .environment(\.appAccentColor, accent)
                         .environment(\.scenePhase, scenePhase)
+                        .environment(\.desktopChat, desktopChat)
                 }
                 .ignoresSafeArea()
             }
@@ -88,6 +98,7 @@ private struct OpenClientRemoteDesktopView: View {
     let handoff: OpenClientDesktopHandoff?
     let dismiss: () -> Void
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.desktopChat) private var desktopChat
     @StateObject private var store = OpenClientRemoteDesktopStore()
     @State private var coordinator = OpenClientRemoteDesktopCoordinator()
     @State private var clickEnabled = false
@@ -194,10 +205,16 @@ private struct OpenClientRemoteDesktopView: View {
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         DesktopHandoffDoneButton {
-                            coordinator.complete(handoff, outcome: "done", endpoint: endpoint,
-                                                 access: bridge.desktopAccess, store: store)
+                            if handoff.preparesFollowupDraft {
+                                if desktopChat?.prepareDesktopFollowup(forSessionID: handoff.sessionID) == true {
+                                    dismiss()
+                                }
+                            } else {
+                                coordinator.complete(handoff, outcome: "done", endpoint: endpoint,
+                                                     access: bridge.desktopAccess, store: store)
+                            }
                         }
-                        .disabled(store.isBusy || store.completed)
+                        .disabled(store.isBusy || store.completed || (handoff.preparesFollowupDraft && desktopChat == nil))
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {

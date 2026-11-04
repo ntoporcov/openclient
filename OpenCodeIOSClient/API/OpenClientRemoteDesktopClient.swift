@@ -6,6 +6,9 @@ struct OpenClientDesktopHandoff: Codable, Equatable, Sendable {
     let messageID: String
     let reason: String
     let outcome: String?
+    let mode: String?
+
+    var preparesFollowupDraft: Bool { mode == "draft" }
 
     init?(part: OpenCodePart) {
         guard part.type == "tool", part.tool == "openclient_request_remote_access",

@@ -2701,10 +2701,12 @@ struct ChatView: View {
                 .transition(.identity)
         } else {
             chatObservedContent
+                .environment(\.desktopChat, chatFacade)
                 .transition(.identity)
         }
         #else
         chatObservedContent
+            .environment(\.desktopChat, chatFacade)
         #endif
     }
 

@@ -1059,6 +1059,21 @@ final class ChatFacade: ObservableObject {
         composerStore.resetToken = UUID()
     }
 
+    @discardableResult
+    func prepareDesktopFollowup(forSessionID sessionID: String) -> Bool {
+        if let windowContext {
+            guard windowContext.isCurrent, windowContext.session.id == sessionID else { return false }
+        } else {
+            guard selectedSession?.id == sessionID else { return false }
+        }
+        saveMessageDraft(composerStore.textAppendingDesktopFollowup(), forSessionID: sessionID)
+        // Chat's local text editor observes this token for externally prepared drafts.
+        let delivery = composerStore.streamingDeliveryOverride
+        resetComposer()
+        if let delivery { composerStore.selectStreamingDelivery(delivery) }
+        return true
+    }
+
     func setDraftAgentMentions(_ mentions: [OpenCodeAgentMention], forSessionID sessionID: String) {
         if let windowContext {
             guard windowContext.isCurrent, windowContext.session.id == sessionID else { return }
