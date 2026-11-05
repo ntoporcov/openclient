@@ -22,7 +22,7 @@ configs:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    CURRENT_PROJECT_VERSION: 96
+    CURRENT_PROJECT_VERSION: 97
     MARKETING_VERSION: 1.0.30
   configs:
     Debug:
