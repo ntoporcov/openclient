@@ -34,7 +34,7 @@ struct DesktopStreamSurface: UIViewRepresentable {
 final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput, UIGestureRecognizerDelegate {
     let image = UIImageView()
     lazy var click = UITapGestureRecognizer(target: self, action: #selector(tap(_:)))
-    lazy var doubleClick = UITapGestureRecognizer(target: self, action: #selector(doubleTap(_:)))
+    lazy var doubleClick = UITapGestureRecognizer(target: self, action: #selector(tap(_:)))
     lazy var pointerDrag = UILongPressGestureRecognizer(target: self, action: #selector(holdAndDrag(_:)))
     weak var session: OpenClientNativeDesktopSession? {
         didSet { pointerInput = session }
@@ -65,13 +65,16 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
         }
         addSubview(image)
         doubleClick.numberOfTapsRequired = 2
+        click.delegate = self
+        doubleClick.delegate = self
         pointerDrag.minimumPressDuration = 0.35
         pointerDrag.allowableMovement = 12
         pointerDrag.delegate = self
         addGestureRecognizer(pointerDrag)
         addGestureRecognizer(doubleClick)
         addGestureRecognizer(click)
-        click.require(toFail: doubleClick)
+        // The first click is immediate. The simultaneous double-tap recognizer
+        // supplies only the second click, without a failure dependency/delay.
         click.require(toFail: pointerDrag)
         doubleClick.require(toFail: pointerDrag)
         click.require(toFail: panGestureRecognizer)
@@ -160,11 +163,6 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
         pointerInput?.pointer(x: x, y: y, down: false)
     }
 
-    @objc private func doubleTap(_ gesture: UITapGestureRecognizer) {
-        tap(gesture)
-        tap(gesture)
-    }
-
     @objc private func holdAndDrag(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
@@ -237,6 +235,8 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        if (gestureRecognizer === click && other === doubleClick)
+            || (gestureRecognizer === doubleClick && other === click) { return true }
         // A second finger can take over navigation, even after mouse-down.
         let navigation = [panGestureRecognizer, pinchGestureRecognizer].compactMap { $0 }
         return (gestureRecognizer === pointerDrag && navigation.contains(where: { $0 === other }))

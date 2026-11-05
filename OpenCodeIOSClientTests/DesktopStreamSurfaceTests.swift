@@ -58,8 +58,7 @@ final class DesktopStreamSurfaceTests: XCTestCase {
         let surface = DesktopScrollSurface()
         surface.setClickEnabled(true)
         XCTAssertTrue(surface.click.isEnabled)
-        XCTAssertTrue(surface.doubleClick.isEnabled)
-        XCTAssertEqual(surface.doubleClick.numberOfTapsRequired, 2)
+        XCTAssertEqual(surface.click.numberOfTapsRequired, 1)
         XCTAssertTrue(surface.pointerDrag.isEnabled)
         XCTAssertTrue(surface.gestureRecognizer(surface.pointerDrag,
                                                shouldRecognizeSimultaneouslyWith: surface.panGestureRecognizer))
@@ -69,7 +68,6 @@ final class DesktopStreamSurfaceTests: XCTestCase {
         XCTAssertEqual(surface.pinchGestureRecognizer?.isEnabled, true)
         surface.setClickEnabled(false)
         XCTAssertFalse(surface.click.isEnabled)
-        XCTAssertFalse(surface.doubleClick.isEnabled)
         XCTAssertFalse(surface.pointerDrag.isEnabled)
         XCTAssertEqual(surface.panGestureRecognizer.minimumNumberOfTouches, 1)
         XCTAssertEqual(surface.pinchGestureRecognizer?.isEnabled, true)

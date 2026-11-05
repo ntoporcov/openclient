@@ -13,8 +13,7 @@ final class DesktopPointerUITests: XCTestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 15))
         let events = app.staticTexts["desktop.pointer.events"]
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
-        XCTAssertTrue(NSPredicate(format: "label == %@", "2|2|0|0")
-            .evaluate(with: events), "A double tap must send exactly two full clicks")
+        XCTAssertEqual(events.label, "2|2|0|0", "A double tap must send exactly two full clicks")
         let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
         let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
         start.press(forDuration: 0.6, thenDragTo: end)
