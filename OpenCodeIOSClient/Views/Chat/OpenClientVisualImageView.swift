@@ -1,5 +1,68 @@
 import SwiftUI
 
+struct TranscriptReadImageView: View {
+    let path: String
+    let load: (String) async throws -> Data
+    @State private var loader = TranscriptReadImageLoader()
+    @State private var retry = 0
+    @State private var showsPreview = false
+    @State private var actions = TranscriptImageActions()
+
+    private static let imageHeight: CGFloat = 280
+
+    private var imageWidth: CGFloat {
+        guard let image = loader.image else { return 220 }
+        return Self.imageHeight * CGFloat(image.width) / CGFloat(max(1, image.height))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if let image = loader.image {
+                    Button { showsPreview = true } label: {
+                        openClientPlatformImage(image.image)
+                            .resizable()
+                            .aspectRatio(CGFloat(image.width) / CGFloat(max(1, image.height)), contentMode: .fit)
+                            .frame(width: imageWidth, height: Self.imageHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(verbatim: path))
+                    .contextMenu {
+                        if let asset = loader.asset {
+                            TranscriptImageActionButtons(asset: asset, actions: actions)
+                        }
+                    }
+                } else if let error = loader.error {
+                    VStack(spacing: 8) {
+                        Text(verbatim: error).font(.caption).lineLimit(3)
+                        Button("Retry", systemImage: "arrow.clockwise") { retry += 1 }
+                    }
+                    .padding(12)
+                    .frame(width: imageWidth, height: Self.imageHeight)
+                    .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 14))
+                } else {
+                    ProgressView()
+                        .frame(width: imageWidth, height: Self.imageHeight)
+                        .background(OpenCodePlatformColor.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 14))
+                }
+            }
+            Text(verbatim: (path as NSString).lastPathComponent)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: imageWidth, alignment: .leading)
+        .task(id: retry) { await loader.load(path: path, using: load) }
+        .modifier(TranscriptImageActionError(actions: actions))
+        .sheet(isPresented: $showsPreview) {
+            if let asset = loader.asset {
+                TranscriptImageDetailView(asset: asset, path: path)
+            }
+        }
+    }
+}
+
 struct OpenClientVisualImageLoadingID: Hashable, Sendable {
     let sessionID: String
     let messageID: String

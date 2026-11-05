@@ -1,5 +1,17 @@
 import Foundation
 
+enum TranscriptReadImagePolicy {
+    // Matches upstream current-tool-state.ts/readImagePath. Only successful reads
+    // preview files; failed and in-flight reads retain their normal activity UI.
+    static func path(for part: OpenCodePart) -> String? {
+        guard part.type == "tool", part.tool == "read", part.state?.status == "completed",
+              let path = part.state?.input?.path ?? part.state?.input?.filePath else { return nil }
+        let normalized = path.replacingOccurrences(of: "\\", with: "/")
+        let extensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"]
+        return extensions.contains((normalized as NSString).pathExtension.lowercased()) ? normalized : nil
+    }
+}
+
 /// Presentation-only slices. Parts retain their canonical message IDs for tool actions.
 struct TranscriptActivitySlice: Identifiable {
     let source: OpenCodeMessageEnvelope
@@ -24,6 +36,7 @@ enum TranscriptActivityGrouping {
     }
 
     static func isActivity(_ part: OpenCodePart) -> Bool {
+        if TranscriptReadImagePolicy.path(for: part) != nil { return false }
         // App features stay inline and separate surrounding collapsible activity.
         if OpenCodeToolActivityPolicy.isOpenClientTool(part) { return false }
         return part.timelineContextType != nil || part.type == "reasoning" || (part.type == "text" && part.reason?.lowercased().contains("reasoning") == true)
@@ -46,7 +59,9 @@ enum TranscriptActivityGrouping {
                 if let index = result.indices.last,
                    result[index].source.info.role == "assistant",
                    result[index].isActivity == activity,
-                   activity || result[index].source.id == message.id {
+                    activity || result[index].source.id == message.id
+                        || (TranscriptReadImagePolicy.path(for: part) != nil
+                            && result[index].parts.allSatisfy { TranscriptReadImagePolicy.path(for: $0) != nil }) {
                     result[index].parts.append(part)
                     if (result[index].additionalSourceMessageIDs.last ?? result[index].source.id) != message.id {
                         result[index].additionalSourceMessageIDs.append(message.id)
