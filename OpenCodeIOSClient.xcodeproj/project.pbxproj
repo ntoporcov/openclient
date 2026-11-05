@@ -644,6 +644,7 @@
 		CEBC8BB18B0AA74A6E8E5395 /* PinnedCommandStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDAC9A1F93B6E86173FEE8D8 /* PinnedCommandStore.swift */; };
 		CEE60B3A4B2B45473EBF97CE /* OpenCodeCommandsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD1913FAB65347A5AC53DCA /* OpenCodeCommandsService.swift */; };
 		CF29802BEBD5A466A64AC665 /* ProjectContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF3564009893D20694D105B /* ProjectContentView.swift */; };
+		CF304188E2717CE9A8F5298A /* DesktopPointerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1C8E982BB25586EE84D73BD /* DesktopPointerUITests.swift */; };
 		CFCBF1353D8BF337D7F3F603 /* ToolGroupSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D76FA74A8CCC024CF91E908 /* ToolGroupSummary.swift */; };
 		D01E8857971642E7CC20124B /* DesktopClipboardButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40E3A169449801B3AFB99E6A /* DesktopClipboardButton.swift */; };
 		D020AEEA2B349D552096DAD4 /* ProviderUsageAccountRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9542471BC79C123DEBA53F9B /* ProviderUsageAccountRepository.swift */; };
@@ -1175,6 +1176,7 @@
 		C062B901429100F912C90383 /* LiveActivityCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityCoordinator.swift; sourceTree = "<group>"; };
 		C08CAC08E3E7D095333DCE80 /* OpenCodeIOSClient.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenCodeIOSClient.entitlements; sourceTree = "<group>"; };
 		C126EA7240EC59D518E11FA2 /* SnapshotHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotHelper.swift; sourceTree = "<group>"; };
+		C1C8E982BB25586EE84D73BD /* DesktopPointerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopPointerUITests.swift; sourceTree = "<group>"; };
 		C237D3E4A11603721D0A94BF /* OpenCodeChatActivityExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = OpenCodeChatActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C33850810967CC5A047C3244 /* OpenClientBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClientBridgeTests.swift; sourceTree = "<group>"; };
 		C435A7F0986CD073C2DC3B28 /* OpenCodeIOSClientUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = OpenCodeIOSClientUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1749,6 +1751,7 @@
 				2D9B15EC9185BDDA3F5BFCE5 /* ComposerMentionUITests.swift */,
 				84B0D211CBBD1E2F5029D514 /* DesktopClipboardUITests.swift */,
 				0EBB099776098D28D805903B /* DesktopLoadingGameUITests.swift */,
+				C1C8E982BB25586EE84D73BD /* DesktopPointerUITests.swift */,
 				CF114084B6003DD850A211F3 /* GalleryScreenshotUITests.swift */,
 				1E35EBE15CA41A449B323317 /* OpenCodeIOSClientUITests.swift */,
 				744BFC51A0F0E53CD7DF2F4A /* ResponseCopyUITests.swift */,
@@ -2461,6 +2464,7 @@
 				EC90A4780D68494FDAF8D8F4 /* ComposerMentionUITests.swift in Sources */,
 				CD8BABC2DCE486916434BF06 /* DesktopClipboardUITests.swift in Sources */,
 				CE6E840D94C294AFFE94A00B /* DesktopLoadingGameUITests.swift in Sources */,
+				CF304188E2717CE9A8F5298A /* DesktopPointerUITests.swift in Sources */,
 				61F53D2FD1FA10969AA6022E /* GalleryScreenshotUITests.swift in Sources */,
 				A3404A867579F6DB6B42D6C8 /* OpenCodeIOSClientUITests.swift in Sources */,
 				06BEDEE288262C5FEF4DCDF2 /* ResponseCopyUITests.swift in Sources */,

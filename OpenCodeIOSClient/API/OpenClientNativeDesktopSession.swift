@@ -3,7 +3,12 @@ import CoreGraphics
 @preconcurrency import RoyalVNCKit
 
 @MainActor
-final class OpenClientNativeDesktopSession: NSObject {
+protocol DesktopPointerInput: AnyObject {
+    func pointer(x: UInt16, y: UInt16, down: Bool)
+}
+
+@MainActor
+final class OpenClientNativeDesktopSession: NSObject, DesktopPointerInput {
     private var connection: VNCConnection?
     private var credentialReply: ((VNCCredential?) -> Void)?
     private weak var store: OpenClientRemoteDesktopStore?
@@ -56,6 +61,12 @@ final class OpenClientNativeDesktopSession: NSObject {
     }
 
     func key(_ key: VNCKeyCode) { connection?.keyDown(key); connection?.keyUp(key) }
+
+    func copySelection() {
+        modifier(.command, pressed: true)
+        type("c")
+        modifier(.command, pressed: false)
+    }
 
     func modifier(_ key: VNCKeyCode, pressed: Bool) {
         if pressed { connection?.keyDown(key) } else { connection?.keyUp(key) }

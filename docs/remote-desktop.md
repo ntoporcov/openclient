@@ -45,6 +45,10 @@ RoyalVNCKit exposes a TCP client but no public custom-transport injection. `Open
 
 ### Receive-only clipboard history
 
+In click mode, tap sends a click, double-tap sends a double-click (word selection in supporting desktop apps), and holding for 350 ms begins a mouse drag with a light haptic. Dragging selects text or moves desktop objects using the remote app's own behavior. A one-time hint introduces the gesture. Two-finger pan/zoom remains available and releases any held remote mouse button before taking over. Turning click mode off, resizing, cancellation, or removing the surface also releases the button. The viewer options menu's **Copy selection** sends ⌘C to the Mac; the resulting clipboard update enters the history below.
+
+Selection verification: five surface tests plus an actual double-tap/hold-and-drag UI test passed on each required simulator (iPhone 18 Pro Max/iOS 27.0, iPad Pro 13-inch M5/iOS 27.0, iPhone Duo/iOS 27.1), with no skips. Signed device build and localization extraction passed. Installation was blocked by unavailable Nic iPhone connectivity, including the direct CoreDevice fallback; haptic feel and live desktop selection/copy still need on-device confirmation. Duo fold transitions remain untested.
+
 Ordinary RFB ServerCutText events are delivered to a main-actor history without reading or writing the iOS pasteboard or sending clipboard contents back to the computer. The clipboard button appears when text has been captured, briefly bounces on new captures (respecting Reduce Motion), and opens a popover. Tapping an item explicitly copies its full text to the device clipboard; Clear removes the cached history.
 
 The viewer, Projects toolbar, and chat handoff cards share the connected server/account's history. Closing the viewer retains it in memory until the app process ends. Switching the authenticated target clears that server's old history, and late events from another target/connection are ignored. History holds up to 40 distinct text items, each at most 64 KiB UTF-8. Recopying an older item promotes it; repeated unchanged updates do not animate or duplicate it. Clipboard contents are not persisted or logged.

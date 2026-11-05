@@ -24,16 +24,23 @@ struct DesktopStreamSurface: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: DesktopScrollSurface, coordinator: ()) {
+        view.endPointerDrag()
         view.keyboardChanged = nil
         _ = view.resignFirstResponder()
     }
 }
 
-/// UIKit owns zoom geometry and converts taps back into unscaled framebuffer coordinates.
-final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput {
+/// UIKit owns zoom geometry and maps pointer gestures into framebuffer coordinates.
+final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput, UIGestureRecognizerDelegate {
     let image = UIImageView()
     lazy var click = UITapGestureRecognizer(target: self, action: #selector(tap(_:)))
-    weak var session: OpenClientNativeDesktopSession?
+    lazy var doubleClick = UITapGestureRecognizer(target: self, action: #selector(doubleTap(_:)))
+    lazy var pointerDrag = UILongPressGestureRecognizer(target: self, action: #selector(holdAndDrag(_:)))
+    weak var session: OpenClientNativeDesktopSession? {
+        didSet { pointerInput = session }
+    }
+    weak var pointerInput: (any DesktopPointerInput)?
+    private var dragPoint: (x: UInt16, y: UInt16)?
     var keyboardChanged: ((Bool) -> Void)?
     private var pixelSize = CGSize.zero
     private var lastBounds = CGSize.zero
@@ -56,16 +63,32 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
             bottomEdgeEffect.isHidden = true
         }
         addSubview(image)
+        doubleClick.numberOfTapsRequired = 2
+        pointerDrag.minimumPressDuration = 0.35
+        pointerDrag.allowableMovement = 12
+        pointerDrag.delegate = self
+        addGestureRecognizer(pointerDrag)
+        addGestureRecognizer(doubleClick)
         addGestureRecognizer(click)
+        click.require(toFail: doubleClick)
+        click.require(toFail: pointerDrag)
+        doubleClick.require(toFail: pointerDrag)
         click.require(toFail: panGestureRecognizer)
-        if let pinchGestureRecognizer { click.require(toFail: pinchGestureRecognizer) }
+        doubleClick.require(toFail: panGestureRecognizer)
+        if let pinchGestureRecognizer {
+            click.require(toFail: pinchGestureRecognizer)
+            doubleClick.require(toFail: pinchGestureRecognizer)
+        }
         accessibilityIdentifier = "remote-desktop.canvas"
         accessibilityLabel = String(localized: "Remote Desktop")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func setClickEnabled(_ enabled: Bool) {
+        if !enabled { endPointerDrag() }
         click.isEnabled = enabled
+        doubleClick.isEnabled = enabled
+        pointerDrag.isEnabled = enabled
         panGestureRecognizer.minimumNumberOfTouches = enabled ? 2 : 1
         panGestureRecognizer.isEnabled = true
         pinchGestureRecognizer?.isEnabled = true
@@ -75,6 +98,7 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
         image.image = UIImage(cgImage: frame)
         let size = CGSize(width: frame.width, height: frame.height)
         if pixelSize != size {
+            endPointerDrag()
             pixelSize = size
             lastBounds = .zero
             viewportCenter = nil
@@ -89,6 +113,7 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
         super.layoutSubviews()
         guard pixelSize.width > 0, bounds.width > 0, bounds.height > 0 else { return }
         if resized {
+            endPointerDrag()
             let previousCenter = viewportCenter
             let previousZoom = zoomScale
             let initial = lastBounds == .zero
@@ -116,6 +141,8 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
     }
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { image }
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { endPointerDrag() }
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) { endPointerDrag() }
     func scrollViewDidZoom(_ scrollView: UIScrollView) { centerImage(); rememberCenter() }
     func scrollViewDidScroll(_ scrollView: UIScrollView) { rememberCenter() }
     private func rememberCenter() {
@@ -128,8 +155,69 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
     }
     @objc private func tap(_ gesture: UITapGestureRecognizer) {
         guard let (x, y) = pointerCoordinates(at: gesture.location(in: self)) else { return }
-        session?.pointer(x: x, y: y, down: true)
-        session?.pointer(x: x, y: y, down: false)
+        pointerInput?.pointer(x: x, y: y, down: true)
+        pointerInput?.pointer(x: x, y: y, down: false)
+    }
+
+    @objc private func doubleTap(_ gesture: UITapGestureRecognizer) {
+        tap(gesture)
+        tap(gesture)
+    }
+
+    @objc private func holdAndDrag(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            guard gesture.numberOfTouches == 1,
+                  beginPointerDrag(at: gesture.location(in: self)) else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .changed:
+            guard gesture.numberOfTouches == 1 else { endPointerDrag(); return }
+            continuePointerDrag(at: gesture.location(in: self))
+        case .ended:
+            continuePointerDrag(at: gesture.location(in: self))
+            endPointerDrag()
+        case .cancelled, .failed:
+            endPointerDrag()
+        default: break
+        }
+    }
+
+    @discardableResult
+    func beginPointerDrag(at location: CGPoint) -> Bool {
+        guard pointerDrag.isEnabled, let point = pointerCoordinates(at: location) else { return false }
+        endPointerDrag()
+        dragPoint = point
+        pointerInput?.pointer(x: point.0, y: point.1, down: true)
+        return true
+    }
+
+    func continuePointerDrag(at location: CGPoint) {
+        guard dragPoint != nil, pixelSize.width > 0, pixelSize.height > 0 else { return }
+        let point = image.convert(location, from: self)
+        guard point.x.isFinite, point.y.isFinite else { return }
+        let x = UInt16(clamping: Int(max(0, min(pixelSize.width - 1, point.x))))
+        let y = UInt16(clamping: Int(max(0, min(pixelSize.height - 1, point.y))))
+        dragPoint = (x, y)
+        pointerInput?.pointer(x: x, y: y, down: true)
+    }
+
+    func endPointerDrag() {
+        guard let point = dragPoint else { return }
+        dragPoint = nil
+        pointerInput?.pointer(x: point.x, y: point.y, down: false)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        // A second finger can take over navigation, even after mouse-down.
+        let navigation = [panGestureRecognizer, pinchGestureRecognizer].compactMap { $0 }
+        return (gestureRecognizer === pointerDrag && navigation.contains(where: { $0 === other }))
+            || (other === pointerDrag && navigation.contains(where: { $0 === gestureRecognizer }))
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        if newWindow == nil { endPointerDrag() }
+        super.willMove(toWindow: newWindow)
     }
 
     func pointerCoordinates(at location: CGPoint) -> (UInt16, UInt16)? {
@@ -150,6 +238,55 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
         return resigned
     }
 }
+
+#if DEBUG
+@MainActor
+final class DesktopPointerFixtureState: ObservableObject, DesktopPointerInput {
+    @Published var downs = 0
+    @Published var ups = 0
+    @Published var moves = 0
+    private var held = false
+
+    func pointer(x: UInt16, y: UInt16, down: Bool) {
+        if down {
+            if held { moves += 1 } else { downs += 1 }
+        } else { ups += 1 }
+        held = down
+    }
+}
+
+struct DesktopPointerFixture: View {
+    @StateObject private var input = DesktopPointerFixtureState()
+
+    var body: some View {
+        VStack {
+            DesktopPointerFixtureSurface(input: input)
+            Text(verbatim: "\(input.downs)|\(input.ups)|\(input.moves)")
+                .accessibilityIdentifier("desktop.pointer.events")
+        }
+    }
+}
+
+private struct DesktopPointerFixtureSurface: UIViewRepresentable {
+    let input: DesktopPointerFixtureState
+
+    func makeUIView(context: Context) -> DesktopScrollSurface {
+        let surface = DesktopScrollSurface()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 300)).image { context in
+            UIColor.darkGray.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 300))
+        }
+        surface.setFrame(image.cgImage!)
+        surface.isAccessibilityElement = true
+        return surface
+    }
+
+    func updateUIView(_ view: DesktopScrollSurface, context: Context) {
+        view.pointerInput = input
+        view.setClickEnabled(true)
+    }
+}
+#endif
 
 /// SwiftUI owns modal presentation; this visible controller applies orientation
 /// after the cover has appeared, rather than presenting from a toolbar background.

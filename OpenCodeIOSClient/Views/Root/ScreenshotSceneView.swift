@@ -92,7 +92,9 @@ struct ScreenshotSceneView: View {
             }
         case .chat:
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            if ProcessInfo.processInfo.environment["OPENCLIENT_DESKTOP_CLIPBOARD_TEST"] == "1" {
+            if ProcessInfo.processInfo.environment["OPENCLIENT_DESKTOP_POINTER_TEST"] == "1" {
+                DesktopPointerFixture()
+            } else if ProcessInfo.processInfo.environment["OPENCLIENT_DESKTOP_CLIPBOARD_TEST"] == "1" {
                 DesktopClipboardFixture()
             } else if let suite = ProcessInfo.processInfo.environment["OPENCLIENT_DESKTOP_GAME_TEST_SUITE"],
                let defaults = UserDefaults(suiteName: suite) {

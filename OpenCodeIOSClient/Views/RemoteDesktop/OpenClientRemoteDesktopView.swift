@@ -173,6 +173,8 @@ private struct OpenClientRemoteDesktopView: View {
     @State private var clickEnabled = false
     @State private var keyboardVisible = false
     @State private var clickToast: Bool?
+    @AppStorage("remoteDesktop.didShowDragHint") private var didShowDragHint = false
+    @State private var showsDragHint = false
 
     var body: some View {
         NavigationStack {
@@ -230,7 +232,8 @@ private struct OpenClientRemoteDesktopView: View {
             #endif
             .overlay(alignment: .bottom) {
                 if let clickToast {
-                    Text(clickToast ? "Tap to click enabled" : "Tap to click disabled")
+                    Text(showsDragHint ? "Hold and drag to select text or move items." :
+                            (clickToast ? "Tap to click enabled" : "Tap to click disabled"))
                         .font(.callout.weight(.medium))
                         .padding(.horizontal, 16).padding(.vertical, 10)
                         .background(.regularMaterial, in: Capsule())
@@ -292,6 +295,8 @@ private struct OpenClientRemoteDesktopView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        Button("Copy selection", systemImage: "doc.on.doc") { coordinator.native.copySelection() }
+                            .disabled(!store.isConnected)
                         Text("Using iPhone Duo? Unfold it to use the inner display.")
                         Button("Reconnect") { openDesktop() }
                         Button("Forget credentials", role: .destructive) {
@@ -311,10 +316,14 @@ private struct OpenClientRemoteDesktopView: View {
         .buttonStyle(.automatic)
         .toggleStyle(.automatic)
         .task { openDesktop() }
-        .onChange(of: clickEnabled) { _, enabled in clickToast = enabled }
+        .onChange(of: clickEnabled) { _, enabled in
+            showsDragHint = enabled && !didShowDragHint
+            if showsDragHint { didShowDragHint = true }
+            clickToast = enabled
+        }
         .task(id: clickToast) {
             guard clickToast != nil else { return }
-            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            do { try await Task.sleep(for: .seconds(showsDragHint ? 5 : 2)) } catch { return }
             clickToast = nil
         }
         .onChange(of: store.completed) { _, completed in if completed { dismiss() } }
