@@ -62,6 +62,33 @@ enum OpenClientChatCommands {
 
 @MainActor
 final class ChatFacade: ObservableObject {
+    func readTranscriptImage(path: String, sessionID: String) async throws -> Data {
+        guard let session = viewModel.session(matching: sessionID),
+              let directory = session.directory,
+              let client = viewModel.compatibilityClient(for: .files) else {
+            throw OpenCodeAPIError.invalidResponse
+        }
+        let request = Self.transcriptImageRequest(path, directory: directory, workspaceID: session.workspaceID)
+        let content = try await (isV2Connection
+            ? client.readV2FileContent(directory: request.directory, path: request.path, workspaceID: request.workspaceID)
+            : client.readFileContent(directory: request.directory, path: request.path))
+        guard let data = OpenCodeFilePreviewSupport.imageData(from: content) else {
+            throw OpenCodeAPIError.invalidResponse
+        }
+        return data
+    }
+
+    static func transcriptImageRequest(_ path: String, directory: String, workspaceID: String?)
+        -> (directory: String, path: String, workspaceID: String?) {
+        // Matches upstream runtime/server/image.ts: absolute images are scoped
+        // to their parent, including reads outside the session's project.
+        let absolute = path.hasPrefix("/") || path.range(of: "^[a-zA-Z]:/", options: .regularExpression) != nil
+        if absolute {
+            return ((path as NSString).deletingLastPathComponent, (path as NSString).lastPathComponent, nil)
+        }
+        return (directory, path, workspaceID)
+    }
+
     struct ChatComposerOverlaySnapshot {
         let todos: [OpenCodeTodo]
         let attachments: [OpenCodeComposerAttachment]

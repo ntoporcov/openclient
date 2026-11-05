@@ -50,6 +50,8 @@
 	<string>OpenClient uses the microphone for dictation and voice conversations.</string>
 	<key>NSPersonalVoiceUsageDescription</key>
 	<string>OpenClient uses your Personal Voice to read AI responses aloud when you select it.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>OpenClient saves images to your photo library when you choose Save.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>OpenClient uses your photo library to show recent photos and attach selected images to messages.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

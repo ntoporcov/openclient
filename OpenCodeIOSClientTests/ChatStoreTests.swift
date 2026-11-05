@@ -1235,6 +1235,39 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertEqual(appended.last?.parts.count, 4)
     }
 
+    func testSuccessfulImageReadsStayInlineAcrossMessages() throws {
+        let absolute = ChatFacade.transcriptImageRequest("/other/a.png", directory: "/project", workspaceID: "workspace")
+        XCTAssertEqual(absolute.directory, "/other")
+        XCTAssertEqual(absolute.path, "a.png")
+        XCTAssertNil(absolute.workspaceID)
+        let relative = ChatFacade.transcriptImageRequest("images/a.png", directory: "/project", workspaceID: "workspace")
+        XCTAssertEqual(relative.directory, "/project")
+        XCTAssertEqual(relative.path, "images/a.png")
+        XCTAssertEqual(relative.workspaceID, "workspace")
+        func message(_ id: String, status: String = "completed", path: String = "/tmp/photo.PNG") throws -> OpenCodeMessageEnvelope {
+            var result = OpenCodeMessageEnvelope.local(role: "assistant", text: "", messageID: id, sessionID: "ses_1")
+            let data = try JSONSerialization.data(withJSONObject: [
+                "id": "part_\(id)", "messageID": id, "sessionID": "ses_1", "type": "tool", "tool": "read",
+                "state": ["status": status, "input": ["path": path]]
+            ])
+            result.parts = [try JSONDecoder().decode(OpenCodePart.self, from: data)]
+            return result
+        }
+        let first = try message("a")
+        let second = try message("b")
+        let textRead = try message("c", path: "/tmp/code.swift")
+        let running = try message("d", status: "running")
+        let failed = try message("e", status: "error")
+        let slices = TranscriptActivityGrouping.slices([first, second, textRead, running, failed])
+        XCTAssertEqual(slices.map(\.sourceMessageIDs), [["a", "b"], ["c", "d", "e"]])
+        XCTAssertEqual(slices.map(\.isActivity), [false, true])
+        XCTAssertEqual(slices.flatMap(\.parts), [first, second, textRead, running, failed].flatMap(\.parts))
+        XCTAssertEqual(MessageBubbleToolGroupingPolicy.groups(parts: first.parts + second.parts + textRead.parts,
+            visibleIndices: [0, 1, 2], enabled: true), [[0], [1], [2]])
+        XCTAssertNil(TranscriptReadImagePolicy.path(for: running.parts[0]))
+        XCTAssertNil(TranscriptReadImagePolicy.path(for: failed.parts[0]))
+    }
+
     func testLargeStreamingActivityGroupPreservesSourcesAndPreviousSnapshot() {
         let messages = (0..<2_000).map { index in
             var message = OpenCodeMessageEnvelope.local(role: "assistant", text: "", messageID: "m\(index)", sessionID: "s")

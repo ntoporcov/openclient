@@ -178,6 +178,7 @@ struct MessageBubble: View {
     var onAnswerTextTap: () -> Void = {}
     var onEntryAnimationCompleted: (String) -> Void = { _ in }
     var onEntryAnimationCancelled: (String) -> Void = { _ in }
+    var loadReadImage: (String) async throws -> Data = { _ in throw OpenCodeAPIError.invalidResponse }
     #if DEBUG
     var entryReduceMotionOverride: Bool? = nil
     #endif
@@ -265,7 +266,13 @@ struct MessageBubble: View {
         guard !isUser else { return displayEntries }
         var result: [DisplayEntry] = []
         for entry in displayEntries {
-            if case let .part(indexed) = entry,
+            if case let .part(indexed) = entry, TranscriptReadImagePolicy.path(for: indexed.part) != nil {
+                if case let .images(parts) = result.last {
+                    result[result.count - 1] = .images(parts + [indexed])
+                } else {
+                    result.append(.images([indexed]))
+                }
+            } else if case let .part(indexed) = entry,
                indexed.part.type == "text", !isReasoningPart(indexed.part),
                !isStreamingMessage || indexed.part.time?.end != nil {
                 if case let .answer(parts) = result.last {
@@ -370,6 +377,22 @@ struct MessageBubble: View {
         return VStack(alignment: isUser ? .trailing : .leading, spacing: MessageBubbleSpacing.part) {
             ForEach(renderedDisplayEntries, id: \.id) { entry in
                 switch entry {
+                case let .images(parts):
+                    ScrollView(.horizontal) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(parts) { indexed in
+                                if let path = TranscriptReadImagePolicy.path(for: indexed.part) {
+                                    TranscriptReadImageView(path: path, load: loadReadImage)
+                                        .id(path)
+                                }
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                    // Rows retain their text inset, while images scroll all the
+                    // way to the enclosing transcript's edge.
+                    .scrollClipDisabled()
+                    .accessibilityIdentifier("chat.read-images")
                 case let .answer(parts):
                     let textParts = parts.compactMap { renderableText(for: $0.part) }
                     VStack(alignment: .leading, spacing: MessageBubbleSpacing.part) {
@@ -948,10 +971,11 @@ struct MessageBubble: View {
         retainedVisualHTMLPartIDs: Set<String>
     ) -> Bool {
         switch entry {
-        case .answer:
+        case .answer, .images:
             return true
         case let .part(indexed):
             let part = indexed.part
+            if TranscriptReadImagePolicy.path(for: part) != nil { return true }
             if OpenCodeToolActivityPolicy.isOpenClientTool(part) { return true }
             if part.timelineContextType != nil { return true }
             if attachment(for: part) != nil { return true }
@@ -986,7 +1010,8 @@ struct MessageBubble: View {
             type: part.type,
             toolName: toolName(for: part),
             hasRenderableText: renderableText(for: part) != nil,
-            synthetic: part.synthetic
+            synthetic: part.synthetic,
+            readImagePath: TranscriptReadImagePolicy.path(for: part)
         )
     }
 
@@ -1454,6 +1479,7 @@ private struct MessageBubbleDisplayEntryCacheKey: Equatable {
         let toolName: String
         let hasRenderableText: Bool
         let synthetic: Bool?
+        let readImagePath: String?
     }
 
     let messageID: String
@@ -1487,12 +1513,15 @@ private final class MessageBubbleDisplayEntryCache {
 
 private enum DisplayEntry: Identifiable {
     case part(IndexedPart)
+    case images([IndexedPart])
     case answer([IndexedPart])
     case context(ContextGroup)
     case earlierActivity(hiddenCount: Int)
 
     var id: String {
         switch self {
+        case let .images(parts):
+            return "images-\(parts.first?.id ?? "")"
         case let .answer(parts):
             return "answer-\(parts.first?.id ?? "")"
         case let .part(indexed):

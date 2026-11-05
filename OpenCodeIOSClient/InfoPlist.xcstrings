@@ -1,6 +1,14 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "NSPhotoLibraryAddUsageDescription": {
+      "comment": "Privacy - Photo Library Additions Usage Description",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "OpenClient saves images to your photo library when you choose Save." } },
+        "it": { "stringUnit": { "state": "translated", "value": "OpenClient salva le immagini nella tua libreria foto quando scegli Salva." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "O OpenClient salva imagens na sua fototeca quando você escolhe Salvar." } }
+      }
+    },
     "CFBundleDisplayName" : {
       "comment" : "Bundle display name",
       "localizations" : {

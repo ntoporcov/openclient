@@ -2010,6 +2010,7 @@ private struct EquatableMessageBubbleHost: View, Equatable {
     let imageLoadingStore: OpenClientImageLoadingStore
     let videoStreams: OpenClientVideoStreamCoordinator?
     let videoPlaybackStore: OpenClientVideoPlaybackStore
+    let loadReadImage: (String) async throws -> Data
     let resolveTaskSessionID: (OpenCodePart, String) -> String?
     let onSelectPart: (OpenCodePart) -> Void
     let onOpenTaskSession: (String) -> Void
@@ -2062,7 +2063,8 @@ private struct EquatableMessageBubbleHost: View, Equatable {
             videoPlaybackStore: videoPlaybackStore,
             onAnswerTextTap: onAnswerTextTap,
             onEntryAnimationCompleted: onEntryAnimationCompleted,
-            onEntryAnimationCancelled: onEntryAnimationCancelled
+            onEntryAnimationCancelled: onEntryAnimationCancelled,
+            loadReadImage: loadReadImage
         )
     }
 }
@@ -4959,6 +4961,9 @@ struct ChatView: View {
             imageLoadingStore: chatStore.imageLoadingStore,
             videoStreams: videoStreams,
             videoPlaybackStore: chatStore.videoPlaybackStore,
+            loadReadImage: { path in
+                try await chatFacade.readTranscriptImage(path: path, sessionID: sessionID)
+            },
             resolveTaskSessionID: { part, currentSessionID in
                 chatFacade.resolveTaskSessionID(from: part, currentSessionID: currentSessionID)
             }
