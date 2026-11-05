@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Computer clipboard": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Appunti del computer" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Área de transferência do computador" } } } },
+    "Copy this item to your clipboard": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Copia questo elemento negli appunti" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Copiar este item para sua área de transferência" } } } },
+    "Tap an item to copy it to your clipboard.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tocca un elemento per copiarlo negli appunti." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque em um item para copiá-lo para sua área de transferência." } } } },
     "Forget credentials": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Dimentica credenziali" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Esquecer credenciais" } } } },
     "Button icon": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Icona del pulsante" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Ícone do botão" } } } },
     "Keyboard": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tastiera" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Teclado" } } } },

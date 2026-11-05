@@ -10,6 +10,7 @@ final class OpenClientNativeDesktopSession: NSObject {
     var onCredentialsRequested: (() -> Void)?
     var onConnected: (() -> Void)?
     var onDisconnected: (() -> Void)?
+    var onClipboardText: ((String) -> Void)?
 
     func start(port: UInt16, store: OpenClientRemoteDesktopStore) {
         self.store = store
@@ -22,6 +23,12 @@ final class OpenClientNativeDesktopSession: NSObject {
         let connection = VNCConnection(settings: settings)
         self.connection = connection
         connection.delegate = self
+        connection.serverClipboardTextHandler = { [weak self] connection, text in
+            Task { @MainActor [weak self] in
+                guard let self, self.connection === connection else { return }
+                self.onClipboardText?(text)
+            }
+        }
         connection.connect()
     }
 
@@ -41,6 +48,7 @@ final class OpenClientNativeDesktopSession: NSObject {
         connection?.delegate = nil
         connection?.disconnect()
         connection = nil
+        onClipboardText = nil
     }
 
     func type(_ text: String) {

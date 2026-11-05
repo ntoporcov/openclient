@@ -353,8 +353,11 @@ struct ProjectListView: View {
         .toolbar {
             if let bridge, facade.allowsBridge {
                 if bridge.remoteDesktopEndpoint != nil {
-                    ToolbarItem(placement: .opencodeTrailing) {
+                    ToolbarItemGroup(placement: .opencodeTrailing) {
                         OpenClientRemoteDesktopButton(bridge: bridge)
+                        if let history = bridge.desktopClipboardHistory {
+                            DesktopClipboardButton(history: history)
+                        }
                     }
                     #if os(iOS)
                     if #available(iOS 26.0, *) {

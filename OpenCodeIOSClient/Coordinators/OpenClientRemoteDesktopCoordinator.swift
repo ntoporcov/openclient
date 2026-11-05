@@ -35,7 +35,8 @@ final class OpenClientRemoteDesktopCoordinator {
         catch { store.credentialStorageFailed(error) }
     }
 
-    func open(endpoint: OpenClientBridgeEndpoint, access: OpenClientDesktopAccess?, store: OpenClientRemoteDesktopStore) {
+    func open(endpoint: OpenClientBridgeEndpoint, access: OpenClientDesktopAccess?, store: OpenClientRemoteDesktopStore,
+              clipboardHistory: DesktopClipboardHistory? = nil) {
         disconnect(store: store)
         store.begin()
         let tunnel = OpenClientDesktopTunnel()
@@ -46,6 +47,7 @@ final class OpenClientRemoteDesktopCoordinator {
                 let ticket = try await access.open()
                 guard !Task.isCancelled else { return }
                 credentialScope = access.client.config.recentServerID + ":" + ticket.targetID
+                clipboardHistory?.activate(targetID: ticket.targetID)
                 let url = try OpenClientRemoteDesktopClient(endpoint: endpoint).viewerURL(ticket: ticket.ticket)
                 let port = try await tunnel.start(viewerURL: url)
                 guard !Task.isCancelled else { tunnel.stop(); return }
@@ -73,6 +75,9 @@ final class OpenClientRemoteDesktopCoordinator {
                     skipSavedCredentials = false
                 }
                 native.onDisconnected = { [weak self] in self?.pendingCredentials = nil }
+                native.onClipboardText = { [weak clipboardHistory] text in
+                    clipboardHistory?.capture(text, targetID: ticket.targetID)
+                }
                 native.start(port: port, store: store)
             } catch {
                 guard !Task.isCancelled else { return }

@@ -88,6 +88,11 @@ struct OpenClientBridgeSnapshot: Equatable {
 
 @MainActor
 final class OpenClientBridgeFacade: ObservableObject {
+    private let desktopClipboards = DesktopClipboardStore()
+    var desktopClipboardHistory: DesktopClipboardHistory? {
+        guard let access = desktopAccess else { return nil }
+        return desktopClipboards.history(serverID: access.client.config.recentServerID)
+    }
     var desktopAccess: OpenClientDesktopAccess? { desktopAccessProvider() }
     private let desktopAccessProvider: @MainActor () -> OpenClientDesktopAccess?
     var remoteDesktopEndpoint: OpenClientBridgeEndpoint? {

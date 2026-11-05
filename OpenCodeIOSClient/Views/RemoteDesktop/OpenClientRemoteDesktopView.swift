@@ -66,7 +66,8 @@ struct OpenClientRemoteDesktopButton: View {
             #if os(iOS)
             .fullScreenCover(isPresented: $isPresented) {
                 DesktopLandscapeContainer {
-                    OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff) { isPresented = false }
+                    OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff,
+                                                clipboardHistory: bridge.desktopClipboardHistory) { isPresented = false }
                         .environment(\.appAccentColor, accent)
                         .environment(\.scenePhase, scenePhase)
                         .environment(\.desktopChat, desktopChat)
@@ -75,7 +76,8 @@ struct OpenClientRemoteDesktopButton: View {
             }
             #else
             .sheet(isPresented: $isPresented) {
-                OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff) { isPresented = false }
+                OpenClientRemoteDesktopView(endpoint: endpoint, bridge: bridge, handoff: handoff,
+                                            clipboardHistory: bridge.desktopClipboardHistory) { isPresented = false }
             }
             #endif
             .onChange(of: bridge.remoteDesktopEndpoint) { _, value in
@@ -133,12 +135,17 @@ struct OpenClientDesktopHandoffCard: View {
             Text(verbatim: handoff.reason)
             if pending {
                 if let bridge {
-                    OpenClientRemoteDesktopButton(bridge: bridge, handoff: handoff)
-                        .buttonStyle(.borderedProminent)
-                        .modifier(AppAccentActionModifier())
-                        .controlSize(.large)
-                        .labelStyle(.titleAndIcon)
-                        .font(.headline)
+                    HStack {
+                        OpenClientRemoteDesktopButton(bridge: bridge, handoff: handoff)
+                            .buttonStyle(.borderedProminent)
+                            .modifier(AppAccentActionModifier())
+                            .controlSize(.large)
+                            .labelStyle(.titleAndIcon)
+                            .font(.headline)
+                        if let history = bridge.desktopClipboardHistory {
+                            DesktopClipboardButton(history: history)
+                        }
+                    }
                 } else {
                     Text("Connect the OpenClient plugin to open the desktop.").font(.caption)
                 }
@@ -157,6 +164,7 @@ private struct OpenClientRemoteDesktopView: View {
     let endpoint: OpenClientBridgeEndpoint
     @ObservedObject var bridge: OpenClientBridgeFacade
     let handoff: OpenClientDesktopHandoff?
+    let clipboardHistory: DesktopClipboardHistory?
     let dismiss: () -> Void
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.desktopChat) private var desktopChat
@@ -198,7 +206,7 @@ private struct OpenClientRemoteDesktopView: View {
                     DesktopLoadingGame()
                 } else {
                     Form {
-                        Button("Connect") { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
+                        Button("Connect") { openDesktop() }
                             .disabled(store.isBusy)
                     }
                 }
@@ -246,6 +254,11 @@ private struct OpenClientRemoteDesktopView: View {
                     .disabled(!store.isConnected)
                 }
                 ToolbarItem(placement: .bottomBar) { Spacer() }
+                if let clipboardHistory {
+                    ToolbarItem(placement: .bottomBar) {
+                        DesktopClipboardButton(history: clipboardHistory)
+                    }
+                }
                 ToolbarItem(placement: .bottomBar) {
                     Button { keyboardVisible.toggle() } label: {
                         HStack(spacing: 4) {
@@ -280,10 +293,10 @@ private struct OpenClientRemoteDesktopView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Text("Using iPhone Duo? Unfold it to use the inner display.")
-                        Button("Reconnect") { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
+                        Button("Reconnect") { openDesktop() }
                         Button("Forget credentials", role: .destructive) {
                             coordinator.forgetCredentials(store: store)
-                            coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store)
+                            openDesktop()
                         }
                     } label: { Image(systemName: "ellipsis.circle") }
                     .accessibilityLabel("Remote desktop options")
@@ -297,7 +310,7 @@ private struct OpenClientRemoteDesktopView: View {
         .foregroundStyle(.primary)
         .buttonStyle(.automatic)
         .toggleStyle(.automatic)
-        .task { coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store) }
+        .task { openDesktop() }
         .onChange(of: clickEnabled) { _, enabled in clickToast = enabled }
         .task(id: clickToast) {
             guard clickToast != nil else { return }
@@ -310,6 +323,11 @@ private struct OpenClientRemoteDesktopView: View {
             if phase == .background { coordinator.disconnect(store: store) }
         }
         .onDisappear { coordinator.disconnect(store: store) }
+    }
+
+    private func openDesktop() {
+        coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store,
+                         clipboardHistory: clipboardHistory)
     }
 }
 

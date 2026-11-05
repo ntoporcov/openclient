@@ -46,8 +46,7 @@ schemes:
         - OpenCodeIOSClientUITests
 packages:
   RoyalVNCKit:
-    url: https://github.com/royalapplications/royalvnc
-    revision: 090b96eddeee183e9fec293c5cd881d302a4349d
+    path: Vendor/RoyalVNCKit
   HighlighterSwift:
     url: https://github.com/smittytone/HighlighterSwift
     from: 3.0.3
