@@ -119,11 +119,36 @@ final class DesktopStreamSurfaceTests: XCTestCase {
         DesktopStreamSurface.dismantleUIView(surface, coordinator: ())
         XCTAssertEqual(pointer.events.map(\.down), [true, false, true, false, true, false])
     }
+
+    func testStationaryHoldPreservesSelectionAndCancelledHoldDoesNothing() throws {
+        let pixels = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 120, height: 80))
+            .image { _ in }.cgImage)
+        let surface = DesktopScrollSurface(frame: CGRect(x: 0, y: 0, width: 600, height: 300))
+        let pointer = RecordingDesktopPointer()
+        surface.pointerInput = pointer
+        surface.setFrame(pixels)
+        surface.setClickEnabled(true)
+        surface.layoutSubviews()
+        let center = CGPoint(x: 300, y: 150)
+        XCTAssertTrue(surface.beginPointerHold(at: center))
+        surface.updatePointerHold(at: CGPoint(x: 303, y: 151))
+        XCTAssertTrue(pointer.events.isEmpty)
+        surface.finishPointerHold(at: center)
+        XCTAssertTrue(pointer.events.isEmpty, "Right-click must not first send a selection-clearing left click")
+        XCTAssertEqual(pointer.secondaryClicks, 1)
+        XCTAssertTrue(surface.beginPointerHold(at: center))
+        surface.scrollViewWillBeginZooming(surface, with: surface.image)
+        surface.finishPointerHold(at: center)
+        XCTAssertEqual(pointer.secondaryClicks, 1)
+        XCTAssertTrue(pointer.events.isEmpty)
+    }
 }
 
 @MainActor
 private final class RecordingDesktopPointer: DesktopPointerInput {
     struct Event { let x: UInt16; let y: UInt16; let down: Bool }
     var events: [Event] = []
+    var secondaryClicks = 0
     func pointer(x: UInt16, y: UInt16, down: Bool) { events.append(Event(x: x, y: y, down: down)) }
+    func secondaryClick(x: UInt16, y: UInt16) { secondaryClicks += 1 }
 }

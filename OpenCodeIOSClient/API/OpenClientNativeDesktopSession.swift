@@ -5,6 +5,7 @@ import CoreGraphics
 @MainActor
 protocol DesktopPointerInput: AnyObject {
     func pointer(x: UInt16, y: UInt16, down: Bool)
+    func secondaryClick(x: UInt16, y: UInt16)
 }
 
 @MainActor
@@ -75,6 +76,11 @@ final class OpenClientNativeDesktopSession: NSObject, DesktopPointerInput {
     func pointer(x: UInt16, y: UInt16, down: Bool) {
         if down { connection?.mouseButtonDown(.left, x: x, y: y) }
         else { connection?.mouseButtonUp(.left, x: x, y: y) }
+    }
+
+    func secondaryClick(x: UInt16, y: UInt16) {
+        connection?.mouseButtonDown(.right, x: x, y: y)
+        connection?.mouseButtonUp(.right, x: x, y: y)
     }
 }
 

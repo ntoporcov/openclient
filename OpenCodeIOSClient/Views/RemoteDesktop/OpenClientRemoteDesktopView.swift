@@ -170,10 +170,10 @@ private struct OpenClientRemoteDesktopView: View {
     @Environment(\.desktopChat) private var desktopChat
     @StateObject private var store = OpenClientRemoteDesktopStore()
     @State private var coordinator = OpenClientRemoteDesktopCoordinator()
-    @State private var clickEnabled = false
+    @State private var clickEnabled = true
     @State private var keyboardVisible = false
     @State private var clickToast: Bool?
-    @AppStorage("remoteDesktop.didShowDragHint") private var didShowDragHint = false
+    @AppStorage("remoteDesktop.didShowHoldMenuHint") private var didShowDragHint = false
     @State private var showsDragHint = false
 
     var body: some View {
@@ -232,7 +232,7 @@ private struct OpenClientRemoteDesktopView: View {
             #endif
             .overlay(alignment: .bottom) {
                 if let clickToast {
-                    Text(showsDragHint ? "Hold and drag to select text or move items." :
+                    Text(showsDragHint ? "Hold still for a menu, or drag to select." :
                             (clickToast ? "Tap to click enabled" : "Tap to click disabled"))
                         .font(.callout.weight(.medium))
                         .padding(.horizontal, 16).padding(.vertical, 10)
@@ -317,9 +317,10 @@ private struct OpenClientRemoteDesktopView: View {
         .toggleStyle(.automatic)
         .task { openDesktop() }
         .onChange(of: clickEnabled) { _, enabled in
-            showsDragHint = enabled && !didShowDragHint
-            if showsDragHint { didShowDragHint = true }
-            clickToast = enabled
+            showClickModeToast(enabled)
+        }
+        .onChange(of: store.frame != nil) { _, hasFrame in
+            if hasFrame, clickEnabled, !didShowDragHint { showClickModeToast(true) }
         }
         .task(id: clickToast) {
             guard clickToast != nil else { return }
@@ -337,6 +338,12 @@ private struct OpenClientRemoteDesktopView: View {
     private func openDesktop() {
         coordinator.open(endpoint: endpoint, access: bridge.desktopAccess, store: store,
                          clipboardHistory: clipboardHistory)
+    }
+
+    private func showClickModeToast(_ enabled: Bool) {
+        showsDragHint = enabled && !didShowDragHint
+        if showsDragHint { didShowDragHint = true }
+        clickToast = enabled
     }
 }
 

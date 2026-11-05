@@ -41,6 +41,7 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
     }
     weak var pointerInput: (any DesktopPointerInput)?
     private var dragPoint: (x: UInt16, y: UInt16)?
+    private var holdOrigin: CGPoint?
     var keyboardChanged: ((Bool) -> Void)?
     private var pixelSize = CGSize.zero
     private var lastBounds = CGSize.zero
@@ -168,18 +169,44 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
         switch gesture.state {
         case .began:
             guard gesture.numberOfTouches == 1,
-                  beginPointerDrag(at: gesture.location(in: self)) else { return }
+                  beginPointerHold(at: gesture.location(in: self)) else { return }
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .changed:
             guard gesture.numberOfTouches == 1 else { endPointerDrag(); return }
-            continuePointerDrag(at: gesture.location(in: self))
+            updatePointerHold(at: gesture.location(in: self))
         case .ended:
-            continuePointerDrag(at: gesture.location(in: self))
-            endPointerDrag()
+            finishPointerHold(at: gesture.location(in: self))
         case .cancelled, .failed:
             endPointerDrag()
         default: break
         }
+    }
+
+    @discardableResult
+    func beginPointerHold(at location: CGPoint) -> Bool {
+        guard pointerDrag.isEnabled, pointerCoordinates(at: location) != nil else { return false }
+        endPointerDrag()
+        holdOrigin = location
+        return true
+    }
+
+    func updatePointerHold(at location: CGPoint) {
+        if let origin = holdOrigin {
+            // Defer mouse-down until deliberate movement, preserving existing
+            // desktop selection when the intent is a stationary right-click.
+            guard hypot(location.x - origin.x, location.y - origin.y) >= 8 else { return }
+            guard beginPointerDrag(at: origin) else { endPointerDrag(); return }
+        }
+        continuePointerDrag(at: location)
+    }
+
+    func finishPointerHold(at location: CGPoint) {
+        updatePointerHold(at: location)
+        if let origin = holdOrigin, let point = pointerCoordinates(at: origin) {
+            holdOrigin = nil
+            pointerInput?.secondaryClick(x: point.0, y: point.1)
+        }
+        endPointerDrag()
     }
 
     @discardableResult
@@ -202,6 +229,7 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
     }
 
     func endPointerDrag() {
+        holdOrigin = nil
         guard let point = dragPoint else { return }
         dragPoint = nil
         pointerInput?.pointer(x: point.x, y: point.y, down: false)
@@ -245,6 +273,7 @@ final class DesktopPointerFixtureState: ObservableObject, DesktopPointerInput {
     @Published var downs = 0
     @Published var ups = 0
     @Published var moves = 0
+    @Published var secondaryClicks = 0
     private var held = false
 
     func pointer(x: UInt16, y: UInt16, down: Bool) {
@@ -253,6 +282,8 @@ final class DesktopPointerFixtureState: ObservableObject, DesktopPointerInput {
         } else { ups += 1 }
         held = down
     }
+
+    func secondaryClick(x: UInt16, y: UInt16) { secondaryClicks += 1 }
 }
 
 struct DesktopPointerFixture: View {
@@ -261,7 +292,7 @@ struct DesktopPointerFixture: View {
     var body: some View {
         VStack {
             DesktopPointerFixtureSurface(input: input)
-            Text(verbatim: "\(input.downs)|\(input.ups)|\(input.moves)")
+            Text(verbatim: "\(input.downs)|\(input.ups)|\(input.moves)|\(input.secondaryClicks)")
                 .accessibilityIdentifier("desktop.pointer.events")
         }
     }
