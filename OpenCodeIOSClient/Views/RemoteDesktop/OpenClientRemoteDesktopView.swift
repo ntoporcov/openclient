@@ -264,7 +264,6 @@ private struct OpenClientRemoteDesktopView: View {
                         Menu {
                             Button("Copy selection", systemImage: "doc.on.doc") { coordinator.native.copySelection() }
                                 .disabled(!store.isConnected)
-                            Text("Using iPhone Duo? Unfold it to use the inner display.")
                             Button("Reconnect") { openDesktop() }
                             Button("Forget credentials", role: .destructive) {
                                 coordinator.forgetCredentials(store: store)
