@@ -22,5 +22,10 @@ GPL source was consulted for protocol facts; its implementation is not vendored.
 The Swift receive-only parser is a local implementation. Standard RFB extended
 clipboard negotiation remains unsupported by this upstream revision.
 
+`mouseWheel` also sends the button-release event for each wheel tick. Upstream
+cleared its local bitmask without transmitting it, leaving edge-triggered servers
+unable to distinguish consecutive ticks. Native wire tests check press/release
+pairs for repeated scrolling.
+
 Replace the snapshot with an upstream dependency when a receive-only hook is
 available. Retain the MIT license with any redistribution.

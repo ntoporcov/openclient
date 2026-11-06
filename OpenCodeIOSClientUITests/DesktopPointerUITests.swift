@@ -2,6 +2,24 @@ import XCTest
 
 @MainActor
 final class DesktopPointerUITests: XCTestCase {
+    func testQuickSwipeSendsRemoteWheelWithoutClickingOrSelecting() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "chat"
+        app.launchEnvironment["OPENCLIENT_DESKTOP_POINTER_TEST"] = "1"
+        app.launch()
+        defer { app.terminate() }
+        let canvas = app.descendants(matching: .any).matching(identifier: "remote-desktop.canvas").firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 15))
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        let values = app.staticTexts["desktop.pointer.scroll"].label.split(separator: "|").compactMap { Int($0) }
+        XCTAssertEqual(values.count, 2)
+        XCTAssertGreaterThan(values[1], 0, "An upward swipe should scroll the remote page down")
+        XCTAssertEqual(app.staticTexts["desktop.pointer.events"].label, "0|0|0|0")
+    }
+
     func testTopControlGapPassesClicksToDesktopButButtonsDoNot() {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -49,5 +67,6 @@ final class DesktopPointerUITests: XCTestCase {
         end.press(forDuration: 0.6)
         let afterHold = events.label.split(separator: "|").compactMap { Int($0) }
         XCTAssertEqual(afterHold, [3, 3, parts[2], 1], "A stationary hold must send only a right-click")
+        XCTAssertEqual(app.staticTexts["desktop.pointer.scroll"].label, "0|0", "Holding to select must not also scroll")
     }
 }

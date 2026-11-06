@@ -173,7 +173,7 @@ private struct OpenClientRemoteDesktopView: View {
     @State private var clickEnabled = true
     @State private var keyboardVisible = false
     @State private var clickToast: Bool?
-    @AppStorage("remoteDesktop.didShowHoldMenuHint") private var didShowDragHint = false
+    @AppStorage("remoteDesktop.didShowSwipeScrollHint") private var didShowDragHint = false
     @State private var showsDragHint = false
 
     var body: some View {
@@ -234,7 +234,7 @@ private struct OpenClientRemoteDesktopView: View {
             #endif
             .overlay(alignment: .bottom) {
                 if let clickToast {
-                    Text(showsDragHint ? "Hold still for a menu, or drag to select." :
+                    Text(showsDragHint ? "Swipe to scroll. Hold for a menu, or hold and drag to select." :
                             (clickToast ? "Tap to click enabled" : "Tap to click disabled"))
                         .font(.callout.weight(.medium))
                         .padding(.horizontal, 16).padding(.vertical, 10)

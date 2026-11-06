@@ -74,7 +74,7 @@ final class NativeRemoteDesktopTests: XCTestCase {
             let fixture: String
             let viewerURL: URL?
             let events: [Event]
-            struct Event: Decodable { let type: String; let key: Int?; let x: Int?; let y: Int? }
+            struct Event: Decodable { let type: String; let key: Int?; let x: Int?; let y: Int?; let buttons: Int? }
         }
         func fixture(_ path: String) async throws -> Fixture {
             let (data, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:14079/\(path)")!)
@@ -108,11 +108,14 @@ final class NativeRemoteDesktopTests: XCTestCase {
             native.type("A")
             native.pointer(x: 100, y: 50, down: true)
             native.pointer(x: 100, y: 50, down: false)
+            native.scroll(x: 120, y: 60, horizontal: 0, vertical: 2)
             try await Task.sleep(for: .milliseconds(100))
             let events = try await fixture("events").events.dropFirst(ticket.events.count)
             XCTAssertTrue(events.contains { $0.type == "authenticated" })
             XCTAssertTrue(events.contains { $0.key == 65 })
             XCTAssertTrue(events.contains { $0.x == 100 && $0.y == 50 })
+            XCTAssertEqual(events.filter { $0.type == "pointer" && $0.x == 120 && $0.y == 60 }.compactMap(\.buttons),
+                           [16, 0, 16, 0], "Every remote wheel tick must include a release")
         }
     }
 }

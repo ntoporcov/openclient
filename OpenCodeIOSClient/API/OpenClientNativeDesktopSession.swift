@@ -6,6 +6,7 @@ import CoreGraphics
 protocol DesktopPointerInput: AnyObject {
     func pointer(x: UInt16, y: UInt16, down: Bool)
     func secondaryClick(x: UInt16, y: UInt16)
+    func scroll(x: UInt16, y: UInt16, horizontal: Int, vertical: Int)
 }
 
 @MainActor
@@ -81,6 +82,15 @@ final class OpenClientNativeDesktopSession: NSObject, DesktopPointerInput {
     func secondaryClick(x: UInt16, y: UInt16) {
         connection?.mouseButtonDown(.right, x: x, y: y)
         connection?.mouseButtonUp(.right, x: x, y: y)
+    }
+
+    func scroll(x: UInt16, y: UInt16, horizontal: Int, vertical: Int) {
+        if vertical != 0 {
+            connection?.mouseWheel(vertical > 0 ? .down : .up, x: x, y: y, steps: UInt32(min(abs(vertical), 8)))
+        }
+        if horizontal != 0 {
+            connection?.mouseWheel(horizontal > 0 ? .right : .left, x: x, y: y, steps: UInt32(min(abs(horizontal), 8)))
+        }
     }
 }
 

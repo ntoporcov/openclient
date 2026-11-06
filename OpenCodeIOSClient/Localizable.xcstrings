@@ -1,7 +1,7 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Hold still for a menu, or drag to select.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tieni premuto senza muovere per il menu, oppure trascina per selezionare." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque e segure sem mover para abrir o menu, ou arraste para selecionar." } } } },
+    "Swipe to scroll. Hold for a menu, or hold and drag to select.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Scorri con un dito. Tieni premuto per il menu, oppure tieni premuto e trascina per selezionare." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Deslize para rolar. Toque e segure para abrir o menu, ou segure e arraste para selecionar." } } } },
     "Hold and drag to select text or move items.": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Tieni premuto e trascina per selezionare testo o spostare elementi." } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Toque, segure e arraste para selecionar texto ou mover itens." } } } },
     "Copy selection": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Copia selezione" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Copiar seleção" } } } },
     "Computer clipboard": { "localizations": { "it": { "stringUnit": { "state": "translated", "value": "Appunti del computer" } }, "pt-BR": { "stringUnit": { "state": "translated", "value": "Área de transferência do computador" } } } },

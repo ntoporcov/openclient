@@ -43,6 +43,35 @@ RoyalVNCKit exposes a TCP client but no public custom-transport injection. `Open
 
 `OpenClientNativeDesktopSession` owns protocol operations and bridges SDK callbacks to the main-actor store. SwiftUI consumes the store and forwards user intent. In-memory credentials are cleared after the authentication attempt; opt-in persistence uses Keychain. Automatic clipboard synchronization remains disabled.
 
+### Remote scrolling and local touch feedback
+
+With click mode enabled, a quick one-finger swipe sends remote mouse-wheel ticks
+at the swipe's starting framebuffer coordinate (natural direction: swipe upward
+to scroll down). Holding 350 ms before moving still selects/drags, and a stationary
+hold still right-clicks without clearing selection. Two-finger pan/pinch continues
+to navigate the desktop image locally. With click mode off, one-finger dragging
+continues to pan that image. Partial wheel deltas are accumulated in screen
+points, capped per update, and discarded on cancellation, zoom, resize, or mode
+change. Each transmitted wheel tick includes its release.
+
+An immediate pulsing dot tracks one-finger contact; movement leaves a bounded
+directional trail. A stationary armed hold gains an additional ring. Finger-up
+expands/fades the indicator and trail. These are local gesture indicators, not
+claims that a remote app accepted input: RFB provides no dependable app-level
+acknowledgement. No frame or latency timer is treated as a successful click.
+Reduce Motion disables pulsing/expansion and uses a short fade. All feedback is
+drawn in non-interactive Core Animation layers and cleared when navigation takes
+over or the viewer closes. Image clipboard capture remains out of scope; the
+clipboard history receives only available plain-text representations.
+
+Verification: ten surface/gesture UI tests and one native wheel-packet integration
+test passed on each of iPhone 18 Pro Max/iOS 27.0, iPad Pro 13-inch M5/iOS 27.0,
+and iPhone Duo/iOS 27.1, with no skips. The wire test checks repeated down-wheel
+press/release pairs. Catalog/source and compiler-extraction localization checks
+passed, as did the signed device build. Installed on Nic iPhone; automatic launch
+was blocked by the locked screen. Real Safari scrolling/5G feedback feel and Duo
+folded/unfolded transitions remain hands-on checks.
+
 ### Receive-only clipboard history
 
 #### Host clipboard transport (after build 101)

@@ -91,6 +91,11 @@ public extension VNCConnection {
 
             updateMouseButtonState(wheel: wheel,
                                    isDown: false)
+
+            // RFB wheel ticks are button press/release pairs. Transmit the
+            // release too, so edge-triggered servers accept consecutive ticks.
+            enqueueMouseEvent(nonNormalizedX: x,
+                              nonNormalizedY: y)
         }
     }
 }

@@ -140,6 +140,37 @@ final class DesktopStreamSurfaceTests: XCTestCase {
         XCTAssertEqual(pointer.secondaryClicks, 1)
         XCTAssertTrue(pointer.events.isEmpty)
     }
+
+    func testRemoteSwipeScrollsNaturallyAndNavigationCancelsRemainderAndFeedback() throws {
+        let pixels = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 120, height: 80)).image { _ in }.cgImage)
+        let surface = DesktopScrollSurface(frame: CGRect(x: 0, y: 0, width: 600, height: 600))
+        let pointer = RecordingDesktopPointer()
+        surface.pointerInput = pointer
+        surface.setFrame(pixels)
+        surface.setClickEnabled(true)
+        surface.layoutSubviews()
+        XCTAssertFalse(surface.beginRemoteScroll(at: CGPoint(x: 300, y: 10)))
+        let center = CGPoint(x: 300, y: 300)
+        XCTAssertTrue(surface.beginRemoteScroll(at: center))
+        surface.feedback.begin(at: center)
+        surface.updateRemoteScroll(by: CGPoint(x: 0, y: -12))
+        XCTAssertTrue(pointer.scrolls.isEmpty)
+        surface.updateRemoteScroll(by: CGPoint(x: -24, y: -12))
+        XCTAssertEqual(pointer.scrolls.last?.horizontal, 1)
+        XCTAssertEqual(pointer.scrolls.last?.vertical, 1)
+        XCTAssertTrue(pointer.events.isEmpty, "Scrolling must not press the left mouse button")
+        surface.updateRemoteScroll(by: CGPoint(x: 0, y: 24))
+        XCTAssertEqual(pointer.scrolls.last?.vertical, -1)
+        surface.scrollViewWillBeginZooming(surface, with: surface.image)
+        XCTAssertFalse(surface.feedback.isActive)
+        surface.updateRemoteScroll(by: CGPoint(x: 0, y: -48))
+        XCTAssertEqual(pointer.scrolls.count, 2)
+        XCTAssertTrue(surface.beginPointerHold(at: center))
+        XCTAssertFalse(surface.beginRemoteScroll(at: center), "A hold selects or right-clicks, never scrolls")
+        surface.finishPointerHold(at: center)
+        surface.setClickEnabled(false)
+        XCTAssertFalse(surface.beginRemoteScroll(at: center))
+    }
 }
 
 @MainActor
@@ -147,6 +178,11 @@ private final class RecordingDesktopPointer: DesktopPointerInput {
     struct Event { let x: UInt16; let y: UInt16; let down: Bool }
     var events: [Event] = []
     var secondaryClicks = 0
+    struct Scroll { let horizontal: Int; let vertical: Int }
+    var scrolls: [Scroll] = []
     func pointer(x: UInt16, y: UInt16, down: Bool) { events.append(Event(x: x, y: y, down: down)) }
     func secondaryClick(x: UInt16, y: UInt16) { secondaryClicks += 1 }
+    func scroll(x: UInt16, y: UInt16, horizontal: Int, vertical: Int) {
+        scrolls.append(Scroll(horizontal: horizontal, vertical: vertical))
+    }
 }

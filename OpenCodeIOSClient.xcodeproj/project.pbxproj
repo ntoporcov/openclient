@@ -281,6 +281,7 @@
 		5BAF666C9C6C3C67001D358E /* GitDiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3CDF1A5CC5EBD38065F132 /* GitDiffView.swift */; };
 		5BD336ECCE41BC43C90AF88B /* SideQuestionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3F82771BFD667A5CD9B6D8A /* SideQuestionCoordinator.swift */; };
 		5BF2A0B482A0186A48D73EAD /* DirectoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0745A824CCD615EBB6F0B9D /* DirectoryStore.swift */; };
+		5BF757BBBA3CEAF3CEE300A8 /* DesktopGestureFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50D70843BCD1D9F02C48369 /* DesktopGestureFeedback.swift */; };
 		5C519E6E3A2F56D723032F55 /* ActivityAnnouncementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08243272D9EC292C4D40C25F /* ActivityAnnouncementUITests.swift */; };
 		5CA8ECA43FDC0C8A05A24476 /* V2ProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F5909F128ECDF4806A284E /* V2ProviderStore.swift */; };
 		5CB3C42B54B691045620E7DE /* ComposerSuggestionSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32365C3E04BA9CE086A166F1 /* ComposerSuggestionSelection.swift */; };
@@ -723,6 +724,7 @@
 		EBB1478D0A2A67E9D9159AE2 /* OpenClientVisualVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 962071EDD5F2EE93FC66DDA2 /* OpenClientVisualVideoView.swift */; };
 		EC1510E633AC425471C1A0EE /* ModelToolbarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9330DFD0E36A44A30ADA81F4 /* ModelToolbarMenu.swift */; };
 		EC90A4780D68494FDAF8D8F4 /* ComposerMentionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D9B15EC9185BDDA3F5BFCE5 /* ComposerMentionUITests.swift */; };
+		ECCA4C61A8E0FBEC70B2B125 /* DesktopGestureFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50D70843BCD1D9F02C48369 /* DesktopGestureFeedback.swift */; };
 		ECFB2C41F0D38BDEF12743B9 /* AppleIntelligenceIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5098A1B36D1A31CC24A788C4 /* AppleIntelligenceIntegrationTests.swift */; };
 		EDAD112FAA62DB2136D8E92A /* OpenClientBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33850810967CC5A047C3244 /* OpenClientBridgeTests.swift */; };
 		EE0AC1444163D33A7A546DF3 /* OpenCodeChatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD22634739A584D72F8DFA45 /* OpenCodeChatActivityAttributes.swift */; };
@@ -1130,6 +1132,7 @@
 		A0EEA870477FC0FB20F10BA0 /* AppViewModel+Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppViewModel+Events.swift"; sourceTree = "<group>"; };
 		A39F3209079C16C06C440EF6 /* FindPlaceGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindPlaceGame.swift; sourceTree = "<group>"; };
 		A3DE4F2B7BD4980A760D7114 /* OpenClient.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A50D70843BCD1D9F02C48369 /* DesktopGestureFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopGestureFeedback.swift; sourceTree = "<group>"; };
 		A5DDA19A03EB0243DB1DC306 /* Generated-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Generated-Info.plist"; sourceTree = "<group>"; };
 		A646955CA36C75DE45C03244 /* CreateProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateProjectSheet.swift; sourceTree = "<group>"; };
 		A679B629166BCCF01547F158 /* ConversationModeControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModeControllerTests.swift; sourceTree = "<group>"; };
@@ -1630,6 +1633,7 @@
 			isa = PBXGroup;
 			children = (
 				40E3A169449801B3AFB99E6A /* DesktopClipboardButton.swift */,
+				A50D70843BCD1D9F02C48369 /* DesktopGestureFeedback.swift */,
 				2E01F5E9FD00A8467F6CDF28 /* DesktopKeyboardButton.swift */,
 				13C23424B772FC02F1261E2B /* DesktopLoadingGame.swift */,
 				AFDACA8F4E46EF101AA404B3 /* DesktopStreamSurface.swift */,
@@ -2680,6 +2684,7 @@
 				15DC950F3073F1C9401075D6 /* CreateWorkspaceSheet.swift in Sources */,
 				0B6797D58CB8DB5E5B4FEEE6 /* DesktopClipboardButton.swift in Sources */,
 				C90CE7FB0A3930A1CCDA9617 /* DesktopClipboardStore.swift in Sources */,
+				5BF757BBBA3CEAF3CEE300A8 /* DesktopGestureFeedback.swift in Sources */,
 				ACD03858E8C9BAC79FCC1580 /* DesktopKeyboardButton.swift in Sources */,
 				B72AAF5F5945E5A6F2999665 /* DesktopLoadingGame.swift in Sources */,
 				172793104A522E07596F74C0 /* DesktopReactionRecordStore.swift in Sources */,
@@ -2977,6 +2982,7 @@
 				2F34B87D848586CC4C71CE6D /* CreateWorkspaceSheet.swift in Sources */,
 				D01E8857971642E7CC20124B /* DesktopClipboardButton.swift in Sources */,
 				CC7844299265CBA5FB754510 /* DesktopClipboardStore.swift in Sources */,
+				ECCA4C61A8E0FBEC70B2B125 /* DesktopGestureFeedback.swift in Sources */,
 				549348ADE9D275D0DCBFEC01 /* DesktopKeyboardButton.swift in Sources */,
 				3B46487C46F801705ACF321D /* DesktopLoadingGame.swift in Sources */,
 				F5F7F9E7BFAEC53D6B368288 /* DesktopReactionRecordStore.swift in Sources */,
