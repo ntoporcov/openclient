@@ -86,10 +86,10 @@ final class OpenClientNativeDesktopSession: NSObject, DesktopPointerInput {
 
     func scroll(x: UInt16, y: UInt16, horizontal: Int, vertical: Int) {
         if vertical != 0 {
-            connection?.mouseWheel(vertical > 0 ? .down : .up, x: x, y: y, steps: UInt32(min(abs(vertical), 40)))
+            connection?.mouseWheel(vertical > 0 ? .down : .up, x: x, y: y, steps: UInt32(min(abs(vertical), 80)))
         }
         if horizontal != 0 {
-            connection?.mouseWheel(horizontal > 0 ? .right : .left, x: x, y: y, steps: UInt32(min(abs(horizontal), 40)))
+            connection?.mouseWheel(horizontal > 0 ? .right : .left, x: x, y: y, steps: UInt32(min(abs(horizontal), 80)))
         }
     }
 }
