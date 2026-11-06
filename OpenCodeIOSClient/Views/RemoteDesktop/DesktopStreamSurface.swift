@@ -311,12 +311,14 @@ final class DesktopScrollSurface: UIScrollView, UIScrollViewDelegate, UIKeyInput
 
     func updateRemoteScroll(by delta: CGPoint) {
         guard let point = scrollAnchor, delta.x.isFinite, delta.y.isFinite else { return }
-        scrollRemainder.x = max(-192, min(192, scrollRemainder.x - delta.x))
-        scrollRemainder.y = max(-192, min(192, scrollRemainder.y - delta.y))
-        let horizontal = Int(scrollRemainder.x / 24)
-        let vertical = Int(scrollRemainder.y / 24)
-        scrollRemainder.x -= CGFloat(horizontal) * 24
-        scrollRemainder.y -= CGFloat(vertical) * 24
+        let pointsPerTick: CGFloat = 8
+        let maximumDelta = pointsPerTick * 8
+        scrollRemainder.x = max(-maximumDelta, min(maximumDelta, scrollRemainder.x - delta.x))
+        scrollRemainder.y = max(-maximumDelta, min(maximumDelta, scrollRemainder.y - delta.y))
+        let horizontal = Int(scrollRemainder.x / pointsPerTick)
+        let vertical = Int(scrollRemainder.y / pointsPerTick)
+        scrollRemainder.x -= CGFloat(horizontal) * pointsPerTick
+        scrollRemainder.y -= CGFloat(vertical) * pointsPerTick
         if horizontal != 0 || vertical != 0 {
             pointerInput?.scroll(x: point.0, y: point.1, horizontal: horizontal, vertical: vertical)
         }
