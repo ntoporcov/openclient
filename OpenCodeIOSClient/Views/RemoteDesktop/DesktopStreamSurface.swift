@@ -288,12 +288,25 @@ final class DesktopPointerFixtureState: ObservableObject, DesktopPointerInput {
 
 struct DesktopPointerFixture: View {
     @StateObject private var input = DesktopPointerFixtureState()
+    @State private var closeCount = 0
 
     var body: some View {
-        VStack {
-            DesktopPointerFixtureSurface(input: input)
-            Text(verbatim: "\(input.downs)|\(input.ups)|\(input.moves)|\(input.secondaryClicks)")
-                .accessibilityIdentifier("desktop.pointer.events")
+        NavigationStack {
+            VStack {
+                DesktopPointerFixtureSurface(input: input)
+                    .aspectRatio(2, contentMode: .fit)
+                    .overlay(alignment: .top) {
+                        DesktopTopControls(dismiss: { closeCount += 1 }) {
+                            Menu { Button(action: {}) { Text(verbatim: "Fixture") } } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                        }
+                    }
+                Text(verbatim: "\(input.downs)|\(input.ups)|\(input.moves)|\(input.secondaryClicks)")
+                    .accessibilityIdentifier("desktop.pointer.events")
+                Text(verbatim: "\(closeCount)").accessibilityIdentifier("desktop.pointer.close-count")
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 }

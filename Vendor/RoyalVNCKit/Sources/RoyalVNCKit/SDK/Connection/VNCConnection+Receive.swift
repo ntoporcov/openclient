@@ -49,6 +49,9 @@ private extension VNCConnection {
 			case VNCProtocol.ServerCutText.messageType:
 				try await handleServerCutTextMessage()
 
+            case 0x1f where state.isAppleRemoteDesktop:
+                try await receiveAppleClipboard()
+
 			case VNCProtocol.Bell.messageType:
 				try await handleBellMessage()
 

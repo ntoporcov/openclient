@@ -213,6 +213,7 @@ private struct OpenClientRemoteDesktopView: View {
                     }
                 }
             }
+            .padding(.top, store.frame == nil || store.needsCredentials ? 60 : 0)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
                 if let frame = store.frame, !store.needsCredentials {
@@ -228,6 +229,7 @@ private struct OpenClientRemoteDesktopView: View {
                 }
             }
             #if os(iOS)
+            .toolbar(.hidden, for: .navigationBar)
             .toolbarBackground(.hidden, for: .navigationBar, .bottomBar)
             #endif
             .overlay(alignment: .bottom) {
@@ -242,9 +244,39 @@ private struct OpenClientRemoteDesktopView: View {
                         .accessibilityIdentifier("remote-desktop.mode-toast")
                 }
             }
-            .navigationTitle(store.frame == nil ? Text("Remote Desktop") : Text(verbatim: ""))
+            .overlay(alignment: .top) {
+                DesktopTopControls(dismiss: dismiss) {
+                    if store.frame != nil && !store.needsCredentials {
+                        if let handoff {
+                            DesktopHandoffInstructions(reason: handoff.reason)
+                            DesktopHandoffDoneButton {
+                                if handoff.preparesFollowupDraft {
+                                    if desktopChat?.prepareDesktopFollowup(forSessionID: handoff.sessionID) == true {
+                                        dismiss()
+                                    }
+                                } else {
+                                    coordinator.complete(handoff, outcome: "done", endpoint: endpoint,
+                                                         access: bridge.desktopAccess, store: store)
+                                }
+                            }
+                            .disabled(store.isBusy || store.completed || (handoff.preparesFollowupDraft && desktopChat == nil))
+                        }
+                        Menu {
+                            Button("Copy selection", systemImage: "doc.on.doc") { coordinator.native.copySelection() }
+                                .disabled(!store.isConnected)
+                            Text("Using iPhone Duo? Unfold it to use the inner display.")
+                            Button("Reconnect") { openDesktop() }
+                            Button("Forget credentials", role: .destructive) {
+                                coordinator.forgetCredentials(store: store)
+                                openDesktop()
+                            }
+                        } label: { Image(systemName: "ellipsis.circle") }
+                        .accessibilityLabel("Remote desktop options")
+                        .disabled(store.isBusy)
+                    }
+                }
+            }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 if store.frame != nil && !store.needsCredentials {
                 #if os(iOS)
                 ToolbarItem(placement: .bottomBar) {
@@ -275,38 +307,6 @@ private struct OpenClientRemoteDesktopView: View {
                     .disabled(!store.isConnected)
                 }
                 #endif
-                if let handoff {
-                    ToolbarItem(placement: .opencodeTrailing) {
-                        DesktopHandoffInstructions(reason: handoff.reason)
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        DesktopHandoffDoneButton {
-                            if handoff.preparesFollowupDraft {
-                                if desktopChat?.prepareDesktopFollowup(forSessionID: handoff.sessionID) == true {
-                                    dismiss()
-                                }
-                            } else {
-                                coordinator.complete(handoff, outcome: "done", endpoint: endpoint,
-                                                     access: bridge.desktopAccess, store: store)
-                            }
-                        }
-                        .disabled(store.isBusy || store.completed || (handoff.preparesFollowupDraft && desktopChat == nil))
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button("Copy selection", systemImage: "doc.on.doc") { coordinator.native.copySelection() }
-                            .disabled(!store.isConnected)
-                        Text("Using iPhone Duo? Unfold it to use the inner display.")
-                        Button("Reconnect") { openDesktop() }
-                        Button("Forget credentials", role: .destructive) {
-                            coordinator.forgetCredentials(store: store)
-                            openDesktop()
-                        }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                    .accessibilityLabel("Remote desktop options")
-                    .disabled(store.isBusy)
-                }
                 }
             }
         }
@@ -344,6 +344,36 @@ private struct OpenClientRemoteDesktopView: View {
         showsDragHint = enabled && !didShowDragHint
         if showsDragHint { didShowDragHint = true }
         clickToast = enabled
+    }
+}
+
+/// Only the controls have hit regions. A transparent navigation bar still consumes
+/// desktop taps in the gap between its items, so it cannot host this row.
+struct DesktopTopControls<Trailing: View>: View {
+    let dismiss: () -> Void
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack {
+            Button("Close", action: dismiss)
+            Spacer().allowsHitTesting(false)
+            trailing()
+        }
+        .controlSize(.large)
+        .modifier(DesktopSystemButtonStyle())
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+}
+
+private struct DesktopSystemButtonStyle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            content.buttonStyle(.glass)
+        } else {
+            content.buttonStyle(.bordered)
+        }
     }
 }
 

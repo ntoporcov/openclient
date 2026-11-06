@@ -2,6 +2,29 @@ import XCTest
 
 @MainActor
 final class DesktopPointerUITests: XCTestCase {
+    func testTopControlGapPassesClicksToDesktopButButtonsDoNot() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchEnvironment["OPENCLIENT_SCREENSHOT_SCENE"] = "chat"
+        app.launchEnvironment["OPENCLIENT_DESKTOP_POINTER_TEST"] = "1"
+        app.launch()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        let canvas = app.descendants(matching: .any).matching(identifier: "remote-desktop.canvas").firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 15))
+        let close = app.buttons["Close"]
+        let gap = canvas.coordinate(withNormalizedOffset: CGVector(
+            dx: 0.5, dy: (close.frame.midY - canvas.frame.minY) / canvas.frame.height))
+        gap.tap()
+        XCTAssertEqual(app.staticTexts["desktop.pointer.events"].label, "1|1|0|0")
+        close.tap()
+        XCTAssertEqual(app.staticTexts["desktop.pointer.close-count"].label, "1")
+        XCTAssertEqual(app.staticTexts["desktop.pointer.events"].label, "1|1|0|0")
+    }
+
     func testDoubleTapAndHoldDragSendDistinctMouseSequences() {
         continueAfterFailure = false
         let app = XCUIApplication()
