@@ -1,5 +1,6 @@
 import { networkInterfaces } from "node:os"
 import { RemoteDesktopSessions, type DesktopSocketData } from "./remote-desktop-session.js"
+import type { ClipboardObserver } from "./remote-desktop-clipboard.js"
 import { OpenClientBridge } from "./bridge.js"
 import { parseClientMessage, protocolVersion } from "./protocol.js"
 import { mintNotificationSetupTicket, notificationCapability, type SetupDraft } from "./notifications.js"
@@ -46,6 +47,7 @@ export type BridgeServerOptions = {
   remoteDesktopURL?: string
   remoteDesktopToken?: string
   remoteDesktopRPC?: boolean
+  desktopClipboardObserver?: ClipboardObserver
 }
 
 export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
@@ -54,6 +56,7 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
     options.remoteDesktopURL ?? process.env.OPENCLIENT_VNC_URL,
     options.remoteDesktopToken ?? process.env.OPENCLIENT_REMOTE_DESKTOP_TOKEN,
     options.remoteDesktopRPC,
+    options.desktopClipboardObserver,
   )
   const imageResources = new ImageResourceManager({
     ...options.image,
@@ -103,7 +106,7 @@ export function startBridgeServer(options: BridgeServerOptions): BridgeServer {
          if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response(null, { status: 426 })
          const ticket = url.searchParams.get("ticket") ?? ""
          if (!remoteDesktop.consume(ticket)) return new Response(null, { status: 401 })
-         return bunServer.upgrade(request, { data: { desktopTicket: ticket } })
+         return bunServer.upgrade(request, { data: { desktopTicket: ticket, clipboard: url.searchParams.get("clipboard") === "1" } })
            ? undefined : new Response(null, { status: 400 })
        }
        if (url.pathname === `${desktopRoot}/viewer` || url.pathname === `${desktopRoot}/viewer.js`) {

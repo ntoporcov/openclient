@@ -5,6 +5,28 @@ import UIKit
 
 @MainActor
 final class DesktopClipboardTests: XCTestCase {
+    func testHostClipboardWaitsForCapabilityAndAuthenticationAndBoundsText() {
+        var channel = DesktopClipboardChannel()
+        XCTAssertFalse(channel.takeSubscription())
+        XCTAssertNil(channel.receive(#"{"type":"clipboard.text","text":"premature"}"#))
+        XCTAssertEqual(channel.receive(#"{"type":"clipboard.capability","available":true}"#), .capability(true))
+        XCTAssertFalse(channel.takeSubscription(), "A capability alone must not start capture before login")
+        channel.requested = true
+        XCTAssertTrue(channel.takeSubscription())
+        XCTAssertFalse(channel.takeSubscription(), "Subscribe once per connection")
+        XCTAssertEqual(channel.receive(#"{"type":"clipboard.text","text":"Mac — 🖥"}"#), .text("Mac — 🖥"))
+        XCTAssertNil(channel.receive(#"{"type":"clipboard.text","text":42}"#))
+        let oversized = "{\"type\":\"clipboard.text\",\"text\":\"" + String(repeating: "a", count: 65_537) + "\"}"
+        XCTAssertNil(channel.receive(oversized))
+        var olderHost = DesktopClipboardChannel()
+        olderHost.requested = true
+        XCTAssertFalse(olderHost.takeSubscription())
+        XCTAssertEqual(olderHost.receive(#"{"type":"clipboard.capability","available":false}"#), .capability(false))
+        XCTAssertFalse(olderHost.takeSubscription())
+        XCTAssertEqual(olderHost.receive(#"{"type":"clipboard.capability","available":true}"#), .capability(true))
+        XCTAssertTrue(olderHost.takeSubscription(), "Authentication can finish before capability arrives")
+    }
+
     func testHistorySurvivesViewerReopenButIsolatesAccountsAndTargets() {
         let store = DesktopClipboardStore()
         let first = store.history(serverID: "server/account-a")

@@ -4,7 +4,17 @@ import { startBridgeServer } from "../../src/bridge-server.js"
 // Explicit local-only fixture for the native integration test. No real desktop.
 const fixture = await startVNCFixture({ username: "fixture-user", password: "fixture-password" })
 const bridge = startBridgeServer({ openCodePort: 65533, remoteDesktopURL: `vnc://127.0.0.1:${fixture.port}`,
-  remoteDesktopToken: "fixture-only-token-32-characters-long" })
+  remoteDesktopToken: "fixture-only-token-32-characters-long",
+  desktopClipboardObserver: (text, status) => {
+    let stopped = false
+    queueMicrotask(() => {
+      if (stopped) return
+      status(true)
+      text("Host clipboard fixture — 🖥")
+    })
+    return () => { stopped = true }
+  },
+})
 const inspection = Bun.serve({ hostname: "127.0.0.1", port: 14079, async fetch(request) {
   if (new URL(request.url).pathname === "/api/rpc/openclient.desktop/open") {
     if (request.method !== "POST" || request.headers.get("authorization") !== `Basic ${Buffer.from("opencode:fixture-api-password").toString("base64")}`) return new Response(null, { status: 401 })

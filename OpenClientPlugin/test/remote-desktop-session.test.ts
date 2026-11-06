@@ -110,6 +110,17 @@ test("authenticated single-use viewer tickets carry binary traffic and reject re
     })
     expect([...bytes]).toEqual([0, 255, 17, 128])
     expect(bridge.remoteDesktop.consume(ticket)).toBe(false)
+    client.close()
+    const next = await fetch(`${origin}/openclient/v1/desktop/sessions`, { method: "POST", headers: auth })
+    const nextTicket = (await next.json() as { ticket: string }).ticket
+    client = new WS(`${origin.replace("http:", "ws:")}/openclient/v1/desktop/socket?ticket=${nextTicket}&clipboard=1`, { headers: { origin } })
+    const clipboardCapability = await new Promise<unknown>((resolve, reject) => {
+      client!.onerror = () => reject(new Error("Clipboard capability WebSocket failed"))
+      client!.onmessage = (event) => {
+        if (typeof event.data === "string") resolve(JSON.parse(event.data))
+      }
+    })
+    expect(clipboardCapability).toEqual({ type: "clipboard.capability", available: process.platform === "darwin" })
     const unauthorized = await fetch(`${origin}/openclient/v1/desktop/socket?ticket=${ticket}`, {
       headers: { origin: "https://other.example", upgrade: "websocket" },
     })

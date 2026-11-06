@@ -45,6 +45,47 @@ RoyalVNCKit exposes a TCP client but no public custom-transport injection. `Open
 
 ### Receive-only clipboard history
 
+#### Host clipboard transport (after build 101)
+
+Build 101's Apple VNC clipboard extension still did not deliver text on the live
+Mac. Native viewers now opt into a clipboard control channel on the existing
+ticketed WebSocket (`clipboard=1`). The host advertises availability only on macOS
+when the configured VNC hostname is loopback or a local interface address. After
+desktop authentication, the client subscribes; the host observes its own logged-in
+user's NSPasteboard with one short-lived AppKit/JXA process per viewer. It checks
+changeCount every 100 ms, reads only changed plain text, and sends bounded JSON
+text frames separately from binary RFB traffic. No Swift compiler/helper install
+is required. Closing the viewer terminates the observer. Older hosts receive no
+unknown control commands, and legacy binary-only viewers receive no text frames.
+
+This requires both the updated iOS app and the updated host plugin. The host
+clipboard is for same-Mac viewing; it is not a substitute for a separately
+configured remote computer or another user's login session. History continues to
+be receive-only; only tapping a history item writes the iPhone clipboard.
+OSLog category `DesktopClipboard` reports capability and observer readiness,
+without clipboard contents. Malformed or oversized control frames are ignored
+and never enter the VNC stream.
+
+Host validation: plugin typechecking/build and 90 tests passed (one opt-in live
+test skipped by the default suite). The explicit native AppKit observer test
+passed using both an isolated named pasteboard and the actual general Mac
+pasteboard. Initial general-board tests revealed competing Simulator/CoreDevice
+clipboard-sync writes: the synthetic copy was replaced repeatedly within two
+seconds. Temporarily pausing only the Simulator `dtpasteboardd` processes removed
+that interference; they were resumed in cleanup. `OPENCLIENT_LIVE_CLIPBOARD_TEST=1`
+enables the native test; also set `OPENCLIENT_GENERAL_CLIPBOARD_TEST=1` to test the
+actual desktop board. The test preserves all original clipboard flavors unless
+another process changes the clipboard during the test.
+
+Eight iOS tests passed without skips on each of iPhone 18 Pro Max/iOS 27.0,
+iPad Pro 13-inch M5/iOS 27.0, and iPhone Duo/iOS 27.1. The native integration
+fixture verifies authenticated WebSocket clipboard text reaches the shared
+history without writing the device pasteboard, while VNC authentication,
+framebuffer/input, saved credentials, and reconnect continue working. Signed
+device build passed. This combines a real Mac pasteboard test and fixture-driven
+iOS transport tests; physical-iPhone end-to-end validation and Duo fold
+transitions remain outstanding.
+
 Click mode starts enabled. Tap sends a click; double-tap sends a double-click (word selection in supporting desktop apps). A 350 ms hold gives a light haptic: releasing without deliberate movement sends only a right-click, preserving existing selection; moving at least 8 screen points starts a left-button drag from the hold location. Dragging selects text or moves desktop objects using the remote app's own behavior and never automatically right-clicks afterward. A one-time hint appears when the first desktop frame arrives. Two-finger pan/zoom remains available and cancels pending holds or releases any held remote mouse button before taking over. Turning click mode off, resizing, cancellation, or removing the surface does the same. The viewer options menu's **Copy selection** sends ⌘C to the Mac; the resulting clipboard update enters the history below.
 
 Selection verification: six surface tests plus an actual double-tap/hold-and-drag/stationary-hold UI test passed on each required simulator (iPhone 18 Pro Max/iOS 27.0, iPad Pro 13-inch M5/iOS 27.0, iPhone Duo/iOS 27.1), with no skips. Tests verify a stationary hold sends only a right-click, dragging never adds a right-click, and navigation cancellation does neither. Signed device build and localization extraction passed. Installation was blocked by unavailable Nic iPhone connectivity, including the direct CoreDevice fallback; haptic feel and live desktop selection/copy still need on-device confirmation. Duo fold transitions remain untested.

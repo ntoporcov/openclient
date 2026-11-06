@@ -49,7 +49,12 @@ final class OpenClientRemoteDesktopCoordinator {
                 credentialScope = access.client.config.recentServerID + ":" + ticket.targetID
                 clipboardHistory?.activate(targetID: ticket.targetID)
                 let url = try OpenClientRemoteDesktopClient(endpoint: endpoint).viewerURL(ticket: ticket.ticket)
-                let port = try await tunnel.start(viewerURL: url)
+                let port = try await tunnel.start(viewerURL: url) { [weak self, weak tunnel, weak clipboardHistory] text in
+                    Task { @MainActor in
+                        guard let self, let tunnel, self.tunnel === tunnel else { return }
+                        clipboardHistory?.capture(text, targetID: ticket.targetID)
+                    }
+                }
                 guard !Task.isCancelled else { tunnel.stop(); return }
                 native.onCredentialsRequested = { [weak self, weak store] in
                     guard let self, let store, !skipSavedCredentials, let credentialScope else { return }
@@ -64,6 +69,7 @@ final class OpenClientRemoteDesktopCoordinator {
                 }
                 native.onConnected = { [weak self, weak store] in
                     guard let self else { return }
+                    self.tunnel?.enableClipboard()
                     defer { pendingCredentials = nil }
                     if let pendingCredentials, let credentialScope {
                         do { try credentials.save(pendingCredentials, scope: credentialScope) }
@@ -74,7 +80,11 @@ final class OpenClientRemoteDesktopCoordinator {
                     }
                     skipSavedCredentials = false
                 }
-                native.onDisconnected = { [weak self] in self?.pendingCredentials = nil }
+                native.onDisconnected = { [weak self] in
+                    self?.pendingCredentials = nil
+                    self?.tunnel?.stop()
+                    self?.tunnel = nil
+                }
                 native.onClipboardText = { [weak clipboardHistory] text in
                     clipboardHistory?.capture(text, targetID: ticket.targetID)
                 }

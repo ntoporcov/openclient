@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import OpenClient
 
 @MainActor
@@ -18,6 +19,7 @@ final class NativeRemoteDesktopTests: XCTestCase {
         defer { try? keychain.delete(scope: scope) }
         let coordinator = OpenClientRemoteDesktopCoordinator(credentials: keychain)
         let store = OpenClientRemoteDesktopStore()
+        let history = DesktopClipboardHistory()
         defer { coordinator.disconnect(store: store) }
         func wait(_ condition: () -> Bool) async throws {
             for _ in 0..<100 {
@@ -32,10 +34,13 @@ final class NativeRemoteDesktopTests: XCTestCase {
         try await wait { store.errorMessage != nil }
         XCTAssertNil(try keychain.load(scope: scope), "Rejected credentials must never be saved")
 
-        coordinator.open(endpoint: endpoint, access: access, store: store)
+        let pasteboardChanges = UIPasteboard.general.changeCount
+        coordinator.open(endpoint: endpoint, access: access, store: store, clipboardHistory: history)
         try await wait { store.needsCredentials }
         coordinator.authenticate(username: "fixture-user", password: "fixture-password", save: true)
         try await wait { store.isConnected }
+        try await wait { history.items.first?.text == "Host clipboard fixture — 🖥" }
+        XCTAssertEqual(UIPasteboard.general.changeCount, pasteboardChanges)
         XCTAssertEqual(try keychain.load(scope: scope)?.password, "fixture-password")
         XCTAssertNil(try keychain.load(scope: scope + "other-host"))
 

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import OSLog
 
 /// RoyalVNCKit accepts TCP only. This single-client loopback adapter preserves
 /// the plugin's ticket/origin boundary without exposing a listener on the LAN.
@@ -11,8 +12,11 @@ final class OpenClientDesktopTunnel: @unchecked Sendable {
     private var session: URLSession?
     private var ready: CheckedContinuation<UInt16, Error>?
     private var stopped = false
+    private var clipboard = DesktopClipboardChannel()
+    private var onClipboardText: (@Sendable (String) -> Void)?
+    private let logger = Logger(subsystem: "com.ntoporcov.openclient", category: "DesktopClipboard")
 
-    func start(viewerURL: URL) async throws -> UInt16 {
+    func start(viewerURL: URL, onClipboardText: (@Sendable (String) -> Void)? = nil) async throws -> UInt16 {
         guard var url = URLComponents(url: viewerURL, resolvingAgainstBaseURL: false),
               ["http", "https"].contains(url.scheme), url.host != nil,
               url.user == nil, url.password == nil else { throw URLError(.badURL) }
@@ -25,6 +29,7 @@ final class OpenClientDesktopTunnel: @unchecked Sendable {
         origin.path = ""
         url.scheme = url.scheme == "https" ? "wss" : "ws"
         url.queryItems = [URLQueryItem(name: "ticket", value: ticket)]
+        if onClipboardText != nil { url.queryItems?.append(URLQueryItem(name: "clipboard", value: "1")) }
         var request = URLRequest(url: url.url!)
         request.setValue(origin.url!.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")), forHTTPHeaderField: "Origin")
         let socketRequest = request
@@ -32,6 +37,7 @@ final class OpenClientDesktopTunnel: @unchecked Sendable {
             queue.async { [self] in
                 guard !self.stopped else { continuation.resume(throwing: CancellationError()); return }
                 self.ready = continuation
+                self.onClipboardText = onClipboardText
                 do {
                     let parameters = NWParameters.tcp
                     parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
@@ -67,9 +73,27 @@ final class OpenClientDesktopTunnel: @unchecked Sendable {
 
     func stop() { queue.async { self.close(CancellationError()) } }
 
+    /// Called only after the native desktop has authenticated. Older hosts never
+    /// advertise this channel, so they never receive an unsupported text command.
+    func enableClipboard() {
+        queue.async {
+            guard !self.stopped else { return }
+            self.clipboard.requested = true
+            self.subscribeToClipboardIfReady()
+        }
+    }
+
+    private func subscribeToClipboardIfReady() {
+        guard onClipboardText != nil, clipboard.takeSubscription() else { return }
+        socket?.send(.string("{\"type\":\"clipboard.subscribe\"}")) { error in
+            if error != nil { self.logger.error("Host clipboard subscription failed") }
+        }
+    }
+
     private func close(_ error: Error) {
         guard !stopped else { return }
         stopped = true
+        onClipboardText = nil
         ready?.resume(throwing: error); ready = nil
         listener?.cancel(); listener = nil
         peer?.cancel(); peer = nil
@@ -99,10 +123,66 @@ final class OpenClientDesktopTunnel: @unchecked Sendable {
                     self.peer?.send(content: data, completion: .contentProcessed { error in
                         if let error { self.close(error) } else { self.readWebSocket() }
                     })
+                case .success(.string(let message)):
+                    if let event = self.clipboard.receive(message) {
+                        switch event {
+                        case .capability(let available):
+                            self.logger.info("Host clipboard available: \(available)")
+                            self.subscribeToClipboardIfReady()
+                        case .status(let ready):
+                            self.logger.info("Host clipboard observer ready: \(ready)")
+                        case .text(let text):
+                            self.onClipboardText?(text)
+                        }
+                    }
+                    // Control messages never enter the RFB byte stream.
+                    self.readWebSocket()
                 case .success: self.close(URLError(.cannotParseResponse))
                 case .failure(let error): self.close(error)
                 }
             }
         }
+    }
+}
+
+struct DesktopClipboardChannel {
+    enum Event: Equatable {
+        case capability(Bool), status(Bool), text(String)
+    }
+    var requested = false
+    private var available = false
+    private var subscribed = false
+
+    mutating func takeSubscription() -> Bool {
+        guard requested, available, !subscribed else { return false }
+        subscribed = true
+        return true
+    }
+
+    mutating func receive(_ message: String) -> Event? {
+        guard message.utf8.count <= 512 * 1024,
+              let data = message.data(using: .utf8),
+              let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else { return nil }
+        switch envelope.type {
+        case "clipboard.capability":
+            guard let value = envelope.available else { return nil }
+            available = value
+            return .capability(value)
+        case "clipboard.status":
+            guard subscribed, let value = envelope.ready else { return nil }
+            return .status(value)
+        case "clipboard.text":
+            guard subscribed, let text = envelope.text, !text.isEmpty,
+                  text.utf8.count <= 65_536 else { return nil }
+            return .text(text)
+        default: return nil
+        }
+    }
+
+    private struct Envelope: Decodable {
+        let type: String
+        let available: Bool?
+        let ready: Bool?
+        let text: String?
     }
 }

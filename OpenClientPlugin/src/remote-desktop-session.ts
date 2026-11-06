@@ -3,8 +3,9 @@ import { createConnection, type Socket } from "node:net"
 import type { ServerWebSocket } from "bun"
 import { parseVNCTarget, RemoteDesktopDiscovery } from "./remote-desktop.js"
 import { RemoteDesktopHandoffs } from "./remote-desktop-handoff.js"
+import { isLocalDesktopHost, observeMacClipboard, type ClipboardObserver } from "./remote-desktop-clipboard.js"
 
-export type DesktopSocketData = { desktopTicket: string }
+export type DesktopSocketData = { desktopTicket: string; clipboard?: boolean }
 type Peer = ServerWebSocket<DesktopSocketData>
 
 /** Host-scoped, binary transport. The browser negotiates VNC authentication end-to-end. */
@@ -12,9 +13,10 @@ export class RemoteDesktopSessions {
   readonly discovery: RemoteDesktopDiscovery
   readonly handoffs = new RemoteDesktopHandoffs()
   private readonly tickets = new Map<string, number>()
-  private readonly connections = new Map<Peer, { tcp: Socket; expiry: ReturnType<typeof setTimeout> }>()
+  private readonly connections = new Map<Peer, { tcp: Socket; expiry: ReturnType<typeof setTimeout>; clipboardAvailable: boolean; stopClipboard?: () => void }>()
 
-  constructor(private readonly targetURL?: string, private readonly token?: string, private readonly rpcEnabled = false) {
+  constructor(private readonly targetURL?: string, private readonly token?: string, private readonly rpcEnabled = false,
+    private readonly observeClipboard: ClipboardObserver = observeMacClipboard) {
     this.discovery = new RemoteDesktopDiscovery(targetURL)
   }
 
@@ -58,7 +60,9 @@ export class RemoteDesktopSessions {
     try { target = parseVNCTarget(this.targetURL!) } catch { peer.close(1011, "Unavailable"); return }
     const tcp = createConnection({ host: target.host, port: target.port })
     const expiry = setTimeout(() => peer.close(1000, "Session expired"), 60 * 60_000)
-    this.connections.set(peer, { tcp, expiry })
+    const clipboardAvailable = process.platform === "darwin" && isLocalDesktopHost(target.host)
+    this.connections.set(peer, { tcp, expiry, clipboardAvailable })
+    if (peer.data.clipboard) peer.send(JSON.stringify({ type: "clipboard.capability", available: clipboardAvailable }))
     tcp.setTimeout(10_000, () => peer.close(1011, "Desktop unavailable"))
     tcp.once("connect", () => tcp.setTimeout(0))
     tcp.on("data", (data) => {
@@ -72,7 +76,21 @@ export class RemoteDesktopSessions {
 
   message(peer: Peer, payload: string | Buffer) {
     const connection = this.connections.get(peer)
-    if (!connection || typeof payload === "string") { peer.close(1003, "Binary data required"); return }
+    if (!connection) { peer.close(1003, "Binary data required"); return }
+    if (typeof payload === "string") {
+      if (peer.data.clipboard && connection.clipboardAvailable && payload === '{"type":"clipboard.subscribe"}') {
+        connection.stopClipboard ??= this.observeClipboard((text) => {
+          if (this.connections.get(peer) !== connection) return
+          // Drop captures for a backlogged viewer rather than grow the socket queue.
+          if (peer.getBufferedAmount() <= 1_048_576) peer.send(JSON.stringify({ type: "clipboard.text", text }))
+        }, (ready) => {
+          if (this.connections.get(peer) === connection) peer.send(JSON.stringify({ type: "clipboard.status", ready }))
+        })
+        return
+      }
+      peer.close(1003, "Unsupported desktop control")
+      return
+    }
     if (connection.tcp.writableLength + payload.length > 1_048_576) {
       peer.close(1009, "Input limit exceeded")
       return
@@ -85,7 +103,7 @@ export class RemoteDesktopSessions {
   close(peer: Peer) {
     const connection = this.connections.get(peer)
     this.connections.delete(peer)
-    if (connection) { clearTimeout(connection.expiry); connection.tcp.destroy() }
+    if (connection) { connection.stopClipboard?.(); clearTimeout(connection.expiry); connection.tcp.destroy() }
   }
 
   stop() {
