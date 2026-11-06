@@ -53,8 +53,9 @@ to navigate the desktop image locally. With click mode off, one-finger dragging
 continues to pan that image. Partial wheel deltas are accumulated in screen
 points, capped per update, and discarded on cancellation, zoom, resize, or mode
 change. Each transmitted wheel tick includes its release. Device feedback led to
-increasing sensitivity from one tick per 24 screen points to one per 8 points
-(3×), retaining the eight-tick per-update cap.
+increasing sensitivity from one tick per 24 screen points to one per 1.6 points
+(15× the original, 5× the previous 3× tuning). The per-update cap is 40 ticks so
+ordinary swipes can reach that sensitivity without being clipped at eight ticks.
 
 An immediate pulsing dot tracks one-finger contact; movement leaves a bounded
 directional trail. A stationary armed hold gains an additional ring. Finger-up
